@@ -1,7 +1,7 @@
 {
   "app": "titer",
   "schemaVersion": 1,
-  "savedAt": "2026-11-14T07:14:59.755Z",
+  "savedAt": "2026-11-22T23:40:54.532Z",
   "project": {
     "nodes": {
       "t-viab": {
@@ -107,6 +107,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -146,7 +148,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-kinase": {
@@ -233,6 +242,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -268,7 +279,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-growth": {
@@ -367,6 +385,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -412,7 +432,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-volume": {
@@ -521,6 +548,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -579,7 +608,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "g-volume-bars": {
@@ -636,6 +672,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -686,7 +724,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "g-volume-violin": {
@@ -743,6 +788,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -788,7 +835,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-pk": {
@@ -876,6 +930,8 @@
           "xScale": "linear",
           "yScale": "log10",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -915,7 +971,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-il6": {
@@ -1003,6 +1066,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -1046,7 +1111,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "g-il6-bars": {
@@ -1103,6 +1175,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -1147,7 +1221,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-immune": {
@@ -1232,6 +1313,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -1263,7 +1346,14 @@
           "outlineColor": "#FFFFFF",
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-surv": {
@@ -1413,6 +1503,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -1454,7 +1546,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-nested": {
@@ -1534,6 +1633,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -1564,7 +1665,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-rnaseq": {
@@ -11635,6 +11743,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -11729,7 +11839,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-genes": {
@@ -11818,6 +11935,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -11849,7 +11968,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-deseq": {
@@ -12918,6 +13044,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -12951,7 +13079,14 @@
           "volcanoLabel": "Gene",
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-ki67": {
@@ -13043,6 +13178,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -13086,7 +13223,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-elisa": {
@@ -13179,6 +13323,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -13218,7 +13364,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-markers": {
@@ -13360,6 +13513,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -13398,7 +13553,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "g-markers-ki67": {
@@ -13455,6 +13617,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -13493,7 +13657,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-response": {
@@ -13571,6 +13742,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -13611,7 +13784,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-exposure": {
@@ -13737,6 +13917,8 @@
           "xScale": "linear",
           "yScale": "linear",
           "y2Scale": "linear",
+          "xDateFormat": "16-jan-2004",
+          "xElapsedFormat": "h:mm:ss",
           "gridX": "none",
           "gridY": "none",
           "tickDirection": "outside",
@@ -13773,7 +13955,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "f-main": {

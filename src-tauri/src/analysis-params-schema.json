@@ -1691,6 +1691,23 @@
         "description": "How the curve is fitted (seq 200): least squares (default), robust (Tukey biweight), or Poisson (counts)."
       },
       {
+        "name": "difficultFitHandling",
+        "type": "string",
+        "enum": [
+          "unstable",
+          "ambiguous",
+          "none"
+        ],
+        "required": false,
+        "description": "How a difficult fit is handled (seq 323): identify unstable parameters (default), identify ambiguous fits (seq 387, Prism's older method — a parameter whose dependency exceeds 0.9999 is flagged, with ~ values and very wide CIs), or report best-fit values no matter what."
+      },
+      {
+        "name": "reportDependency",
+        "type": "boolean",
+        "required": false,
+        "description": "Report each parameter's dependency (seq 387, Prism's Diagnostics tab): the results sheet gains a Dependency column. The values are computed on every nonlinear fit either way; this only controls the display."
+      },
+      {
         "name": "compareWith",
         "type": "string",
         "required": false,
@@ -3214,7 +3231,35 @@
           "y-times-k",
           "y-divided-by-k",
           "k-minus-y",
-          "k-divided-by-y"
+          "k-divided-by-y",
+          "logit",
+          "probit",
+          "rank",
+          "zscore",
+          "sin",
+          "cos",
+          "tan",
+          "arcsin",
+          "abs",
+          "y-plus-random",
+          "round-k",
+          "y-power-k",
+          "ten-power-y",
+          "two-power-y",
+          "neg-log10",
+          "log-log",
+          "x-divided-by-y",
+          "y-divided-by-x",
+          "y-minus-x",
+          "y-plus-x",
+          "y-times-x",
+          "x-minus-y",
+          "eadie-hofstee",
+          "user-defined",
+          "hill-plot",
+          "scatchard",
+          "hanes-woolf",
+          "lineweaver-burk"
         ],
         "default": "log10",
         "required": false
@@ -3224,6 +3269,104 @@
         "type": "number",
         "required": false,
         "description": "The constant K for the arithmetic functions (seq 205)."
+      },
+      {
+        "name": "constants",
+        "type": "object",
+        "value_shape": "object mapping a column name to a number",
+        "required": false,
+        "description": "A constant K per data set, keyed by data-set name — overrides `constant` for that set (seq 341)."
+      },
+      {
+        "name": "x",
+        "type": "string",
+        "required": false,
+        "description": "The X column (XY tables): the value paired with each Y value for the cross-column functions, and the column the X function applies to (seq 341)."
+      },
+      {
+        "name": "xFunction",
+        "type": "string",
+        "enum": [
+          "log10",
+          "ln",
+          "log2",
+          "sqrt",
+          "reciprocal",
+          "exp",
+          "square",
+          "y-plus-k",
+          "y-minus-k",
+          "y-times-k",
+          "y-divided-by-k",
+          "k-minus-y",
+          "k-divided-by-y",
+          "logit",
+          "probit",
+          "rank",
+          "zscore",
+          "sin",
+          "cos",
+          "tan",
+          "arcsin",
+          "abs",
+          "y-plus-random",
+          "round-k",
+          "y-power-k",
+          "ten-power-y",
+          "two-power-y",
+          "neg-log10",
+          "log-log",
+          "x-divided-by-y",
+          "y-divided-by-x",
+          "y-minus-x",
+          "y-plus-x",
+          "y-times-x",
+          "x-minus-y",
+          "eadie-hofstee",
+          "hill-plot",
+          "scatchard",
+          "hanes-woolf",
+          "lineweaver-burk"
+        ],
+        "required": false,
+        "description": "The function applied to the X values (XY tables); omitted: X passes through unchanged (seq 341)."
+      },
+      {
+        "name": "interchange",
+        "type": "boolean",
+        "default": false,
+        "required": false,
+        "description": "Swap the X and Y roles before transforming (XY tables): the Y function applies to the old X values, the X function to the old Y values (seq 341)."
+      },
+      {
+        "name": "errorMode",
+        "type": "string",
+        "enum": [
+          "mean-only",
+          "erase",
+          "to-ci"
+        ],
+        "default": "mean-only",
+        "required": false,
+        "description": "How error bars on a mean±SD/SEM table are handled (seq 341); the default is mean-only."
+      },
+      {
+        "name": "formula",
+        "type": "string",
+        "required": false,
+        "description": "The user-defined transform (function \"user-defined\", seq 341): lines separated by `;` or newlines, each optionally starting with a designator `<Name>` (only that data set) or `<~Name>` (all data sets except it), then an expression with an optional `Y =` prefix."
+      },
+      {
+        "name": "ymax",
+        "type": "number",
+        "required": false,
+        "description": "The maximum response Ymax for the Hill plot (function \"hill-plot\", seq 383): Y becomes log10(Y/(Ymax−Y)). Required — the run errors without it — and it must be greater than 0."
+      },
+      {
+        "name": "xIsLog",
+        "type": "boolean",
+        "required": false,
+        "description": "Whether the X values were entered as log(concentration) (function \"hill-plot\", seq 383): true leaves X unchanged; omitted or false means concentrations, so X becomes log10(X)."
       },
       {
         "name": "sets",

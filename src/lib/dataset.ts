@@ -2,10 +2,12 @@
 // share, so they always agree on the data: excluded cells read as blank, each cell
 // is parsed once (numeric.ts decides what a number is), and the reading is cached
 // per table version. An edit makes a new TableData, so the cache is never stale.
-import { hasXColumn, type TableData, type TableType } from "../store/types";
+import { hasXColumn, type TableData, type TableType, type VariableType, type VariableTypeInfo } from "../store/types";
 import { summaryFormatOf, type SummaryFormat } from "./summary-format";
+import { convertXCell, xZeroMs, type XConversion } from "./date-time";
 import { excludedKey, seriesKeyOf } from "./columns";
 import { parseCell } from "./numeric";
+import { orderedLevelKeys, rowLabelsOf, variableTypesOf } from "./variable-types";
 
 /** One data column, as every engine sees it. */
 export interface Column {
@@ -21,6 +23,16 @@ export interface Column {
   /** The data set it belongs to: a grouped table's group or an XY table's data set of
    *  replicates ("A" for "A:Y1"), else (absent) the column itself. */
   set?: string;
+  /** The column's resolved MV variable type (seq 331): categorical,
+   *  continuous or label, as the Variable Types panel shows it. Absent on
+   *  tables nobody typed yet (non-MV tables, or an MV table before its
+   *  first edit) — consumers fall back to the cells, as before. */
+  variableType?: VariableType;
+  /** The column's categorical levels in their stored order (seq 340), as
+   *  normalized keys — present only when the table stores an order for
+   *  this column. Absent = Entry order (first appearance in the table),
+   *  which is what `levelsOf` reads anyway. */
+  levelOrder?: string[];
 }
 
 export interface Dataset {
@@ -38,6 +50,13 @@ export interface Dataset {
   /** A nested table's groups with their subgroups (empty for other tables) —
    *  the structure the nested tests read, alongside `sets`. */
   nested: NestedGroup[];
+  /** The resolved MV variable types, keyed by column name — the pickers'
+   *  reading, so a label variable is never offered to an analysis. Empty
+   *  on tables nobody typed yet. */
+  variableTypes?: Record<string, VariableTypeInfo>;
+  /** The values the graphs show beside their points: the chosen label
+   *  variable's cells, or the row titles when none is chosen. */
+  rowLabels?: (string | null)[];
   /** A grouped table's sub-column format: "replicates", or the summaries its
    *  sub-columns hold (see src/lib/summary-format.ts) — the graphs' and the
    *  stats' shared reading, so a summary table is never mistaken for replicates. */
@@ -81,14 +100,44 @@ export function readTable(data: TableData): Dataset {
   let dataset = cache.get(data);
   if (!dataset) {
     const excluded = new Set(data.excluded);
+    // The resolved variable types, when the table has any — an MV table
+    // refreshed by the store funnel, never a non-MV table (whose columns
+    // stay typeless and read exactly as before).
+    const types = data.variableTypes ? variableTypesOf(data) : {};
     // The columns from `lead` on are a grouped table's: each in its group.
     const lead = leadOf(data);
+    // A date/elapsed X column (seq 332): the first data column converts to
+    // numbers with the table's units + start date, so every analysis and
+    // graph sees numbers while the cells keep their typed text. The zero is
+    // computed once for the whole column, not per cell.
+    let xByRow: (number | null)[] | null = null;
+    if (data.xFormat === "date" || data.xFormat === "elapsed") {
+      const format = data.xFormat;
+      const xCells = data.rows.map((row, r) => (excluded.has(excludedKey(r, 1)) ? null : (row[1] ?? null)));
+      const conversion: XConversion = data.xConversion ?? { units: "days" };
+      const zero = format === "date" ? xZeroMs(xCells, conversion) : null;
+      xByRow = xCells.map((cell) => convertXCell(cell, format, conversion, zero));
+    }
     const columns = data.columns.slice(1).map((name, i): Column => {
       const cells = data.rows.map((row, r) => (excluded.has(excludedKey(r, i + 1)) ? null : (row[i + 1] ?? null)));
-      const byRow = cells.map(parseCell);
+      const byRow = i === 0 && xByRow !== null ? xByRow : cells.map(parseCell);
       const rows = byRow.flatMap((v, r) => (v == null ? [] : [r]));
       const set = i + 1 >= lead ? seriesKeyOf(name) : undefined;
-      return { name, cells, byRow, values: rows.map((r) => byRow[r]!), rows, ...(set === undefined ? {} : { set }) };
+      const variableType = types[name]?.type;
+      // The stored level order, when the table holds one for this column —
+      // the level functions below read their levels in this order. Absent
+      // = Entry order, which is what the discovery order already is.
+      const levelOrder = data.levelOrder?.[name] ? orderedLevelKeys(data, name) : undefined;
+      return {
+        name,
+        cells,
+        byRow,
+        values: rows.map((r) => byRow[r]!),
+        rows,
+        ...(set === undefined ? {} : { set }),
+        ...(variableType === undefined ? {} : { variableType }),
+        ...(levelOrder === undefined ? {} : { levelOrder }),
+      };
     });
     dataset = {
       titles: data.rows.map((row) => row[0] ?? null),
@@ -100,6 +149,8 @@ export function readTable(data: TableData): Dataset {
           ? byGroup(columns)
           : columns.map((c) => ({ name: c.name, columns: [c] })),
       nested: isNested(data) ? nestedGroupsOf(columns) : [],
+      variableTypes: types,
+      rowLabels: rowLabelsOf(data),
       summary: summaryFormatOf(data),
     };
     cache.set(data, dataset);
@@ -141,10 +192,31 @@ export function xyRows(x: Column, set: DataSet): { x: number[]; values: number[]
   };
 }
 
+/** Reorders discovered level names by a stored level order (seq 340): a
+ *  level whose normalized key sits in the order takes that position; a
+ *  level the order doesn't name stays after them, in discovery order. Two
+ *  spellings of one level ("Female" / "female") share a key and keep their
+ *  discovery order — the sort is stable. Without an order, the list is
+ *  returned as discovered. */
+export function orderLevels(levels: string[], levelOrder?: readonly string[]): string[] {
+  if (!levelOrder || levelOrder.length === 0) return levels;
+  const pos = new Map(levelOrder.map((k, i) => [k, i]));
+  return [...levels].sort((a, b) => {
+    const pa = pos.get(a.trim().toLowerCase());
+    const pb = pos.get(b.trim().toLowerCase());
+    if (pa === undefined && pb === undefined) return 0;
+    if (pa === undefined) return 1;
+    if (pb === undefined) return -1;
+    return pa - pb;
+  });
+}
+
 /** Distinct non-blank cell texts of a column, in first-appearance order — a
  *  grouping variable's levels (integer codes or text, e.g. "Female"/"Male").
  *  The Multiple Variables analyses split their rows by these (a t test's two
- *  groups, a survival analysis's groups), as Extract and rearrange does. */
+ *  groups, a survival analysis's groups), as Extract and rearrange does.
+ *  When the column carries a stored level order (seq 340), the levels come
+ *  back in that order instead. */
 export function levelsOf(column: Column): string[] {
   const seen = new Set<string>();
   const levels: string[] = [];
@@ -155,7 +227,7 @@ export function levelsOf(column: Column): string[] {
       levels.push(t);
     }
   }
-  return levels;
+  return orderLevels(levels, column.levelOrder);
 }
 
 /** The columns of one Y data set: the column itself, its replicate columns —

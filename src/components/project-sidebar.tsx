@@ -15,6 +15,7 @@ import { SidePanel, SidebarItem } from "../ui/layout";
 import { popupMenu } from "../native";
 import { useOutline, useProjectActions, type OutlineNode } from "../store/use-project-store";
 import { removeWithConfirm } from "../store/use-document";
+import { canEditAnalysisParams } from "../views/analyses/wizards";
 import { NODE_NAMES, SHEET_HIGHLIGHTS, SHEET_HIGHLIGHT_STYLE, TAG_COLORS, type TagColor } from "../store/types";
 import { colorDot } from "../views/graphs/style-menus";
 import { titleCase } from "../lib/format";
@@ -320,6 +321,18 @@ export function ProjectSidebar() {
 
   const childMenu = (child: OutlineNode) =>
     void popupMenu([
+      // Change Parameters (seq 373): re-opens the analysis in its wizard,
+      // pre-filled from the stored params. The outline row carries no
+      // analysis params, so the full node is read for the live check.
+      ...(child.type === "analysis"
+        ? [
+            {
+              text: "Change Parameters…",
+              enabled: canEditAnalysisParams(get().nodes[child.id]).editable,
+              action: () => openSelector({ kind: "edit-analysis-params", nodeId: child.id }),
+            },
+          ]
+        : []),
       ...(child.type === "graph"
         ? [
             { text: "New Figure from this Graph…", action: () => createFigure([child.id]) },

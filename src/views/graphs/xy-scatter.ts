@@ -49,6 +49,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
     const py = thin(pick(d.y)!);
     const pkeys = thin(pick(d.keys));
     const perr = thin(pick(d.errors));
+    const perrm = thin(pick(d.errorMinus));
     const pxerr = thin(pick(d.xErrors));
     return {
       type: "scatter",
@@ -63,7 +64,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
           : { marker: seriesMarker(paint, set.name, i) }
         : {}),
       ...(mode !== "markers" ? { line: paint.line(set.name, i) } : {}),
-      ...(perr ? { error_y: paint.errorBars(set.name, i, perr) } : {}),
+      ...(perr ? { error_y: paint.errorBars(set.name, i, perr, perrm) } : {}),
       ...(pxerr ? { error_x: paint.errorBars(set.name, i, pxerr) } : {}),
       hoverinfo: "x+y",
     };
@@ -89,5 +90,7 @@ export const xyScatter: GraphModule = {
   family: "xy",
   points: (options) => options.xyStyle !== "line",
   lines: (options) => options.xyStyle !== "points",
+  // Replicates are summarized only when shown as their center.
+  summarizes: (options) => options.xyReplicates === "mean",
   build,
 };

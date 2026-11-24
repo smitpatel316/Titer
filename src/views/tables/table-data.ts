@@ -10,8 +10,12 @@
 // them so they stay attached to their values. (Graphs follow on their own: see
 // store/references.ts.)
 import type { LinkedPaste, RowGroup, TableData, TableErrorFormat, TableType } from "../../store/types";
+import type { CellBackgroundColor } from "../../lib/cell-colors";
 import { tableErrorFormat } from "../../store/types";
+import { isXColumnFormat, sameConversion, type XColumnFormat, type XConversion } from "../../lib/date-time";
 import { renameCalculatedReferences } from "../../lib/calcvars";
+import { normalizeDecimalInput, type DecimalSeparator } from "../../lib/decimal-format";
+import { parseCell } from "../../lib/numeric";
 import { seriesKeyOf, groupRuns } from "../../lib/columns";
 import { isGrouped, isNested } from "../../lib/dataset";
 import {
@@ -117,8 +121,10 @@ function remapExcluded(data: TableData, fn: (r: number, c: number) => [number, n
  * Writes `block` with its top-left corner at (r, c): typing (1×1) and pasting.
  * Adds rows as needed, and columns too unless the table is grouped (whose
  * columns come from its group structure). `type` names any new columns.
+ * With a comma decimal separator, a decimal comma typed or pasted ("1,5")
+ * stores as its canonical point form ("1.5") — see decimal-format.ts.
  */
-export function writeBlock(data: TableData, r: number, c: number, block: Cell[][], type: TableType): TableData {
+export function writeBlock(data: TableData, r: number, c: number, block: Cell[][], type: TableType, separator: DecimalSeparator = "."): TableData {
   const blockWidth = block.reduce((w, row) => Math.max(w, row.length), 0);
   const needCols = isGrouped(data) || isNested(data) ? 0 : c + blockWidth - data.columns.length;
   const columns = needCols > 0 ? [...data.columns, ...freshColumnNames(data.columns, type, needCols)] : data.columns;
@@ -130,7 +136,7 @@ export function writeBlock(data: TableData, r: number, c: number, block: Cell[][
     if (!line && (!src || src.length === width)) return src ?? Array<Cell>(width).fill(null);
     const row = [...(src ?? []), ...Array<Cell>(width - (src?.length ?? 0)).fill(null)];
     line?.forEach((value, j) => {
-      if (c + j < width) row[c + j] = value === "" ? null : value;
+      if (c + j < width) row[c + j] = value === null || value === "" ? null : normalizeDecimalInput(value, separator);
     });
     return row;
   });
@@ -201,6 +207,63 @@ export function toggleExcluded(data: TableData, range: Range): TableData {
   return { ...data, excluded: excluded.size ? [...excluded] : undefined };
 }
 
+/** Moves cell background colors through `fn` (null drops a cell) — the
+ *  `cellBackgrounds` twin of `remapExcluded`, so every structural edit
+ *  carries the colors with the values they flag. */
+function remapCellBackgrounds(
+  data: TableData,
+  fn: (r: number, c: number) => [number, number] | null,
+): Record<string, CellBackgroundColor> | undefined {
+  const out: Record<string, CellBackgroundColor> = {};
+  for (const [key, color] of Object.entries(data.cellBackgrounds ?? {})) {
+    const [r, c] = key.split(",").map(Number);
+    const moved = fn(r, c);
+    if (moved) out[`${moved[0]},${moved[1]}`] = color;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Prism's paint-bucket (seq 325): paints every cell of `range` with
+ *  `color`, or clears the range when `color` is null. A color is
+ *  presentation only — the values stay, and clearing a value never drops
+ *  its color (unlike an exclusion: a tinted empty cell is a cell flagged
+ *  to be filled in). Returns the table unchanged when nothing moves, so
+ *  the grid takes no undo step for a no-op paint. */
+export function setCellBackground(data: TableData, range: Range, color: CellBackgroundColor | null): TableData {
+  const next = { ...(data.cellBackgrounds ?? {}) };
+  let changed = false;
+  for (let r = range.r0; r <= Math.min(range.r1, data.rows.length - 1); r++) {
+    for (let c = range.c0; c <= Math.min(range.c1, data.columns.length - 1); c++) {
+      const key = `${r},${c}`;
+      if (color === null) {
+        if (key in next) {
+          delete next[key];
+          changed = true;
+        }
+      } else if (next[key] !== color) {
+        next[key] = color;
+        changed = true;
+      }
+    }
+  }
+  if (!changed) return data;
+  return { ...data, cellBackgrounds: Object.keys(next).length ? next : undefined };
+}
+
+/** The range's color when every stored cell in it wears the same one,
+ *  `"mixed"` when several (or some colored and some not), `null` when none
+ *  is colored — the menu's checkmark and its None entry read this. */
+export function rangeCellBackground(data: TableData, range: Range): CellBackgroundColor | "mixed" | null {
+  const seen = new Set<CellBackgroundColor | null>();
+  for (let r = range.r0; r <= Math.min(range.r1, data.rows.length - 1); r++) {
+    for (let c = range.c0; c <= Math.min(range.c1, data.columns.length - 1); c++) {
+      seen.add(data.cellBackgrounds?.[`${r},${c}`] ?? null);
+      if (seen.size > 1) return "mixed";
+    }
+  }
+  return seen.size === 1 ? [...seen][0] : null;
+}
+
 // ── Rows and columns ───────────────────────────────────────────────────
 
 /** The link after `count` rows/columns are inserted at `at` on `axis`: the
@@ -250,6 +313,7 @@ export function insertRows(data: TableData, at: number, count: number): TableDat
     ...data,
     rows,
     excluded: remapExcluded(data, (r, c) => [shift(r), c]),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => [shift(r), c]),
     rowGroups: shiftRowGroupsForInsert(data.rowGroups, at, count),
     linkedPaste: data.linkedPaste ? linkedPasteAfterInsert(data.linkedPaste, "row", at, count) : undefined,
   };
@@ -262,6 +326,7 @@ export function deleteRows(data: TableData, at: number, count: number): TableDat
     ...data,
     rows,
     excluded: remapExcluded(data, (r, c) => (shift(r) === null ? null : [shift(r)!, c])),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => (shift(r) === null ? null : [shift(r)!, c])),
     rowGroups: shiftRowGroupsForDelete(data.rowGroups, at, count),
     linkedPaste: data.linkedPaste ? linkedPasteAfterDelete(data.linkedPaste, "row", at, count) : undefined,
   };
@@ -281,6 +346,7 @@ export function insertColumns(data: TableData, at: number, count: number, type: 
     columns,
     rows,
     excluded: remapExcluded(data, (r, c) => [r, c >= at ? c + count : c]),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => [r, c >= at ? c + count : c]),
     linkedPaste: data.linkedPaste ? linkedPasteAfterInsert(data.linkedPaste, "col", at, count) : undefined,
   };
 }
@@ -288,6 +354,30 @@ export function insertColumns(data: TableData, at: number, count: number, type: 
 /** The widths of `columns` alone: a column gone takes its width with it. */
 function widthsOf(widths: TableData["widths"], columns: string[]): TableData["widths"] {
   const kept = widths && Object.entries(widths).filter(([name]) => columns.includes(name));
+  return kept?.length ? Object.fromEntries(kept) : undefined;
+}
+
+/** The decimal settings of `columns` alone: a column gone takes its setting with it. */
+function decimalsOf(decimals: TableData["decimals"], columns: string[]): TableData["decimals"] {
+  const kept = decimals && Object.entries(decimals).filter(([name]) => columns.includes(name));
+  return kept?.length ? Object.fromEntries(kept) : undefined;
+}
+
+/** The variable types of `columns` alone: a column gone takes its type with it. */
+function variableTypesOfColumns(
+  types: TableData["variableTypes"],
+  columns: string[],
+): TableData["variableTypes"] {
+  const kept = types && Object.entries(types).filter(([name]) => columns.includes(name));
+  return kept?.length ? Object.fromEntries(kept) : undefined;
+}
+
+/** The level orders of `columns` alone: a column gone takes its order with it. */
+function levelOrderOfColumns(
+  orders: TableData["levelOrder"],
+  columns: string[],
+): TableData["levelOrder"] {
+  const kept = orders && Object.entries(orders).filter(([name]) => columns.includes(name));
   return kept?.length ? Object.fromEntries(kept) : undefined;
 }
 
@@ -302,7 +392,13 @@ export function deleteColumns(data: TableData, at: number, count: number): Table
     columns,
     rows: data.rows.map((row) => row.filter(keep)),
     excluded: remapExcluded(data, (r, c) => (c < at ? [r, c] : c >= at + n ? [r, c - n] : null)),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => (c < at ? [r, c] : c >= at + n ? [r, c - n] : null)),
     widths: widthsOf(data.widths, columns),
+    decimals: decimalsOf(data.decimals, columns),
+    variableTypes: variableTypesOfColumns(data.variableTypes, columns),
+    // A deleted row-label source goes with its column.
+    labelVariable: data.labelVariable !== undefined && columns.includes(data.labelVariable) ? data.labelVariable : undefined,
+    levelOrder: levelOrderOfColumns(data.levelOrder, columns),
     linkedPaste: data.linkedPaste ? linkedPasteAfterDelete(data.linkedPaste, "col", at, n) : undefined,
     // A deleted calculated variable goes with its column; a formula that
     // used a deleted source keeps its text and reads as an error until it
@@ -374,7 +470,7 @@ function renameKey<T>(map: Record<string, T> | undefined, from: string, to: stri
   return { ...rest, [to]: value };
 }
 
-/** Renames column `c`, carrying its width over — and, for a Multiple
+/** Renames column `c`, carrying its width and its variable type over — and, for a Multiple
  *  Variables table, carrying the rename through its calculated variables'
  *  formulas, so `=A + B` still reads `A` after `A` becomes `Dose`. */
 export function renameColumn(data: TableData, c: number, name: string): TableData {
@@ -384,6 +480,10 @@ export function renameColumn(data: TableData, c: number, name: string): TableDat
     ...data,
     columns: data.columns.map((n, i) => (i === c ? name : n)),
     widths: renameKey(data.widths, old, name),
+    decimals: renameKey(data.decimals, old, name),
+    variableTypes: renameKey(data.variableTypes, old, name),
+    labelVariable: data.labelVariable === old ? name : data.labelVariable,
+    levelOrder: renameKey(data.levelOrder, old, name),
   };
   return renameCalculatedReferences(next, old, name);
 }
@@ -395,10 +495,13 @@ export function renameGroup(data: TableData, oldKey: string, newKey: string): Ta
   }
   const rename = (n: string) => (seriesKeyOf(n) === oldKey && n.includes(":") ? newKey + n.slice(n.indexOf(":")) : n);
   const widths = data.widths && Object.fromEntries(Object.entries(data.widths).map(([n, w]) => [rename(n), w]));
+  const decimals =
+    data.decimals && Object.fromEntries(Object.entries(data.decimals).map(([n, d]) => [rename(n), d]));
   return {
     ...data,
     columns: data.columns.map(rename),
     widths,
+    decimals,
   };
 }
 
@@ -418,10 +521,13 @@ export function renameSubgroup(data: TableData, groupKey: string, oldSub: string
   const rename = (n: string) =>
     isSub(n) && parts(n)[1] === oldSub ? `${groupKey}:${newSub}:${parts(n)[2]}` : n;
   const widths = data.widths && Object.fromEntries(Object.entries(data.widths).map(([n, w]) => [rename(n), w]));
+  const decimals =
+    data.decimals && Object.fromEntries(Object.entries(data.decimals).map(([n, d]) => [rename(n), d]));
   return {
     ...data,
     columns: data.columns.map(rename),
     widths,
+    decimals,
   };
 }
 
@@ -452,6 +558,41 @@ export function changeErrorFormat(data: TableData, format: TableErrorFormat): Ta
   const renamed = columns.some((c, i) => c !== data.columns[i]);
   if (tableErrorFormat(data) === format && !renamed) return data;
   return { ...data, errorFormat: format, columns };
+}
+
+/** What an XY table's X column holds — "numbers" when nothing is recorded. */
+export const xFormatOf = (data: TableData): XColumnFormat =>
+  data.xFormat === undefined ? "numbers" : data.xFormat;
+
+/**
+ * An XY table's X format, changed (Prism 11, seq 332): the format is
+ * recorded, and the conversion with it when one is given. Switching back to
+ * numbers clears the format but keeps the conversion, so switching back to
+ * dates restores the units and start date. The cells are never touched — a
+ * date column switched to numbers still holds its date text, and switching
+ * back re-reads it. Returns the table unchanged when nothing would change,
+ * so the switch leaves no undo entry behind.
+ */
+export function changeXFormat(data: TableData, format: XColumnFormat, conversion?: XConversion): TableData {
+  if (!isXColumnFormat(format)) return data;
+  const nextConversion = conversion === undefined ? data.xConversion : conversion;
+  if (xFormatOf(data) === format && sameConversion(data.xConversion, nextConversion)) return data;
+  return {
+    ...data,
+    xFormat: format === "numbers" ? undefined : format,
+    xConversion: nextConversion,
+  };
+}
+
+/**
+ * An XY table's X conversion, changed (units, start date, day-first): only
+ * the conversion moves, never the format or the cells. Returns the table
+ * unchanged when the conversion already holds, so the change leaves no undo
+ * entry behind.
+ */
+export function changeXConversion(data: TableData, conversion: XConversion): TableData {
+  if (sameConversion(data.xConversion, conversion)) return data;
+  return { ...data, xConversion: { ...conversion } };
 }
 
 /** A grouped table's group names, in run order (duplicates kept). */
@@ -502,7 +643,9 @@ export function regroupTable(
     groups,
     replicates,
     excluded: remapExcluded(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
     widths: widthsOf(data.widths, columns),
+    decimals: decimalsOf(data.decimals, columns),
     // Regrouping rebuilds the columns, but the link's anchor is a position
     // (seq 168): it stays where it was, and a refresh re-pastes the source
     // into that same region — values keep their slots, as they do here.
@@ -557,7 +700,12 @@ export function applySummaryFormat(data: TableData, format: SummaryFormat): Tabl
       const to = c === 0 ? 0 : at(c);
       return to === null ? null : [r, to];
     }),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => {
+      const to = c === 0 ? 0 : at(c);
+      return to === null ? null : [r, to];
+    }),
     widths: widthsOf(data.widths, columns),
+    decimals: decimalsOf(data.decimals, columns),
     // A format switch rebuilds the sub-columns, but the link's anchor is a
     // position (seq 168): it stays where it was.
   };
@@ -634,7 +782,13 @@ export function applySummaryFormatXY(data: TableData, format: SummaryFormat): Ta
       const to = at(c);
       return to === null ? null : [r, to];
     }),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => {
+      if (c < lead) return [r, c];
+      const to = at(c);
+      return to === null ? null : [r, to];
+    }),
     widths: widthsOf(data.widths, columns),
+    decimals: decimalsOf(data.decimals, columns),
   };
 }
 
@@ -715,7 +869,12 @@ export function applySummaryFormatNested(data: TableData, format: SummaryFormat)
       const to = c === 0 ? 0 : at(c);
       return to === null ? null : [r, to];
     }),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => {
+      const to = c === 0 ? 0 : at(c);
+      return to === null ? null : [r, to];
+    }),
     widths: widthsOf(data.widths, columns),
+    decimals: decimalsOf(data.decimals, columns),
   };
 }
 
@@ -735,7 +894,7 @@ export function replicateXY(data: TableData, replicates: number): { data: TableD
     const one = regroupTable(data, data.groups!, 1, "xy");
     const columns = one.columns.map((n, c) => (c < 2 ? n : seriesKeyOf(n)));
     return {
-      data: { ...one, columns, groups: undefined, replicates: undefined, widths: widthsOf(one.widths, columns) },
+      data: { ...one, columns, groups: undefined, replicates: undefined, widths: widthsOf(one.widths, columns), decimals: decimalsOf(one.decimals, columns) },
       renamed,
     };
   }
@@ -811,7 +970,9 @@ export function renestTable(data: TableData, groups: number, subgroups: number, 
     subgroups,
     replicates,
     excluded: remapExcluded(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
     widths: widthsOf(data.widths, columns),
+    decimals: decimalsOf(data.decimals, columns),
     // Renesting rebuilds the columns, but the link's anchor is a position
     // (seq 168): it stays where it was.
   };
@@ -982,14 +1143,17 @@ export function convertCommaDecimals(data: TableData): TableData {
 
 // ── Clipboard ──────────────────────────────────────────────────────────
 
-/** Stored cells of `range` as tab-separated text, the format Excel and Numbers exchange. */
-export function toTSV(data: TableData, range: Range): string {
+/** Stored cells of `range` as tab-separated text, the format Excel and Numbers exchange.
+ *  Values keep full precision — a decimal-places setting never rounds them — and
+ *  numeric cells take the decimal separator. */
+export function toTSV(data: TableData, range: Range, separator: DecimalSeparator = "."): string {
   const lines: string[] = [];
   for (let r = range.r0; r <= Math.min(range.r1, data.rows.length - 1); r++) {
     const cells: string[] = [];
     for (let c = range.c0; c <= Math.min(range.c1, data.columns.length - 1); c++) {
       const v = data.rows[r]?.[c] ?? "";
-      cells.push(/[\t\n"]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+      const shown = v !== "" && separator === "," && parseCell(v) !== null ? v.replace(".", ",") : v;
+      cells.push(/[\t\n"]/.test(shown) ? `"${shown.replace(/"/g, '""')}"` : shown);
     }
     lines.push(cells.join("\t"));
   }

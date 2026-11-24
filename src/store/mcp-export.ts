@@ -78,6 +78,8 @@ import {
   writeFile as nativeWriteFile,
   type McpJob,
 } from "../native";
+import { loadDecimalSeparator, type DecimalSeparator } from "../lib/decimal-format";
+import { parseCell } from "../lib/numeric";
 
 /** The project as an export job sees it: the store state, nothing more. */
 export interface ExportJobState {
@@ -1060,15 +1062,18 @@ export async function executeCopyGraphImage(job: McpJob, deps: ExportJobDeps): P
 // an ID like "0123" never becomes 123).
 
 /** The table's grid as text rows: every column (column 0 is the row
- *  titles), every stored row (short rows padded), excluded cells empty. */
-export function tableTextRows(data: TableData): string[][] {
+ *  titles), every stored row (short rows padded), excluded cells empty.
+ *  Values keep full precision — a decimal-places setting never rounds
+ *  them — and numeric cells take the decimal separator. */
+export function tableTextRows(data: TableData, separator: DecimalSeparator = "."): string[][] {
   const columns = data.columns.length ? data.columns : ["Title"];
   const excluded = new Set(data.excluded ?? []);
   return data.rows.map((row, r) =>
     columns.map((_, c) => {
       if (c >= 1 && excluded.has(`${r},${c}`)) return "";
       const cell = row[c];
-      return cell === null || cell === undefined ? "" : cell;
+      if (cell === null || cell === undefined) return "";
+      return separator === "," && parseCell(cell) !== null ? cell.replace(".", ",") : cell;
     }),
   );
 }
@@ -1085,15 +1090,16 @@ export function txtField(cell: string): string {
   return /[\t"\n\r]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell;
 }
 
-/** The table as CSV text (one row per line, CRLF-free). */
-export function tableToCsv(data: TableData): string {
-  const rows = [data.columns.length ? data.columns : ["Title"], ...tableTextRows(data)];
+/** The table as CSV text (one row per line, CRLF-free). Numeric cells take
+ *  the decimal separator; values keep full precision. */
+export function tableToCsv(data: TableData, separator: DecimalSeparator = "."): string {
+  const rows = [data.columns.length ? data.columns : ["Title"], ...tableTextRows(data, separator)];
   return rows.map((row) => row.map(csvField).join(",")).join("\n");
 }
 
 /** The table as TXT text (tab-separated, same grid as CSV). */
-export function tableToTxt(data: TableData): string {
-  const rows = [data.columns.length ? data.columns : ["Title"], ...tableTextRows(data)];
+export function tableToTxt(data: TableData, separator: DecimalSeparator = "."): string {
+  const rows = [data.columns.length ? data.columns : ["Title"], ...tableTextRows(data, separator)];
   return rows.map((row) => row.map(txtField).join("\t")).join("\n");
 }
 
@@ -1122,8 +1128,8 @@ export function sheetName(name: string): string {
  *  same hand-built pattern as `office-export.ts`): one sheet, every
  *  cell an inline string, empty cells omitted (sparse). Opens in
  *  Excel, LibreOffice and Sheets. */
-export async function tableToXlsx(data: TableData, name: string): Promise<Uint8Array> {
-  const rows = [data.columns.length ? data.columns : ["Title"], ...tableTextRows(data)];
+export async function tableToXlsx(data: TableData, name: string, separator: DecimalSeparator = "."): Promise<Uint8Array> {
+  const rows = [data.columns.length ? data.columns : ["Title"], ...tableTextRows(data, separator)];
   const sheetRows = rows
     .map((row, r) => {
       const cells = row
@@ -1227,10 +1233,13 @@ export async function executeExportTableData(job: McpJob, deps: ExportJobDeps): 
   const state = deps.getState();
   const table = tableNode(job, state, tableId);
   const data = table.data ?? { columns: ["Title"], rows: [] };
+  // Text exports render the decimal separator; Prism XML keeps the period
+  // (a machine format for Prism — see tableToXml).
+  const separator = loadDecimalSeparator();
   let bytes: string | Uint8Array;
-  if (format === "csv") bytes = tableToCsv(data);
-  else if (format === "txt") bytes = tableToTxt(data);
-  else if (format === "xlsx") bytes = await tableToXlsx(data, table.name);
+  if (format === "csv") bytes = tableToCsv(data, separator);
+  else if (format === "txt") bytes = tableToTxt(data, separator);
+  else if (format === "xlsx") bytes = await tableToXlsx(data, table.name, separator);
   else bytes = tableToXml(data, table.name, table.tableType ?? "column");
   const io = deps.io ?? defaultExportIo;
   await io.writeFile(ensureSaveExtension(path, format), bytes);

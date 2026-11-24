@@ -67,6 +67,18 @@ import {
 } from "../src/lib/pane-focus";
 import { galleryItems } from "../src/lib/gallery";
 import { loadPrintSettings, printPageCss, savePrintSettings } from "../src/lib/print-settings";
+import {
+  DECIMAL_SEPARATOR_KEY,
+  clampDecimalPlaces,
+  decimalsSupported,
+  displayCellValue,
+  formatDecimalCell,
+  loadDecimalSeparator,
+  normalizeDecimalInput,
+  saveDecimalSeparator,
+  setDecimalPlaces,
+  type DecimalSeparator,
+} from "../src/lib/decimal-format";
 import { formatMergeReport, mergeProjects, type MergeInput as ProjectMergeInput } from "../src/lib/project-merge";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
 import {
@@ -94,6 +106,31 @@ import {
   renameVariableInFormula,
   setCalculatedFormula,
 } from "../src/lib/calcvars";
+import {
+  categoricalLevels,
+  detectVariableType,
+  labelVariableOf,
+  levelSuggestions,
+  moveLevel,
+  orderedLevelKeys,
+  readLevelOrder,
+  readVariableTypes,
+  refreshLevelOrder,
+  refreshVariableTypes,
+  renameLevel,
+  rowLabelsOf,
+  setLabelVariable,
+  setLevelOrder,
+  setVariableType,
+  setVariableTypeAuto,
+  sortLevelOrder,
+  variableTypesOf,
+} from "../src/lib/variable-types";
+import {
+  CATEGORY_AUTOCOMPLETE_KEY,
+  loadCategoryAutocomplete,
+  saveCategoryAutocomplete,
+} from "../src/lib/category-autocomplete";
 import { writePrism, type PrismWriteReport } from "../src/lib/prism-write";
 import {
   infoSheetsOf,
@@ -108,6 +145,7 @@ import {
 import JSZip from "jszip";
 import {
   DEFAULT_GRAPH_OPTIONS,
+  GRAPH_CHOICES,
   GRAPH_LIMITS,
   SAME_AS_FILL,
   type DrawingObject,
@@ -115,6 +153,7 @@ import {
   type GraphOptions,
   type GraphType,
   type ProjectNode,
+  type RowGroup,
   type TableType,
   type TableData,
 } from "../src/store/types";
@@ -127,6 +166,8 @@ import {
   applySummaryFormatXY,
   applySummaryFormatXYLoses,
   changeErrorFormat,
+  changeXConversion,
+  changeXFormat,
   columnsBeyond,
   defaultRowGroups,
   deleteColumns,
@@ -149,12 +190,16 @@ import {
   replicateXY,
   rowsDeleted,
   rowsInserted,
+  setCellBackground,
   setRowGroupCount,
   setRowGroupName,
   toggleExcluded,
+  toTSV,
   transposeBlock,
   writeBlock,
+  xFormatOf,
 } from "../src/views/tables/table-data";
+import { resultCellBackgroundKey } from "../src/lib/cell-colors";
 import { flattenThreeWay, rowGroupBands } from "../src/stats/grouped/base";
 import { gridMenu } from "../src/views/tables/grid-menu";
 import { analysisOptionsForTable, analysisOptionsKey } from "../src/views/analyses";
@@ -183,7 +228,23 @@ import {
 } from "../src/lib/palettes";
 import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-palettes";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, graphSeriesDataset, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
-import { datasetColumns, isGrouped, isNested, readTable, seriesOf, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
+import { datasetColumns, isGrouped, isNested, levelsOf, readTable, seriesOf, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
+import {
+  convertXCell,
+  displayXCell,
+  parseDateCell,
+  parseElapsedCell,
+  xZeroMs,
+} from "../src/lib/date-time";
+import {
+  DATE_DISPLAY_FORMATS,
+  ELAPSED_DISPLAY_FORMATS,
+  dateAxisTicksForValues,
+  elapsedAxisTicksForValues,
+  formatDateTick,
+  formatElapsedTick,
+} from "../src/lib/axis-dates";
+import { writePzfx } from "../src/lib/pzfx-write";
 import {
   mergeGraphTables,
   mergedGraphData,
@@ -196,8 +257,9 @@ import { buildPanelFigure } from "../src/views/figures/panel-figure";
 import type { McpJob } from "../src/native";
 import { nestedMeans } from "../src/stats/nested/base";
 import { runNestedTTest } from "../src/stats/nested/nested-t-test";
-import { prepareFit } from "../src/stats/xy/nonlinear-fit";
-import { adjustComparisonRows, adjustFdrComparisonRows, adjustFdrPValues, adjustPValues, describe, describedBy, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
+import { AMBIGUOUS_DEPENDENCY_THRESHOLD, applyUnstableFlags, derivedSources, fitModelSpec, identifyUnstableParameters, modelSpec, parameterDependencies, prepareFit, UNSTABLE_CONDITION_THRESHOLD, type DerivedRow, type ModelSpec } from "../src/stats/xy/nonlinear-fit";
+import { adjustComparisonRows, adjustFdrComparisonRows, adjustFdrPValues, adjustPValues, describe, describedBy, incompleteRows, missingColumn, R_EFFECT_CI, rVec } from "../src/stats/column/base";
+import { analysisTitle, titleAfterApply } from "../src/stats/index";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
 import { hclustAvgSilhouette, hclustClusterWithinSs, hclustDistanceMatrix, hclustSuggestedK, hclustWithinSs } from "../src/stats/multiple/hierarchical-clustering";
 import { dendrogramSegments } from "../src/views/graphs/dendrogram";
@@ -208,19 +270,22 @@ import { dagostinoPearson } from "../src/stats/column/shapiro-wilk";
 import { runRout } from "../src/stats/column/rout";
 import { adjustStackPValues, bkyTrueNullEstimate, fisherCombinedP, runPValueStack, stoufferCombinedP } from "../src/stats/column/p-values";
 import {
+  answersFromParams,
+  canEditAnalysisParams,
   CHECKLIST_KEYS,
   CHECKLISTS,
   checklistFor,
   parseGroupLevels,
   toggled,
   WIZARDS,
+  wizardForAnalysis,
   type Answers,
   type Question,
 } from "../src/views/analyses/wizards";
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, applyNumberFormats, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowSummaryStats, scatterOffsets, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, applyDateAxis, applyNumberFormats, axesRangeInputs, baseLayout, centers, curveXs, errorOf, errors, groupedBarLayout, groupedScatterLayout, hasTableXAxis, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowStats, perRowSummaryStats, scatterOffsets, summaryErrorAt, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -249,9 +314,11 @@ import { previewFigure } from "../src/views/graphs/match-preview";
 import type { OutlineNode } from "../src/store/use-project-store";
 import {
   addSignificance,
+  compactLetters,
   deriveComparisons,
   expandSigPairs,
   lettersComparisons,
+  lettersFit,
   sigAnalysisIdsOf,
   sigPairKey,
   sigPairSelected,
@@ -259,6 +326,7 @@ import {
 } from "../src/views/graphs/significance-overlay";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { LettersFormatControls } from "../src/views/graphs/format-sections";
 import { AnalysisResultsView, headline } from "../src/views/analyses/analysis-results-view";
 import { loadPrismSaveChoice, nextSaveAction } from "../src/lib/prism-nudge";
 import {
@@ -300,7 +368,7 @@ import {
   prettyBreaks,
   sturgesCount,
 } from "../src/stats/column/frequency-distribution";
-import { transformValue } from "../src/stats/column/transform-data";
+import { rankValues, seededGaussian, transformValue, zscoreValues } from "../src/stats/column/transform-data";
 import { binomialPmf, chiSquarePdf, fPdf, normalPdf, poissonPmf, tPdf } from "../src/stats/distributions";
 import {
   concentrationFactor,
@@ -380,7 +448,7 @@ import {
   parseXlsx,
   rowsToTable,
 } from "../src/lib/tabular-import";
-import { executeExportTableData, tableToCsv, tableToTxt, tableToXml, tableToXlsx } from "../src/store/mcp-export";
+import { executeExportTableData, tableTextRows, tableToCsv, tableToTxt, tableToXml, tableToXlsx } from "../src/store/mcp-export";
 import {
   exportTableData,
   serializeTableData,
@@ -411,7 +479,7 @@ import {
   type ColorMode,
 } from "../src/lib/vector-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
-import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, ChiSquareGofParams, ComparedCell, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, RemoveBaselineParams, SimulationSpec, ThreeWayAnovaParams } from "../src/stats/types";
+import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnalysisType, AnovaParams, ChiSquareGofParams, ComparedCell, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, RemoveBaselineParams, SimulationSpec, ThreeWayAnovaParams } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
@@ -3104,6 +3172,72 @@ check("MCP run-analysis refuses a frozen analysis before running it", async () =
   deepStrictEqual(seen, []);
 });
 
+// Results tables (seq 325) are painted by address — section, row, column —
+// so a color survives a recompute while the table's shape holds, and a
+// frozen analysis can still be painted (the color never re-runs anything).
+check("MCP set-result-cell-background paints and clears a results cell (seq 325)", async () => {
+  const { harness } = await rerunHarness();
+  harness.deps.setResultCellBackground = (id, key, color) =>
+    harness.dispatch({ type: "setResultCellBackground", id, key, color });
+  const key = resultCellBackgroundKey("Statistics", 0, 1);
+  const done = await harness.run("job-325r-a", "set-result-cell-background", {
+    analysis_id: "a1",
+    section: "Statistics",
+    row: 0,
+    col: 1,
+    color: "red",
+  });
+  deepStrictEqual((done.result as { color: string }).color, "red");
+  deepStrictEqual(harness.state().nodes["a1"]?.resultCellBackgrounds, { [key]: "red" });
+  // A recompute keeps the color on its cell (same-shape result).
+  harness.dispatch({
+    type: "cacheAnalysisResult",
+    id: "a1",
+    result: { testType: "anova", stats: [], groups: [], notes: "" },
+  });
+  deepStrictEqual(harness.state().nodes["a1"]?.resultCellBackgrounds, { [key]: "red" });
+  // Clearing removes it; a bogus color, a negative row, and an unknown
+  // analysis are refused.
+  await harness.run("job-325r-b", "set-result-cell-background", {
+    analysis_id: "a1",
+    section: "Statistics",
+    row: 0,
+    col: 1,
+    color: null,
+  });
+  strictEqual(harness.state().nodes["a1"]?.resultCellBackgrounds, undefined);
+  await rejects(
+    harness.run("job-325r-c", "set-result-cell-background", {
+      analysis_id: "a1",
+      section: "Statistics",
+      row: 0,
+      col: 1,
+      color: "pink",
+    }),
+    /one of yellow, red, blue, green, purple, orange, tan, gray/,
+  );
+  await rejects(
+    harness.run("job-325r-d", "set-result-cell-background", {
+      analysis_id: "a1",
+      section: "Statistics",
+      row: -1,
+      col: 1,
+      color: "red",
+    }),
+    /must be a whole number, at least 0/,
+  );
+  await rejects(
+    harness.run("job-325r-e", "set-result-cell-background", {
+      analysis_id: "nope",
+      section: "Statistics",
+      row: 0,
+      col: 1,
+      color: "red",
+    }),
+    /No analysis with id/,
+  );
+});
+
 // The generated MCP params schema (titer_get_analysis_params) must stay
 // in step with the validator: same types, same param names per type, and
 // every listed enum value must pass validateAnalysisParams.
@@ -3178,6 +3312,83 @@ check("write-table with excluded omitted (null) preserves the marks (v1.6 F5)", 
   harness.sync();
   await harness.run("job-f5d", "write-table", { table_id: tid, columns, rows, excluded: [] });
   strictEqual(data().excluded, undefined);
+});
+
+// Cell background colors (seq 325) are Prism's paint-bucket: one cell, one
+// of the 8 colors, or null to clear it. The value stays — the color is
+// presentation only — and painting the same color again is a no-op
+// success (no undo step, no revision bump).
+check("MCP edit-table set-cell-background paints and clears one cell (seq 325)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const created = await harness.run("job-325a", "create-table", {
+    table_type: "xy",
+    name: "Doses",
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["r1", 0, 1],
+      ["r2", 1, 2],
+    ],
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  harness.sync();
+  await harness.run("job-325b", "edit-table", { table_id: tid, op: "set-cell-background", at_row: 0, at_col: 1, color: "yellow" });
+  deepStrictEqual(data().cellBackgrounds, { "0,1": "yellow" });
+  strictEqual(data().rows[0][1], "0"); // the value is untouched (stored as "0")
+  const before = harness.state().revision;
+  await harness.run("job-325c", "edit-table", { table_id: tid, op: "set-cell-background", at_row: 0, at_col: 1, color: "yellow" });
+  strictEqual(harness.state().revision, before);
+  // Clearing removes the color; a bogus color and an out-of-range cell are refused.
+  harness.sync();
+  await harness.run("job-325d", "edit-table", { table_id: tid, op: "set-cell-background", at_row: 0, at_col: 1, color: null });
+  strictEqual(data().cellBackgrounds, undefined);
+  await rejects(
+    harness.run("job-325e", "edit-table", { table_id: tid, op: "set-cell-background", at_row: 0, at_col: 1, color: "pink" }),
+    /the colors are/,
+  );
+  await rejects(
+    harness.run("job-325f", "edit-table", { table_id: tid, op: "set-cell-background", at_row: 9, at_col: 1, color: "red" }),
+    /has no cell/,
+  );
+});
+
+// write-table with cell_backgrounds follows the excluded convention (F5):
+// omitted (null) preserves the colors, an explicit map replaces them, an
+// empty map clears them.
+check("write-table with cell_backgrounds omitted preserves the colors (seq 325)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const created = await harness.run("job-325w-a", "create-table", {
+    table_type: "xy",
+    name: "Doses",
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["r1", 0, 1],
+      ["r2", 1, 2],
+    ],
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  const columns = ["Title", "X", "Y1"];
+  const rows = [
+    ["r1", 0, 1],
+    ["r2", 1, 2],
+  ];
+  harness.sync();
+  await harness.run("job-325w-b", "edit-table", { table_id: tid, op: "set-cell-background", at_row: 0, at_col: 1, color: "yellow" });
+  deepStrictEqual(data().cellBackgrounds, { "0,1": "yellow" });
+  harness.sync();
+  await harness.run("job-325w-c", "write-table", { table_id: tid, columns, rows, cell_backgrounds: null });
+  deepStrictEqual(data().cellBackgrounds, { "0,1": "yellow" });
+  harness.sync();
+  await harness.run("job-325w-d", "write-table", { table_id: tid, columns, rows, cell_backgrounds: { "1,2": "red" } });
+  deepStrictEqual(data().cellBackgrounds, { "1,2": "red" });
+  harness.sync();
+  await harness.run("job-325w-e", "write-table", { table_id: tid, columns, rows, cell_backgrounds: {} });
+  strictEqual(data().cellBackgrounds, undefined);
+  await rejects(
+    harness.run("job-325w-f", "write-table", { table_id: tid, columns, rows, cell_backgrounds: { "0,1": "pink" } }),
+    /the colors are/,
+  );
 });
 
 check("write-table with zero rows is refused and leaves the table untouched (BUG-17)", async () => {
@@ -4066,6 +4277,775 @@ check("one-way ANOVA completion: Brown-Forsythe, FDR and trend (seq 191)", () =>
   );
 });
 
+// seq 373: changing an analysis's parameters in place re-opens its wizard
+// pre-filled from the stored params — answersFromParams, the inverse of each
+// wizard's finish. Every mapped wizard round-trips: finish(answersFromParams)
+// is the params it started from, and those params validate (the Apply path
+// runs validateAnalysisParams on the finished params, as the MCP rerun does).
+const seq373Column = (): TableData => ({
+  columns: ["Title", "A", "B", "C", "D"],
+  rows: [
+    [null, "1", "2", "3", "4"],
+    [null, "2", "3", "4", "5"],
+    [null, "3", "4", "5", "6"],
+  ],
+});
+const seq373Xy = (): TableData => ({
+  columns: ["Title", "X", "A", "B"],
+  rows: [
+    [null, "1", "10", "20"],
+    [null, "2", "11", "21"],
+    [null, "3", "12", "22"],
+  ],
+});
+const seq373Xy3 = (): TableData => ({
+  columns: ["Title", "X", "A", "B", "C"],
+  rows: [
+    [null, "1", "10", "20", "30"],
+    [null, "2", "11", "21", "31"],
+    [null, "3", "12", "22", "32"],
+  ],
+});
+const seq373Two = (): TableData => ({
+  columns: ["Title", "A", "B"],
+  rows: [
+    [null, "1", "2"],
+    [null, "2", "3"],
+    [null, "3", "4"],
+  ],
+});
+const seq373One = (): TableData => ({
+  columns: ["Title", "A"],
+  rows: [
+    [null, "1"],
+    [null, "2"],
+    [null, "3"],
+  ],
+});
+const seq373Grouped3 = (): TableData => ({
+  columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2", "C:Y1", "C:Y2"],
+  rows: [
+    [null, "1", "2", "3", "4", "5", "6"],
+    [null, "2", "3", "4", "5", "6", "7"],
+    [null, "3", "4", "5", "6", "7", "8"],
+  ],
+  groups: 3,
+  replicates: 2,
+});
+const seq373Grouped2x1 = (): TableData => ({
+  columns: ["Title", "A:Y1", "B:Y1"],
+  rows: [
+    [null, "1", "2"],
+    [null, "2", "3"],
+  ],
+  groups: 2,
+  replicates: 1,
+});
+const seq373ThreeWayBands: RowGroup[] = [
+  { name: "WT", count: 2 },
+  { name: "KO", count: 1 },
+];
+const seq373Gaps = (): TableData => ({
+  columns: ["Title", "A", "B", "C"],
+  rows: [
+    [null, "1", "2", null],
+    [null, "2", "3", "4"],
+    [null, "3", "4", "5"],
+  ],
+});
+const seq373Nested3 = (): TableData => ({
+  columns: [
+    "Title",
+    "A:S1:R1",
+    "A:S1:R2",
+    "A:S2:R1",
+    "A:S2:R2",
+    "B:S1:R1",
+    "B:S1:R2",
+    "B:S2:R1",
+    "B:S2:R2",
+    "C:S1:R1",
+    "C:S1:R2",
+    "C:S2:R1",
+    "C:S2:R2",
+  ],
+  rows: [
+    [null, "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
+    [null, "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"],
+  ],
+  groups: 3,
+  subgroups: 2,
+  replicates: 2,
+});
+const seq373Nested4 = (): TableData => ({
+  columns: [
+    "Title",
+    "A:S1:R1",
+    "A:S1:R2",
+    "A:S2:R1",
+    "A:S2:R2",
+    "B:S1:R1",
+    "B:S1:R2",
+    "B:S2:R1",
+    "B:S2:R2",
+    "C:S1:R1",
+    "C:S1:R2",
+    "C:S2:R1",
+    "C:S2:R2",
+    "D:S1:R1",
+    "D:S1:R2",
+    "D:S2:R1",
+    "D:S2:R2",
+  ],
+  rows: [
+    [null, "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"],
+    [null, "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17"],
+  ],
+  groups: 4,
+  subgroups: 2,
+  replicates: 2,
+});
+const seq373Mv = (): TableData => ({
+  columns: ["Title", "Age", "Height", "Weight", "Group"],
+  rows: [
+    [null, "20", "170", "60", "Control"],
+    [null, "25", "175", "70", "Treated"],
+    [null, "30", "180", "80", "Control"],
+    [null, "35", "165", "65", "Treated"],
+  ],
+});
+const seq373MvSurvival = (): TableData => ({
+  columns: ["Title", "Time", "Status", "Group"],
+  rows: [
+    [null, "5", "1", "Control"],
+    [null, "8", "0", "Treated"],
+    [null, "12", "1", "Control"],
+    [null, "3", "0", "Treated"],
+  ],
+});
+const seq373MvCox = (): TableData => ({
+  columns: ["Title", "Time", "Status", "Age", "Sex"],
+  rows: [
+    [null, "5", "1", "20", "0"],
+    [null, "8", "0", "25", "1"],
+    [null, "12", "1", "30", "0"],
+    [null, "3", "0", "35", "1"],
+  ],
+});
+const seq373MvLogistic = (): TableData => ({
+  columns: ["Title", "Outcome", "Age", "Weight"],
+  rows: [
+    [null, "0", "20", "60"],
+    [null, "1", "25", "70"],
+    [null, "0", "30", "80"],
+    [null, "1", "35", "65"],
+  ],
+});
+const seq373MvPoisson = (): TableData => ({
+  columns: ["Title", "Counts", "Age"],
+  rows: [
+    [null, "3", "20"],
+    [null, "5", "25"],
+    [null, "2", "30"],
+    [null, "7", "35"],
+  ],
+});
+const seq373Chi2x2 = (): TableData => ({
+  columns: ["Title", "A", "B"],
+  rows: [
+    [null, "10", "20"],
+    [null, "30", "40"],
+  ],
+});
+const seq373ChiTrend = (): TableData => ({
+  columns: ["Title", "A", "B"],
+  rows: [
+    [null, "10", "20"],
+    [null, "30", "40"],
+    [null, "50", "60"],
+  ],
+});
+/** A stored params object survives a round trip through the edit wizard. */
+const seq373RoundTrip = (
+  type: AnalysisType,
+  params: AnalysisParams,
+  table: Dataset,
+  tableType?: TableType,
+) => {
+  const key = wizardForAnalysis(type, params);
+  ok(key !== null, `${type} should map to a wizard`);
+  const answers = answersFromParams(type, params, table, tableType);
+  ok(answers !== null, `${type} should invert its stored params`);
+  const finished = WIZARDS[key!]!.finish(answers!, table, tableType);
+  deepStrictEqual(finished, { type, params }, `${type} round-trip through its wizard`);
+  deepStrictEqual(
+    validateAnalysisParams(type, finished.params).errors,
+    [],
+    `${type} finished params validate (the Apply path)`,
+  );
+};
+
+check("seq 373: set-based wizards round-trip stored params to answers", () => {
+  const table = readTable(seq373Column());
+  seq373RoundTrip("descriptive-statistics", { sets: ["A", "C"] }, table);
+  seq373RoundTrip(
+    "one-sample-t",
+    { sets: ["A"], hypotheticalValue: 5, gaussian: true, lognormal: true, tails: "greater" },
+    table,
+  );
+  seq373RoundTrip(
+    "one-sample-t",
+    { sets: ["A"], hypotheticalValue: 0, gaussian: false, tails: "two-sided" },
+    table,
+  );
+  seq373RoundTrip("shapiro-wilk", { sets: ["A"], test: "anderson-darling", lognormal: true }, table);
+  seq373RoundTrip(
+    "one-sample-ks",
+    { sets: ["A"], distribution: "normal", paramsFrom: "specified", tails: "two-sided", mean: 0, sd: 2 },
+    table,
+  );
+  seq373RoundTrip(
+    "one-sample-ks",
+    { sets: ["A"], distribution: "exponential", paramsFrom: "estimated", tails: "less" },
+    table,
+  );
+  seq373RoundTrip(
+    "frequency-distribution",
+    { sets: ["A"], binMode: "width", binWidth: 5, startAt: 0 },
+    table,
+  );
+  seq373RoundTrip(
+    "frequency-distribution",
+    { sets: ["A"], binMode: "count", binCount: 8, startAt: 0 },
+    table,
+  );
+  seq373RoundTrip("frequency-distribution", { sets: ["A"], binMode: "auto" }, table);
+  seq373RoundTrip("outliers", { sets: ["A", "B"], q: 1 }, table);
+  seq373RoundTrip(
+    "outliers",
+    { sets: ["A"], method: "grubbs", alpha: 0.05, iterate: true },
+    table,
+  );
+  seq373RoundTrip(
+    "outliers",
+    { sets: ["A"], method: "grubbs", alpha: 0.01, iterate: false },
+    table,
+  );
+  seq373RoundTrip("p-value-stack", { sets: ["A"], method: "bh", q: 5 }, table);
+  seq373RoundTrip("p-value-stack", { sets: ["A"], method: "holm", alpha: 0.05 }, table);
+  seq373RoundTrip("transform-data", { sets: ["A", "B"], function: "y-times-k", constant: 3 }, table);
+  seq373RoundTrip("transform-data", { sets: ["A"], function: "log10" }, table);
+  seq373RoundTrip("correlation-matrix", { sets: ["A", "B", "C"], method: "spearman" }, table);
+  seq373RoundTrip(
+    "chi-square-gof",
+    { sets: ["A"], expectedMode: "percent", expectedValues: [25, 25, 25, 25] },
+    table,
+  );
+  seq373RoundTrip("chi-square-gof", { sets: ["A"], expectedMode: "equal" }, table);
+  seq373RoundTrip("binomial-test", { sets: ["A"], expectedProportion: 0.5 }, table);
+  // One set only: the wizard never asks which set, but the stored set still
+  // rides along in the answers (finish reads it).
+  const one = readTable(seq373One());
+  seq373RoundTrip("one-sample-t", { sets: ["A"], hypotheticalValue: 5, gaussian: true, tails: "two-sided" }, one);
+  seq373RoundTrip("binomial-test", { sets: ["A"], expectedProportion: 0.5 }, one);
+  seq373RoundTrip("chi-square-gof", { sets: ["A"], expectedMode: "equal" }, one);
+});
+
+check("seq 373: comparison wizards round-trip stored params to answers", () => {
+  const table = readTable(seq373Column());
+  seq373RoundTrip(
+    "compare-two-groups",
+    { sets: ["A", "B"], paired: false, gaussian: true, equalVariance: false, ratio: false, tails: "two-sided" },
+    table,
+  );
+  seq373RoundTrip(
+    "compare-two-groups",
+    { sets: ["A", "B"], paired: true, gaussian: true, equalVariance: true, ratio: true, tails: "less" },
+    table,
+  );
+  seq373RoundTrip(
+    "compare-two-groups",
+    { sets: ["A", "B"], paired: false, gaussian: false, equalVariance: true, ratio: false, tails: "two-sided" },
+    table,
+  );
+  // Two sets only: the wizard never asks which two to compare, but the
+  // stored sets still ride along in the answers (finish reads them).
+  const two = readTable(seq373Two());
+  seq373RoundTrip(
+    "compare-two-groups",
+    { sets: ["A", "B"], paired: false, gaussian: true, equalVariance: false, ratio: false, tails: "two-sided" },
+    two,
+  );
+  seq373RoundTrip(
+    "anova",
+    { sets: ["A", "B", "C"], posthoc: "none", equalSd: true, trend: true },
+    table,
+  );
+  seq373RoundTrip(
+    "anova",
+    { sets: ["A", "B", "C"], posthoc: "dunnett", equalSd: true, control: "A" },
+    table,
+  );
+  seq373RoundTrip(
+    "anova",
+    { sets: ["A", "B", "C", "D"], posthoc: "fdr", equalSd: false },
+    table,
+  );
+  seq373RoundTrip(
+    "anova",
+    { sets: ["A", "B", "C"], posthoc: "bonferroni", equalSd: true, compared: [pairKey("A", "B")] },
+    table,
+  );
+  seq373RoundTrip("kruskal-wallis", { sets: ["A", "B", "C"], posthoc: "dunn" }, table);
+  seq373RoundTrip("friedman", { sets: ["A", "B", "C"], posthoc: "none" }, table);
+  seq373RoundTrip("rm-anova", { sets: ["A", "B", "C"], posthoc: "none", sphericity: false }, table);
+  const gaps = readTable(seq373Gaps());
+  seq373RoundTrip("rm-anova", { sets: ["A", "B", "C"], posthoc: "none", mixed: true }, gaps);
+  const grouped = readTable(seq373Grouped3());
+  seq373RoundTrip(
+    "multiple-t-tests",
+    { sets: ["A", "B"], paired: false, gaussian: true, pooledSd: false, correction: "fdr", q: 5 },
+    grouped,
+  );
+  seq373RoundTrip(
+    "multiple-t-tests",
+    { sets: ["A", "B"], paired: true, gaussian: false, pooledSd: false, correction: "holm-sidak" },
+    grouped,
+  );
+  const nested3 = readTable(seq373Nested3());
+  seq373RoundTrip("nested-t-test", { sets: ["A", "C"] }, nested3);
+  const nested4 = readTable(seq373Nested4());
+  seq373RoundTrip("nested-anova", { sets: ["A", "B", "C", "D"], posthoc: "tukey" }, nested4);
+  seq373RoundTrip("nested-anova", { posthoc: "none" }, nested3);
+  seq373RoundTrip(
+    "two-way-anova",
+    { sets: ["A", "B", "C"], design: "ordinary", posthoc: "tukey", posthocTarget: "rows" },
+    grouped,
+  );
+  seq373RoundTrip(
+    "two-way-anova",
+    { sets: ["A", "B", "C"], design: "repeated-measures", sphericity: true, posthoc: "none", posthocTarget: "groups" },
+    grouped,
+  );
+  seq373RoundTrip(
+    "two-way-anova",
+    { sets: ["A", "B", "C"], design: "ordinary", posthoc: "dunnett", posthocTarget: "groups", control: "A" },
+    grouped,
+  );
+  seq373RoundTrip(
+    "two-way-anova",
+    { sets: ["A", "B", "C"], design: "ordinary", posthoc: "fdr", posthocTarget: "groups", fdrMethod: "bky", fdrQ: 10 },
+    grouped,
+  );
+  seq373RoundTrip(
+    "two-way-anova",
+    { sets: ["A", "B", "C"], design: "nonparametric", posthoc: "none", posthocTarget: "groups" },
+    grouped,
+  );
+  const grouped2x1 = readTable(seq373Grouped2x1());
+  seq373RoundTrip(
+    "two-way-anova",
+    { design: "ordinary", posthoc: "none", posthocTarget: "groups" },
+    grouped2x1,
+  );
+  seq373RoundTrip(
+    "three-way-anova",
+    { sets: ["A", "B", "C"], posthoc: "tukey", posthocTerm: "B" },
+    grouped,
+  );
+  seq373RoundTrip(
+    "three-way-anova",
+    { sets: ["A", "B", "C"], posthoc: "tukey", posthocTerm: "A:B", posthocScope: "simple" },
+    grouped,
+  );
+  // Dunnett's control options come from the wizard's own control question.
+  const w3 = WIZARDS["three-way-anova"]!;
+  const controlQ = w3
+    .questions({ sets: ["A", "B", "C"], posthoc: "dunnett", posthocTerm: "A" }, grouped, undefined, seq373ThreeWayBands)
+    .find((q) => q && q.id === "control") as Question & { options: { value: string }[] };
+  ok(controlQ.options.length > 0, "three-way Dunnett offers a control");
+  seq373RoundTrip(
+    "three-way-anova",
+    { sets: ["A", "B", "C"], posthoc: "dunnett", posthocTerm: "A", control: controlQ.options[0].value },
+    grouped,
+  );
+  const mv = readTable(seq373Mv());
+  seq373RoundTrip(
+    "multifactor-anova",
+    { response: "Response", factors: ["Treatment", "Time"], posthoc: "tukey", posthocTerm: "Treatment:Time" },
+    mv,
+    "multiple",
+  );
+  seq373RoundTrip(
+    "multifactor-anova",
+    { response: "Response", factors: ["Treatment", "Time"], posthoc: "none" },
+    mv,
+    "multiple",
+  );
+});
+
+check("seq 373: XY wizards round-trip stored params to answers", () => {
+  const table = readTable(seq373Xy());
+  const table3 = readTable(seq373Xy3());
+  seq373RoundTrip("linear-regression", { ys: ["A", "B"], forceOrigin: false }, table, "xy");
+  seq373RoundTrip("linear-regression", { ys: ["A", "B"], compareSlopes: true, forceOrigin: false }, table, "xy");
+  seq373RoundTrip("linear-regression", { y: "A", forceOrigin: false, weights: "1/y2" }, table, "xy");
+  seq373RoundTrip("linear-regression", { y: "A", forceOrigin: true }, table, "xy");
+  seq373RoundTrip("compare-slopes", { ys: ["A", "B"] }, table, "xy");
+  seq373RoundTrip("compare-slopes", { ys: ["A"] }, table, "xy");
+  seq373RoundTrip("deming-regression", { y: "A", lambda: 2 }, table, "xy");
+  seq373RoundTrip("simple-logistic-regression", { y: "A" }, table, "xy");
+  seq373RoundTrip(
+    "area-under-curve",
+    { baseline: 5, ignorePeaksBelow: 10, peaksAboveBaselineOnly: true },
+    table,
+    "xy",
+  );
+  seq373RoundTrip("area-under-curve", { baseline: 0 }, table, "xy");
+  seq373RoundTrip("spline-lowess", { y: "A", method: "lowess", f: 0.5 }, table, "xy");
+  seq373RoundTrip("spline-lowess", { y: "A", method: "spline", spar: 0.8 }, table, "xy");
+  seq373RoundTrip("spline-lowess", { y: "A", method: "spline", spar: null }, table, "xy");
+  seq373RoundTrip(
+    "smooth-differentiate-integrate",
+    { ys: ["A", "B"], x: "X", operation: "integral", window: 9, order: 3, smoothResults: true, baseline: 2, startValue: 1 },
+    table,
+    "xy",
+  );
+  seq373RoundTrip(
+    "smooth-differentiate-integrate",
+    { ys: ["A"], x: "X", operation: "smooth", window: 5, order: 2, smoothResults: false },
+    table,
+    "xy",
+  );
+  seq373RoundTrip("bland-altman", { sets: ["A", "B"] }, table, "xy");
+  seq373RoundTrip("roc-curve", { truth: "A", score: "B", positive: 12 }, table, "xy");
+  seq373RoundTrip("correlation", { method: "spearman", mode: "two-datasets", datasets: ["A", "B"] }, table, "xy");
+  seq373RoundTrip("correlation", { method: "pearson", mode: "x-vs-every-y" }, table, "xy");
+  seq373RoundTrip("correlation", { method: "pearson", mode: "matrix" }, table, "xy");
+  seq373RoundTrip("survival", { curveTest: "gehan", correction: "fdr" }, table3, "xy");
+  seq373RoundTrip("survival", { curveTest: "logrank", correction: "holm" }, table, "xy");
+  seq373RoundTrip("cox", { reference: "A" }, table, "xy");
+  seq373RoundTrip("binding-saturation", { y: "A", model: "two-site-specific" }, table, "xy");
+  seq373RoundTrip("binding-saturation", { y: "A", model: "one-site-total-and-ns", y2: "B" }, table, "xy");
+  seq373RoundTrip(
+    "binding-kinetics",
+    { y: "A", model: "association-one-phase", ligandConcentration: 5, koff: 0.1 },
+    table,
+    "xy",
+  );
+  seq373RoundTrip(
+    "binding-kinetics",
+    { y: "A", model: "association-then-dissociation", hotNM: 1, time0: 10 },
+    table,
+    "xy",
+  );
+  seq373RoundTrip("binding-kinetics", { y: "A", model: "dissociation-one-phase" }, table, "xy");
+  seq373RoundTrip(
+    "nonlinear-regression",
+    { y: "A", model: "sigmoidal-4pl-logx", interpolate: true },
+    table,
+    "xy",
+  );
+});
+
+check("seq 373: Multiple Variables wizards round-trip stored params to answers", () => {
+  const mv = readTable(seq373Mv());
+  seq373RoundTrip(
+    "compare-two-groups",
+    { response: "Weight", groupBy: "Group", paired: false, gaussian: false, equalVariance: true, ratio: false, tails: "two-sided" },
+    mv,
+    "multiple",
+  );
+  seq373RoundTrip(
+    "compare-two-groups",
+    { sets: ["Age", "Height"], paired: true, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided" },
+    mv,
+    "multiple",
+  );
+  seq373RoundTrip("linear-regression", { x: "Height", y: "Weight", forceOrigin: false }, mv, "multiple");
+  const survival = readTable(seq373MvSurvival());
+  seq373RoundTrip(
+    "survival",
+    { time: "Time", status: "Status", groupBy: "Group", curveTest: "logrank", correction: "holm" },
+    survival,
+    "multiple",
+  );
+  seq373RoundTrip("multiple-regression", { dependent: "Weight", predictors: ["Age", "Height"] }, mv, "multiple");
+  const logistic = readTable(seq373MvLogistic());
+  seq373RoundTrip("multiple-logistic-regression", { dependent: "Outcome", predictors: ["Age", "Weight"] }, logistic, "multiple");
+  const poisson = readTable(seq373MvPoisson());
+  seq373RoundTrip("poisson-regression", { dependent: "Counts", predictors: ["Age"], quasi: true }, poisson, "multiple");
+  seq373RoundTrip("poisson-regression", { dependent: "Counts", predictors: ["Age"], quasi: false }, poisson, "multiple");
+  const cox = readTable(seq373MvCox());
+  seq373RoundTrip(
+    "cox-proportional-hazards",
+    { time: "Time", status: "Status", covariates: ["Age", "Sex"], ties: "efron", stratifyBy: "Sex" },
+    cox,
+    "multiple",
+  );
+  seq373RoundTrip(
+    "cox-proportional-hazards",
+    { time: "Time", status: "Status", covariates: ["Age"], ties: "breslow" },
+    cox,
+    "multiple",
+  );
+});
+
+check("seq 373: transform and table-shape wizards round-trip stored params to answers", () => {
+  const table = readTable(seq373Column());
+  const xy = readTable(seq373Xy());
+  seq373RoundTrip("transform-concentrations", { column: "A", fromUnit: "mM", toUnit: "µM" }, table);
+  seq373RoundTrip(
+    "normalize",
+    { ys: ["A"], x: "X", normalizeMethod: "percent-of-largest", asPercent: true },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip(
+    "normalize",
+    { ys: ["A"], x: "X", normalizeMethod: "zero-to-hundred", zeroDef: "constant", zeroConstant: 5, hundredDef: "largest" },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip(
+    "normalize",
+    { ys: ["A"], x: "X", normalizeMethod: "percent-of-constant", asPercent: false, constantHook: "Ref" },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip(
+    "remove-baseline",
+    { columnMathOperation: "subtract", columnMathA: "A", columnMathB: "B", x: "X" },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip(
+    "remove-baseline",
+    { ys: ["A", "B"], x: "X", baselineMethod: "mean-first-n", firstN: 3 },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip(
+    "remove-baseline",
+    { ys: ["A"], x: "X", baselineMethod: "constant", constantHook: "Blank" },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip("prune-rows", { ys: ["A"], x: "X", condition: "below", threshold: 5 }, xy, "xy");
+  seq373RoundTrip("prune-rows", { ys: ["A"], x: "X", condition: "outside", low: 0, high: 100 }, xy, "xy");
+  seq373RoundTrip(
+    "fraction-of-total",
+    { ys: ["A"], x: "X", totalBy: "row", format: "percent", ci: "wilson" },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip("row-means-totals", { ys: ["A"], x: "X", rowScope: "per-column" }, xy, "xy");
+  seq373RoundTrip("chi-square", { test: "fisher", trendOrdered: false }, readTable(seq373Chi2x2()));
+  seq373RoundTrip("chi-square", { trendOrdered: true }, readTable(seq373ChiTrend()));
+  seq373RoundTrip("mcnemar", { continuityCorrection: false }, table);
+  seq373RoundTrip("mcnemar", { continuityCorrection: true }, table);
+  seq373RoundTrip("principal-component-analysis", { scale: "covariance", components: 3 }, table);
+  seq373RoundTrip("principal-component-analysis", { scale: "correlation", components: 0 }, table);
+  seq373RoundTrip("k-means", { clusters: 4, standardise: false }, table);
+  seq373RoundTrip("k-means", { clusters: 2, standardise: true }, table);
+  seq373RoundTrip(
+    "hierarchical-clustering",
+    { clusters: 3, linkage: "ward.D2", distance: "manhattan", standardise: true },
+    table,
+  );
+  seq373RoundTrip(
+    "mixed-effects",
+    { subjectId: "replicate", randomStructure: "intercept", fixedFactors: ["Group", "Row"], interaction: true, dfMethod: "kenward-roger" },
+    readTable(seq373Grouped3()),
+  );
+  seq373RoundTrip(
+    "mixed-effects",
+    { sets: ["A", "B", "C"], subjectId: "row", randomStructure: "intercept", fixedFactors: ["Condition"], dfMethod: "kenward-roger" },
+    table,
+  );
+  seq373RoundTrip(
+    "mixed-effects",
+    {
+      sets: ["A", "B", "C"],
+      subjectId: "row",
+      randomStructure: "intercept",
+      fixedFactors: ["Treatment", "Condition"],
+      subjectFactor: { name: "Treatment", levels: ["Control", "Control", "Treated"] },
+      dfMethod: "satterthwaite",
+    },
+    table,
+  );
+  seq373RoundTrip(
+    "enzyme-inhibition",
+    { model: "mixed", y: ["A", "B"], inhibitorConcentrations: { A: 0, B: 5 } },
+    readTable(seq373Xy()),
+    "xy",
+  );
+  seq373RoundTrip(
+    "enzyme-inhibition",
+    { model: "morrison", y: ["A"], enzymeConcentration: 2, substrateConcentration: 10, kmForMorrison: 5 },
+    readTable(seq373Xy()),
+    "xy",
+  );
+  seq373RoundTrip(
+    "enzyme-inhibition",
+    { model: "morrison", y: ["A"], enzymeConcentration: 2 },
+    readTable(seq373Xy()),
+    "xy",
+  );
+  seq373RoundTrip(
+    "dose-response-special",
+    { model: "schild", ys: ["A", "B", "C"], antagonistConcentrations: { A: 0, B: 1, C: 10 }, bUnits: "nM", fixHillSlope: true },
+    readTable(seq373Xy3()),
+    "xy",
+  );
+  seq373RoundTrip(
+    "dose-response-special",
+    { model: "ec50-shift", ys: ["A", "B"], antagonistConcentrations: { A: 0, B: 2 }, bUnits: "M" },
+    readTable(seq373Xy()),
+    "xy",
+  );
+});
+
+check("seq 373: wizardForAnalysis maps types to wizards, and canEditAnalysisParams gates the entry", () => {
+  strictEqual(wizardForAnalysis("anova"), "compare-many-groups");
+  strictEqual(wizardForAnalysis("kruskal-wallis"), "compare-many-groups");
+  strictEqual(wizardForAnalysis("rm-anova"), "compare-many-groups");
+  strictEqual(wizardForAnalysis("friedman"), "compare-many-groups");
+  strictEqual(
+    wizardForAnalysis("nonlinear-regression", { y: "A", model: "sigmoidal-4pl-logx", interpolate: true }),
+    "interpolate",
+  );
+  strictEqual(wizardForAnalysis("nonlinear-regression", { y: "A", model: "line" }), null);
+  strictEqual(wizardForAnalysis("kolmogorov-smirnov"), null);
+  strictEqual(wizardForAnalysis("transpose"), null);
+  strictEqual(wizardForAnalysis("monte-carlo"), null);
+  strictEqual(wizardForAnalysis("plot-function"), null);
+  strictEqual(wizardForAnalysis("extract-rearrange"), null);
+  strictEqual(wizardForAnalysis("select-transform"), null);
+  strictEqual(wizardForAnalysis("one-sample-t"), "one-sample-t");
+  strictEqual(wizardForAnalysis(undefined), null);
+  const base: Pick<ProjectNode, "id" | "type" | "name" | "parentId" | "analysisType" | "analysisParams"> = {
+    id: "a1",
+    type: "analysis",
+    name: "A",
+    parentId: "t1",
+    analysisType: "one-sample-t",
+    analysisParams: { sets: ["A"], hypotheticalValue: 5, gaussian: true, tails: "two-sided" },
+  };
+  strictEqual(canEditAnalysisParams(base).editable, true);
+  strictEqual(canEditAnalysisParams({ ...base, frozen: true }).editable, false);
+  ok(/frozen/i.test(canEditAnalysisParams({ ...base, frozen: true }).reason ?? ""), "frozen names the reason");
+  strictEqual(canEditAnalysisParams({ ...base, orphaned: true }).editable, false);
+  ok(/orphan/i.test(canEditAnalysisParams({ ...base, orphaned: true }).reason ?? ""), "orphaned names the reason");
+  strictEqual(canEditAnalysisParams({ ...base, analysisType: "monte-carlo" }).editable, false);
+  strictEqual(canEditAnalysisParams({ ...base, analysisType: "nonlinear-regression" }).editable, false);
+  strictEqual(
+    canEditAnalysisParams({
+      ...base,
+      analysisType: "nonlinear-regression",
+      analysisParams: { y: "A", model: "line", interpolate: true },
+    }).editable,
+    true,
+  );
+  // The entry points exist: toolbar button, Analysis menu (CmdOrCtrl+T),
+  // navigator context menu, and the edit branch of the wizard host.
+  const view = readFileSync("src/views/analyses/analysis-view.tsx", "utf8");
+  ok(/Change parameters/.test(view) && /SlidersHorizontalIcon/.test(view), "toolbar lacks the Change parameters button");
+  ok(/edit-analysis-params/.test(view), "toolbar doesn't open the edit selector");
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(/Change Parameters…/.test(menu) && /CmdOrCtrl\+T/.test(menu), "Analysis menu lacks Change Parameters… (CmdOrCtrl+T)");
+  const sidebar = readFileSync("src/components/project-sidebar.tsx", "utf8");
+  ok(/Change Parameters…/.test(sidebar), "navigator context menu lacks Change Parameters…");
+  const wizard = readFileSync("src/views/analyses/analysis-wizard.tsx", "utf8");
+  ok(
+    /edit-analysis-params/.test(wizard) &&
+      /Apply/.test(wizard) &&
+      /validateAnalysisParams/.test(wizard) &&
+      /setAnalysisParams/.test(wizard),
+    "wizard host lacks the edit branch (Apply + validate + setAnalysisParams)",
+  );
+});
+
+// seq 373 follow-up: Apply renames the analysis node to match the new params.
+// Before the fix the title stayed whatever creation gave it — Dunnett→Tukey
+// left "One-way ANOVA + Dunnett (vs. vehicle)" on Tukey results. One title
+// derivation serves creation and Apply (analysisTitle): the test's subtitle
+// plus the post-hoc short label, so a fresh Dunnett ANOVA is named exactly
+// what Apply renames an edited one to. The rename rides the same undoable
+// setAnalysisParams action as the params, and only fires while the title is
+// still the derived one for the old params — a hand-renamed (or legacy) title
+// is left alone, and a type the derivation can't cover keeps its title.
+check("seq 373 follow-up: Apply renames the analysis node to match the new params", () => {
+  strictEqual(
+    analysisTitle("anova", { posthoc: "dunnett", equalSd: true, control: "Vehicle" }),
+    "One-way ANOVA + Dunnett (vs. vehicle)",
+  );
+  strictEqual(analysisTitle("anova", { posthoc: "tukey", equalSd: true }), "One-way ANOVA + Tukey");
+  strictEqual(analysisTitle("anova", { posthoc: "none", equalSd: true }), "One-way ANOVA");
+  strictEqual(analysisTitle("anova", { equalSd: true } as AnalysisParams), "One-way ANOVA");
+  strictEqual(analysisTitle("outliers", { q: 1 }), "Identify outliers");
+  strictEqual(
+    titleAfterApply(
+      "anova",
+      { posthoc: "dunnett", control: "Vehicle" },
+      "One-way ANOVA + Dunnett (vs. vehicle)",
+      { posthoc: "tukey" },
+    ),
+    "One-way ANOVA + Tukey",
+  );
+  strictEqual(
+    titleAfterApply("anova", { posthoc: "dunnett", control: "Vehicle" }, "My ANOVA", { posthoc: "tukey" }),
+    null,
+    "a hand-renamed title is left alone",
+  );
+  strictEqual(
+    titleAfterApply("anova", { posthoc: "tukey" }, "One-way ANOVA + Tukey", { posthoc: "tukey" }),
+    null,
+    "the same title is a no-op",
+  );
+  strictEqual(
+    titleAfterApply("outliers", { q: 1 }, "Outliers (ROUT, Q = 1%)", { q: 5 }),
+    null,
+    "a legacy rich name the derivation can't reproduce is left alone",
+  );
+  // Params + title in one action: one undo step restores both.
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "a1",
+      type: "analysis",
+      name: "One-way ANOVA + Dunnett (vs. vehicle)",
+      parentId: t1,
+      analysisType: "anova",
+      analysisParams: { posthoc: "dunnett", equalSd: true, control: "Vehicle" } as AnalysisParams,
+    },
+  });
+  s = reducer(s, {
+    type: "setAnalysisParams",
+    id: "a1",
+    params: { posthoc: "tukey", equalSd: true } as AnalysisParams,
+    name: "One-way ANOVA + Tukey",
+  });
+  strictEqual(s.nodes.a1.name, "One-way ANOVA + Tukey");
+  deepStrictEqual(s.nodes.a1.analysisParams, { posthoc: "tukey", equalSd: true });
+  s = reducer(s, { type: "undo" });
+  strictEqual(s.nodes.a1.name, "One-way ANOVA + Dunnett (vs. vehicle)");
+  deepStrictEqual(s.nodes.a1.analysisParams, { posthoc: "dunnett", equalSd: true, control: "Vehicle" });
+  s = reducer(s, { type: "redo" });
+  strictEqual(s.nodes.a1.name, "One-way ANOVA + Tukey");
+  // Without a name the params-only call (the MCP rerun path) leaves the title alone.
+  s = reducer(s, {
+    type: "setAnalysisParams",
+    id: "a1",
+    params: { posthoc: "bonferroni", equalSd: true } as AnalysisParams,
+  });
+  strictEqual(s.nodes.a1.name, "One-way ANOVA + Tukey");
+  deepStrictEqual(s.nodes.a1.analysisParams, { posthoc: "bonferroni", equalSd: true });
+});
+
 // Quirk 2: the "Project Updated" notice must not go through the native dialog —
 // its window lingered on macOS after dismissal, blocking clicks and quitting.
 // load() raises the in-app dialog state instead, and the shell mounts it.
@@ -4241,6 +5221,41 @@ check("a table's error format survives a save and reload; a bogus one reads as S
   const bogus: ProjectNode = { ...table, data: { ...table.data!, errorFormat: "ci" as never } };
   const bogusFile = { ...payload, nodes: { ...payload.nodes, t1: bogus } };
   strictEqual(read(serializeProjectFile(bogusFile)).project.nodes.t1.data!.errorFormat, undefined);
+});
+
+// Cell background colors (seq 325) persist in the .hlx like excluded
+// flags; a bogus color name or an out-of-bounds address is dropped on
+// load rather than kept.
+check("cell background colors survive a save and reload; bogus ones are dropped (seq 325)", () => {
+  const colored: ProjectNode = {
+    ...table,
+    data: { ...table.data!, cellBackgrounds: { "0,1": "yellow", "1,0": "gray" } },
+  };
+  const coloredFile = { ...payload, nodes: { ...payload.nodes, t1: colored } };
+  deepStrictEqual(read(serializeProjectFile(coloredFile)).project.nodes.t1.data!.cellBackgrounds, {
+    "0,1": "yellow",
+    "1,0": "gray",
+  });
+  const bogus: ProjectNode = {
+    ...table,
+    data: { ...table.data!, cellBackgrounds: { "0,1": "pink", "9,9": "yellow" } as never },
+  };
+  const bogusFile = { ...payload, nodes: { ...payload.nodes, t1: bogus } };
+  strictEqual(read(serializeProjectFile(bogusFile)).project.nodes.t1.data!.cellBackgrounds, undefined);
+});
+
+check("results cell background colors survive a save and reload (seq 325)", () => {
+  const colored: ProjectNode = { ...analysis, resultCellBackgrounds: { "Statistics|0|1": "red" } };
+  const coloredFile = { ...payload, nodes: { ...payload.nodes, a1: colored } };
+  deepStrictEqual(read(serializeProjectFile(coloredFile)).project.nodes.a1.resultCellBackgrounds, {
+    "Statistics|0|1": "red",
+  });
+  const bogus: ProjectNode = {
+    ...analysis,
+    resultCellBackgrounds: { "Statistics|0|1": "pink", "Nope": "red" } as never,
+  };
+  const bogusFile = { ...payload, nodes: { ...payload.nodes, a1: bogus } };
+  strictEqual(read(serializeProjectFile(bogusFile)).project.nodes.a1.resultCellBackgrounds, undefined);
 });
 
 // Floating notes (v2): color-coded notes pinned to a sheet — shown on screen,
@@ -5112,6 +6127,498 @@ check("summary subcolumns: per-row stats read the stored error, converting SD↔
     error: [3],
     errorMinus: [2],
   });
+});
+
+// seq 351: error-bar center/error choices — geometric mean, range, IQR,
+// geometric SD factor and geometric 95% CI. Fixtures hand-computed in
+// Python (~/workspace/.helix-v19/351-fixtures.py): the lognormal column
+// [1,2,4,8,16] has geometric mean 4 exactly; the skewed column
+// [1,2,3,10,20,30,40,50] has median 15, Q1 2.25, Q3 37.5.
+check("seq 351: geometric mean center matches the hand-computed value", () => {
+  const cols = readTable({
+    columns: ["Title", "A"],
+    rows: [["r1", "1"], ["r2", "2"], ["r3", "4"], ["r4", "8"], ["r5", "16"]],
+  }).columns;
+  // exp(mean of ln) is 4 up to a last-ulp rounding, so a tolerance, not an exact match.
+  const gm = centers(cols, "geomean");
+  ok(Math.abs(gm[0] - 4) < 1e-9, JSON.stringify(gm));
+  deepStrictEqual(centers(cols, "mean"), [6.2]);
+  deepStrictEqual(centers(cols, "median"), [4]);
+});
+
+check("seq 351: geometric SD factor and geometric 95% CI match hand-computed values", () => {
+  const v = [1, 2, 4, 8, 16];
+  // Geometric SD factor exp(SD of ln) = 2.992059427797328; the bars run
+  // geoMean × factor above and geoMean / factor below.
+  const gs = errorOf(v, "geosd", 4);
+  ok(Math.abs(gs.error! - 7.968237711189312) < 1e-9, JSON.stringify(gs));
+  ok(Math.abs(gs.errorMinus! - 2.6631281575363994) < 1e-9, JSON.stringify(gs));
+  // Geometric 95% CI exp(mean of ln ± t·SEM of ln) = [1.0258…, 15.5975…];
+  // 1e-7, not 1e-9: the bound moves ~8× any tCrit95 bisection error.
+  const gci = errorOf(v, "geoci", 4);
+  ok(Math.abs(gci.error! - 11.597502780236702) < 1e-7, JSON.stringify(gci));
+  ok(Math.abs(gci.errorMinus! - 2.9741947653137593) < 1e-7, JSON.stringify(gci));
+});
+
+check("seq 351: range and IQR errors are asymmetric around the center", () => {
+  // Range [3,1,4,1,5]: mean 2.8 → plus 2.2, minus 1.8.
+  const range = errorOf([3, 1, 4, 1, 5], "range", 2.8);
+  ok(Math.abs(range.error! - 2.2) < 1e-9, JSON.stringify(range));
+  ok(Math.abs(range.errorMinus! - 1.8) < 1e-9, JSON.stringify(range));
+  // IQR [1,2,3,10,20,30,40,50]: median 15, Q1 2.25, Q3 37.5.
+  deepStrictEqual(errorOf([1, 2, 3, 10, 20, 30, 40, 50], "iqr", 15), { error: 22.5, errorMinus: 12.75 });
+  // The symmetric kinds keep a null lower side; off means no bar at all.
+  deepStrictEqual(errorOf([1, 2, 4, 8, 16], "sd", 6.2).errorMinus, null);
+  deepStrictEqual(errorOf([1, 2, 4, 8, 16], "sem", 6.2).errorMinus, null);
+  deepStrictEqual(errorOf([1, 2, 4, 8, 16], "ci", 6.2).errorMinus, null);
+  deepStrictEqual(errorOf([1, 2, 4, 8, 16], "none", 6.2), { error: null, errorMinus: null });
+});
+
+check("seq 351: per-row stats carry the asymmetric lower side for range and IQR", () => {
+  const cols = readTable({
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      ["r1", "1", "10", "100"],
+      ["r2", "2", "20", "200"],
+      ["r3", "3", "30", "300"],
+    ],
+  }).columns;
+  // Row 1 [1,10,100]: median 10, Q1 1, Q3 100 → plus 90, minus 9.
+  // Row 2 [2,20,200]: median 20, Q1 2, Q3 200 → plus 180, minus 18.
+  // Row 3 [3,30,300]: median 30, Q1 3, Q3 300 → plus 270, minus 27.
+  deepStrictEqual(perRowStats(cols, 3, "median", "iqr"), {
+    center: [10, 20, 30],
+    error: [90, 180, 270],
+    errorMinus: [9, 18, 27],
+  });
+  deepStrictEqual(perRowStats(cols, 3, "mean", "range"), {
+    center: [37, 74, 111],
+    error: [63, 126, 189],
+    errorMinus: [36, 72, 108],
+  });
+});
+
+check("seq 351: mean-error draws geometric-mean centers with asymmetric bars per dataset", () => {
+  const dataset = readTable({
+    columns: ["Title", "Lognormal", "Skewed"],
+    rows: [
+      [null, "1", "1"],
+      [null, "2", "2"],
+      [null, "4", "3"],
+      [null, "8", "10"],
+      [null, "16", "20"],
+    ],
+  });
+  const options = { ...newGraphOptions("mean-error"), center: "geomean" as const, error: "geosd" as const };
+  const fig = GRAPHS["mean-error"].build(dataset.numeric, options, paintOf(options, 2));
+  const traces = fig.data as { y: number[]; error_y?: { array: number[]; arrayminus?: number[] } }[];
+  const bars = traces.filter((t) => t.error_y);
+  strictEqual(bars.length, 2);
+  ok(Math.abs(bars[0].y[0] - 4) < 1e-9, JSON.stringify(bars[0]));
+  ok(Math.abs(bars[1].y[0] - 4.128917917333368) < 1e-9, JSON.stringify(bars[1]));
+  ok(Math.abs(bars[0].error_y!.array[0] - 7.968237711189312) < 1e-9, JSON.stringify(bars[0].error_y));
+  ok(Math.abs(bars[0].error_y!.arrayminus![0] - 2.6631281575363994) < 1e-9, JSON.stringify(bars[0].error_y));
+  ok(Math.abs(bars[1].error_y!.array[0] - 9.793871042985396) < 1e-9, JSON.stringify(bars[1].error_y));
+  ok(Math.abs(bars[1].error_y!.arrayminus![0] - 2.9044532488919526) < 1e-9, JSON.stringify(bars[1].error_y));
+  // Median + IQR on the same two columns: Lognormal [1,2,4,8,16] has median 4,
+  // Q1 1.5, Q3 12; Skewed [1,2,3,10,20] has median 3, Q1 1.5, Q3 15.
+  const iqrOptions = { ...newGraphOptions("mean-error"), center: "median" as const, error: "iqr" as const };
+  const iqrFig = GRAPHS["mean-error"].build(dataset.numeric, iqrOptions, paintOf(iqrOptions, 2));
+  const iqrBars = (iqrFig.data as { y: number[]; error_y?: { array: number[]; arrayminus?: number[] } }[]).filter(
+    (t) => t.error_y,
+  );
+  strictEqual(iqrBars.length, 2);
+  deepStrictEqual(iqrBars[0].y, [4]);
+  deepStrictEqual(iqrBars[0].error_y?.array, [8]);
+  deepStrictEqual(iqrBars[0].error_y?.arrayminus, [2.5]);
+  deepStrictEqual(iqrBars[1].y, [3]);
+  deepStrictEqual(iqrBars[1].error_y?.array, [12]);
+  deepStrictEqual(iqrBars[1].error_y?.arrayminus, [1.5]);
+});
+
+check("seq 351: XY replicates as geometric means with range bars per X", () => {
+  const cols = readTable({
+    columns: ["Title", "X", "Y:Y1", "Y:Y2"],
+    rows: [
+      ["r1", "1", "1", "2"],
+      ["r2", "2", "4", "8"],
+    ],
+  }).columns;
+  const options = {
+    ...newGraphOptions("xy-scatter"),
+    center: "geomean" as const,
+    error: "range" as const,
+    xyReplicates: "mean" as const,
+  };
+  const drawn = xyDrawn(cols[0]!, { name: "Y", columns: [cols[1]!, cols[2]!] }, options);
+  deepStrictEqual(drawn.x, [1, 2]);
+  ok(Math.abs(drawn.y[0] - Math.SQRT2) < 1e-9, JSON.stringify(drawn));
+  ok(Math.abs(drawn.y[1] - Math.sqrt(32)) < 1e-9, JSON.stringify(drawn));
+  ok(Math.abs(drawn.errors![0] - (2 - Math.SQRT2)) < 1e-9, JSON.stringify(drawn));
+  ok(Math.abs(drawn.errors![1] - (8 - Math.sqrt(32))) < 1e-9, JSON.stringify(drawn));
+  ok(Math.abs(drawn.errorMinus![0] - (Math.SQRT2 - 1)) < 1e-9, JSON.stringify(drawn));
+  ok(Math.abs(drawn.errorMinus![1] - (Math.sqrt(32) - 4)) < 1e-9, JSON.stringify(drawn));
+});
+
+check("seq 351: geometric kinds blank without a plotted value on non-positive data", () => {
+  const cols = readTable({
+    columns: ["Title", "A"],
+    rows: [["r1", "-1"], ["r2", "2"], ["r3", "3"]],
+  }).columns;
+  deepStrictEqual(centers(cols, "geomean"), [NaN]);
+  deepStrictEqual(errorOf([-1, 2, 3], "geosd", 4 / 3), { error: null, errorMinus: null });
+  deepStrictEqual(errorOf([-1, 2, 3], "geoci", 4 / 3), { error: null, errorMinus: null });
+  // Zero is non-positive too.
+  deepStrictEqual(errorOf([0, 2, 3], "geosd", 5 / 3), { error: null, errorMinus: null });
+  // The graph draws no point and no bar for the undefined center…
+  const geoOptions = { ...newGraphOptions("mean-error"), center: "geomean" as const, error: "geosd" as const };
+  const geoFig = GRAPHS["mean-error"].build(cols, geoOptions, paintOf(geoOptions, 1));
+  const geoBars = geoFig.data as { y: number[]; error_y?: { array: number[] } }[];
+  const geoBar = geoBars.find((t) => t.error_y)!;
+  ok(Number.isNaN(geoBar.y[0]), JSON.stringify(geoBar));
+  ok(Number.isNaN(geoBar.error_y!.array[0]), JSON.stringify(geoBar));
+  // …and with a mean center the point stays but its geometric error bar blanks.
+  const meanOptions = { ...newGraphOptions("mean-error"), center: "mean" as const, error: "geosd" as const };
+  const meanFig = GRAPHS["mean-error"].build(cols, meanOptions, paintOf(meanOptions, 1));
+  const meanBars = meanFig.data as { y: number[]; error_y?: { array: number[] } }[];
+  const meanBar = meanBars.find((t) => t.error_y)!;
+  deepStrictEqual(meanBar.y, [4 / 3]);
+  ok(Number.isNaN(meanBar.error_y!.array[0]), JSON.stringify(meanBar));
+});
+
+check("seq 351: a summary table cannot derive range/IQR/geometric errors from stored Mean/SD/N", () => {
+  const sets = readTable(summaryTable()).sets;
+  deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sd-n", "range"), { error: null, errorMinus: null });
+  deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sd-n", "iqr"), { error: null, errorMinus: null });
+  deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sd-n", "geosd"), { error: null, errorMinus: null });
+  deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sd-n", "geoci"), { error: null, errorMinus: null });
+  // The stored kinds still convert exactly.
+  deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sd-n", "sd"), { error: 2, errorMinus: null });
+});
+
+// seq 375 half A: per-series center/error overrides — model + paint threading.
+// A [1,2,4,8,16]: mean 6.2, median 4, geomean 4. B [1,2,3,10,20]: mean 7.2, median 3.
+check("seq 375: a per-series center override changes only that series", () => {
+  const cols = readTable({
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "1", "1"],
+      ["r2", "2", "2"],
+      ["r3", "4", "3"],
+      ["r4", "8", "10"],
+      ["r5", "16", "20"],
+    ],
+  }).columns;
+  deepStrictEqual(centers(cols, "mean"), [6.2, 7.2]);
+  // Geomean is exp(mean of ln) — 4 up to a last-ulp rounding, so a tolerance.
+  const geo = centers(cols, "mean", { A: { center: "geomean" } });
+  ok(Math.abs(geo[0]! - 4) < 1e-9, JSON.stringify(geo));
+  deepStrictEqual(geo[1], 7.2);
+  deepStrictEqual(centers(cols, "mean", { B: { center: "median" } }), [6.2, 3]);
+  // An unknown series key changes nothing; an empty styles record is the default.
+  deepStrictEqual(centers(cols, "mean", { C: { center: "median" } }), [6.2, 7.2]);
+  deepStrictEqual(centers(cols, "mean", {}), [6.2, 7.2]);
+});
+
+check("seq 375: a per-series error override changes only that series", () => {
+  const cols = readTable({
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "1", "1"],
+      ["r2", "2", "2"],
+      ["r3", "4", "3"],
+      ["r4", "8", "10"],
+      ["r5", "16", "20"],
+    ],
+  }).columns;
+  const center = centers(cols, "mean");
+  // Graph error "sd"; B overridden to "none" blanks only B's bar.
+  const errs = errors(cols, "sd", center, { B: { error: "none" } })!;
+  ok(Math.abs(errs.error[0]! - errorOf([1, 2, 4, 8, 16], "sd", 6.2).error!) < 1e-9, JSON.stringify(errs));
+  ok(Number.isNaN(errs.error[1]!), JSON.stringify(errs));
+  strictEqual(errs.errorMinus, null);
+  // Graph error "sd"; A overridden to "range" gets asymmetric sides only for A
+  // (max 16 − mean 6.2 above, mean 6.2 − min 1 below); B stays symmetric.
+  const ranged = errors(cols, "sd", center, { A: { error: "range" } })!;
+  ok(Math.abs(ranged.error[0]! - 9.8) < 1e-9, JSON.stringify(ranged));
+  ok(Math.abs(ranged.error[1]! - errorOf([1, 2, 3, 10, 20], "sd", 7.2).error!) < 1e-9, JSON.stringify(ranged));
+  deepStrictEqual(ranged.errorMinus, [5.2, NaN]);
+});
+
+check("seq 375: a file keeps valid per-series center/error and drops invalid ones", () => {
+  const file = JSON.parse(serializeProjectFile(payload));
+  file.project.nodes.g1.graphOptions.series = {
+    Y1: { center: "median", error: "range" },
+    Y2: { Center: "Geomean", Error: "Geosd" },
+    Y3: { center: "bogus", error: "bogus" },
+  };
+  const { project } = read(JSON.stringify(file));
+  const o = project.nodes.g1.graphOptions!;
+  deepStrictEqual(o.series, {
+    Y1: { center: "median", error: "range" },
+    Y2: { center: "geomean", error: "geosd" },
+  });
+});
+
+check("seq 375: mean-error draws a per-series median while the rest take the graph mean", () => {
+  const dataset = readTable({
+    columns: ["Title", "Lognormal", "Skewed"],
+    rows: [
+      [null, "1", "1"],
+      [null, "2", "2"],
+      [null, "4", "3"],
+      [null, "8", "10"],
+      [null, "16", "20"],
+    ],
+  });
+  const options = {
+    ...newGraphOptions("mean-error"),
+    center: "mean" as const,
+    error: "sd" as const,
+    series: { Lognormal: { center: "median" as const } },
+  };
+  const fig = GRAPHS["mean-error"].build(dataset.numeric, options, paintOf(options, 2));
+  const traces = fig.data as { y: number[]; error_y?: { array: number[] } }[];
+  const bars = traces.filter((t) => t.error_y);
+  strictEqual(bars.length, 2);
+  deepStrictEqual(bars[0].y, [4]);
+  deepStrictEqual(bars[1].y, [7.2]);
+});
+
+check("seq 375: geometric kinds blank only the overridden series on non-positive data", () => {
+  const cols = readTable({
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "1", "1"],
+      ["r2", "2", "2"],
+      ["r3", "-4", "4"],
+    ],
+  }).columns;
+  const c = centers(cols, "mean", { A: { center: "geomean" } });
+  ok(Number.isNaN(c[0]), JSON.stringify(c));
+  deepStrictEqual(c[1], 7 / 3);
+});
+
+check("seq 375: XY replicates take the dataset's center/error override", () => {
+  const cols = readTable({
+    columns: ["Title", "X", "Y:Y1", "Y:Y2"],
+    rows: [
+      ["r1", "1", "1", "2"],
+      ["r2", "2", "4", "8"],
+    ],
+  }).columns;
+  const options = {
+    ...newGraphOptions("xy-scatter"),
+    center: "geomean" as const,
+    error: "range" as const,
+    xyReplicates: "mean" as const,
+    series: { Y: { center: "median" as const, error: "sd" as const } },
+  };
+  const drawn = xyDrawn(cols[0]!, { name: "Y", columns: [cols[1]!, cols[2]!] }, options);
+  deepStrictEqual(drawn.x, [1, 2]);
+  deepStrictEqual(drawn.y, [1.5, 6]);
+  ok(Math.abs(drawn.errors![0] - Math.sqrt(0.5)) < 1e-9, JSON.stringify(drawn));
+  ok(Math.abs(drawn.errors![1] - Math.sqrt(8)) < 1e-9, JSON.stringify(drawn));
+  strictEqual(drawn.errorMinus, undefined);
+});
+
+check("seq 375: grouped bars take a per-group center override", () => {
+  const columns = readTable({
+    columns: ["Title", "A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3"],
+    rows: [
+      [null, "1", "2", "10", "1", "2", "3"],
+      [null, "3", "4", "5", "10", "20", "30"],
+    ],
+  }).columns;
+  // Group A row 1 [1,2,10]: mean 13/3, median 2. Group B is unchanged either way.
+  const plain = GRAPHS["grouped-bars"].build(
+    columns,
+    newGraphOptions("grouped-bars"),
+    paintOf(newGraphOptions("grouped-bars"), 2),
+  ).data as { name: string; y: (number | null)[] }[];
+  deepStrictEqual(plain.map((t) => t.name), ["A", "B"]);
+  deepStrictEqual(plain[0].y, [13 / 3, 4]);
+  deepStrictEqual(plain[1].y, [2, 20]);
+  const options = { ...newGraphOptions("grouped-bars"), series: { A: { center: "median" as const } } };
+  const fig = GRAPHS["grouped-bars"].build(columns, options, paintOf(options, 2));
+  const traces = fig.data as { name: string; y: (number | null)[] }[];
+  deepStrictEqual(traces[0].y, [2, 4]);
+  deepStrictEqual(traces[1].y, [2, 20]);
+});
+
+// seq 375 half B: Series UI + MCP acceptance for per-series center/error.
+check("seq 375: MCP accepts per-series center/error in the series object", () => {
+  const nodes: Record<string, ProjectNode> = {
+    table_1: { id: "table_1", type: "table", name: "T", parentId: null, tableType: "column",
+      data: {
+        columns: ["Title", "A", "B"],
+        rows: [
+          ["r1", "1", "1"],
+          ["r2", "2", "2"],
+        ],
+      },
+    },
+    graph_1: {
+      id: "graph_1",
+      type: "graph",
+      name: "G",
+      parentId: "table_1",
+      graphType: "mean-error",
+      graphOptions: newGraphOptions("mean-error"),
+    },
+  };
+  const state = { nodes, rootOrder: ["table_1"], childOrder: { table_1: ["graph_1"] }, activeNodeId: "table_1" };
+  const updated: { id: string; options: GraphOptions }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    createGraph: () => "graph_2",
+    updateGraph: (id, options) => {
+      updated.push({ id, options });
+    },
+  };
+  const job = (jobId: string, options: unknown) => ({
+    job_id: jobId,
+    project_id: "project-1",
+    action: "update-graph",
+    args: { graph_id: "graph_1", options },
+    status: "queued" as const,
+  });
+  executeUpdateGraph(
+    job("job-375b-mcp", { center: "mean", error: "sd", series: { A: { center: "median" }, B: { error: "none" } } }),
+    deps,
+  );
+  strictEqual(updated[0]?.id, "graph_1");
+  deepStrictEqual(updated[0]?.options.series, { A: { center: "median" }, B: { error: "none" } });
+  // The graph-level choices ride along untouched.
+  strictEqual(updated[0]?.options.center, "mean");
+  strictEqual(updated[0]?.options.error, "sd");
+});
+
+check("seq 375: MCP rejects invalid per-series center/error", () => {
+  const nodes: Record<string, ProjectNode> = {
+    table_1: { id: "table_1", type: "table", name: "T", parentId: null, tableType: "column",
+      data: {
+        columns: ["Title", "A", "B"],
+        rows: [
+          ["r1", "1", "1"],
+          ["r2", "2", "2"],
+        ],
+      },
+    },
+    graph_1: {
+      id: "graph_1",
+      type: "graph",
+      name: "G",
+      parentId: "table_1",
+      graphType: "mean-error",
+      graphOptions: newGraphOptions("mean-error"),
+    },
+  };
+  const state = { nodes, rootOrder: ["table_1"], childOrder: { table_1: ["graph_1"] }, activeNodeId: "table_1" };
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    createGraph: () => "graph_2",
+    updateGraph: () => {},
+  };
+  const job = (jobId: string, options: unknown) => ({
+    job_id: jobId,
+    project_id: "project-1",
+    action: "update-graph",
+    args: { graph_id: "graph_1", options },
+    status: "queued" as const,
+  });
+  throws(() => executeUpdateGraph(job("job-375b-bad-center", { series: { A: { center: "bogus" } } }), deps), /must be one of: mean, median, geomean/);
+  throws(() => executeUpdateGraph(job("job-375b-bad-error", { series: { A: { error: "bogus" } } }), deps), /must be one of: none, sd, sem, ci, range, iqr, geosd, geoci/);
+  // An unknown series key still fails as one, not as a bad value.
+  throws(() => executeUpdateGraph(job("job-375b-bad-key", { series: { A: { size: 5 } } }), deps), /unknown series style/);
+});
+
+check("seq 375: dropping a series center/error via MCP falls back to the graph choice", () => {
+  const nodes: Record<string, ProjectNode> = {
+    table_1: { id: "table_1", type: "table", name: "T", parentId: null, tableType: "column",
+      data: {
+        columns: ["Title", "A", "B"],
+        rows: [
+          ["r1", "1", "1"],
+          ["r2", "2", "2"],
+        ],
+      },
+    },
+    graph_1: {
+      id: "graph_1",
+      type: "graph",
+      name: "G",
+      parentId: "table_1",
+      graphType: "mean-error",
+      graphOptions: newGraphOptions("mean-error"),
+    },
+  };
+  const state = { nodes, rootOrder: ["table_1"], childOrder: { table_1: ["graph_1"] }, activeNodeId: "table_1" };
+  const updated: { id: string; options: GraphOptions }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    createGraph: () => "graph_2",
+    updateGraph: (id, options) => {
+      updated.push({ id, options });
+    },
+  };
+  const job = (jobId: string, options: unknown) => ({
+    job_id: jobId,
+    project_id: "project-1",
+    action: "update-graph",
+    args: { graph_id: "graph_1", options },
+    status: "queued" as const,
+  });
+  executeUpdateGraph(job("job-375b-set", { series: { A: { center: "median", error: "range" } } }), deps);
+  deepStrictEqual(updated[0]?.options.series, { A: { center: "median", error: "range" } });
+  // The series object replaces wholesale: a later call without the overrides
+  // leaves A with no center/error, so the paint path falls back to the graph's.
+  executeUpdateGraph(job("job-375b-clear", { series: { A: { color: "#E69F00" } } }), deps);
+  deepStrictEqual(updated[1]?.options.series, { A: { color: "#E69F00" } });
+  const cols = readTable({
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "1", "1"],
+      ["r2", "2", "2"],
+      ["r3", "4", "3"],
+      ["r4", "8", "10"],
+      ["r5", "16", "20"],
+    ],
+  }).columns;
+  deepStrictEqual(centers(cols, "mean", updated[1]?.options.series), [6.2, 7.2]);
+});
+
+check("seq 375: a series record with center/error and other styles survives a .hlx round-trip", () => {
+  const file = JSON.parse(serializeProjectFile(payload));
+  file.project.nodes.g1.graphOptions.series = {
+    Y1: { color: "#E69F00", shape: "circle", center: "median", error: "range" },
+    Y2: { color: "#56B4E9", dash: "dash", center: "geomean" },
+  };
+  const { project } = read(JSON.stringify(file));
+  const o = project.nodes.g1.graphOptions!;
+  deepStrictEqual(o.series, {
+    Y1: { color: "#E69F00", shape: "circle", center: "median", error: "range" },
+    Y2: { color: "#56B4E9", dash: "dash", center: "geomean" },
+  });
+});
+
+check("seq 375: the Series section offers center/error where the graph summarizes", () => {
+  ok(GRAPHS["mean-error"].summarizes?.(newGraphOptions("mean-error")) === true);
+  ok(GRAPHS["individual"].summarizes?.(newGraphOptions("individual")) === true);
+  ok(GRAPHS["before-after"].summarizes?.(newGraphOptions("before-after")) === true);
+  ok(GRAPHS["grouped-bars"].summarizes?.(newGraphOptions("grouped-bars")) === true);
+  ok(GRAPHS["grouped-lines"].summarizes?.(newGraphOptions("grouped-lines")) === true);
+  // Stacked bars center but never draw error bars; a pie summarizes nothing.
+  ok(GRAPHS["grouped-stacked"].summarizes === undefined);
+  ok(GRAPHS["pie"].summarizes === undefined);
+  // XY scatter summarizes only when replicates are shown as their center.
+  const xyMean = { ...newGraphOptions("xy-scatter"), xyReplicates: "mean" as const };
+  const xyEach = { ...newGraphOptions("xy-scatter"), xyReplicates: "each" as const };
+  ok(GRAPHS["xy-scatter"].summarizes?.(xyMean) === true);
+  ok(GRAPHS["xy-scatter"].summarizes?.(xyEach) === false);
+  // Bars and areas always stand for one value per X — replicates as their center.
+  ok(GRAPHS["xy-bar"].summarizes?.(newGraphOptions("xy-bar")) === true);
+  ok(GRAPHS["xy-area"].summarizes?.(newGraphOptions("xy-area")) === true);
 });
 
 check("summary subcolumns: grouped bars draw the mean with the stored error (SEM by default)", () => {
@@ -6650,6 +8157,150 @@ check("seq 220: a number format survives a .hlx save/load round-trip; a broken o
   deepStrictEqual(reread!.xNumberFormat, { format: "decimal", decimals: 1 });
 });
 
+// seq 333: per-column decimal places (display format, Prism 11). On the
+// pre-fix code nothing here exists (no `decimals` on TableData, no
+// decimal-format helpers, no separator preference), so this check fails
+// there. Display-only: the grid rounds what it shows, the stored values
+// keep full precision, and the focused cell shows them.
+check("seq 333: decimal places round the grid display, keep full precision everywhere else", async () => {
+  // The formatter: rounds to the column's places, swaps in the separator;
+  // text and blanks pass through untouched.
+  strictEqual(formatDecimalCell("1.23456", 2, "."), "1.23");
+  strictEqual(formatDecimalCell("1.23556", 2, "."), "1.24");
+  strictEqual(formatDecimalCell("1.23456", 0, "."), "1");
+  strictEqual(formatDecimalCell("2.4", 0, "."), "2");
+  strictEqual(formatDecimalCell("1e3", 2, "."), "1000.00");
+  strictEqual(formatDecimalCell("-0.001", 2, "."), "-0.00");
+  strictEqual(formatDecimalCell("1.23456", undefined, "."), "1.23456"); // no setting: full digits
+  strictEqual(formatDecimalCell("1.23456", 2, ","), "1,23");
+  strictEqual(formatDecimalCell("1.23456", undefined, ","), "1,23456");
+  strictEqual(formatDecimalCell("hello", 2, "."), "hello");
+  strictEqual(formatDecimalCell("1.234.56", 2, "."), "1.234.56");
+  strictEqual(formatDecimalCell(null, 2, "."), "");
+  strictEqual(clampDecimalPlaces(99), 15);
+  strictEqual(clampDecimalPlaces(-3), 0);
+  strictEqual(clampDecimalPlaces(2.5), 2);
+  strictEqual(clampDecimalPlaces(NaN), 0);
+  // The focused cell shows the full stored digits, whatever the setting.
+  strictEqual(displayCellValue("1.23456", 2, ".", false), "1.23");
+  strictEqual(displayCellValue("1.23456", 2, ".", true), "1.23456");
+  strictEqual(displayCellValue("1.23456", 2, ",", true), "1.23456");
+
+  const t: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "1.23456", "2.5"],
+      ["r2", "3.14159", "4"],
+    ],
+  };
+  // The setting lives on the column, keyed by name; setting it never mutates.
+  const two = setDecimalPlaces(t, "A", 2);
+  deepStrictEqual(two.decimals, { A: 2 });
+  strictEqual(t.decimals, undefined);
+  deepStrictEqual(setDecimalPlaces(two, "A", undefined).decimals, undefined);
+  deepStrictEqual(setDecimalPlaces(t, "A", 99).decimals, { A: 15 });
+  deepStrictEqual(setDecimalPlaces(t, "A", -3).decimals, { A: 0 });
+  // Not offered on contingency or survival-Y tables.
+  strictEqual(decimalsSupported("column"), true);
+  strictEqual(decimalsSupported("xy"), true);
+  strictEqual(decimalsSupported("grouped"), true);
+  strictEqual(decimalsSupported("multiple"), true);
+  strictEqual(decimalsSupported("contingency"), false);
+  strictEqual(decimalsSupported("survival"), false);
+  // Entry parsing: with a comma separator, "1,5" typed or pasted stores as
+  // 1.5; with a period separator it stores as typed (the menu's conversion
+  // offers to fix it, as before). Text with a comma is never touched.
+  strictEqual(normalizeDecimalInput("1,5", ","), "1.5");
+  strictEqual(normalizeDecimalInput("-2,75", ","), "-2.75");
+  strictEqual(normalizeDecimalInput("1,5e3", ","), "1.5e3");
+  strictEqual(normalizeDecimalInput("1,5", "."), "1,5");
+  strictEqual(normalizeDecimalInput("hello, world", ","), "hello, world");
+  strictEqual(writeBlock(t, 0, 1, [["1,5"]], "column", ",").rows[0]?.[1], "1.5");
+  strictEqual(writeBlock(t, 0, 1, [["1,5"]], "column", ".").rows[0]?.[1], "1,5");
+  strictEqual(writeBlock(t, 0, 1, [["1,5"]], "column").rows[0]?.[1], "1,5"); // default: period
+  // Copy and export carry full precision — the setting never rounds a value
+  // — and render the separator.
+  const withDec = setDecimalPlaces(t, "A", 2);
+  strictEqual(toTSV(withDec, { r0: 0, r1: 1, c0: 0, c1: 2 }), "r1\t1.23456\t2.5\nr2\t3.14159\t4");
+  strictEqual(toTSV(withDec, { r0: 0, r1: 1, c0: 0, c1: 2 }, ","), "r1\t1,23456\t2,5\nr2\t3,14159\t4");
+  strictEqual(tableToCsv(withDec), "Title,A,B\nr1,1.23456,2.5\nr2,3.14159,4");
+  strictEqual(tableToCsv(withDec, ","), "Title,A,B\nr1,\"1,23456\",\"2,5\"\nr2,\"3,14159\",4");
+  strictEqual(tableToTxt(withDec, ","), "Title\tA\tB\nr1\t1,23456\t2,5\nr2\t3,14159\t4");
+  deepStrictEqual(tableTextRows(withDec, ","), [
+    ["r1", "1,23456", "2,5"],
+    ["r2", "3,14159", "4"],
+  ]);
+  const xml = new TextDecoder().decode(tableToXml(withDec, "Doses", "column"));
+  ok(xml.includes("1.23456"), "Prism XML must keep the stored value");
+  ok(!xml.includes("1,23456"), "Prism XML is a machine format — it keeps the period");
+  // The setting follows its column through a rename, and goes with a deleted one.
+  deepStrictEqual(renameColumn(withDec, 1, "Dose").decimals, { Dose: 2 });
+  deepStrictEqual(deleteColumns(withDec, 2, 1).decimals, { A: 2 });
+  strictEqual(deleteColumns(withDec, 1, 1).decimals, undefined);
+  // The setting survives a .hlx save/load round-trip; a broken one reads as none.
+  const decTable: ProjectNode = {
+    id: "t9",
+    type: "table",
+    name: "Dec",
+    parentId: null,
+    tableType: "column",
+    data: withDec,
+  };
+  const decPayload: ProjectFilePayload = {
+    nodes: { t9: decTable },
+    rootOrder: ["t9"],
+    childOrder: {},
+    activeNodeId: "t9",
+  };
+  const back = read(serializeProjectFile(decPayload));
+  deepStrictEqual((back.project.nodes.t9 as ProjectNode).data?.decimals, { A: 2 });
+  strictEqual(back.updated, false);
+  const broken = JSON.parse(serializeProjectFile(decPayload)) as { project: ProjectFilePayload };
+  (broken.project.nodes.t9 as ProjectNode).data!.decimals = { A: 2, B: 99, Nope: 1, Title: 1 };
+  deepStrictEqual(
+    (read(JSON.stringify(broken)).project.nodes.t9 as ProjectNode).data?.decimals,
+    { A: 2 },
+  );
+  // The separator preference: period by default, comma when saved, period
+  // again for anything unusable — never throws without localStorage.
+  strictEqual(loadDecimalSeparator(), ".");
+  const store = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+  };
+  try {
+    saveDecimalSeparator(",");
+    strictEqual(loadDecimalSeparator(), ",");
+    store.set(DECIMAL_SEPARATOR_KEY, "semicolon");
+    strictEqual(loadDecimalSeparator(), ".");
+    store.set(DECIMAL_SEPARATOR_KEY, "");
+    strictEqual(loadDecimalSeparator(), ".");
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+  // The UI wiring: the grid formats its cells (focused cell full digits),
+  // the menu offers the control off contingency/survival tables, and
+  // Preferences holds the separator.
+  const gridSrc = readFileSync("src/views/tables/grid.tsx", "utf8");
+  ok(/decimals=\{data\.decimals\}/.test(gridSrc), "grid doesn't pass the decimal settings to its cells");
+  ok(/active=\{active\}/.test(gridSrc), "grid doesn't tell its cells which one is focused");
+  ok(/displayCellValue\(/.test(gridSrc), "grid doesn't format cells by decimal places");
+  const menuSrc = readFileSync("src/views/tables/grid-menu.ts", "utf8");
+  ok(
+    /Decimal Places/.test(menuSrc) && /decimalsSupported\(type\)/.test(menuSrc),
+    "grid menu offers no decimal-places control, or offers it on contingency/survival tables",
+  );
+  const prefsSrc = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(
+    /Decimal separator/.test(prefsSrc) && /decimalSeparator/.test(prefsSrc),
+    "Preferences has no decimal-separator control",
+  );
+  // The type itself: a separator is only ever "." or ",".
+  const sep: DecimalSeparator = ",";
+  strictEqual(sep, ",");
+});
+
 check("seq 220: MCP update-graph accepts a number format and rejects a bad one", () => {
   const nodes: Record<string, ProjectNode> = {
     table_1: {
@@ -7078,6 +8729,48 @@ check("clearing an excluded cell drops its exclusion, so no phantom * and no aut
   // …while overwriting an excluded cell with a value keeps it excluded.
   const kept = writeBlock(t, 0, 1, [["7"]], "xy");
   deepStrictEqual(kept.excluded, ["0,1"]);
+});
+
+// Cell background colors (seq 325) are Prism's paint-bucket: a color is
+// presentation only — the value stays, an empty cell or a row title can
+// be painted (a cell flagged to be filled in), and painting the same
+// color again is a no-op that returns the input unchanged.
+check("cell background colors paint one cell or a range, clear, and never change a value (seq 325)", () => {
+  const t = treatments(["Y1", "Y2"]); // 3 rows: [null, "1", "2"], …
+  const painted = setCellBackground(t, { r0: 0, r1: 0, c0: 1, c1: 1 }, "yellow");
+  deepStrictEqual(painted.cellBackgrounds, { "0,1": "yellow" });
+  strictEqual(painted.rows[0][1], "1");
+  strictEqual(setCellBackground(painted, { r0: 0, r1: 0, c0: 1, c1: 1 }, "yellow"), painted);
+  // A range paints every cell in it, row titles included.
+  const ranged = setCellBackground(painted, { r0: 0, r1: 1, c0: 0, c1: 2 }, "red");
+  deepStrictEqual(ranged.cellBackgrounds, {
+    "0,0": "red",
+    "0,1": "red",
+    "0,2": "red",
+    "1,0": "red",
+    "1,1": "red",
+    "1,2": "red",
+  });
+  // Clearing one cell leaves the rest; clearing the last color drops the field.
+  const cleared = setCellBackground(ranged, { r0: 0, r1: 0, c0: 1, c1: 1 }, null);
+  deepStrictEqual(cleared.cellBackgrounds, { "0,0": "red", "0,2": "red", "1,0": "red", "1,1": "red", "1,2": "red" });
+  const allCleared = setCellBackground(cleared, { r0: 0, r1: 1, c0: 0, c1: 2 }, null);
+  strictEqual(allCleared.cellBackgrounds, undefined);
+  // An empty cell keeps its color when cleared of its value (unlike an
+  // exclusion, which a cleared value drops).
+  const flagged = setCellBackground(t, { r0: 0, r1: 0, c0: 0, c1: 0 }, "gray");
+  strictEqual(writeBlock(flagged, 0, 0, [[null]], "column").cellBackgrounds?.["0,0"], "gray");
+});
+
+// Like exclusions, colors follow their cells through row/column edits —
+// and go with a cell when its row or column is deleted.
+check("cell background colors follow their cells through insert/delete rows and columns (seq 325)", () => {
+  const t = setCellBackground(treatments(["Y1", "Y2"]), { r0: 1, r1: 1, c0: 2, c1: 2 }, "blue");
+  deepStrictEqual(insertRows(t, 0, 1).cellBackgrounds, { "2,2": "blue" });
+  deepStrictEqual(deleteRows(t, 0, 1).cellBackgrounds, { "0,2": "blue" });
+  strictEqual(deleteRows(t, 1, 1).cellBackgrounds, undefined);
+  deepStrictEqual(insertColumns(t, 1, 1, "column").cellBackgrounds, { "1,3": "blue" });
+  strictEqual(deleteColumns(t, 2, 1).cellBackgrounds, undefined);
 });
 
 check("Create Series fills a column with an arithmetic series, formatted without float noise (seq 169)", () => {
@@ -9741,6 +11434,116 @@ check("effect sizes (seq 161): partial eta squared, Glass's delta and the CIs", 
   close(stat(chi3, "Cramér's V 95% CI upper"), 0.477728, 1e-4, "Cramér's V 95% CI upper");
 });
 
+// Seq 161 remainder (b): pins for the two-way / three-way / RM-ANOVA
+// partial eta-squared 95% CIs. The CIs are computed in R by `etaCI`
+// (noncentral-F inversion, lambda / (lambda + N)); the expected values
+// below were computed independently in Python/scipy (ncf inversion mirroring
+// fci/etaCI — NOT the app's code path; script
+// ~/workspace/.helix-v19/eta-ci-scipy.py). Agreement is ~1e-9 on every bound.
+// Zero lower bounds are the non-significant effects: the noncentrality CI
+// starts at 0 when even lambda = 0 leaves the F CDF on the wrong side.
+check("effect-size CIs are pinned for two-way / three-way / RM-ANOVA (seq 161)", async () => {
+  const close = (got: number | null | undefined, want: number, tol: number, label: string) => {
+    if (got == null || Math.abs(got - want) > tol) throw new Error(`${label}: got ${got}, expected ${want}`);
+  };
+  const row = (
+    out: { effectSizes?: { effect: string; partialEta2: number | null; partialEta2Lo: number | null; partialEta2Hi: number | null }[] },
+    effect: string,
+  ) => {
+    const r = out.effectSizes?.find((e) => e.effect === effect);
+    if (!r) throw new Error(`expected an effect-size row for ${effect}`);
+    return r;
+  };
+  // Ordinary two-way ANOVA, replicated 2x2 design, N = 16, DFd = 8.
+  const twoTable: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [
+      ["R1", "12.1", "13.2", "14.3", "15.1"],
+      ["R2", "11.4", "12.8", "15.1", "16.2"],
+      ["R3", "13.2", "12.9", "13.8", "14.9"],
+      ["R4", "12.8", "13.5", "16.2", "15.8"],
+    ],
+    groups: 2,
+    replicates: 2,
+  };
+  const twoParams = { design: "ordinary", posthoc: "none", posthocTarget: "groups" } as AnalysisParams;
+  const two = await runAnalysis("two-way-anova", twoTable, twoParams);
+  if ("error" in two) throw new Error(`two-way should run, got ${two.error}`);
+  // Group F = 54.555, Row F = 1.635, Interaction F = 2.182.
+  close(row(two, "Group").partialEta2, 0.872113, 1e-6, "two-way Group partial eta squared");
+  close(row(two, "Group").partialEta2Lo, 0.40302, 1e-4, "two-way Group partial eta squared 95% CI lower");
+  close(row(two, "Group").partialEta2Hi, 0.89026, 1e-4, "two-way Group partial eta squared 95% CI upper");
+  close(row(two, "Row").partialEta2, 0.3801, 1e-6, "two-way Row partial eta squared");
+  close(row(two, "Row").partialEta2Lo, 0, 1e-9, "two-way Row partial eta squared 95% CI lower");
+  close(row(two, "Row").partialEta2Hi, 0.51076, 1e-4, "two-way Row partial eta squared 95% CI upper");
+  close(row(two, "Interaction").partialEta2, 0.450044, 1e-6, "two-way Interaction partial eta squared");
+  close(row(two, "Interaction").partialEta2Lo, 0, 1e-9, "two-way Interaction partial eta squared 95% CI lower");
+  close(row(two, "Interaction").partialEta2Hi, 0.564214, 1e-4, "two-way Interaction partial eta squared 95% CI upper");
+  const twoOff = await runAnalysis("two-way-anova", twoTable, { ...twoParams, effectSizes: false });
+  if ("error" in twoOff) throw new Error(`two-way should run, got ${twoOff.error}`);
+  strictEqual(twoOff.effectSizes, undefined, "effectSizes false omits the two-way table");
+  // Three-way ANOVA (seq 192 fixture), N = 16, DFd = 8, all seven terms.
+  const threeTable: TableData = {
+    columns: ["Title", "Placebo:Y1", "Placebo:Y2", "Drug:Y1", "Drug:Y2"],
+    rows: [
+      ["Day 1", "10.0", "10.3", "11.1", "11.5"],
+      ["Day 2", "14.1", "15.3", "19.4", "20.5"],
+      ["Day 1", "11.1", "10.1", "13.7", "11.7"],
+      ["Day 2", "11.1", "11.7", "14.8", "13.7"],
+    ],
+    groups: 2,
+    replicates: 2,
+    rowGroups: [
+      { name: "WT", count: 2 },
+      { name: "KO", count: 2 },
+    ],
+  };
+  const three = await runAnalysis("three-way-anova", threeTable, { posthoc: "none" } as AnalysisParams);
+  if ("error" in three) throw new Error(`three-way should run, got ${three.error}`);
+  const threeWant: [string, number, number, number][] = [
+    // effect, partial eta squared, CI lower, CI upper (F in parens)
+    ["A — Group", 0.871821, 0.402192, 0.890024], // F = 54.413
+    ["B — Row", 0.927361, 0.594373, 0.936057], // F = 102.134
+    ["C — Row group", 0.72967, 0.140086, 0.78131], // F = 21.593
+    ["A:B", 0.553959, 0.02062, 0.659887], // F = 9.936
+    ["A:C", 0.099917, 0, 0.348458], // F = 0.888
+    ["B:C", 0.86141, 0.373682, 0.881642], // F = 49.724
+    ["A:B:C", 0.372068, 0, 0.541686], // F = 4.740
+  ];
+  for (const [effect, partial, lo, hi] of threeWant) {
+    const r = row(three, effect);
+    close(r.partialEta2, partial, 1e-6, `three-way ${effect} partial eta squared`);
+    close(r.partialEta2Lo, lo, lo === 0 ? 1e-9 : 1e-4, `three-way ${effect} partial eta squared 95% CI lower`);
+    close(r.partialEta2Hi, hi, 1e-4, `three-way ${effect} partial eta squared 95% CI upper`);
+  }
+  const threeOff = await runAnalysis("three-way-anova", threeTable, { posthoc: "none", effectSizes: false } as AnalysisParams);
+  if ("error" in threeOff) throw new Error(`three-way should run, got ${threeOff.error}`);
+  strictEqual(threeOff.effectSizes, undefined, "effectSizes false omits the three-way table");
+  // Repeated-measures one-way ANOVA (seq 311 fixture), sphericity assumed,
+  // N = 6 subjects x 3 groups = 18, F = 25.851, DFn = 2, DFd = 10.
+  const rmA = [10, 12, 11, 13, 10, 12];
+  const rmB = [10, 12, 11, 13, 10, 12];
+  const rmC = [15, 14, 18, 16, 13, 19];
+  const rmTable: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: rmA.map((_, i) => [`S${i + 1}`, String(rmA[i]), String(rmB[i]), String(rmC[i])]),
+  };
+  const rm = await runAnalysis("rm-anova", rmTable, { sphericity: true, posthoc: "none" } as AnalysisParams);
+  if ("error" in rm) throw new Error(`rm-anova should run, got ${rm.error}`);
+  close(row(rm, "Treatment").partialEta2, 0.837931, 1e-6, "RM Treatment partial eta squared");
+  close(row(rm, "Treatment").partialEta2Lo, 0.382902, 1e-4, "RM Treatment partial eta squared 95% CI lower");
+  close(row(rm, "Treatment").partialEta2Hi, 0.865531, 1e-4, "RM Treatment partial eta squared 95% CI upper");
+  // Matching (subjects) is an eta squared, not a partial one, so its
+  // partial / CI stay null by design.
+  const matching = row(rm, "Matching (subjects)");
+  strictEqual(matching.partialEta2, null, "RM Matching partial eta squared stays null");
+  strictEqual(matching.partialEta2Lo, null, "RM Matching CI lower stays null");
+  strictEqual(matching.partialEta2Hi, null, "RM Matching CI upper stays null");
+  const rmOff = await runAnalysis("rm-anova", rmTable, { sphericity: true, posthoc: "none", effectSizes: false } as AnalysisParams);
+  if ("error" in rmOff) throw new Error(`rm-anova should run, got ${rmOff.error}`);
+  strictEqual(rmOff.effectSizes, undefined, "effectSizes false omits the RM table");
+});
+
 check("a two-way ANOVA of one value per cell asks nothing and runs the ordinary one", () => {
   const wizard = WIZARDS["two-way-anova"]!;
   const single = readTable({
@@ -10108,6 +11911,8 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
     "model",
     "weights",
     "fitMethod",
+    "difficultFitHandling",
+    "reportDependency",
     "fitRange",
     "compareWith",
     "compareModel",
@@ -10123,6 +11928,8 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
       "model",
       "weights",
       "fitMethod",
+      "difficultFitHandling",
+      "reportDependency",
       "fitRange",
       "compareWith",
       "compareModel",
@@ -10135,7 +11942,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
   );
   deepStrictEqual(
     asked({ y: "A", kind: "dose", model: "homologous-competition-logx" }).map((q) => q.id),
-    ["ys", "kind", "model", "weights", "fitMethod", "fitRange", "compareWith", "compareModel", "global", "constrain", "ligandConcentration"],
+    ["ys", "kind", "model", "weights", "fitMethod", "difficultFitHandling", "reportDependency", "fitRange", "compareWith", "compareModel", "global", "constrain", "ligandConcentration"],
   );
   ok(!asked({ y: "A", kind: "dose", model: "sigmoidal-4pl-logx" }).some((q) => q.id === "fitKi"));
   deepStrictEqual(
@@ -10979,6 +12786,495 @@ check("seq 200 fitting method in the curve wizard", () => {
   deepStrictEqual(
     wizard.finish({ ys: ["A"], kind: "other", model: "line", fitMethod: "least-squares" }, twoY).params,
     { y: "A", model: "line" },
+  );
+});
+
+// Seq 323: Prism's unstable-parameter check — the fit's Hessian (JᵀWJ)
+// condition number against 10/√ε (≈ 6.7×10⁸, Prism 8/9 Curve Fitting
+// Guide), with greedy elimination of the parameter that most reduces the
+// condition. The hand-built expectations below are numpy's eigvalsh on the
+// same matrices (verified independently in Python, Nov 22, 2026).
+check("seq 323 unstable-parameter detection on hand-built Hessians", () => {
+  const th = UNSTABLE_CONDITION_THRESHOLD;
+  ok(th === 671088640, `threshold should be 10/sqrt(eps) = 671088640, got ${th}`);
+  const unstable = (h: number[][], names: string[]) => identifyUnstableParameters(h, names).unstable;
+  const condition = (h: number[][], names: string[]) => identifyUnstableParameters(h, names).condition;
+  // A single badly-scaled parameter (cond 1e9) is unstable; 1e8 is not.
+  deepStrictEqual(unstable([[1, 0], [0, 1e-9]], ["A", "B"]), ["B"]);
+  ok(Math.abs(condition([[1, 0], [0, 1e-9]], ["A", "B"]) - 1e9) / 1e9 < 1e-9, "cond of diag(1,1e-9) should be 1e9");
+  deepStrictEqual(unstable([[1, 0], [0, 1e-8]], ["A", "B"]), []);
+  deepStrictEqual(unstable([[1, 0], [0, 1]], ["A", "B"]), []);
+  // Exactly at the threshold is stable; one unit above it is not.
+  deepStrictEqual(unstable([[1, 0], [0, 1 / 671088640]], ["A", "B"]), []);
+  deepStrictEqual(unstable([[1, 0], [0, 1 / 671088641]], ["A", "B"]), ["B"]);
+  // A near-collinear pair (cond ~2e9): removing either leaves cond 1 — the
+  // tie breaks toward the parameter loading most on the smallest eigenvector
+  // (equal loadings here, so the first in order).
+  deepStrictEqual(
+    unstable([[1, 0.999999999, 0], [0.999999999, 1, 0], [0, 0, 1]], ["P1", "P2", "P3"]),
+    ["P1"],
+  );
+  // Two bad scalings are eliminated one at a time, worst first.
+  deepStrictEqual(
+    unstable([[1, 0, 0], [0, 1e-9, 0], [0, 0, 1e-18]], ["A", "B", "C"]),
+    ["C", "B"],
+  );
+  // A clear winner: only removing the 1e-9 diagonal brings cond below threshold.
+  deepStrictEqual(
+    unstable([[1, 0.9, 0], [0.9, 1, 0], [0, 0, 1e-9]], ["A", "B", "C"]),
+    ["C"],
+  );
+  ok(
+    Math.abs(condition([[1, 0.9, 0], [0.9, 1, 0], [0, 0, 1e-9]], ["A", "B", "C"]) - 1.9e9) / 1.9e9 < 1e-3,
+    "cond of the clear-winner Hessian should be ~1.9e9",
+  );
+});
+
+// Seq 323: the Hessian condition is computed on the fit itself — a
+// well-determined 4PL stays far below the threshold, while a one-phase decay
+// spanning 1e5 → 1 with 1/Y² weights trips it (its Y0 is determined only by
+// the heavily down-weighted early points). The R cond values below were
+// cross-checked against an independent Python (numpy) computation on the
+// same fitted parameters (4PL 4154.74, decay 5.169e12 — agreement to 0.02%).
+check("seq 323 the Hessian condition is computed on the fit", async () => {
+  const xs4 = [-9, -8.5, -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4];
+  const ys4 = xs4.map((x, i) => 100 / (1 + 10 ** (-6.5 - x)) + 0.8 * Math.sin(1.7 * i + 0.5));
+  const fit4 = await fitModelSpec(xs4, ys4, modelSpec("sigmoidal-4pl-logx"));
+  ok(
+    fit4.hessianCondition != null && fit4.hessianCondition > 4000 && fit4.hessianCondition < 4300,
+    `well-determined 4PL Hessian condition should be ~4155, got ${fit4.hessianCondition}`,
+  );
+  deepStrictEqual(fit4.unstableParameters ?? [], []);
+  const xsD = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20];
+  const ysD = xsD.map((x, i) => (1e5 - 1) * Math.exp(-0.5 * x) + 1 + 0.02 * Math.sin(1.7 * i + 0.5));
+  const wD = ysD.map((y) => 1 / (y * y));
+  const fitD = await fitModelSpec(xsD, ysD, modelSpec("one-phase-decay"), "", (t) => t, { weights: wD });
+  ok(
+    fitD.hessianCondition != null && fitD.hessianCondition > 1e12,
+    `weighted decay Hessian condition should exceed 1e12, got ${fitD.hessianCondition}`,
+  );
+  deepStrictEqual(fitD.unstableParameters ?? [], ["Y0"]);
+  // The control off: the same fit reports nothing unstable.
+  const fitDNone = await fitModelSpec(xsD, ysD, modelSpec("one-phase-decay"), "", (t) => t, {
+    weights: wD,
+    difficultFitHandling: "none",
+  });
+  deepStrictEqual(fitDNone.unstableParameters ?? [], []);
+});
+
+// Seq 323: an unstable parameter is flagged on the results sheet, and the
+// Confidence-tab control turns the check off (the value is then reported).
+check("seq 323 an unstable parameter is flagged on the results sheet", async () => {
+  const xsD = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20];
+  const ysD = xsD.map((x, i) => (1e5 - 1) * Math.exp(-0.5 * x) + 1 + 0.02 * Math.sin(1.7 * i + 0.5));
+  const decayTable: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xsD.map((x, i) => ["", String(x), String(ysD[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", decayTable, { y: "Y", model: "one-phase-decay", weights: "1/y2" });
+  ok(!("error" in out), `weighted decay fit failed: ${"error" in out ? out.error : ""}`);
+  const y0 = out.coefficients?.find((c) => c.term === "Y0");
+  ok(y0?.unstable === true, `Y0 should be flagged unstable, got ${JSON.stringify(y0)}`);
+  ok(out.coefficients?.find((c) => c.term === "Plateau")?.unstable !== true, "Plateau should not be flagged");
+  ok(out.coefficients?.find((c) => c.term === "K")?.unstable !== true, "K should not be flagged");
+  ok(
+    out.notes?.includes("Y0") && out.notes?.includes("unstable"),
+    `notes should name Y0 as unstable, got ${out.notes}`,
+  );
+  // The control off: Y0 is reported with its value, and no warning.
+  const off = await runAnalysis("nonlinear-regression", decayTable, {
+    y: "Y",
+    model: "one-phase-decay",
+    weights: "1/y2",
+    difficultFitHandling: "none",
+  });
+  ok(!("error" in off), `decay fit with the control off failed: ${"error" in off ? off.error : ""}`);
+  const y0off = off.coefficients?.find((c) => c.term === "Y0");
+  ok(
+    y0off?.unstable !== true && y0off?.estimate != null && Math.abs(y0off.estimate - 99973) < 1,
+    `Y0 should be reported (~99973) with the control off, got ${y0off?.estimate}`,
+  );
+  ok(!off.notes?.includes("unstable"), `notes should not warn with the control off, got ${off.notes}`);
+  // A well-determined 4PL reports nothing unstable.
+  const xs4 = [-9, -8.5, -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4];
+  const ys4 = xs4.map((x, i) => 100 / (1 + 10 ** (-6.5 - x)) + 0.8 * Math.sin(1.7 * i + 0.5));
+  const table4: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xs4.map((x, i) => ["", String(x), String(ys4[i])]),
+  };
+  const out4 = await runAnalysis("nonlinear-regression", table4, { y: "Y", model: "sigmoidal-4pl-logx" });
+  ok(!("error" in out4), `4PL fit failed: ${"error" in out4 ? out4.error : ""}`);
+  ok(!out4.coefficients?.some((c) => c.unstable), "well-determined 4PL should flag nothing unstable");
+  ok(!out4.notes?.includes("unstable"), `4PL notes should not warn, got ${out4.notes}`);
+});
+
+check("seq 323 difficult-fit handling in the curve wizard", () => {
+  const wizard = WIZARDS["nonlinear-regression"]!;
+  const twoY = readTable({ columns: ["Title", "X", "A", "B"], rows: [["", "1", "2", "3"]] });
+  const asked = (a: Record<string, string | string[]>) =>
+    wizard.questions(a, twoY).flatMap((q) => (q ? [q] : []));
+  const ids = (a: Record<string, string | string[]>) => asked(a).map((q) => q.id);
+  ok(
+    ids({ kind: "dose", model: "sigmoidal-4pl-logx" }).includes("difficultFitHandling"),
+    "dose-response should ask about difficult fits",
+  );
+  ok(ids({ kind: "other", model: "line" }).includes("difficultFitHandling"), "line should ask too");
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", difficultFitHandling: "none" }, twoY).params,
+    { y: "A", model: "line", difficultFitHandling: "none" },
+  );
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", difficultFitHandling: "unstable" }, twoY).params,
+    { y: "A", model: "line" },
+  );
+});
+
+// Seq 388: derived quantities from unstable parameters — Prism's docs
+// define "Unstable"/"Very wide" for fitted parameters only and never say
+// what happens to a transform of an unstable parameter (docs verdict,
+// Nov 23: "Unstable" + "Choosing transforms of parameters to report"
+// read; no rule found), so the derived value stays reported and the
+// results note names the unstable source parameter(s) instead of
+// silently showing a number.
+check("seq 388 derived quantities name their source parameters", () => {
+  const src = (spec: ModelSpec, label: string) =>
+    derivedSources(spec.derived!.find((d) => d.label === label)!, spec.terms);
+  const spec4 = modelSpec("sigmoidal-4pl-logx");
+  deepStrictEqual(src(spec4, "EC50"), ["LogEC50"]);
+  deepStrictEqual(src(spec4, "Span"), ["Bottom", "Top"]);
+  // Absolute IC50 lives on its own model, not the 4PL.
+  deepStrictEqual(src(modelSpec("absolute-ic50-logx"), "Absolute IC50"), ["Bottom", "Top", "LogEC50", "HillSlope"]);
+  const specD = modelSpec("one-phase-decay");
+  deepStrictEqual(src(specD, "Half-life"), ["K"]);
+  deepStrictEqual(src(specD, "Tau"), ["K"]);
+  deepStrictEqual(src(specD, "Span"), ["Y0", "Plateau"]);
+  // A constant derived row names no parameter.
+  deepStrictEqual(src(modelSpec("agonist-3pl-normalized-logx"), "Span"), []);
+});
+
+check("seq 388 a derived row is flagged with its unstable sources", () => {
+  const coef = (term: string): RegressionCoefficient => ({ term, estimate: 1, stdError: 1, t: 1, p: 0.5, low: 0, high: 2 });
+  // LogEC50 badly scaled (cond 1e9): unstable; Top is not.
+  const coefficients = [coef("Top"), coef("LogEC50")];
+  const derived: DerivedRow[] = [
+    { label: "EC50", value: 1, sources: ["LogEC50"] },
+    { label: "Span", value: 1, sources: ["Top", "Bottom"] },
+  ];
+  const { unstableParameters } = applyUnstableFlags(
+    coefficients,
+    [[1, 0], [0, 1e-9]],
+    ["Top", "LogEC50"],
+    (t) => t,
+    "unstable",
+    derived,
+  );
+  deepStrictEqual(unstableParameters, ["LogEC50"]);
+  ok(coefficients[1].unstable === true, "LogEC50 should be flagged");
+  deepStrictEqual(derived[0].unstableSources, ["LogEC50"]);
+  ok(derived[1].unstableSources === undefined, `Span's sources are stable, got ${JSON.stringify(derived[1].unstableSources)}`);
+  // The control off: nothing flagged, no sources.
+  const derivedOff: DerivedRow[] = [{ label: "EC50", value: 1, sources: ["LogEC50"] }];
+  applyUnstableFlags([coef("Top"), coef("LogEC50")], [[1, 0], [0, 1e-9]], ["Top", "LogEC50"], (t) => t, "none", derivedOff);
+  ok(derivedOff[0].unstableSources === undefined, "control off should flag nothing");
+});
+
+// Seq 388: the shared choke point — fitModelSpec carries the unstable
+// sources on its derived rows, so the global-fit / binding / enzyme
+// paths (which all run through it) see them too.
+check("seq 388 fitModelSpec carries unstable sources on derived rows", async () => {
+  const xs = [-9, -8.5, -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4];
+  const ys = xs.map((x, i) => 1 + (1e5 - 1) / (1 + 10 ** (-8.5 - x)) + 0.8 * Math.sin(1.7 * i + 0.5));
+  const w = ys.map((y) => 1 / (y * y));
+  const fit = await fitModelSpec(xs, ys, modelSpec("sigmoidal-4pl-logx"), "", (t) => t, { weights: w });
+  deepStrictEqual(fit.unstableParameters, ["LogEC50", "HillSlope"]);
+  deepStrictEqual(fit.derived.find((d) => d.label === "EC50")?.unstableSources, ["LogEC50"]);
+  ok(fit.derived.find((d) => d.label === "Span")?.unstableSources === undefined, "Span's sources (Top, Bottom) are stable here");
+});
+
+check("seq 388 a derived row from an unstable parameter is noted, not silently numbered", async () => {
+  const xs = [-9, -8.5, -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4];
+  const ys = xs.map((x, i) => 1 + (1e5 - 1) / (1 + 10 ** (-8.5 - x)) + 0.8 * Math.sin(1.7 * i + 0.5));
+  const table: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", table, { y: "Y", model: "sigmoidal-4pl-logx", weights: "1/y2" });
+  ok(!("error" in out), `weighted 4PL fit failed: ${"error" in out ? out.error : ""}`);
+  const logEC50 = out.coefficients?.find((c) => c.term === "LogEC50");
+  ok(logEC50?.unstable === true, `LogEC50 should be flagged unstable, got ${JSON.stringify(logEC50)}`);
+  // The EC50 row names its unstable source in the notes...
+  ok(
+    out.notes?.includes("“EC50” is derived from “LogEC50”"),
+    `notes should name EC50's unstable source, got ${out.notes}`,
+  );
+  // ...while Span, whose sources are stable, gets no such note...
+  ok(!out.notes?.includes("“Span” is derived"), `Span should not be noted, got ${out.notes}`);
+  // ...and the value itself stays reported (a number, not suppressed).
+  const ec50 = out.fit?.rows.find((r) => r.label === "EC50");
+  ok(
+    ec50?.values?.[0] != null && Number.isFinite(ec50.values[0]),
+    `EC50 should still report a value, got ${JSON.stringify(ec50)}`,
+  );
+});
+
+check("seq 388 a derived row from stable parameters is not noted", async () => {
+  const xsD = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20];
+  const ysD = xsD.map((x, i) => (1e5 - 1) * Math.exp(-0.5 * x) + 1 + 0.02 * Math.sin(1.7 * i + 0.5));
+  const decayTable: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xsD.map((x, i) => ["", String(x), String(ysD[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", decayTable, { y: "Y", model: "one-phase-decay", weights: "1/y2" });
+  ok(!("error" in out), `weighted decay fit failed: ${"error" in out ? out.error : ""}`);
+  ok(out.coefficients?.find((c) => c.term === "Y0")?.unstable === true, "Y0 should be flagged unstable");
+  // Half-life derives from K (stable): no note...
+  ok(!out.notes?.includes("“Half-life” is derived"), `Half-life should not be noted, got ${out.notes}`);
+  // ...but Span derives from Y0 (unstable): it is noted.
+  ok(out.notes?.includes("“Span” is derived from “Y0”"), `notes should name Span's unstable source, got ${out.notes}`);
+});
+
+// Seq 387: Prism's dependency method (FAQ 931) — dependency_i = 1 − s²/(V_ii·HH_ii),
+// with V the fit's covariance matrix (V_ii = SE_i²), HH the Gauss–Newton
+// Hessian JᵀWJ and s² = Sy.x². The hand-built expectations below are the
+// closed form evaluated on paper: a diagonal Hessian is orthogonal
+// (dependency 0); HH = [[1, 0.9], [0.9, 1]] with s² = 1 gives
+// V_ii = 1/(1 − 0.81) and dependency 1 − 1/5.263… = 0.81 for both.
+check("seq 387 dependency from the covariance matrix and Hessian", () => {
+  ok(AMBIGUOUS_DEPENDENCY_THRESHOLD === 0.9999, `ambiguity threshold should be 0.9999, got ${AMBIGUOUS_DEPENDENCY_THRESHOLD}`);
+  const mk = (se: number): RegressionCoefficient => ({ term: "P", estimate: 1, stdError: se, t: null, p: null, low: null, high: null });
+  deepStrictEqual(
+    parameterDependencies(
+      [
+        [1, 0],
+        [0, 1],
+      ],
+      [mk(1), mk(1)],
+      1,
+    ),
+    [0, 0],
+  );
+  const se2 = Math.sqrt(1 / 0.19);
+  const deps = parameterDependencies(
+    [
+      [1, 0.9],
+      [0.9, 1],
+    ],
+    [mk(se2), mk(se2)],
+    1,
+  );
+  ok(deps[0] != null && Math.abs(deps[0] - 0.81) < 1e-9, `dep of the first parameter should be 0.81, got ${deps[0]}`);
+  ok(deps[1] != null && Math.abs(deps[1] - 0.81) < 1e-9, `dep of the second parameter should be 0.81, got ${deps[1]}`);
+  // Undefined when there is nothing to compute it from: no Hessian (lm
+  // fits), no Sy.x, a zero standard error (noiseless data), or a
+  // non-positive Hessian diagonal.
+  deepStrictEqual(parameterDependencies(null, [mk(1)], 1), [null]);
+  deepStrictEqual(parameterDependencies([[1]], [mk(1)], null), [null]);
+  deepStrictEqual(parameterDependencies([[1]], [mk(0)], 1), [null]);
+  deepStrictEqual(parameterDependencies([[0]], [mk(1)], 1), [null]);
+});
+
+// Seq 387: FAQ 931's worked example — a one-phase exponential decay
+// (20 points, MLAB Applications Manual pp. 128–130). Prism reports K
+// 0.2149 ± 0.0248 and dependencies K 0.866, Span 0.613, Plateau 0.813
+// (the scope's 0.865/0.815 are the FAQ's rounded-SE arithmetic; the
+// values pinned here are the page's own numbers, re-derived in Python
+// from the data, Nov 23, 2026). The closed form is verified against the
+// refit definition in the same check: fix Span and Plateau at their
+// best-fit values, refit K alone (SE 0.008605, df 19), correct by
+// sqrt(19/17) for the df change, and the ratio gives the same 0.866.
+check("seq 387 FAQ 931 dependency reproduces Prism's worked example", async () => {
+  const xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+  const ys = [
+    39.814, 32.269, 29.431, 27.481, 26.086, 25.757, 24.932, 23.928, 22.415, 22.548, 21.9, 20.527, 20.695, 20.105,
+    19.516, 19.64, 19.346, 18.927, 18.857, 17.652,
+  ];
+  const table: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const base = {
+    y: "Y",
+    model: "user-defined",
+    customEquation: "Y = Plateau + Span*exp(-K*X)",
+    customParameters: { Plateau: 18, Span: 25, K: 0.2 },
+  } as const;
+  const out = await runAnalysis("nonlinear-regression", table, base);
+  ok(!("error" in out), `FAQ 931 decay fit failed: ${"error" in out ? out.error : ""}`);
+  const coef = (term: string) => out.coefficients?.find((c) => c.term === term);
+  ok(coef("K")?.estimate != null && Math.abs(coef("K")!.estimate! - 0.2149) < 0.001, `K should be ~0.2149, got ${coef("K")?.estimate}`);
+  ok(coef("K")?.stdError != null && Math.abs(coef("K")!.stdError! - 0.0248) < 0.001, `K's SE should be ~0.0248, got ${coef("K")?.stdError}`);
+  ok(coef("K")?.dependency != null && Math.abs(coef("K")!.dependency! - 0.866) < 0.005, `K's dependency should be ~0.866, got ${coef("K")?.dependency}`);
+  ok(
+    coef("Span")?.dependency != null && Math.abs(coef("Span")!.dependency! - 0.613) < 0.005,
+    `Span's dependency should be ~0.613, got ${coef("Span")?.dependency}`,
+  );
+  ok(
+    coef("Plateau")?.dependency != null && Math.abs(coef("Plateau")!.dependency! - 0.813) < 0.005,
+    `Plateau's dependency should be ~0.813, got ${coef("Plateau")?.dependency}`,
+  );
+  // The refit definition: Span and Plateau fixed at their best-fit values.
+  const refit = await runAnalysis("nonlinear-regression", table, {
+    ...base,
+    fixed: { Span: coef("Span")!.estimate!, Plateau: coef("Plateau")!.estimate! },
+  });
+  ok(!("error" in refit), `FAQ 931 refit failed: ${"error" in refit ? refit.error : ""}`);
+  const seFixed = refit.coefficients?.find((c) => c.term === "K")?.stdError;
+  ok(seFixed != null && Math.abs(seFixed - 0.008605) < 0.0005, `refit SE of K should be ~0.008605, got ${seFixed}`);
+  const depRefit = 1 - ((seFixed! * Math.sqrt(19 / 17)) / coef("K")!.stdError!) ** 2;
+  ok(
+    Math.abs(depRefit - coef("K")!.dependency!) < 0.002,
+    `refit dependency ${depRefit} should match the closed form ${coef("K")!.dependency}`,
+  );
+});
+
+// Seq 387: FAQ 1462's dose-response example — a 4PL whose data never reach
+// the top plateau. Hand-built fixture (true Bottom 0, Top 100, LogEC50
+// −7.31, HillSlope 1; X −10 to −7.5; σ = 1.5 noise, seed 13): the
+// unconstrained fit runs away (EC50 far outside the data, Prism's
+// signature) and is ambiguous, while Bottom = 0 / Top = 100 constrained
+// recovers EC50 ≈ 49 nM with a tight CI — FAQ 1462's 49 nM, 39–63 nM.
+// The FAQ's constrained dependency of 0.05 comes from Prism's sample X
+// design; this fixture's design gives ~0.69 — still far below the 0.9999
+// ambiguity threshold, and the EC50/CI match the FAQ.
+check("seq 387 FAQ 1462 an unconstrained dose-response fit is ambiguous, constrained it is not", async () => {
+  const xs = [-10, -9.75, -9.5, -9.25, -9, -8.75, -8.5, -8.25, -8, -7.75, -7.5];
+  const ys = [2.943893, -4.255733, 2.078608, 1.239577, 3.97826, 4.082017, 8.805844, 10.346663, 16.181165, 27.507357, 39.882054];
+  const table: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", table, {
+    y: "Y",
+    model: "sigmoidal-4pl-logx",
+    difficultFitHandling: "ambiguous",
+  });
+  ok(!("error" in out), `ambiguous 4PL fit failed: ${"error" in out ? out.error : ""}`);
+  const logEC50 = out.coefficients?.find((c) => c.term === "LogEC50");
+  const top = out.coefficients?.find((c) => c.term === "Top");
+  ok(logEC50?.ambiguous === true, `LogEC50 should be flagged ambiguous, got ${JSON.stringify(logEC50)}`);
+  ok(
+    (logEC50?.dependency ?? 0) > 0.9999,
+    `LogEC50 dependency should exceed 0.9999, got ${logEC50?.dependency}`,
+  );
+  ok(top?.ambiguous === true, `Top should be flagged ambiguous, got ${JSON.stringify(top)}`);
+  ok(out.notes?.includes("ambiguous"), `notes should label the fit ambiguous, got ${out.notes}`);
+  // Prism's signature: the best-fit EC50 is far outside the data (X is log10 M, so the value is in M).
+  const ec50 = out.fit?.rows.find((r) => r.label === "EC50")?.values?.[0];
+  ok(ec50 != null && ec50 > 1e-6, `EC50 should be wild (>1e-6 M), got ${ec50}`);
+  // "Neither" still reports plain values.
+  const off = await runAnalysis("nonlinear-regression", table, {
+    y: "Y",
+    model: "sigmoidal-4pl-logx",
+    difficultFitHandling: "none",
+  });
+  ok(!("error" in off), `4PL fit with the control off failed: ${"error" in off ? off.error : ""}`);
+  ok(!off.coefficients?.some((c) => c.ambiguous), "with the control off nothing should be flagged ambiguous");
+  ok(!off.notes?.includes("ambiguous"), `notes should not warn with the control off, got ${off.notes}`);
+  // The default (unstable) mode flags by condition number instead — never as ambiguous.
+  const def = await runAnalysis("nonlinear-regression", table, { y: "Y", model: "sigmoidal-4pl-logx" });
+  ok(!("error" in def), `default 4PL fit failed: ${"error" in def ? def.error : ""}`);
+  ok(!def.coefficients?.some((c) => c.ambiguous), "unstable mode should not flag ambiguous");
+  ok(def.coefficients?.some((c) => c.unstable), "unstable mode should flag the undetermined parameters instead");
+  // Constrain Bottom = 0, Top = 100 (FAQ 1462's salvage): no longer ambiguous.
+  const fixed = await runAnalysis("nonlinear-regression", table, {
+    y: "Y",
+    model: "sigmoidal-4pl-logx",
+    difficultFitHandling: "ambiguous",
+    fixed: { Bottom: 0, Top: 100 },
+  });
+  ok(!("error" in fixed), `constrained 4PL fit failed: ${"error" in fixed ? fixed.error : ""}`);
+  ok(!fixed.coefficients?.some((c) => c.ambiguous), "constrained fit should flag nothing ambiguous");
+  const lec = fixed.coefficients?.find((c) => c.term === "LogEC50");
+  ok(
+    (lec?.dependency ?? 1) < 0.8,
+    `constrained LogEC50 dependency should be well below 0.9999, got ${lec?.dependency}`,
+  );
+  const ec50c = fixed.fit?.rows.find((r) => r.label === "EC50")?.values?.[0];
+  ok(ec50c != null && ec50c > 4e-8 && ec50c < 6e-8, `constrained EC50 should be ~49 nM, got ${ec50c}`);
+  const lo = lec?.low != null ? 10 ** lec.low * 1e9 : null;
+  const hi = lec?.high != null ? 10 ** lec.high * 1e9 : null;
+  ok(lo != null && lo > 30 && lo < 45, `EC50 CI low should be ~39 nM, got ${lo}`);
+  ok(hi != null && hi > 55 && hi < 75, `EC50 CI high should be ~63 nM, got ${hi}`);
+  // Dependency values survive recompute.
+  const again = await runAnalysis("nonlinear-regression", table, {
+    y: "Y",
+    model: "sigmoidal-4pl-logx",
+    difficultFitHandling: "ambiguous",
+  });
+  ok(!("error" in again), `recomputed 4PL fit failed: ${"error" in again ? again.error : ""}`);
+  deepStrictEqual(
+    again.coefficients?.map((c) => c.dependency),
+    out.coefficients?.map((c) => c.dependency),
+  );
+});
+
+// Seq 387: the Confidence-tab choice selects the mode, and the Diagnostics
+// option reports dependency (Prism's Diagnostics tab).
+check("seq 387 ambiguous-fit handling in the curve wizard", () => {
+  const wizard = WIZARDS["nonlinear-regression"]!;
+  const twoY = readTable({ columns: ["Title", "X", "A", "B"], rows: [["", "1", "2", "3"]] });
+  const asked = (a: Record<string, string | string[]>) =>
+    wizard.questions(a, twoY).flatMap((q) => (q ? [q] : []));
+  const ids = (a: Record<string, string | string[]>) => asked(a).map((q) => q.id);
+  ok(
+    ids({ kind: "dose", model: "sigmoidal-4pl-logx" }).includes("difficultFitHandling"),
+    "dose-response should ask about difficult fits",
+  );
+  ok(
+    ids({ kind: "dose", model: "sigmoidal-4pl-logx" }).includes("reportDependency"),
+    "dose-response should offer the dependency report",
+  );
+  ok(ids({ kind: "other", model: "line" }).includes("reportDependency"), "line should offer it too");
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", difficultFitHandling: "ambiguous" }, twoY).params,
+    { y: "A", model: "line", difficultFitHandling: "ambiguous" },
+  );
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", reportDependency: "yes" }, twoY).params,
+    { y: "A", model: "line", reportDependency: true },
+  );
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", reportDependency: "no" }, twoY).params,
+    { y: "A", model: "line" },
+  );
+});
+
+// Seq 387: reportDependency asks the results sheet to show the dependency
+// column (the values themselves are computed on every nonlinear fit); a
+// bogus handling is refused naming the three choices.
+check("seq 387 reportDependency surfaces dependency on the results sheet", async () => {
+  const xs = [-9, -8.5, -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4];
+  const ys = xs.map((x, i) => 100 / (1 + 10 ** (-6.5 - x)) + 0.8 * Math.sin(1.7 * i + 0.5));
+  const table: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const withDep = await runAnalysis("nonlinear-regression", table, {
+    y: "Y",
+    model: "sigmoidal-4pl-logx",
+    reportDependency: true,
+  });
+  ok(!("error" in withDep), `4PL fit with reportDependency failed: ${"error" in withDep ? withDep.error : ""}`);
+  ok(withDep.showDependency === true, "reportDependency should set showDependency on the result");
+  ok(
+    withDep.coefficients?.find((c) => c.term === "LogEC50")?.dependency != null,
+    "the LogEC50 coefficient should carry its dependency",
+  );
+  const without = await runAnalysis("nonlinear-regression", table, { y: "Y", model: "sigmoidal-4pl-logx" });
+  ok(!("error" in without), `plain 4PL fit failed: ${"error" in without ? without.error : ""}`);
+  ok(without.showDependency !== true, "without the option the result should not ask for the dependency column");
+  ok(
+    without.coefficients?.find((c) => c.term === "LogEC50")?.dependency != null,
+    "dependency is computed regardless of the display option",
+  );
+  const bogus = await runAnalysis("nonlinear-regression", table, {
+    y: "Y",
+    model: "sigmoidal-4pl-logx",
+    difficultFitHandling: "bogus" as never,
+  });
+  ok(
+    "error" in bogus && bogus.error.includes("ambiguous"),
+    `bogus handling should be refused naming the choices, got ${JSON.stringify(bogus)}`,
   );
 });
 
@@ -12167,6 +14463,8 @@ check("a nonlinear regression on a Multiple Variables table names its X and Y", 
     "model",
     "weights",
     "fitMethod",
+    "difficultFitHandling",
+    "reportDependency",
     "fitRange",
     "rout",
     "compareModel",
@@ -12989,6 +15287,252 @@ check("sigDisplay pvalue-eq labels brackets p=0.03, and a multiple-t-tests run d
   const texts = (fig.layout.annotations as { text: string }[]).map((a) => a.text);
   strictEqual(texts.length, 3);
   ok(texts.every((t) => /^p(=|<)0/.test(t)), `p= labels, got ${texts.join(", ")}`);
+});
+
+// ── seq 178: Compact Letter Display format options ────────────────────────
+// Fixture: a column graph with three groups; A differs from B and C, B and
+// C do not differ — so the letters are A="a", B="b", C="b".
+const cldColumns = readTable({
+  columns: ["Title", "A", "B", "C"],
+  rows: [
+    [null, "10", "5", "1"],
+    [null, "11", "6", "2"],
+    [null, "12", "7", "3"],
+  ],
+}).columns;
+const cldComparisons: SigComparison[] = [
+  { key: pairKey("A", "B"), group1: "A", group2: "B", p: 0.01 },
+  { key: pairKey("A", "C"), group1: "A", group2: "C", p: 0.001 },
+  { key: pairKey("B", "C"), group1: "B", group2: "C", p: 0.4 },
+];
+type CldAnnotation = {
+  text: string;
+  x: number;
+  y: number;
+  yref?: string;
+  textangle?: number;
+  font?: { color?: string; size?: number; family?: string };
+};
+const cldAnnotations = (fig: GraphFigure): CldAnnotation[] => (fig.layout.annotations as CldAnnotation[] | undefined) ?? [];
+const cldFigure = (options: Partial<GraphOptions>, comparisons: SigComparison[] = cldComparisons): GraphFigure => {
+  const fig: GraphFigure = { data: [], layout: {} };
+  addSignificance(fig, cldColumns, "individual", { ...newGraphOptions("individual"), sigDisplay: "letters", ...options }, comparisons);
+  return fig;
+};
+
+// seq 178: the Compact Letter Display algorithm itself — a functional pin
+// (the coverage row was sourceContains-only until now). Canonical
+// insert-absorb families: all differ, none differ, the middle group sharing
+// with both neighbours, and a chain where the absorb step drops the
+// two-letter {C,D} set (so D ends up with two letters, "ac").
+check("seq 178: compactLetters assigns one letter per group when all pairs differ, one shared letter when none do, and two letters to a middle group", () => {
+  const show = (m: Map<string, string>) => Object.fromEntries(m);
+  deepStrictEqual(show(compactLetters(["A", "B", "C"], [["A", "B"], ["A", "C"], ["B", "C"]])), { A: "a", B: "b", C: "c" });
+  deepStrictEqual(show(compactLetters(["A", "B", "C"], [])), { A: "a", B: "a", C: "a" });
+  deepStrictEqual(show(compactLetters(["A", "B", "C"], [["A", "C"]])), { A: "a", B: "ab", C: "b" });
+  deepStrictEqual(
+    show(compactLetters(["A", "B", "C", "D"], [["A", "B"], ["B", "C"], ["C", "D"]])),
+    { A: "ab", B: "c", C: "b", D: "ac" },
+  );
+  // The letter scheme overflows past "z" into "a1", "b1", ...
+  const many = Array.from({ length: 28 }, (_, i) => `G${i}`);
+  const allPairs = many.flatMap((g, i) => many.slice(i + 1).map((h) => [g, h] as [string, string]));
+  const overflow = compactLetters(many, allPairs);
+  strictEqual(overflow.get("G25"), "z");
+  strictEqual(overflow.get("G26"), "a1");
+  strictEqual(overflow.get("G27"), "b1");
+});
+
+// seq 178: the defaults reproduce today's rendering — above the data,
+// horizontal, lowercase, system font, 14 px, INK — so existing files and
+// the old pins keep their letters.
+check("seq 178: the default letters render above the data, horizontal, lowercase, 14 px in the default color", () => {
+  const anns = cldAnnotations(cldFigure({}));
+  deepStrictEqual(anns.map((a) => a.text), ["a", "b", "b"]);
+  ok(anns.every((a) => a.yref === "y"), "letters sit on the data axis");
+  ok(anns.every((a) => a.textangle === undefined), "horizontal by default");
+  ok(anns.every((a) => a.font?.size === 14), `size 14, got ${anns.map((a) => a.font?.size).join(", ")}`);
+  ok(anns.every((a) => a.font?.color === "#111827"), `default color, got ${anns.map((a) => a.font?.color).join(", ")}`);
+});
+
+// seq 178: the identifier option changes the letters — upper case, or
+// numbers (each letter's 1-based index, comma-separated).
+check("seq 178: lettersIdentifier upper cases the letters and numbers turns them into 1-based numbers", () => {
+  deepStrictEqual(cldAnnotations(cldFigure({ lettersIdentifier: "upper" })).map((a) => a.text), ["A", "B", "B"]);
+  deepStrictEqual(cldAnnotations(cldFigure({ lettersIdentifier: "numbers" })).map((a) => a.text), ["1", "2", "2"]);
+  deepStrictEqual(cldAnnotations(cldFigure({ lettersIdentifier: "lower" })).map((a) => a.text), ["a", "b", "b"]);
+});
+
+// seq 178: the direction option rotates the letters (vertical up/down) and
+// stacks them — one annotation per letter token, so a group with two
+// letters draws two annotations at increasing heights.
+check("seq 178: lettersDirection vertical-up/down rotates the letters and stacked draws one annotation per letter", () => {
+  const up = cldAnnotations(cldFigure({ lettersDirection: "vertical-up" }));
+  ok(up.length === 3 && up.every((a) => a.textangle === 90), `vertical-up, got ${up.map((a) => a.textangle).join(", ")}`);
+  const down = cldAnnotations(cldFigure({ lettersDirection: "vertical-down" }));
+  ok(down.length === 3 && down.every((a) => a.textangle === -90), `vertical-down, got ${down.map((a) => a.textangle).join(", ")}`);
+  // A differs from C only, so B carries two letters ("ab") — stacked draws
+  // four annotations, B's two at increasing heights.
+  const middleTwo: SigComparison[] = [
+    { key: pairKey("A", "B"), group1: "A", group2: "B", p: 0.4 },
+    { key: pairKey("A", "C"), group1: "A", group2: "C", p: 0.001 },
+    { key: pairKey("B", "C"), group1: "B", group2: "C", p: 0.4 },
+  ];
+  deepStrictEqual(cldAnnotations(cldFigure({}, middleTwo)).map((a) => a.text), ["a", "ab", "b"]);
+  const stacked = cldAnnotations(cldFigure({ lettersDirection: "stacked" }, middleTwo));
+  deepStrictEqual(stacked.map((a) => a.text), ["a", "a", "b", "b"]);
+  const bStack = stacked.filter((a) => a.x === 1);
+  strictEqual(bStack.length, 2);
+  ok(bStack[1]!.y > bStack[0]!.y, "stacked letters rise");
+});
+
+// seq 178: the location option moves the letters outside the graphing area
+// (paper coordinates above the plot) and grows the top margin to fit them.
+check("seq 178: lettersLocation outside puts the letters in paper coordinates above the plot and grows the top margin", () => {
+  const fig = cldFigure({ lettersLocation: "outside" });
+  const anns = cldAnnotations(fig);
+  strictEqual(anns.length, 3);
+  ok(anns.every((a) => a.yref === "paper"), `outside the graph, got ${anns.map((a) => a.yref).join(", ")}`);
+  ok(anns.every((a) => a.y > 1), `above the plot, got ${anns.map((a) => a.y).join(", ")}`);
+  // One row of 14 px letters: 16 (title-less top) + 1 row * (14 + 6) + 8.
+  strictEqual((fig.layout.margin as { t?: number } | undefined)?.t, 44);
+  // Outside forces stacked: a two-letter group draws one annotation per
+  // letter even with no direction set.
+  const middleTwo: SigComparison[] = [
+    { key: pairKey("A", "B"), group1: "A", group2: "B", p: 0.4 },
+    { key: pairKey("A", "C"), group1: "A", group2: "C", p: 0.001 },
+    { key: pairKey("B", "C"), group1: "B", group2: "C", p: 0.4 },
+  ];
+  deepStrictEqual(cldAnnotations(cldFigure({ lettersLocation: "outside" }, middleTwo)).map((a) => a.text), ["a", "a", "b", "b"]);
+});
+
+// seq 178: the font option sets the family, size and color — and the
+// auto-size option sizes by group count (14 for ≤4 groups, 12 for ≤8)
+// instead of the fixed size.
+check("seq 178: lettersFont/lettersSize/lettersColor set the font, and lettersFontAuto sizes by group count", () => {
+  const styled = cldAnnotations(cldFigure({ lettersFont: "arial", lettersSize: 20, lettersColor: "#ff0000" }));
+  ok(styled.every((a) => a.font?.family?.includes("Arial")), `Arial, got ${styled.map((a) => a.font?.family).join(", ")}`);
+  ok(styled.every((a) => a.font?.size === 20), `size 20, got ${styled.map((a) => a.font?.size).join(", ")}`);
+  ok(styled.every((a) => a.font?.color === "#ff0000"), `red, got ${styled.map((a) => a.font?.color).join(", ")}`);
+  // Six groups, all pairs differing, auto size beats the fixed size.
+  const sixNames = Array.from({ length: 6 }, (_, i) => `G${i}`);
+  const six = readTable({
+    columns: ["Title", ...sixNames],
+    rows: [0, 1, 2].map((r) => [null, ...sixNames.map((_, i) => String(10 - i + r))]),
+  }).columns;
+  const sixPairs: SigComparison[] = [];
+  for (let i = 0; i < 6; i++) {
+    for (let j = i + 1; j < 6; j++) {
+      sixPairs.push({ key: pairKey(`G${i}`, `G${j}`), group1: `G${i}`, group2: `G${j}`, p: 0.01 });
+    }
+  }
+  const autoFig: GraphFigure = { data: [], layout: {} };
+  addSignificance(
+    autoFig,
+    six,
+    "individual",
+    { ...newGraphOptions("individual"), sigDisplay: "letters", lettersFontAuto: true, lettersSize: 20 },
+    sixPairs,
+  );
+  const auto = cldAnnotations(autoFig);
+  strictEqual(auto.length, 6);
+  ok(auto.every((a) => a.font?.size === 12), `auto size for 6 groups is 12, got ${auto.map((a) => a.font?.size).join(", ")}`);
+});
+
+// seq 178: the letters still gate on a complete pairwise family — an
+// incomplete family draws nothing.
+check("seq 178: letters still gate on a complete pairwise family — an incomplete family draws no letters", () => {
+  const incomplete = cldComparisons.slice(0, 2); // A-B and A-C only: B-C missing
+  strictEqual(lettersFit(incomplete), false);
+  strictEqual(cldAnnotations(cldFigure({}, incomplete)).length, 0);
+  strictEqual(lettersFit(cldComparisons), true);
+});
+
+// seq 178 (MCP): setting the letters options through titer_update_graph
+// lands in the stored graph options and the overlay draws them.
+check("seq 178 (MCP): update-graph with letters options stores them and the overlay draws them", async () => {
+  const harness = mcpLaggingHarness(true);
+  harness.dispatch({
+    type: "create",
+    node: { id: "t2", type: "table", name: "Groups", parentId: null, tableType: "column", data: { columns: ["Title", "A", "B", "C"], rows: [[null, "1", "2", "3"]] } },
+  });
+  harness.dispatch({
+    type: "create",
+    node: { id: "g1", type: "graph", name: "Columns", parentId: "t2", graphType: "individual", graphOptions: newGraphOptions("individual") },
+  });
+  harness.sync();
+  await harness.run("job-178-mcp", "update-graph", {
+    graph_id: "g1",
+    options: { lettersLocation: "outside", lettersIdentifier: "upper", lettersSize: 20 },
+  });
+  const stored = harness.state().nodes.g1.graphOptions!;
+  strictEqual(stored.lettersLocation, "outside");
+  strictEqual(stored.lettersIdentifier, "upper");
+  strictEqual(stored.lettersSize, 20);
+  const anns = cldAnnotations(cldFigure({ lettersLocation: stored.lettersLocation, lettersIdentifier: stored.lettersIdentifier, lettersSize: stored.lettersSize }));
+  deepStrictEqual(anns.map((a) => a.text), ["A", "B", "B"]);
+  ok(anns.every((a) => a.yref === "paper" && a.font?.size === 20), "the overlay draws the stored options");
+});
+
+// seq 178 (.hlx): the letters options survive a save/load round-trip —
+// the file reader keeps validated choices, clamped sizes and booleans.
+check("seq 178 (.hlx): the letters options round-trip through a saved project", () => {
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Columns",
+    parentId: "t1",
+    graphType: "individual",
+    graphOptions: {
+      ...newGraphOptions("individual"),
+      lettersLocation: "outside",
+      lettersDirection: "stacked",
+      lettersIdentifier: "numbers",
+      lettersFont: "arial",
+      lettersSize: 20,
+      lettersColor: "#ff0000",
+      lettersFontAuto: true,
+    },
+  };
+  const table: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Groups",
+    parentId: null,
+    tableType: "column",
+    data: { columns: ["Title", "A", "B", "C"], rows: [[null, "1", "2", "3"]] },
+  };
+  const payload: ProjectFilePayload = { nodes: { t1: table, g1: graph }, rootOrder: ["t1"], childOrder: { t1: ["g1"], g1: [] }, activeNodeId: "g1" };
+  const roundTripped = read(serializeProjectFile(payload));
+  strictEqual(roundTripped.updated, false);
+  const kept = roundTripped.project.nodes.g1.graphOptions!;
+  strictEqual(kept.lettersLocation, "outside");
+  strictEqual(kept.lettersDirection, "stacked");
+  strictEqual(kept.lettersIdentifier, "numbers");
+  strictEqual(kept.lettersFont, "arial");
+  strictEqual(kept.lettersSize, 20);
+  strictEqual(kept.lettersColor, "#ff0000");
+  strictEqual(kept.lettersFontAuto, true);
+});
+
+// seq 178 (Format panel): the letters controls render — location,
+// direction, labels, font, auto-size toggle and color — and outside the
+// graph the direction choice gives way to the stacked note (the size
+// stepper still shows: the size still applies to the outside rows).
+check("seq 178 (panel): the letters format controls render, and outside the graph the direction choice becomes the stacked note", () => {
+  const render = (options: GraphOptions) =>
+    renderToStaticMarkup(createElement(LettersFormatControls, { options, set: () => {} }));
+  const def = render(newGraphOptions("individual"));
+  for (const label of ["Location", "Direction", "Labels", "Font", "Font size", "Automatically determine the font size"]) {
+    ok(def.includes(label), `default controls lack “${label}”`);
+  }
+  ok(def.includes('type="color"'), "default controls lack the color picker");
+  const outside = render({ ...newGraphOptions("individual"), lettersLocation: "outside" });
+  ok(outside.includes("stack in one row per letter"), "outside lacks the stacked note");
+  ok(!outside.includes("Direction"), "outside still offers a direction choice");
+  ok(outside.includes("Font size"), "outside hides the size stepper");
+  const auto = render({ ...newGraphOptions("individual"), lettersFontAuto: true });
+  ok(!auto.includes("Font size"), "auto-size still shows the size stepper");
 });
 
 check("a group-pair sigPairs selection expands to per-row keys for the Format panel", () => {
@@ -25690,6 +28234,1162 @@ check("transform-data wizard asks for K only for the arithmetic functions", () =
   });
 });
 
+// ── Transform function library beyond arithmetic (1.9, seq 341) ──────────
+// Prism's remaining documented transforms: logit, probit, rank, zscore,
+// trig, ABS, Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10; the X/Y
+// cross-column functions; X transforms + interchange; per-data-set K;
+// error-bar handling on mean±SD/SEM tables; user-defined transforms via the
+// calcvars evaluator. Hand-computed fixtures (Python/scipy): logit is
+// ln(Y/(1−Y)); probit is Φ⁻¹(Y)+5; rank is average ranks, smallest = 1;
+// zscore is (v − mean)/sample-SD. Pre-fix these fail: the new function
+// names are not in TRANSFORM_FUNCTIONS yet, so the runner blanks them.
+
+check("transformValue applies the seq 341 pure functions (logit, probit, trig, ABS, powers, rounding)", () => {
+  const close = (a: number | null, b: number) => a !== null && Math.abs(a - b) < 1e-12;
+  // Logit: ln(Y/(1−Y)); undefined outside (0, 1).
+  ok(close(transformValue("logit" as never, 0.25), -1.0986122886681098));
+  strictEqual(transformValue("logit" as never, 0.5), 0);
+  ok(close(transformValue("logit" as never, 0.75), 1.0986122886681098));
+  ok(close(transformValue("logit" as never, 0.9), 2.1972245773362196));
+  strictEqual(transformValue("logit" as never, 0), null);
+  strictEqual(transformValue("logit" as never, 1), null);
+  strictEqual(transformValue("logit" as never, -0.1), null);
+  strictEqual(transformValue("logit" as never, 1.5), null);
+  // Probit: Φ⁻¹(Y)+5 (Acklam's approximation, error < 1.2e-9 — hence the
+  // looser 1e-6 here); undefined outside (0, 1).
+  const closeProbit = (a: number | null, b: number) => a !== null && Math.abs(a - b) < 1e-6;
+  strictEqual(transformValue("probit" as never, 0.5), 5);
+  ok(closeProbit(transformValue("probit" as never, 0.025), 3.0400360154599455));
+  ok(closeProbit(transformValue("probit" as never, 0.975), 6.959963984540054));
+  ok(closeProbit(transformValue("probit" as never, 0.001), 1.9097676938321868));
+  strictEqual(transformValue("probit" as never, 0), null);
+  strictEqual(transformValue("probit" as never, 1), null);
+  // Trig (radians): arcsin is undefined outside [−1, 1].
+  strictEqual(transformValue("sin" as never, 0), 0);
+  ok(close(transformValue("sin" as never, Math.PI / 2), 1));
+  strictEqual(transformValue("cos" as never, 0), 1);
+  ok(close(transformValue("tan" as never, Math.PI / 4), 1));
+  ok(close(transformValue("arcsin" as never, 0.5), Math.PI / 6));
+  strictEqual(transformValue("arcsin" as never, 2), null);
+  strictEqual(transformValue("arcsin" as never, -2), null);
+  // ABS and −log10.
+  strictEqual(transformValue("abs" as never, -3), 3);
+  strictEqual(transformValue("abs" as never, 0), 0);
+  strictEqual(transformValue("neg-log10" as never, 100), -2);
+  strictEqual(transformValue("neg-log10" as never, 0), null);
+  strictEqual(transformValue("neg-log10" as never, -1), null);
+  // Y rounded to K digits; K must be an integer 0–15.
+  ok(close(transformValue("round-k" as never, 1.23456, 2), 1.23));
+  ok(close(transformValue("round-k" as never, 3.14159, 2), 3.14));
+  strictEqual(transformValue("round-k" as never, 1.23456, 0), 1);
+  ok(close(transformValue("round-k" as never, 1.23456, 3), 1.235));
+  strictEqual(transformValue("round-k" as never, 1.23456), null);
+  strictEqual(transformValue("round-k" as never, 1.23456, 2.5), null);
+  strictEqual(transformValue("round-k" as never, 1.23456, 16), null);
+  // Y^K, 10^Y, 2^Y; a negative base to a non-integer power is undefined.
+  strictEqual(transformValue("y-power-k" as never, 2, 3), 8);
+  strictEqual(transformValue("y-power-k" as never, 4, 0.5), 2);
+  strictEqual(transformValue("y-power-k" as never, -2, 2), 4);
+  strictEqual(transformValue("y-power-k" as never, -2, 0.5), null);
+  strictEqual(transformValue("y-power-k" as never, 0, -1), null);
+  strictEqual(transformValue("y-power-k" as never, 2), null);
+  strictEqual(transformValue("ten-power-y" as never, 2), 100);
+  strictEqual(transformValue("ten-power-y" as never, 0), 1);
+  strictEqual(transformValue("ten-power-y" as never, 1000), null);
+  strictEqual(transformValue("two-power-y" as never, 3), 8);
+  strictEqual(transformValue("two-power-y" as never, 0), 1);
+  // Y+Random adds Gaussian noise (mean 0, SD = K) from the run's seeded
+  // generator: with a stub draw of 0.5 the shift is exactly 0.5·K, and
+  // without a generator (or K) there is nothing to add.
+  strictEqual(transformValue("y-plus-random" as never, 10, 2, undefined, "y", () => 0.5), 11);
+  strictEqual(transformValue("y-plus-random" as never, 10, 2), null);
+  strictEqual(transformValue("y-plus-random" as never, 10), null);
+  // Rank, zscore and user-defined are column/formula functions, not
+  // single-value ones: transformValue has no column to read, so it blanks.
+  strictEqual(transformValue("rank" as never, 3), null);
+  strictEqual(transformValue("zscore" as never, 3), null);
+  strictEqual(transformValue("user-defined" as never, 3), null);
+});
+
+check("transformValue applies the seq 341 cross-column functions against the paired X value", () => {
+  const close = (a: number | null, b: number) => a !== null && Math.abs(a - b) < 1e-12;
+  // role "y": value is Y, `other` is the paired X.
+  strictEqual(transformValue("y-divided-by-x" as never, 2, undefined, 10, "y"), 0.2);
+  strictEqual(transformValue("x-divided-by-y" as never, 2, undefined, 10, "y"), 5);
+  strictEqual(transformValue("y-minus-x" as never, 2, undefined, 10, "y"), -8);
+  strictEqual(transformValue("y-plus-x" as never, 2, undefined, 10, "y"), 12);
+  strictEqual(transformValue("y-times-x" as never, 2, undefined, 10, "y"), 20);
+  strictEqual(transformValue("x-minus-y" as never, 2, undefined, 10, "y"), 8);
+  // role "x": value is X, `other` is the paired Y — the same absolute
+  // (Y, X) formulas, so Y/X is 0.2 either way round.
+  strictEqual(transformValue("y-divided-by-x" as never, 10, undefined, 2, "x"), 0.2);
+  strictEqual(transformValue("x-divided-by-y" as never, 10, undefined, 2, "x"), 5);
+  // A missing paired value, or a division by a paired 0, blanks.
+  strictEqual(transformValue("y-divided-by-x" as never, 2), null);
+  strictEqual(transformValue("y-divided-by-x" as never, 2, undefined, 0, "y"), null);
+  strictEqual(transformValue("x-divided-by-y" as never, 0, undefined, 10, "y"), null);
+  // Pure functions ignore the paired value and the role.
+  ok(close(transformValue("log10" as never, 100, undefined, 999, "x"), 2));
+});
+
+check("transformValue applies the Hanes-Woolf transform (X/Y) (seq 381)", () => {
+  // role "y": value is Y, `other` is the paired X — X/Y.
+  strictEqual(transformValue("hanes-woolf" as never, 2, undefined, 10, "y"), 5);
+  strictEqual(transformValue("hanes-woolf" as never, 4, undefined, 2, "y"), 0.5);
+  // role "x": value is X, `other` is the paired Y — the same absolute
+  // (Y, X) formula, so X/Y is 5 either way round.
+  strictEqual(transformValue("hanes-woolf" as never, 10, undefined, 2, "x"), 5);
+  // Y = 0 (X/0) leaves the transformed Y blank, never Infinity; a missing
+  // paired value blanks too.
+  strictEqual(transformValue("hanes-woolf" as never, 0, undefined, 10, "y"), null);
+  strictEqual(transformValue("hanes-woolf" as never, 2), null);
+});
+
+check("transform-data applies the Hanes-Woolf transform on an XY table (seq 381)", async () => {
+  const xy: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1", "2"],
+      [null, "2", "4"],
+      [null, "4", "8"],
+    ],
+  };
+  const hw = await runAnalysis("transform-data", xy, { function: "hanes-woolf", x: "X" } as never);
+  if ("error" in hw) throw new Error(hw.error);
+  // The X column itself is the pairing source, not a Y column: no X entry.
+  strictEqual(hw.transformed?.length, 1);
+  deepStrictEqual(hw.transformed?.[0].values, [0.5, 0.5, 0.5]);
+  strictEqual(hw.subtitle, "Transform data — Hanes-Woolf");
+  // A Y = 0 row leaves its transformed Y blank.
+  const withZero: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1", "2"],
+      [null, "2", "0"],
+      [null, "4", "8"],
+    ],
+  };
+  const zero = await runAnalysis("transform-data", withZero, { function: "hanes-woolf", x: "X" } as never);
+  if ("error" in zero) throw new Error(zero.error);
+  deepStrictEqual(zero.transformed?.[0].values, [0.5, null, 0.5]);
+  // Without its X column it is a clean error, not a column of blanks.
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "hanes-woolf" } as never), {
+    error: "“Hanes-Woolf” needs the X column — name it in `x` and try again.",
+  });
+});
+
+check("transform-data wizard offers Hanes-Woolf on an XY table only (seq 381)", () => {
+  const wizard = WIZARDS["transform-data"]!;
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  if (fnOptions({}, plain).includes("hanes-woolf"))
+    throw new Error("did not expect hanes-woolf offered on a column table");
+  const xy = readTable({
+    columns: ["Title", "X", "Y"],
+    rows: [
+      ["", "1", "2"],
+      ["", "2", "4"],
+    ],
+  });
+  if (!fnOptions({}, xy, "xy").includes("hanes-woolf"))
+    throw new Error(`expected hanes-woolf offered on an XY table, got ${JSON.stringify(fnOptions({}, xy, "xy"))}`);
+  // The GUI path builds the same params the MCP path takes (run_analysis
+  // validates `function` against TRANSFORM_FUNCTIONS, which now lists it) —
+  // and the finish names the X column, because the cross function needs it.
+  deepStrictEqual(wizard.finish({ function: "hanes-woolf" }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "hanes-woolf", x: "X" },
+  });
+});
+
+check("transformValue applies Scatchard: Y becomes Y/X, X becomes the paired Y (seq 386)", () => {
+  // role "y": value is Y, `other` is the paired X — bound over free.
+  strictEqual(transformValue("scatchard" as never, 2, undefined, 10, "y"), 0.2);
+  strictEqual(transformValue("scatchard" as never, 8, undefined, 4, "y"), 2);
+  // role "x": value is X, `other` is the paired Y — the new X is bound.
+  strictEqual(transformValue("scatchard" as never, 10, undefined, 2, "x"), 2);
+  strictEqual(transformValue("scatchard" as never, 4, undefined, 8, "x"), 8);
+  // An X of 0 leaves the Y blank; a missing paired value blanks either way.
+  strictEqual(transformValue("scatchard" as never, 5, undefined, 0, "y"), null);
+  strictEqual(transformValue("scatchard" as never, 5, undefined, undefined, "y"), null);
+  strictEqual(transformValue("scatchard" as never, 5, undefined, undefined, "x"), null);
+});
+
+check("transform-data ranks and z-scores whole columns (seq 341)", async () => {
+  const table = (values: (number | string)[]): TableData => ({
+    columns: ["Title", "V"],
+    rows: values.map((v) => [null, String(v)]),
+  });
+  // Rank: smallest = 1, ties share the average rank ([3,1,3,2] → [3.5,1,3.5,2]).
+  const ranked = await runAnalysis("transform-data", table([3, 1, 3, 2]), { function: "rank" } as never);
+  if ("error" in ranked) throw new Error(ranked.error);
+  deepStrictEqual(ranked.transformed?.[0].values, [3.5, 1, 3.5, 2]);
+  strictEqual(ranked.subtitle, "Transform data — rank(Y)");
+  // Z-score: (v − mean)/sample-SD over the column's values.
+  const z = await runAnalysis("transform-data", table([1, 2, 3, 4, 5]), { function: "zscore" } as never);
+  if ("error" in z) throw new Error(z.error);
+  const close = (a: (number | null)[], b: number[]) =>
+    a.length === b.length && a.every((v, i) => v !== null && Math.abs(v - b[i]) < 1e-12);
+  ok(
+    close(z.transformed?.[0].values ?? [], [-1.2649110640673518, -0.6324555320336759, 0, 0.6324555320336759, 1.2649110640673518]),
+    `unexpected z-scores: ${JSON.stringify(z.transformed?.[0].values)}`,
+  );
+  // A single value, or a constant column (SD 0), has no z-score: blank.
+  const one = await runAnalysis("transform-data", table([7]), { function: "zscore" } as never);
+  if ("error" in one) throw new Error(one.error);
+  deepStrictEqual(one.transformed?.[0].values, [null]);
+  const flat = await runAnalysis("transform-data", table([5, 5, 5]), { function: "zscore" } as never);
+  if ("error" in flat) throw new Error(flat.error);
+  deepStrictEqual(flat.transformed?.[0].values, [null, null, null]);
+});
+
+check("transform-data applies the cross-column functions on an XY table (seq 341)", async () => {
+  const xy: TableData = {
+    columns: ["Title", "X", "A", "B"],
+    rows: [
+      [null, "10", "2", "10"],
+      [null, "20", "4", "20"],
+      [null, "30", "5", "30"],
+    ],
+  };
+  const close = (a: (number | null)[], b: number[]) =>
+    a.length === b.length && a.every((v, i) => v !== null && Math.abs(v - b[i]) < 1e-12);
+  const div = await runAnalysis("transform-data", xy, { function: "y-divided-by-x", x: "X" } as never);
+  if ("error" in div) throw new Error(div.error);
+  // The X column itself is the pairing source, not a Y column: no X entry.
+  strictEqual(div.transformed?.length, 2);
+  ok(close(div.transformed?.[0].values ?? [], [0.2, 0.2, 1 / 6]), `Y/X A: ${JSON.stringify(div.transformed?.[0].values)}`);
+  ok(close(div.transformed?.[1].values ?? [], [1, 1, 1]), `Y/X B: ${JSON.stringify(div.transformed?.[1].values)}`);
+  strictEqual(div.subtitle, "Transform data — Y/X");
+  const cross = await runAnalysis("transform-data", xy, { function: "x-divided-by-y", x: "X" } as never);
+  if ("error" in cross) throw new Error(cross.error);
+  deepStrictEqual(cross.transformed?.[0].values, [5, 5, 6]);
+  const minus = await runAnalysis("transform-data", xy, { function: "y-minus-x", x: "X" } as never);
+  if ("error" in minus) throw new Error(minus.error);
+  deepStrictEqual(minus.transformed?.[0].values, [-8, -16, -25]);
+  const times = await runAnalysis("transform-data", xy, { function: "y-times-x", x: "X" } as never);
+  if ("error" in times) throw new Error(times.error);
+  deepStrictEqual(times.transformed?.[0].values, [20, 80, 150]);
+  // A cross-column function without its X column is a clean error, not a
+  // column of blanks; a named-but-missing X column is named too.
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "y-divided-by-x" } as never), {
+    error: "“Y/X” needs the X column — name it in `x` and try again.",
+  });
+  const gone = await runAnalysis("transform-data", xy, { function: "y-divided-by-x", x: "Nope" } as never);
+  if (!("error" in gone) || !gone.error.includes("“Nope”"))
+    throw new Error(`expected the missing-X error, got ${JSON.stringify(gone)}`);
+});
+
+check("transform-data applies Scatchard on an XY table (seq 386)", async () => {
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "2"],
+      [null, "2", "4"],
+      [null, "4", "8"],
+      [null, "0", "5"],
+    ],
+  };
+  const out = await runAnalysis("transform-data", xy, { function: "scatchard", x: "X" } as never);
+  if ("error" in out) throw new Error(out.error);
+  // Two entries: the Y column (bound/free) first, then the X column (bound).
+  strictEqual(out.transformed?.length, 2);
+  strictEqual(out.transformed?.[0].column, "A");
+  deepStrictEqual(out.transformed?.[0].values, [2, 2, 2, null]);
+  strictEqual(out.transformed?.[1].column, "X");
+  deepStrictEqual(out.transformed?.[1].values, [2, 4, 8, 5]);
+  strictEqual(out.subtitle, "Transform data — Scatchard");
+  if (!out.notes.includes("display-only"))
+    throw new Error(`expected the display-only note, got ${JSON.stringify(out.notes)}`);
+  // The X=0 row's Y is blank, so it is excluded from the Y entry's N.
+  const nRow = out.stats.find((s) => s.label === "Scatchard(A) — N");
+  strictEqual(nRow?.value, 3);
+  const exRow = out.stats.find((s) => s.label === "Scatchard(A) — excluded");
+  strictEqual(exRow?.value, 1);
+  // Scatchard without its X column is a clean error, not a column of blanks.
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "scatchard" } as never), {
+    error: "“Scatchard” needs the X column — name it in `x` and try again.",
+  });
+  // An explicit X function conflicts with Scatchard's own X rewrite.
+  const clash = await runAnalysis("transform-data", xy, { function: "scatchard", x: "X", xFunction: "sqrt" } as never);
+  if (!("error" in clash) || !clash.error.includes("Scatchard"))
+    throw new Error(`expected the X-function clash error, got ${JSON.stringify(clash)}`);
+});
+
+check("transform-data transforms X and interchanges X/Y on an XY table (seq 341)", async () => {
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "10"],
+      [null, "4", "100"],
+      [null, "9", "1000"],
+    ],
+  };
+  const close = (a: (number | null)[], b: number[]) =>
+    a.length === b.length && a.every((v, i) => v !== null && Math.abs(v - b[i]) < 1e-12);
+  // The Y function applies to Y; the X function to X (one X entry, after
+  // the Y entries).
+  const both = await runAnalysis("transform-data", xy, { function: "log10", x: "X", xFunction: "sqrt" } as never);
+  if ("error" in both) throw new Error(both.error);
+  strictEqual(both.transformed?.length, 2);
+  deepStrictEqual(both.transformed?.[0].values, [1, 2, 3]);
+  ok(close(both.transformed?.[1].values ?? [], [1, 2, 3]), `sqrt(X): ${JSON.stringify(both.transformed?.[1].values)}`);
+  strictEqual(both.transformed?.[1].column, "X");
+  if (!both.notes.includes("X values transformed with sqrt(Y)."))
+    throw new Error(`expected the X-function note, got ${JSON.stringify(both.notes)}`);
+  // Interchange: the Y function applies to the old X values, the X function
+  // to the old Y values — the transform runs AFTER the swap, as in Prism.
+  const swapped = await runAnalysis("transform-data", xy, { function: "log10", x: "X", xFunction: "sqrt", interchange: true } as never);
+  if ("error" in swapped) throw new Error(swapped.error);
+  strictEqual(swapped.transformed?.length, 2);
+  ok(close(swapped.transformed?.[0].values ?? [], [0, 0.6020599913279624, 0.9542425094393249]), `log10(old X): ${JSON.stringify(swapped.transformed?.[0].values)}`);
+  strictEqual(swapped.transformed?.[0].column, "X");
+  ok(
+    close(swapped.transformed?.[1].values ?? [], [3.1622776601683795, 10, 31.622776601683793]),
+    `sqrt(old Y): ${JSON.stringify(swapped.transformed?.[1].values)}`,
+  );
+  strictEqual(swapped.transformed?.[1].column, "A");
+  if (!swapped.notes.includes("X and Y interchanged before transforming"))
+    throw new Error(`expected the interchange note, got ${JSON.stringify(swapped.notes)}`);
+  // Interchange without an X function passes the old Y values through
+  // unchanged (the swap itself is the transform).
+  const swapOnly = await runAnalysis("transform-data", xy, { function: "log10", x: "X", interchange: true } as never);
+  if ("error" in swapOnly) throw new Error(swapOnly.error);
+  strictEqual(swapOnly.transformed?.length, 2);
+  deepStrictEqual(swapOnly.transformed?.[1].values, [10, 100, 1000]);
+  strictEqual(swapOnly.transformed?.[1].label, "unchanged");
+  // Interchange needs the X column too.
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "log10", interchange: true } as never), {
+    error: "Interchange needs the X column — name it in `x` and try again.",
+  });
+});
+
+check("transform-data honours a per-data-set K (seq 341)", async () => {
+  const table: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      [null, "1", "1"],
+      [null, "2", "2"],
+    ],
+  };
+  const per = await runAnalysis("transform-data", table, { function: "y-times-k", constants: { A: 10, B: 100 } } as never);
+  if ("error" in per) throw new Error(per.error);
+  deepStrictEqual(per.transformed?.[0].values, [10, 20]);
+  deepStrictEqual(per.transformed?.[1].values, [100, 200]);
+  if (!per.notes.includes("K = 10 for data set “A”") || !per.notes.includes("K = 100 for data set “B”"))
+    throw new Error(`expected the per-set K note, got ${JSON.stringify(per.notes)}`);
+  // A set with no entry falls back to the single constant.
+  const mixed = await runAnalysis("transform-data", table, { function: "y-times-k", constant: 3, constants: { A: 10 } } as never);
+  if ("error" in mixed) throw new Error(mixed.error);
+  deepStrictEqual(mixed.transformed?.[0].values, [10, 20]);
+  deepStrictEqual(mixed.transformed?.[1].values, [3, 6]);
+  // A set with neither entry is a clean error naming the set, not blanks.
+  const missing = await runAnalysis("transform-data", table, { function: "y-times-k", constants: { A: 10 } } as never);
+  deepStrictEqual(missing, { error: "“Y×K” needs a constant K for data set “B” — enter one and try again." });
+  // Y+Random's K is the noise SD: it must be positive.
+  const badSd = await runAnalysis("transform-data", table, { function: "y-plus-random", constant: 0 } as never);
+  deepStrictEqual(badSd, { error: "“Y+Random” needs a constant K greater than 0 — K is the noise SD." });
+});
+
+check("transform-data handles error bars on a mean±SD/SEM table (seq 341)", async () => {
+  const summary: TableData = {
+    columns: ["Title", "A:Mean", "A:SD", "A:N", "B:Mean", "B:SD", "B:N"],
+    rows: [
+      [null, "10", "2", "5", "100", "10", "5"],
+      [null, "20", "4", "5", null, null, null],
+    ],
+    summaryFormat: "mean-sd-n",
+  };
+  const close = (a: (number | null)[], b: (number | null)[]) =>
+    a.length === b.length &&
+    a.every((v, i) => (b[i] === null ? v === null : v !== null && Math.abs(v - b[i]) < 1e-9));
+  // Mean-only is the default: the mean is transformed, the error bars and
+  // N pass through unchanged, and the descriptives cover the means only.
+  const meanOnly = await runAnalysis("transform-data", summary, { function: "log10" });
+  if ("error" in meanOnly) throw new Error(meanOnly.error);
+  deepStrictEqual(
+    meanOnly.transformed?.map((t) => t.column),
+    ["A:Mean", "A:SD", "A:N", "B:Mean", "B:SD", "B:N"],
+  );
+  ok(close(meanOnly.transformed?.[0].values ?? [], [1, 1.3010299956639813]), `A mean: ${JSON.stringify(meanOnly.transformed?.[0].values)}`);
+  deepStrictEqual(meanOnly.transformed?.[1].values, [2, 4]);
+  strictEqual(meanOnly.transformed?.[1].label, "unchanged");
+  deepStrictEqual(meanOnly.transformed?.[2].values, [5, 5]);
+  ok(close(meanOnly.transformed?.[3].values ?? [], [2, null]), `B mean: ${JSON.stringify(meanOnly.transformed?.[3].values)}`);
+  strictEqual(meanOnly.groups.length, 2, `descriptives should cover the two means only, got ${JSON.stringify(meanOnly.groups)}`);
+  if (!meanOnly.notes.includes("Error bars were left unchanged"))
+    throw new Error(`expected the mean-only note, got ${JSON.stringify(meanOnly.notes)}`);
+  // Erase: the error columns go away; N stays (it is a count, not an error bar).
+  const erased = await runAnalysis("transform-data", summary, { function: "log10", errorMode: "erase" } as never);
+  if ("error" in erased) throw new Error(erased.error);
+  deepStrictEqual(
+    erased.transformed?.map((t) => t.column),
+    ["A:Mean", "A:N", "B:Mean", "B:N"],
+  );
+  if (!erased.notes.includes("Error bars were erased"))
+    throw new Error(`expected the erase note, got ${JSON.stringify(erased.notes)}`);
+  // To-CI: each mean's 95% CI (t with N−1 df) is transformed at both ends,
+  // so the resulting interval is asymmetric; the SD columns are replaced by
+  // the CI bounds and N stays.
+  const ci = await runAnalysis("transform-data", summary, { function: "log10", errorMode: "to-ci" } as never);
+  if ("error" in ci) throw new Error(ci.error);
+  deepStrictEqual(
+    ci.transformed?.map((t) => t.column),
+    ["A:Mean", "A:Lower 95% CI", "A:Upper 95% CI", "A:N", "B:Mean", "B:Lower 95% CI", "B:Upper 95% CI", "B:N"],
+  );
+  ok(
+    close(ci.transformed?.[1].values ?? [], [0.8760255998486322, 1.1770555955126132]),
+    `A lower CI: ${JSON.stringify(ci.transformed?.[1].values)}`,
+  );
+  ok(
+    close(ci.transformed?.[2].values ?? [], [1.0963303816444274, 1.3973603773084085]),
+    `A upper CI: ${JSON.stringify(ci.transformed?.[2].values)}`,
+  );
+  ok(
+    close(ci.transformed?.[5].values ?? [], [1.9424216023001457, null]),
+    `B lower CI: ${JSON.stringify(ci.transformed?.[5].values)}`,
+  );
+  ok(
+    close(ci.transformed?.[6].values ?? [], [2.0508306005346855, null]),
+    `B upper CI: ${JSON.stringify(ci.transformed?.[6].values)}`,
+  );
+  if (!ci.notes.includes("converted to 95% confidence intervals"))
+    throw new Error(`expected the to-CI note, got ${JSON.stringify(ci.notes)}`);
+  // ±error bounds need no N: they convert directly.
+  const pm: TableData = {
+    columns: ["Title", "A:Mean", "A:+error", "A:−error"],
+    rows: [[null, "10", "2", "1"]],
+    summaryFormat: "mean-plus-minus",
+  };
+  const pmCi = await runAnalysis("transform-data", pm, { function: "log10", errorMode: "to-ci" } as never);
+  if ("error" in pmCi) throw new Error(pmCi.error);
+  ok(
+    close(pmCi.transformed?.[1].values ?? [], [0.9542425094393249]),
+    `±error lower CI: ${JSON.stringify(pmCi.transformed?.[1].values)}`,
+  );
+  ok(
+    close(pmCi.transformed?.[2].values ?? [], [1.0791812460476249]),
+    `±error upper CI: ${JSON.stringify(pmCi.transformed?.[2].values)}`,
+  );
+  // SEM without an N column has no t to use, so the 95% normal value
+  // (z = 1.96) stands in — and the notes say so.
+  const sem: TableData = {
+    columns: ["Title", "A:Mean", "A:SEM"],
+    rows: [[null, "10", String(2 / Math.sqrt(5))]],
+    summaryFormat: "mean-sem",
+  };
+  const semCi = await runAnalysis("transform-data", sem, { function: "log10", errorMode: "to-ci" } as never);
+  if ("error" in semCi) throw new Error(semCi.error);
+  ok(
+    close(semCi.transformed?.[1].values ?? [], [0.9162936205423272]),
+    `SEM lower CI: ${JSON.stringify(semCi.transformed?.[1].values)}`,
+  );
+  ok(
+    close(semCi.transformed?.[2].values ?? [], [1.070150401978776]),
+    `SEM upper CI: ${JSON.stringify(semCi.transformed?.[2].values)}`,
+  );
+  if (!semCi.notes.includes("z = 1.96"))
+    throw new Error(`expected the z-fallback note, got ${JSON.stringify(semCi.notes)}`);
+  // An error mode on a table with no error bars changes nothing — and says so.
+  const plain = await runAnalysis(
+    "transform-data",
+    { columns: ["Title", "V"], rows: [[null, "1"], [null, "10"]] },
+    { function: "log10", errorMode: "erase" } as never,
+  );
+  if ("error" in plain) throw new Error(plain.error);
+  if (!plain.notes.includes("No error bars in this table"))
+    throw new Error(`expected the no-error-bars note, got ${JSON.stringify(plain.notes)}`);
+});
+
+check("transform-data refuses the combinations it cannot do honestly (seq 341)", async () => {
+  // Interchange and error-bar handling cannot be combined: the swap would
+  // leave the error structure without a home.
+  const summary: TableData = {
+    columns: ["Title", "A:Mean", "A:SD", "A:N"],
+    rows: [[null, "10", "2", "5"]],
+    summaryFormat: "mean-sd-n",
+  };
+  const swapped = await runAnalysis("transform-data", summary, { function: "log10", x: "A:Mean", interchange: true } as never);
+  if (!("error" in swapped) || !swapped.error.includes("cannot be combined"))
+    throw new Error(`expected the interchange+error-bars error, got ${JSON.stringify(swapped)}`);
+  // Rank/zscore cannot convert error bars to CIs: ranking a bound is not
+  // an interval.
+  const ranked = await runAnalysis("transform-data", summary, { function: "rank", errorMode: "to-ci" } as never);
+  if (!("error" in ranked) || !ranked.error.includes("cannot convert error bars"))
+    throw new Error(`expected the rank+to-ci error, got ${JSON.stringify(ranked)}`);
+  // A user-defined transform is a Y function, not an X function.
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [[null, "10", "1"]],
+  };
+  const xUser = await runAnalysis("transform-data", xy, { function: "log10", x: "X", xFunction: "user-defined" } as never);
+  if (!("error" in xUser) || !xUser.error.includes("applies to the Y values"))
+    throw new Error(`expected the user-defined-X error, got ${JSON.stringify(xUser)}`);
+});
+
+check("transform-data applies a user-defined transform through the calcvars evaluator (seq 341)", async () => {
+  const table: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      [null, "1", "10"],
+      [null, "2", "20"],
+      [null, "3", "30"],
+    ],
+  };
+  // IF/AND/OR/NOT and comparisons come from the evaluator, not a second language.
+  const cond = await runAnalysis("transform-data", table, { function: "user-defined", formula: "IF(Y<2, Y, Y*10)" } as never);
+  if ("error" in cond) throw new Error(cond.error);
+  deepStrictEqual(cond.transformed?.[0].values, [1, 20, 30]);
+  deepStrictEqual(cond.transformed?.[1].values, [100, 200, 300]);
+  // Designators: <B> applies only to B; <~A> to every set except A; a line
+  // with no designator applies to all sets. First matching line wins.
+  const scoped = await runAnalysis("transform-data", table, { function: "user-defined", formula: "<B> Y*2; Y+100" } as never);
+  if ("error" in scoped) throw new Error(scoped.error);
+  deepStrictEqual(scoped.transformed?.[0].values, [101, 102, 103]);
+  deepStrictEqual(scoped.transformed?.[1].values, [20, 40, 60]);
+  const except = await runAnalysis("transform-data", table, { function: "user-defined", formula: "<~A> Y*2" } as never);
+  if ("error" in except) throw new Error(except.error);
+  deepStrictEqual(except.transformed?.[0].values, [1, 2, 3]);
+  strictEqual(except.transformed?.[0].label, "unchanged");
+  deepStrictEqual(except.transformed?.[1].values, [20, 40, 60]);
+  // A column name is a variable (the row's value in that column); X reads
+  // the paired X value.
+  const named = await runAnalysis("transform-data", table, { function: "user-defined", formula: "B*2" } as never);
+  if ("error" in named) throw new Error(named.error);
+  deepStrictEqual(named.transformed?.[0].values, [20, 40, 60]);
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "10", "1"],
+      [null, "20", "2"],
+      [null, "30", "3"],
+    ],
+  };
+  const withX = await runAnalysis("transform-data", xy, { function: "user-defined", formula: "Y+X", x: "X" } as never);
+  if ("error" in withX) throw new Error(withX.error);
+  deepStrictEqual(withX.transformed?.[0].values, [11, 22, 33]);
+  // An impossible transform leaves the value blank, as in Prism (dividing
+  // by zero blanks the row); an unknown variable is a clean error naming it.
+  const blank = await runAnalysis("transform-data", table, { function: "user-defined", formula: "Y/0" } as never);
+  if ("error" in blank) throw new Error(blank.error);
+  deepStrictEqual(blank.transformed?.[0].values, [null, null, null]);
+  strictEqual(blank.transformed?.[0].excluded, 3);
+  const unknown = await runAnalysis("transform-data", table, { function: "user-defined", formula: "Y+ZZZ" } as never);
+  if (!("error" in unknown) || !unknown.error.includes("“ZZZ”"))
+    throw new Error(`expected the unknown-variable error, got ${JSON.stringify(unknown)}`);
+  const noFormula = await runAnalysis("transform-data", table, { function: "user-defined" } as never);
+  if (!("error" in noFormula) || !noFormula.error.includes("formula"))
+    throw new Error(`expected the missing-formula error, got ${JSON.stringify(noFormula)}`);
+});
+
+check("transform-data Y+Random is deterministic: the same run twice gives the same values (seq 341)", async () => {
+  const table: TableData = {
+    columns: ["Title", "V"],
+    rows: [[null, "10"], [null, "20"], [null, "30"], [null, "40"]],
+  };
+  const params = { function: "y-plus-random", constant: 1 } as never;
+  const first = await runAnalysis("transform-data", table, params);
+  if ("error" in first) throw new Error(first.error);
+  const second = await runAnalysis("transform-data", table, params);
+  if ("error" in second) throw new Error(second.error);
+  deepStrictEqual(second.transformed?.[0].values, first.transformed?.[0].values);
+  // The noise moved the values (and not all by the same amount).
+  const values = first.transformed?.[0].values ?? [];
+  ok(values.every((v) => v !== null), `expected numbers, got ${JSON.stringify(values)}`);
+  ok(values.some((v, i) => v !== null && v !== [10, 20, 30, 40][i]), "expected the noise to move a value");
+  if (!first.notes.includes("fixed seed"))
+    throw new Error(`expected the fixed-seed note, got ${JSON.stringify(first.notes)}`);
+  // The exact noise: mulberry32 (seed 341) uniforms through Box-Muller,
+  // one draw per value in row order — hand-computed in Python from the
+  // same algorithm (the mirror matches the implementation bit-for-bit).
+  const close = (a: (number | null)[], b: number[]) =>
+    a.length === b.length && a.every((v, i) => v !== null && Math.abs(v - b[i]) < 1e-12);
+  ok(
+    close(first.transformed?.[0].values ?? [], [11.669504704513379, 18.75781711135121, 30.33879947647709, 39.58483186321247]),
+    `unexpected Y+Random values: ${JSON.stringify(first.transformed?.[0].values)}`,
+  );
+});
+
+check("rankValues and zscoreValues compute the column functions directly (seq 341)", () => {
+  deepStrictEqual(rankValues([3, 1, 3, 2]), [3.5, 1, 3.5, 2]);
+  deepStrictEqual(rankValues([null, 2, 1]), [null, 2, 1]);
+  deepStrictEqual(rankValues([]), []);
+  const close = (a: (number | null)[], b: (number | null)[]) =>
+    a.length === b.length &&
+    a.every((v, i) => (b[i] === null ? v === null : v !== null && Math.abs(v - b[i]) < 1e-12));
+  ok(close(zscoreValues([1, 2, 3, 4, 5]), [-1.2649110640673518, -0.6324555320336759, 0, 0.6324555320336759, 1.2649110640673518]));
+  ok(close(zscoreValues([null, 1, 3]), [null, -0.7071067811865476, 0.7071067811865476]));
+  deepStrictEqual(zscoreValues([5]), [null]);
+  deepStrictEqual(zscoreValues([5, 5, 5]), [null, null, null]);
+  // The seeded generator is deterministic per seed, and different seeds
+  // draw differently.
+  const a = seededGaussian(341);
+  const b = seededGaussian(341);
+  const c = seededGaussian(342);
+  deepStrictEqual([a(), a(), a()], [b(), b(), b()]);
+  ok(a() !== c(), "expected a different seed to draw differently");
+});
+
+check("transform-data wizard offers the seq 341 functions and builds the seq 341 params", () => {
+  const wizard = WIZARDS["transform-data"]!;
+  const ids = (a: Record<string, string | number>, table: Dataset, type?: TableType) =>
+    wizard.questions(a, table, type).filter(Boolean).map((q) => (q as Question).id);
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  // A plain column table: the new pure functions are offered, the
+  // cross-column ones are not (there is no X column to pair with).
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  const plainFns = fnOptions({}, plain);
+  for (const fn of ["logit", "probit", "rank", "zscore", "sin", "cos", "tan", "arcsin", "abs", "y-plus-random", "round-k", "y-power-k", "ten-power-y", "two-power-y", "neg-log10", "user-defined"])
+    if (!plainFns.includes(fn)) throw new Error(`expected ${fn} offered on a column table, got ${JSON.stringify(plainFns)}`);
+  for (const fn of ["x-divided-by-y", "y-divided-by-x", "y-minus-x", "y-plus-x", "y-times-x", "x-minus-y"])
+    if (plainFns.includes(fn)) throw new Error(`did not expect ${fn} offered on a column table`);
+  deepStrictEqual(ids({ function: "round-k" }, plain), ["function", "constant"]);
+  deepStrictEqual(ids({ function: "user-defined" }, plain), ["function", "formula"]);
+  deepStrictEqual(ids({ function: "y-plus-random" }, plain), ["function", "constant"]);
+  // A K that round-k cannot use is refused by the constant question.
+  const kQ = wizard.questions({ function: "round-k" }, plain).find((qq) => qq && (qq as Question).id === "constant") as
+    | { validate?: (v: number) => string | undefined }
+    | undefined;
+  if (!kQ?.validate) throw new Error("expected a constant question with validation for round-k");
+  if (kQ.validate(2) !== undefined) throw new Error("expected K = 2 to validate for round-k");
+  if (kQ.validate(2.5) === undefined) throw new Error("expected K = 2.5 to fail validation for round-k");
+  if (kQ.validate(16) === undefined) throw new Error("expected K = 16 to fail validation for round-k");
+  // The GUI path builds the same params the MCP path takes: a user-defined
+  // transform from the wizard runs identically to one passed directly.
+  deepStrictEqual(wizard.finish({ function: "user-defined", formula: "Y*2" }, plain), {
+    type: "transform-data",
+    params: { function: "user-defined", formula: "Y*2" },
+  });
+  // An XY table offers the cross-column functions, asks about X, and the
+  // finish names the X column (the cross function needs it).
+  const xy = readTable({
+    columns: ["Title", "X", "A"],
+    rows: [["", "10", "1"], ["", "20", "2"]],
+  });
+  const xyFns = fnOptions({}, xy, "xy");
+  if (!xyFns.includes("y-divided-by-x")) throw new Error(`expected y-divided-by-x offered on an XY table`);
+  deepStrictEqual(ids({ function: "log10" }, xy, "xy"), ["function", "transformX", "interchange"]);
+  deepStrictEqual(ids({ function: "log10", transformX: "yes" }, xy, "xy"), ["function", "transformX", "xFunction", "interchange"]);
+  deepStrictEqual(wizard.finish({ function: "y-divided-by-x" }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "y-divided-by-x", x: "X" },
+  });
+  deepStrictEqual(wizard.finish({ function: "log10", transformX: "yes", xFunction: "sqrt", interchange: "no" }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "log10", x: "X", xFunction: "sqrt" },
+  });
+  // Per-data-set K: two sets, per-dataset mode asks one K per set and the
+  // finish keys them by data-set name.
+  const two = readTable({ columns: ["Title", "A", "B"], rows: [["", "1", "1"], ["", "2", "2"]] });
+  deepStrictEqual(ids({ function: "y-times-k" }, two), ["sets", "function", "kMode", "constant"]);
+  deepStrictEqual(ids({ function: "y-times-k", kMode: "per-dataset" }, two), ["sets", "function", "kMode", "k_0", "k_1"]);
+  deepStrictEqual(
+    wizard.finish({ function: "y-times-k", kMode: "per-dataset", k_0: 10, k_1: 100, sets: ["A", "B"] }, two),
+    { type: "transform-data", params: { function: "y-times-k", constants: { A: 10, B: 100 }, sets: ["A", "B"] } },
+  );
+  deepStrictEqual(
+    wizard.finish({ function: "y-times-k", kMode: "same", constant: 5, sets: ["A", "B"] }, two),
+    { type: "transform-data", params: { function: "y-times-k", constant: 5, sets: ["A", "B"] } },
+  );
+  // A summary table asks how the error bars are handled.
+  const summary = readTable({
+    columns: ["Title", "A:Mean", "A:SD", "A:N"],
+    rows: [["", "10", "2", "5"]],
+    groups: 1,
+    replicates: 3,
+    summaryFormat: "mean-sd-n",
+  });
+  deepStrictEqual(ids({ function: "log10" }, summary), ["function", "errorMode"]);
+  deepStrictEqual(wizard.finish({ function: "log10", errorMode: "to-ci" }, summary), {
+    type: "transform-data",
+    params: { function: "log10", errorMode: "to-ci" },
+  });
+});
+
+// ── Lineweaver-Burk transform (1.9, seq 384) ──────────────────────────────
+// Prism's double-reciprocal re-plot for enzyme kinetics: X becomes 1/X and
+// Y becomes 1/Y, display-only (Prism: use it to display data, never as a
+// first step in analysis). The Y side is the new `lineweaver-burk` function
+// (a reciprocal under its own name); the X side reuses the existing `xFn`
+// path with `reciprocal`. Hand-computed fixture: X=[1,2,4], Y=[2,4,8] →
+// X'=[1,0.5,0.25], Y'=[0.5,0.25,0.125]; a zero row leaves that transformed
+// value blank. Pre-fix these fail: the name is not in TRANSFORM_FUNCTIONS
+// yet, so the runner blanks it.
+
+check("transformValue and transform-data apply the Lineweaver-Burk double-reciprocal re-plot (seq 384)", async () => {
+  // One value: the reciprocal, blank for 0.
+  strictEqual(transformValue("lineweaver-burk" as never, 2), 0.5);
+  strictEqual(transformValue("lineweaver-burk" as never, 4), 0.25);
+  strictEqual(transformValue("lineweaver-burk" as never, 1), 1);
+  strictEqual(transformValue("lineweaver-burk" as never, -2), -0.5);
+  strictEqual(transformValue("lineweaver-burk" as never, 0), null);
+  // The full re-plot: Y through `lineweaver-burk`, X through the existing
+  // `xFn` path with `reciprocal` — Y entries first, then the X entry.
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "2"],
+      [null, "2", "4"],
+      [null, "4", "8"],
+    ],
+  };
+  const lb = await runAnalysis("transform-data", xy, { function: "lineweaver-burk", x: "X", xFunction: "reciprocal" } as never);
+  if ("error" in lb) throw new Error(lb.error);
+  strictEqual(lb.transformed?.length, 2);
+  deepStrictEqual(lb.transformed?.[0].values, [0.5, 0.25, 0.125]);
+  strictEqual(lb.transformed?.[0].column, "A");
+  deepStrictEqual(lb.transformed?.[1].values, [1, 0.5, 0.25]);
+  strictEqual(lb.transformed?.[1].column, "X");
+  strictEqual(lb.subtitle, "Transform data — Lineweaver-Burk");
+  if (!lb.notes.includes("X values transformed with 1/Y."))
+    throw new Error(`expected the X-function note, got ${JSON.stringify(lb.notes)}`);
+  // A zero row leaves that transformed value blank, on both sides.
+  const zero: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "0", "0"],
+      [null, "1", "2"],
+    ],
+  };
+  const zb = await runAnalysis("transform-data", zero, { function: "lineweaver-burk", x: "X", xFunction: "reciprocal" } as never);
+  if ("error" in zb) throw new Error(zb.error);
+  deepStrictEqual(zb.transformed?.[0].values, [null, 0.5]);
+  strictEqual(zb.transformed?.[0].excluded, 1);
+  deepStrictEqual(zb.transformed?.[1].values, [null, 1]);
+  strictEqual(zb.transformed?.[1].excluded, 1);
+  // `lineweaver-burk` is also offered as an X function itself (same values
+  // as `reciprocal` there); without an X function the X column is simply
+  // left out, not transformed.
+  const asX = await runAnalysis("transform-data", xy, { function: "log10", x: "X", xFunction: "lineweaver-burk" } as never);
+  if ("error" in asX) throw new Error(asX.error);
+  deepStrictEqual(asX.transformed?.[1].values, [1, 0.5, 0.25]);
+  strictEqual(asX.transformed?.[1].label, "Lineweaver-Burk");
+  const yOnly = await runAnalysis("transform-data", xy, { function: "lineweaver-burk", x: "X" } as never);
+  if ("error" in yOnly) throw new Error(yOnly.error);
+  strictEqual(yOnly.transformed?.length, 1);
+  deepStrictEqual(yOnly.transformed?.[0].values, [0.5, 0.25, 0.125]);
+});
+
+check("transform-data wizard offers Lineweaver-Burk and builds its params (seq 384)", async () => {
+  const wizard = WIZARDS["transform-data"]!;
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  if (!fnOptions({}, plain).includes("lineweaver-burk"))
+    throw new Error(`expected lineweaver-burk offered on a column table`);
+  const xy = readTable({
+    columns: ["Title", "X", "A"],
+    rows: [
+      ["", "1", "2"],
+      ["", "2", "4"],
+      ["", "4", "8"],
+    ],
+  });
+  if (!fnOptions({}, xy, "xy").includes("lineweaver-burk"))
+    throw new Error(`expected lineweaver-burk offered on an XY table`);
+  // The GUI path builds the same params the MCP path takes.
+  deepStrictEqual(
+    wizard.finish({ function: "lineweaver-burk", transformX: "yes", xFunction: "reciprocal", interchange: "no" }, xy, "xy"),
+    {
+      type: "transform-data",
+      params: { function: "lineweaver-burk", x: "X", xFunction: "reciprocal" },
+    },
+  );
+  // ...and those params run identically to the ones passed directly.
+  const viaGui = await runAnalysis(
+    "transform-data",
+    { columns: ["Title", "X", "A"], rows: [[null, "1", "2"], [null, "2", "4"], [null, "4", "8"]] },
+    wizard.finish({ function: "lineweaver-burk", transformX: "yes", xFunction: "reciprocal", interchange: "no" }, xy, "xy")
+      .params as never,
+  );
+  if ("error" in viaGui) throw new Error(viaGui.error);
+  deepStrictEqual(viaGui.transformed?.[0].values, [0.5, 0.25, 0.125]);
+  deepStrictEqual(viaGui.transformed?.[1].values, [1, 0.5, 0.25]);
+});
+
+// ── Log-log transform (1.9, seq 385) ──────────────────────────────────────
+// Prism's Log-log (Transform data — Transforms for pharmacology and
+// biochemistry): X becomes log10(X), Y becomes log10(Y) — a display-only
+// re-plot. The Y side reuses log10; the X side goes through the existing
+// xFn path with log10 (the wizard pairs them by default; an MCP caller
+// passes xFunction: "log10"). A value ≤ 0 leaves that transformed value
+// blank, like log10. Pre-fix these fail: "log-log" is not in
+// TRANSFORM_FUNCTIONS yet, so the runner blanks it.
+check("transform-data log-log transforms both axes (seq 385)", async () => {
+  // log-log is log10, one value at a time — undefined for values ≤ 0.
+  strictEqual(transformValue("log-log" as never, 100), 2);
+  strictEqual(transformValue("log-log" as never, 1), 0);
+  strictEqual(transformValue("log-log" as never, 0), null);
+  strictEqual(transformValue("log-log" as never, -10), null);
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "10"],
+      [null, "10", "100"],
+      [null, "100", "1000"],
+    ],
+  };
+  // The scope fixture: X=[1,10,100], Y=[10,100,1000] → X'=[0,1,2], Y'=[1,2,3].
+  const both = await runAnalysis("transform-data", xy, { function: "log-log", x: "X", xFunction: "log10" } as never);
+  if ("error" in both) throw new Error(both.error);
+  strictEqual(both.transformed?.length, 2);
+  deepStrictEqual(both.transformed?.[0].values, [1, 2, 3]);
+  strictEqual(both.transformed?.[0].column, "A");
+  deepStrictEqual(both.transformed?.[1].values, [0, 1, 2]);
+  strictEqual(both.transformed?.[1].column, "X");
+  strictEqual(both.subtitle, "Transform data — log-log");
+  // A zero/negative row leaves that transformed value blank, on both axes.
+  const gapped: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "10"],
+      [null, "0", "0"],
+      [null, "-10", "1000"],
+    ],
+  };
+  const blank = await runAnalysis("transform-data", gapped, { function: "log-log", x: "X", xFunction: "log10" } as never);
+  if ("error" in blank) throw new Error(blank.error);
+  deepStrictEqual(blank.transformed?.[0].values, [1, null, 3]);
+  strictEqual(blank.transformed?.[0].excluded, 1);
+  deepStrictEqual(blank.transformed?.[1].values, [0, null, null]);
+  strictEqual(blank.transformed?.[1].excluded, 2);
+  // Without an X function the X column is left alone (the MCP contract:
+  // an omitted xFunction leaves X unchanged) — one Y entry only.
+  const yOnly = await runAnalysis("transform-data", xy, { function: "log-log", x: "X" } as never);
+  if ("error" in yOnly) throw new Error(yOnly.error);
+  strictEqual(yOnly.transformed?.length, 1);
+  deepStrictEqual(yOnly.transformed?.[0].values, [1, 2, 3]);
+  // The GUI path builds the same params the MCP path takes: picking log-log
+  // pairs the X values with log10 by default, and the run gives the same
+  // values either way.
+  const wizard = WIZARDS["transform-data"]!;
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  // The wizard reads a Dataset (readTable), not the runner's TableData.
+  const xyData = readTable({
+    columns: ["Title", "X", "A"],
+    rows: [
+      ["", "1", "10"],
+      ["", "10", "100"],
+      ["", "100", "1000"],
+    ],
+  });
+  if (!fnOptions({}, xyData, "xy").includes("log-log")) throw new Error("expected log-log offered on an XY table");
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  if (!fnOptions({}, plain).includes("log-log")) throw new Error("expected log-log offered on a column table");
+  deepStrictEqual(wizard.finish({ function: "log-log" }, xyData, "xy"), {
+    type: "transform-data",
+    params: { function: "log-log", x: "X", xFunction: "log10" },
+  });
+  deepStrictEqual(wizard.finish({ function: "log-log", transformX: "no", interchange: "no" }, xyData, "xy"), {
+    type: "transform-data",
+    params: { function: "log-log", x: "X" },
+  });
+  const finished = wizard.finish({ function: "log-log" }, xyData, "xy");
+  const viaWizard = await runAnalysis("transform-data", xy, finished.params as never);
+  if ("error" in viaWizard) throw new Error(viaWizard.error);
+  deepStrictEqual(viaWizard.transformed, both.transformed);
+});
+
+// ── Hill plot transform (1.9, seq 383) ────────────────────────────────────
+// Prism's pharmacology re-plot: Y becomes log10(Y/(Ymax−Y)) — Prism prompts
+// for Ymax — and X becomes log10(X) unless the data were entered as
+// log(concentration). Y ≤ 0 or Y ≥ Ymax leaves the transformed Y blank (the
+// log of a non-positive number has no value). Hand-computed fixture:
+// X=[1,10,100], Y=[10,50,90], Ymax=100 → X'=[0,1,2],
+// Y'=[log10(1/9), 0, log10(9)] ≈ [−0.9542, 0, 0.9542]. Pre-fix these fail:
+// "hill-plot" is not in TRANSFORM_FUNCTIONS yet, so the runner blanks it.
+
+check("transformValue applies the Hill plot (seq 383)", () => {
+  const close = (a: number | null, b: number) => a !== null && Math.abs(a - b) < 1e-12;
+  // log10(Y/(Ymax−Y)) with Ymax = 100: Y=10 → log10(1/9), Y=50 → 0,
+  // Y=90 → log10(9).
+  ok(close(transformValue("hill-plot" as never, 10, undefined, undefined, "y", undefined, 100), -0.9542425094393249));
+  strictEqual(transformValue("hill-plot" as never, 50, undefined, undefined, "y", undefined, 100), 0);
+  ok(close(transformValue("hill-plot" as never, 90, undefined, undefined, "y", undefined, 100), 0.9542425094393249));
+  // Y ≤ 0 or Y ≥ Ymax has no Hill value; without a Ymax there is nothing
+  // to divide by (the runner refuses such a run outright; this is the backstop).
+  strictEqual(transformValue("hill-plot" as never, 0, undefined, undefined, "y", undefined, 100), null);
+  strictEqual(transformValue("hill-plot" as never, 100, undefined, undefined, "y", undefined, 100), null);
+  strictEqual(transformValue("hill-plot" as never, 120, undefined, undefined, "y", undefined, 100), null);
+  strictEqual(transformValue("hill-plot" as never, -5, undefined, undefined, "y", undefined, 100), null);
+  strictEqual(transformValue("hill-plot" as never, 50, undefined, undefined, "y", undefined, undefined), null);
+  strictEqual(transformValue("hill-plot" as never, 50, undefined, undefined, "y", undefined, 0), null);
+});
+
+check("transform-data runs the Hill plot on an XY table (seq 383)", async () => {
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "10"],
+      [null, "10", "50"],
+      [null, "100", "90"],
+    ],
+  };
+  const close = (a: (number | null)[], b: number[]) =>
+    a.length === b.length && a.every((v, i) => v !== null && Math.abs(v - b[i]) < 1e-12);
+  // Concentrations by default: X becomes log10(X), Y becomes
+  // log10(Y/(Ymax−Y)) — one Y entry, then one X entry.
+  const out = await runAnalysis("transform-data", xy, { function: "hill-plot", ymax: 100, x: "X" } as never);
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.subtitle, "Transform data — Hill plot");
+  strictEqual(out.transformed?.length, 2);
+  ok(close(out.transformed?.[0].values ?? [], [-0.9542425094393249, 0, 0.9542425094393249]), `Hill Y: ${JSON.stringify(out.transformed?.[0].values)}`);
+  strictEqual(out.transformed?.[0].column, "A");
+  deepStrictEqual(out.transformed?.[1].values, [0, 1, 2]);
+  strictEqual(out.transformed?.[1].column, "X");
+  // Entered as log(concentration): X is unchanged (passed through, not
+  // logged), Y transforms exactly as above.
+  const logged = await runAnalysis("transform-data", xy, { function: "hill-plot", ymax: 100, x: "X", xIsLog: true } as never);
+  if ("error" in logged) throw new Error(logged.error);
+  strictEqual(logged.transformed?.length, 2);
+  ok(close(logged.transformed?.[0].values ?? [], [-0.9542425094393249, 0, 0.9542425094393249]), `Hill Y (xIsLog): ${JSON.stringify(logged.transformed?.[0].values)}`);
+  deepStrictEqual(logged.transformed?.[1].values, [1, 10, 100]);
+  strictEqual(logged.transformed?.[1].column, "X");
+  strictEqual(logged.transformed?.[1].label, "unchanged");
+  if (!logged.notes.includes("log(concentration), so they were left unchanged"))
+    throw new Error(`expected the xIsLog note, got ${JSON.stringify(logged.notes)}`);
+  // A Y of 0 or Ymax leaves that row blank and is counted, never NaN.
+  const blanks: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "0"],
+      [null, "10", "50"],
+      [null, "100", "100"],
+    ],
+  };
+  const blanked = await runAnalysis("transform-data", blanks, { function: "hill-plot", ymax: 100, x: "X" } as never);
+  if ("error" in blanked) throw new Error(blanked.error);
+  deepStrictEqual(blanked.transformed?.[0].values, [null, 0, null]);
+  strictEqual(blanked.transformed?.[0].excluded, 2);
+  if (!blanked.notes.includes("undefined for Y ≤ 0 or Y ≥ Ymax"))
+    throw new Error(`expected the blank reason in the notes, got ${JSON.stringify(blanked.notes)}`);
+  // Without an X column the Y values still transform — only Y is reported.
+  const columnTable: TableData = {
+    columns: ["Title", "A"],
+    rows: [
+      [null, "10"],
+      [null, "50"],
+      [null, "90"],
+    ],
+  };
+  const yOnly = await runAnalysis("transform-data", columnTable, { function: "hill-plot", ymax: 100 } as never);
+  if ("error" in yOnly) throw new Error(yOnly.error);
+  strictEqual(yOnly.transformed?.length, 1);
+  ok(close(yOnly.transformed?.[0].values ?? [], [-0.9542425094393249, 0, 0.9542425094393249]), `Hill Y only: ${JSON.stringify(yOnly.transformed?.[0].values)}`);
+  // A missing Ymax, or one that is not greater than 0, is a clean error —
+  // never a column of blanks.
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "hill-plot", x: "X" } as never), {
+    error: "“Hill plot” needs a Ymax — enter one and try again.",
+  });
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "hill-plot", ymax: 0, x: "X" } as never), {
+    error: "“Hill plot” needs a Ymax greater than 0.",
+  });
+});
+
+check("transform-data wizard offers the Hill plot and builds its params (seq 383)", () => {
+  const wizard = WIZARDS["transform-data"]!;
+  const ids = (a: Record<string, string | number>, table: Dataset, type?: TableType) =>
+    wizard.questions(a, table, type).filter(Boolean).map((q) => (q as Question).id);
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  // Offered on a plain column table (Y transforms without an X column) and
+  // on an XY table.
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  if (!fnOptions({}, plain).includes("hill-plot")) throw new Error("expected hill-plot offered on a column table");
+  const xy = readTable({
+    columns: ["Title", "X", "A"],
+    rows: [["", "10", "1"], ["", "20", "2"]],
+  });
+  if (!fnOptions({}, xy, "xy").includes("hill-plot")) throw new Error("expected hill-plot offered on an XY table");
+  // A plain table asks for Ymax and nothing else; an XY table asks for
+  // Ymax and the X units — the generic X-function and interchange questions
+  // are hidden for the Hill plot (xIsLog governs X).
+  deepStrictEqual(ids({ function: "hill-plot" }, plain), ["function", "ymax"]);
+  deepStrictEqual(ids({ function: "hill-plot" }, xy, "xy"), ["function", "ymax", "xUnits"]);
+  // A Ymax of 0 or less is refused by the Ymax question.
+  const ymaxQ = wizard.questions({ function: "hill-plot" }, plain).find((qq) => qq && (qq as Question).id === "ymax") as
+    | { validate?: (v: number) => string | undefined }
+    | undefined;
+  if (!ymaxQ?.validate) throw new Error("expected a Ymax question with validation for hill-plot");
+  if (ymaxQ.validate(100) !== undefined) throw new Error("expected Ymax = 100 to validate for hill-plot");
+  if (ymaxQ.validate(0) === undefined) throw new Error("expected Ymax = 0 to fail validation for hill-plot");
+  if (ymaxQ.validate(-5) === undefined) throw new Error("expected Ymax = -5 to fail validation for hill-plot");
+  // The GUI path builds the same params the MCP path takes: concentrations
+  // (the default) name the X column and leave xIsLog unset; log X sets it.
+  deepStrictEqual(wizard.finish({ function: "hill-plot", ymax: 100 }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "hill-plot", ymax: 100, x: "X" },
+  });
+  deepStrictEqual(wizard.finish({ function: "hill-plot", ymax: 100, xUnits: "log" }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "hill-plot", ymax: 100, xIsLog: true, x: "X" },
+  });
+  deepStrictEqual(wizard.finish({ function: "hill-plot", ymax: 100 }, plain), {
+    type: "transform-data",
+    params: { function: "hill-plot", ymax: 100 },
+  });
+});
+
+// ── Eadie-Hofstee transform (1.9, seq 380) ──────────────────────────────
+// Prism's pharmacology re-plot: X becomes Y/X, Y passes through unchanged.
+// A display-only re-plot for enzyme-kinetic results — never a first step in
+// analysis (fit the original data).
+check("transformValue applies Eadie-Hofstee as Y/X in either role (seq 380)", () => {
+  // role "x": value is X, `other` is the paired Y — Y/X.
+  strictEqual(transformValue("eadie-hofstee" as never, 2, undefined, 8, "x"), 4);
+  // role "y": value is Y, `other` is the paired X — the same absolute (Y, X) formula.
+  strictEqual(transformValue("eadie-hofstee" as never, 8, undefined, 2, "y"), 4);
+  // X = 0 has no transform (blank); a missing paired value blanks too.
+  strictEqual(transformValue("eadie-hofstee" as never, 0, undefined, 8, "x"), null);
+  strictEqual(transformValue("eadie-hofstee" as never, 2), null);
+  // A zero Y is a valid numerator: 0/X = 0.
+  strictEqual(transformValue("eadie-hofstee" as never, 2, undefined, 0, "x"), 0);
+});
+
+check("transform-data runs Eadie-Hofstee: X becomes Y/X, Y unchanged (seq 380)", async () => {
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "2"],
+      [null, "2", "4"],
+      [null, "4", "8"],
+      [null, "0", "5"],
+    ],
+  };
+  const close = (a: (number | null)[], b: number[]) =>
+    a.length === b.length && a.every((v, i) => v !== null && Math.abs(v - b[i]) < 1e-12);
+  const out = await runAnalysis("transform-data", xy, { function: "eadie-hofstee", x: "X" } as never);
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.transformed?.length, 2);
+  // Y passes through unchanged.
+  deepStrictEqual(out.transformed?.[0].values, [2, 4, 8, 5]);
+  strictEqual(out.transformed?.[0].column, "A");
+  strictEqual(out.transformed?.[0].label, "unchanged");
+  // X becomes Y/X; the X = 0 row has no transform (blank, counted excluded).
+  deepStrictEqual(out.transformed?.[1].values, [2, 2, 2, null]);
+  strictEqual(out.transformed?.[1].column, "X");
+  strictEqual(out.transformed?.[1].label, "Y/X");
+  strictEqual(out.transformed?.[1].excluded, 1);
+  strictEqual(out.subtitle, "Transform data — Y/X");
+  if (!out.notes.includes("Eadie-Hofstee: X becomes Y/X and Y is unchanged"))
+    throw new Error(`expected the Eadie-Hofstee note, got ${JSON.stringify(out.notes)}`);
+  if (!out.notes.includes("X values transformed with Y/X."))
+    throw new Error(`expected the X-function note, got ${JSON.stringify(out.notes)}`);
+  // Without the X column: a clean error, not a column of blanks.
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "eadie-hofstee" } as never), {
+    error: "“Y/X” needs the X column — name it in `x` and try again.",
+  });
+  // An X function alongside Eadie-Hofstee is refused — it already transforms X.
+  const clash = await runAnalysis("transform-data", xy, { function: "eadie-hofstee", x: "X", xFunction: "log10" } as never);
+  if (!("error" in clash) || !clash.error.includes("Eadie-Hofstee"))
+    throw new Error(`expected the X-function clash error, got ${JSON.stringify(clash)}`);
+  // Interchange + Eadie-Hofstee is refused too.
+  const swap = await runAnalysis("transform-data", xy, { function: "eadie-hofstee", x: "X", interchange: true } as never);
+  if (!("error" in swap) || !swap.error.includes("Eadie-Hofstee"))
+    throw new Error(`expected the interchange error, got ${JSON.stringify(swap)}`);
+  // Eadie-Hofstee as the X function: Y takes the Y function, X becomes Y/X.
+  const xSlot = await runAnalysis("transform-data", xy, { function: "log10", x: "X", xFunction: "eadie-hofstee" } as never);
+  if ("error" in xSlot) throw new Error(xSlot.error);
+  ok(
+    close(xSlot.transformed?.[0].values ?? [], [0.3010299956639812, 0.6020599913279624, 0.9030899869919435, 0.6989700043360189]),
+    `log10(Y): ${JSON.stringify(xSlot.transformed?.[0].values)}`,
+  );
+  deepStrictEqual(xSlot.transformed?.[1].values, [2, 2, 2, null]);
+  strictEqual(xSlot.transformed?.[1].column, "X");
+});
+
+check("transform-data wizard offers Eadie-Hofstee on XY tables and builds its params (seq 380)", () => {
+  const wizard = WIZARDS["transform-data"]!;
+  const ids = (a: Record<string, string | number>, table: Dataset, type?: TableType) =>
+    wizard.questions(a, table, type).filter(Boolean).map((q) => (q as Question).id);
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  // A plain column table: no X column to pair with, so no Eadie-Hofstee.
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  if (fnOptions({}, plain).includes("eadie-hofstee"))
+    throw new Error(`did not expect eadie-hofstee offered on a column table`);
+  // An XY table offers it — and Eadie-Hofstee already transforms X, so there
+  // is no transform-X or interchange question after it.
+  const xy = readTable({
+    columns: ["Title", "X", "A"],
+    rows: [["", "10", "1"], ["", "20", "2"]],
+  });
+  if (!fnOptions({}, xy, "xy").includes("eadie-hofstee")) throw new Error(`expected eadie-hofstee offered on an XY table`);
+  deepStrictEqual(ids({ function: "eadie-hofstee" }, xy, "xy"), ["function"]);
+  deepStrictEqual(wizard.finish({ function: "eadie-hofstee" }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "eadie-hofstee", x: "X" },
+  });
+  // The MCP path takes the same params: they validate (the rerun path runs
+  // validateAnalysisParams on the finished params), as an X function too.
+  deepStrictEqual(validateAnalysisParams("transform-data", { function: "eadie-hofstee", x: "X" }).errors, []);
+  deepStrictEqual(validateAnalysisParams("transform-data", { function: "log10", x: "X", xFunction: "eadie-hofstee" }).errors, []);
+  // The MCP schema advertises it, in both the Y-function and X-function enums.
+  const schema = JSON.parse(
+    readFileSync(new URL("../src-tauri/src/analysis-params-schema.json", import.meta.url), "utf8"),
+  ) as Record<string, { params: { name: string; enum?: string[] }[] }>;
+  for (const key of ["function", "xFunction"]) {
+    const param = schema["transform-data"].params.find((p) => p.name === key);
+    if (!param?.enum?.includes("eadie-hofstee")) throw new Error(`expected eadie-hofstee in the schema's transform-data.${key} enum`);
+  }
+});
+
+check("transform-data wizard offers Scatchard on XY tables only, and names its X column (seq 386)", () => {
+  const wizard = WIZARDS["transform-data"]!;
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  const ids = (a: Record<string, string | number>, table: Dataset, type?: TableType) =>
+    wizard.questions(a, table, type).filter(Boolean).map((q) => (q as Question).id);
+  // A plain column table: no X column to pair with, so no Scatchard.
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  if (fnOptions({}, plain).includes("scatchard"))
+    throw new Error(`did not expect scatchard offered on a column table`);
+  // An XY table offers it, asks no X-function question (Scatchard rewrites
+  // X itself), and the finish names the X column like the MCP path.
+  const xy = readTable({
+    columns: ["Title", "X", "A"],
+    rows: [["", "10", "1"], ["", "20", "2"]],
+  });
+  if (!fnOptions({}, xy, "xy").includes("scatchard"))
+    throw new Error(`expected scatchard offered on an XY table`);
+  deepStrictEqual(ids({ function: "scatchard" }, xy, "xy"), ["function", "interchange"]);
+  deepStrictEqual(wizard.finish({ function: "scatchard" }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "scatchard", x: "X" },
+  });
+});
+
 // ── Calculated Variables (v1.8, seq 156) ──────────────────────────────────
 // Prism 11's in-table formulas for Multiple Variables tables: type `=` in an
 // empty variable; the whole column computes live from the table's other
@@ -25985,6 +29685,673 @@ check("calcvars: formulas and values round-trip through .hlx, and a stale value 
   const plain = read(serializeProjectFile({ ...payload, nodes: { t1: { ...payload.nodes.t1, data: base } } }));
   strictEqual(plain.project.nodes.t1.data?.calculated, undefined);
   ok(!serializeProjectFile({ ...payload, nodes: { t1: { ...payload.nodes.t1, data: base } } }).includes("calculated"));
+});
+
+const condBase = (): TableData =>
+  mvTable(["Title", "A", "C", "F"], [
+    [null, "1", "10", "1"],
+    [null, "1", "14", "2"],
+    [null, "2", "20", "3"],
+    [null, "2", "5", "4"],
+    [null, "1", "14", "5"],
+    [null, "1", null, "6"],
+    [null, "2", "3", null],
+  ]);
+
+check("calcvars: conditional aggregation — the *IF family filters rows by a condition (seq 372, part A)", () => {
+  const base = condBase();
+  const add = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(base, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  const all = (v: string | null): (string | null)[] => Array(7).fill(v);
+  // C <= 14 matches rows 1, 2, 4, 5, 7; F is blank on row 7, so [1, 2, 4, 5].
+  // Values are pinned against the independent Python computation in
+  // ~/workspace/.helix-v19/372-fixtures.py (sample SD, SEM = SD/sqrt(n)).
+  deepStrictEqual(add("SumIf", "SUMIF(F, C <= 14)"), all("12"));
+  deepStrictEqual(add("MeanIf", "MEANIF(F, C <= 14)"), all("3"));
+  deepStrictEqual(add("CountIf", "COUNTIF(F, C <= 14)"), all("4"));
+  deepStrictEqual(add("CountAIf", "COUNTAIF(F, C <= 14)"), all("4"));
+  deepStrictEqual(add("MinIf", "MINIF(F, C <= 14)"), all("1"));
+  deepStrictEqual(add("MaxIf", "MAXIF(F, C <= 14)"), all("5"));
+  deepStrictEqual(add("StdevIf", "STDEVIF(F, C <= 14)"), all("1.825741858"));
+  deepStrictEqual(add("StderrIf", "STDERRIF(F, C <= 14)"), all("0.9128709292"));
+  // Nothing matches: SUM/COUNT/COUNTA return 0; the rest blank.
+  deepStrictEqual(add("SumNone", "SUMIF(F, C > 100)"), all("0"));
+  deepStrictEqual(add("CountNone", "COUNTIF(F, C > 100)"), all("0"));
+  deepStrictEqual(add("CountANone", "COUNTAIF(F, C > 100)"), all("0"));
+  deepStrictEqual(add("MeanNone", "MEANIF(F, C > 100)"), all(null));
+  deepStrictEqual(add("MinNone", "MINIF(F, C > 100)"), all(null));
+  deepStrictEqual(add("StdevNone", "STDEVIF(F, C > 100)"), all(null));
+  // AND / OR / NOT conditions, and a condition on the value column itself.
+  deepStrictEqual(add("SumAnd", "SUMIF(F, C <= 14 AND A = 1)"), all("8"));
+  deepStrictEqual(add("SumOr", "SUMIF(F, C > 14 OR A = 2)"), all("7"));
+  deepStrictEqual(add("SumSelf", "SUMIF(F, F > 2)"), all("18"));
+  deepStrictEqual(add("SumNot", "SUMIF(F, NOT (C <= 14))"), all("3"));
+  // A conditional aggregate inside a larger formula broadcasts like any aggregate.
+  deepStrictEqual(add("Centred", "F - MEANIF(F, C <= 14)"), ["-2", "-1", "0", "1", "2", "3", null]);
+  // A condition may read another calculated variable (dependency order).
+  const withD = addCalculatedVariable(base, "D", "C * 2");
+  if ("error" in withD) throw new Error(withD.error);
+  const sumD = addCalculatedVariable(withD.data, "SumD", "SUMIF(F, D <= 28)");
+  if ("error" in sumD) throw new Error(sumD.error);
+  deepStrictEqual(calcValues(sumD.data, "SumD"), all("12"));
+});
+
+check("calcvars: the WHERE-clause form is the same conditional aggregate (seq 372, part A)", () => {
+  const base = condBase();
+  const add = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(base, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  const all = (v: string | null): (string | null)[] => Array(7).fill(v);
+  deepStrictEqual(add("SumW", "SUM(F) WHERE C <= 14"), all("12"));
+  deepStrictEqual(add("MeanW", "MEAN(F) WHERE C <= 14"), all("3"));
+  deepStrictEqual(add("CountW", "COUNT(F) WHERE C <= 14"), all("4"));
+  deepStrictEqual(add("CountAW", "COUNTA(F) WHERE C <= 14"), all("4"));
+  deepStrictEqual(add("MedianW", "MEDIAN(F) WHERE C <= 14"), all("3"));
+  deepStrictEqual(add("MaxW", "MAX(F) WHERE C <= 14"), all("5"));
+  deepStrictEqual(add("SumWNone", "SUM(F) WHERE C > 100"), all("0"));
+  deepStrictEqual(add("MinWNone", "MIN(F) WHERE C > 100"), all(null));
+  deepStrictEqual(add("SumWAnd", "SUM(F) WHERE C <= 14 AND A = 1"), all("8"));
+  // The two forms agree, and a WHERE aggregate composes inside a formula.
+  deepStrictEqual(
+    add("CentredW", "F - (SUM(F) WHERE C <= 14) / (COUNT(F) WHERE C <= 14)"),
+    ["-2", "-1", "0", "1", "2", "3", null],
+  );
+  // Errors: wrong arity, a non-variable first argument, a WHERE on a
+  // non-aggregate, an unknown variable in the condition, a self-reference.
+  const arity = addCalculatedVariable(base, "G", "SUMIF(F)");
+  ok("error" in arity && arity.error.includes("2 arguments"), JSON.stringify(arity));
+  const notVar = addCalculatedVariable(base, "G", "SUMIF(A + F, C > 0)");
+  ok("error" in notVar && notVar.error.includes("variable"), JSON.stringify(notVar));
+  const whereNonAgg = addCalculatedVariable(base, "G", "LOG(F) WHERE C > 0");
+  ok("error" in whereNonAgg && whereNonAgg.error.includes("could not be read"), JSON.stringify(whereNonAgg));
+  const unknown = addCalculatedVariable(base, "G", "SUMIF(F, Missing > 0)");
+  deepStrictEqual(unknown, { error: "unknown variable “Missing” — the table has no variable with that name." });
+  const withG = addCalculatedVariable(base, "G", "A + 1");
+  if ("error" in withG) throw new Error(withG.error);
+  const self = setCalculatedFormula(withG.data, "G", "SUMIF(F, G > 0)");
+  deepStrictEqual(self, { error: "“G” refers to itself — a calculated variable cannot use its own values." });
+  // A circular reference through a condition is named, like any other cycle.
+  const cyclic = recomputeCalculated({
+    ...base,
+    columns: ["Title", "A", "C", "F", "G", "H"],
+    rows: condBase().rows.map((r) => [...r, null, null]),
+    calculated: [
+      { name: "G", formula: "SUMIF(F, H > 0)" },
+      { name: "H", formula: "G + 1" },
+    ],
+  });
+  deepStrictEqual(calcValues(cyclic, "G"), all(null));
+  ok(cyclic.calculated?.[0].error?.includes("circular reference"), JSON.stringify(cyclic.calculated));
+  ok(cyclic.calculated?.[1].error?.includes("circular reference"), JSON.stringify(cyclic.calculated));
+});
+
+check("calcvars: a conditional formula flows through MCP, round-trips through .hlx, and follows source edits (seq 372, part A)", async () => {
+  // MCP: the same formula through titer_edit_table computes the same values
+  // as the GUI path (addCalculatedVariable).
+  const harness = mcpLaggingHarness(true);
+  const created = await harness.run("job-372a", "create-table", {
+    table_type: "multiple",
+    name: "Cond",
+    columns: ["Title", "A", "C", "F"],
+    rows: [
+      ["r1", 1, 10, 1],
+      ["r2", 1, 14, 2],
+      ["r3", 2, 20, 3],
+      ["r4", 2, 5, 4],
+      ["r5", 1, 14, 5],
+      ["r6", 1, null, 6],
+      ["r7", 2, 3, null],
+    ],
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  harness.sync();
+  await harness.run("job-372b", "edit-table", {
+    table_id: tid,
+    op: "add-calculated-variable",
+    name: "SumIf",
+    formula: "SUMIF(F, C <= 14)",
+  });
+  deepStrictEqual(
+    data().rows.map((r) => r[4]),
+    ["12", "12", "12", "12", "12", "12", "12"],
+  );
+  // set-calculated-variable to the WHERE form gives the same values.
+  harness.sync();
+  await harness.run("job-372c", "edit-table", {
+    table_id: tid,
+    op: "set-calculated-variable",
+    name: "SumIf",
+    formula: "SUM(F) WHERE C <= 14",
+  });
+  deepStrictEqual(
+    data().rows.map((r) => r[4]),
+    ["12", "12", "12", "12", "12", "12", "12"],
+  );
+  // A bad conditional formula is refused through MCP and leaves the table alone.
+  harness.sync();
+  await rejects(
+    harness.run("job-372d", "edit-table", {
+      table_id: tid,
+      op: "set-calculated-variable",
+      name: "SumIf",
+      formula: "SUMIF(F)",
+    }),
+    /2 arguments/,
+  );
+  deepStrictEqual(
+    data().rows.map((r) => r[4]),
+    ["12", "12", "12", "12", "12", "12", "12"],
+  );
+  // GUI path: edits to a source recompute the conditional variable, and the
+  // formula round-trips through .hlx with its values.
+  const base = condBase();
+  const added = addCalculatedVariable(base, "SumIf", "SUMIF(F, C <= 14)");
+  if ("error" in added) throw new Error(added.error);
+  const edited = recomputeCalculated(writeBlock(added.data, 0, 2, [["30"]], "multiple"));
+  deepStrictEqual(calcValues(edited, "SumIf"), ["11", "11", "11", "11", "11", "11", "11"]);
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: { id: "t1", type: "table", name: "MV", parentId: null, tableType: "multiple", data: added.data },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const parsed = read(serializeProjectFile(payload));
+  strictEqual(parsed.updated, false);
+  const loaded = parsed.project.nodes.t1 as ProjectNode;
+  deepStrictEqual(loaded.data?.calculated, [{ name: "SumIf", formula: "SUMIF(F, C <= 14)" }]);
+  deepStrictEqual(calcValues(loaded.data!, "SumIf"), ["12", "12", "12", "12", "12", "12", "12"]);
+});
+
+const animalBase = (): TableData =>
+  // Prism's canonical animal data (window_functions.htm): A is the animal,
+  // B the treatment, C the day, E the tumor volume, F the dose. E is
+  // bracketed in the formulas below — a bare E is Euler's constant in this
+  // formula language (seq 156), so only [E] reads the column.
+  mvTable(["Title", "A", "B", "C", "E", "F"], [
+    [null, "M1", "Control", "0", "100", "0"],
+    [null, "M1", "Control", "7", "180", "0"],
+    [null, "M1", "Control", "14", "300", "0"],
+    [null, "M1", "Control", "21", "500", "0"],
+    [null, "M2", "Treated", "0", "100", "5"],
+    [null, "M2", "Treated", "7", "140", "5"],
+    [null, "M2", "Treated", "14", "160", "5"],
+    [null, "M2", "Treated", "21", "180", "5"],
+    [null, "M2", "Treated", "28", "170", "5"],
+  ]);
+
+check("calcvars: window functions — OVER partitions rows into groups (seq 372, part B)", () => {
+  const base = animalBase();
+  const add = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(base, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  // Values are pinned against the independent Python computation in
+  // ~/workspace/.helix-v19/372-window-fixtures.py; the docs' own numbers
+  // (270 / 150, 0 / 15, 0 / 80 / 200 / 400) are asserted there too.
+  deepStrictEqual(add("MeanB", "MEAN([E]) OVER B"), ["270", "270", "270", "270", "150", "150", "150", "150", "150"]);
+  deepStrictEqual(add("CountB", "COUNT([E]) OVER B WHERE [E] >= 170"), ["3", "3", "3", "3", "2", "2", "2", "2", "2"]);
+  deepStrictEqual(add("SumIfA", "SUMIF(F, C <= 14) OVER A"), ["0", "0", "0", "0", "15", "15", "15", "15", "15"]);
+  // The partition can be any expression: day 0 rows against all later days.
+  deepStrictEqual(add("MeanDay", "MEAN([E]) OVER C > 0"), [
+    "100",
+    "232.8571429",
+    "232.8571429",
+    "232.8571429",
+    "100",
+    "232.8571429",
+    "232.8571429",
+    "232.8571429",
+    "232.8571429",
+  ]);
+  // Row-wise functions within each treatment group (sample SD, n − 1).
+  deepStrictEqual(add("CentreB", "CENTER([E]) OVER B"), ["-170", "-90", "30", "230", "-50", "-10", "10", "30", "20"]);
+  deepStrictEqual(add("ZscoreB", "ZSCORE([E]) OVER B"), [
+    "-0.9771621232",
+    "-0.517321124",
+    "0.1724403747",
+    "1.322042873",
+    "-1.58113883",
+    "-0.316227766",
+    "0.316227766",
+    "0.9486832981",
+    "0.632455532",
+  ]);
+  deepStrictEqual(add("StdB", "STANDARDIZE([E]) OVER B"), [
+    "-0.9771621232",
+    "-0.517321124",
+    "0.1724403747",
+    "1.322042873",
+    "-1.58113883",
+    "-0.316227766",
+    "0.316227766",
+    "0.9486832981",
+    "0.632455532",
+  ]);
+  deepStrictEqual(add("RankB", "RANK([E]) OVER B"), ["1", "2", "3", "4", "1", "2", "3", "5", "4"]);
+  // STDEV / STDERR are Prism's spellings of SD / SEM.
+  deepStrictEqual(add("StdevB", "STDEV([E]) OVER B"), [
+    "173.973178",
+    "173.973178",
+    "173.973178",
+    "173.973178",
+    "31.6227766",
+    "31.6227766",
+    "31.6227766",
+    "31.6227766",
+    "31.6227766",
+  ]);
+  deepStrictEqual(add("StderrB", "STDERR([E]) OVER B"), [
+    "86.986589",
+    "86.986589",
+    "86.986589",
+    "86.986589",
+    "14.14213562",
+    "14.14213562",
+    "14.14213562",
+    "14.14213562",
+    "14.14213562",
+  ]);
+  // No clauses at all: the window is the whole variable.
+  deepStrictEqual(add("ZAll", "ZSCORE([E])"), [
+    "-0.8207781865",
+    "-0.1853370099",
+    "0.7678247551",
+    "2.356427697",
+    "-0.8207781865",
+    "-0.5030575982",
+    "-0.344197304",
+    "-0.1853370099",
+    "-0.2647671569",
+  ]);
+  deepStrictEqual(add("RankAll", "RANK([E])"), ["1.5", "6.5", "8", "9", "1.5", "3", "4", "6.5", "5"]);
+});
+
+check("calcvars: window functions — ORDER BY and ROWS make running and moving calculations (seq 372, part B)", () => {
+  const base = animalBase();
+  const add = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(base, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  deepStrictEqual(add("Cum", "SUM(F) OVER A ORDER BY C ROWS UNBOUNDED PRECEDING"), [
+    "0",
+    "0",
+    "0",
+    "0",
+    "5",
+    "10",
+    "15",
+    "20",
+    "25",
+  ]);
+  deepStrictEqual(add("Move", "MEAN([E]) OVER A ORDER BY C ROWS 1 PRECEDING 1 FOLLOWING"), [
+    "140",
+    "193.3333333",
+    "326.6666667",
+    "400",
+    "120",
+    "133.3333333",
+    "160",
+    "170",
+    "175",
+  ]);
+  deepStrictEqual(add("RunMax", "MAX([E]) OVER A ORDER BY C ROWS UNBOUNDED PRECEDING"), [
+    "100",
+    "180",
+    "300",
+    "500",
+    "100",
+    "140",
+    "160",
+    "180",
+    "180",
+  ]);
+  deepStrictEqual(add("RunCount", "COUNT([E]) OVER A ORDER BY C ROWS UNBOUNDED PRECEDING"), [
+    "1",
+    "2",
+    "3",
+    "4",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+  ]);
+  deepStrictEqual(add("RunCountDesc", "COUNT([E]) OVER A ORDER BY C DESC ROWS UNBOUNDED PRECEDING"), [
+    "4",
+    "3",
+    "2",
+    "1",
+    "5",
+    "4",
+    "3",
+    "2",
+    "1",
+  ]);
+  // A single boundary defaults the other side to the current row.
+  deepStrictEqual(add("OnePrec", "MEAN([E]) OVER A ORDER BY C ROWS 1 PRECEDING"), [
+    "100",
+    "140",
+    "240",
+    "400",
+    "100",
+    "120",
+    "150",
+    "170",
+    "175",
+  ]);
+  deepStrictEqual(add("OneFoll", "MEAN([E]) OVER A ORDER BY C ROWS 1 FOLLOWING"), [
+    "140",
+    "240",
+    "400",
+    "500",
+    "120",
+    "150",
+    "170",
+    "175",
+    "170",
+  ]);
+  // Without ROWS the window is the whole group, even with ORDER BY.
+  deepStrictEqual(add("NoRows", "SUM(F) OVER A ORDER BY C"), ["0", "0", "0", "0", "25", "25", "25", "25", "25"]);
+  // ROWS without ORDER BY runs in table order.
+  deepStrictEqual(add("CumNoOrder", "SUM(F) OVER A ROWS UNBOUNDED PRECEDING"), [
+    "0",
+    "0",
+    "0",
+    "0",
+    "5",
+    "10",
+    "15",
+    "20",
+    "25",
+  ]);
+  // Multi-key ORDER BY breaks ties on the second key.
+  const mk = mvTable(["Title", "G", "K1", "K2", "V"], [
+    [null, "1", "2", "1", "10"],
+    [null, "1", "1", "2", "20"],
+    [null, "1", "1", "1", "30"],
+    [null, "1", "2", "0", "40"],
+  ]);
+  const mkAdd = addCalculatedVariable(mk, "Cum", "SUM(V) OVER G ORDER BY K1, K2 ROWS UNBOUNDED PRECEDING");
+  if ("error" in mkAdd) throw new Error(mkAdd.error);
+  deepStrictEqual(calcValues(mkAdd.data, "Cum"), ["100", "50", "30", "90"]);
+});
+
+check("calcvars: window functions — larger formulas, WHERE with ROWS, blanks and errors (seq 372, part B)", () => {
+  const base = animalBase();
+  const add = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(base, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  // A window function inside a larger formula needs parentheses.
+  deepStrictEqual(add("BaseSub", "[E] - (MEANIF([E], C = 0) OVER A)"), [
+    "0",
+    "80",
+    "200",
+    "400",
+    "0",
+    "40",
+    "60",
+    "80",
+    "70",
+  ]);
+  deepStrictEqual(add("Pct", "100 * [E] / (SUM([E]) OVER A)"), [
+    "9.259259259",
+    "16.66666667",
+    "27.77777778",
+    "46.2962963",
+    "13.33333333",
+    "18.66666667",
+    "21.33333333",
+    "24",
+    "22.66666667",
+  ]);
+  deepStrictEqual(add("DivMean", "[E] / (MEAN([E]) OVER B)"), [
+    "0.3703703704",
+    "0.6666666667",
+    "1.111111111",
+    "1.851851852",
+    "0.6666666667",
+    "0.9333333333",
+    "1.066666667",
+    "1.2",
+    "1.133333333",
+  ]);
+  // Without the parentheses the partition reads greedily: B * 100 is blank
+  // for a text partition, so the whole formula blanks — the docs' warning.
+  deepStrictEqual(add("Greedy", "[E] / SUM([E]) OVER B * 100"), [null, null, null, null, null, null, null, null, null]);
+  // WHERE with ROWS: only matching rows get a result.
+  deepStrictEqual(add("WhereRows", "COUNT([E]) OVER A WHERE [E] >= 170 ORDER BY C ROWS UNBOUNDED PRECEDING"), [
+    null,
+    "1",
+    "2",
+    "3",
+    null,
+    null,
+    null,
+    "1",
+    "2",
+  ]);
+  // A blank partition blanks the row; a blank value still gets its group's
+  // aggregate, but COUNT and the row-wise functions blank on it.
+  const edge = mvTable(["Title", "G", "V"], [
+    [null, "1", "10"],
+    [null, "1", "20"],
+    [null, "1", null],
+    [null, null, "30"],
+    [null, "2", "40"],
+  ]);
+  const edgeAdd = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(edge, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  deepStrictEqual(edgeAdd("EMean", "MEAN(V) OVER G"), ["15", "15", "15", null, "40"]);
+  deepStrictEqual(edgeAdd("ECount", "COUNT(V) OVER G"), ["2", "2", null, null, "1"]);
+  deepStrictEqual(edgeAdd("ERank", "RANK(V) OVER G"), ["1", "2", null, null, "1"]);
+  deepStrictEqual(edgeAdd("EZ", "ZSCORE(V) OVER G"), ["-0.7071067812", "0.7071067812", null, null, null]);
+  // Errors: clauses out of order, a window on MEDIAN, an unknown partition
+  // variable, a bad ROWS boundary, and a self-reference.
+  const badOrder = addCalculatedVariable(base, "G", "MEAN([E]) ORDER BY C OVER B");
+  ok("error" in badOrder && badOrder.error.includes("order OVER, WHERE, ORDER BY, ROWS"), JSON.stringify(badOrder));
+  const medianOver = addCalculatedVariable(base, "G", "MEDIAN([E]) OVER B");
+  ok(
+    "error" in medianOver && medianOver.error.includes("cannot take window clauses"),
+    JSON.stringify(medianOver),
+  );
+  const unknownPart = addCalculatedVariable(base, "G", "MEAN([E]) OVER Missing");
+  deepStrictEqual(unknownPart, { error: "unknown variable “Missing” — the table has no variable with that name." });
+  const badRows = addCalculatedVariable(base, "G", "MEAN([E]) OVER A ORDER BY C ROWS 2 BANANAS");
+  ok("error" in badRows && badRows.error.includes("could not be read"), JSON.stringify(badRows));
+  const withG = addCalculatedVariable(base, "G", "C + 1");
+  if ("error" in withG) throw new Error(withG.error);
+  const self = setCalculatedFormula(withG.data, "G", "MEAN([E]) OVER G");
+  deepStrictEqual(self, { error: "“G” refers to itself — a calculated variable cannot use its own values." });
+});
+
+check("calcvars: a window formula flows through MCP, round-trips through .hlx, and follows source edits (seq 372, part B)", async () => {
+  // MCP: the same formula through titer_edit_table computes the same values
+  // as the GUI path (addCalculatedVariable).
+  const harness = mcpLaggingHarness(true);
+  const created = await harness.run("job-372w", "create-table", {
+    table_type: "multiple",
+    name: "Animals",
+    columns: ["Title", "A", "B", "C", "E", "F"],
+    rows: [
+      ["r1", "M1", "Control", 0, 100, 0],
+      ["r2", "M1", "Control", 7, 180, 0],
+      ["r3", "M1", "Control", 14, 300, 0],
+      ["r4", "M1", "Control", 21, 500, 0],
+      ["r5", "M2", "Treated", 0, 100, 5],
+      ["r6", "M2", "Treated", 7, 140, 5],
+      ["r7", "M2", "Treated", 14, 160, 5],
+      ["r8", "M2", "Treated", 21, 180, 5],
+      ["r9", "M2", "Treated", 28, 170, 5],
+    ],
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  harness.sync();
+  await harness.run("job-372x", "edit-table", {
+    table_id: tid,
+    op: "add-calculated-variable",
+    name: "MeanB",
+    formula: "MEAN([E]) OVER B",
+  });
+  deepStrictEqual(
+    data().rows.map((r) => r[6]),
+    ["270", "270", "270", "270", "150", "150", "150", "150", "150"],
+  );
+  // set-calculated-variable to a framed cumulative sum.
+  harness.sync();
+  await harness.run("job-372y", "edit-table", {
+    table_id: tid,
+    op: "set-calculated-variable",
+    name: "MeanB",
+    formula: "SUM(F) OVER A ORDER BY C ROWS UNBOUNDED PRECEDING",
+  });
+  deepStrictEqual(
+    data().rows.map((r) => r[6]),
+    ["0", "0", "0", "0", "5", "10", "15", "20", "25"],
+  );
+  // A bad window formula is refused through MCP and leaves the table alone.
+  harness.sync();
+  await rejects(
+    harness.run("job-372z", "edit-table", {
+      table_id: tid,
+      op: "set-calculated-variable",
+      name: "MeanB",
+      formula: "MEAN([E]) ORDER BY C OVER B",
+    }),
+    /order OVER, WHERE, ORDER BY, ROWS/,
+  );
+  deepStrictEqual(
+    data().rows.map((r) => r[6]),
+    ["0", "0", "0", "0", "5", "10", "15", "20", "25"],
+  );
+  // GUI path: edits to a source recompute the windowed variable, and the
+  // formula round-trips through .hlx with its values.
+  const base = animalBase();
+  const added = addCalculatedVariable(base, "MeanB", "MEAN([E]) OVER B");
+  if ("error" in added) throw new Error(added.error);
+  const edited = recomputeCalculated(writeBlock(added.data, 0, 4, [["200"]], "multiple"));
+  deepStrictEqual(calcValues(edited, "MeanB"), ["295", "295", "295", "295", "150", "150", "150", "150", "150"]);
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: { id: "t1", type: "table", name: "MV", parentId: null, tableType: "multiple", data: added.data },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const parsed = read(serializeProjectFile(payload));
+  strictEqual(parsed.updated, false);
+  const loaded = parsed.project.nodes.t1 as ProjectNode;
+  deepStrictEqual(loaded.data?.calculated, [{ name: "MeanB", formula: "MEAN([E]) OVER B" }]);
+  deepStrictEqual(calcValues(loaded.data!, "MeanB"), ["270", "270", "270", "270", "150", "150", "150", "150", "150"]);
+});
+
+check("calcvars: plain COUNT only reports in rows with non-blank values (seq 376)", () => {
+  // Prism's rule, from the Prism 11 User Guide function reference
+  // (available_functions_transforms.htm, COUNT(Variable)): "Unlike the
+  // other statistics functions, COUNT only reports in rows that contain
+  // non-blank values." The windowed COUNT already follows it
+  // (calcvars.ts: windowed COUNT blanks blank rows, "as the docs say") —
+  // the plain whole-variable COUNT did not, broadcasting to every row.
+  // COUNTA is one of "the other statistics functions", so it keeps
+  // broadcasting to every row; the *IF family is a condagg, untouched.
+  const base = mvTable(["Title", "A", "B", "C"], [
+    [null, "10", null, "1"],
+    [null, null, null, "2"],
+    [null, "20", null, "3"],
+    [null, "30", null, "4"],
+    [null, null, null, "5"],
+  ]);
+  const add = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(base, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  const all = (v: string | null): (string | null)[] => Array(5).fill(v);
+  // Blank in the middle (row 2) and at the end (row 5): only the rows
+  // with a value report the count.
+  deepStrictEqual(add("CountA", "COUNT(A)"), ["3", null, "3", "3", null]);
+  // An all-blank column has no row with a value: nothing reports.
+  deepStrictEqual(add("CountB", "COUNT(B)"), all(null));
+  // No-blank control: every row reports.
+  deepStrictEqual(add("CountC", "COUNT(C)"), all("5"));
+  // The other summary functions still broadcast to every row, blanks
+  // included — COUNT is the only exception.
+  deepStrictEqual(add("MeanA", "MEAN(A)"), all("20"));
+  deepStrictEqual(add("SumA", "SUM(A)"), all("60"));
+  deepStrictEqual(add("CountAA", "COUNTA(A)"), all("3"));
+  // The blank propagates through a larger formula, like any blank.
+  deepStrictEqual(add("CountPlus", "COUNT(A) + 1"), ["4", null, "4", "4", null]);
+  // Conditional COUNTIF is a condagg, not this call case: it still
+  // broadcasts, and still returns 0 when nothing matches.
+  deepStrictEqual(add("CountIf", "COUNTIF(A, A > 15)"), all("2"));
+  deepStrictEqual(add("CountIfNone", "COUNTIF(A, A > 100)"), all("0"));
+});
+
+check("calcvars: COUNTA counts text values, not just numbers (seq 377)", () => {
+  // Prism's rule, from the Prism 11 User Guide function reference
+  // (available_functions_transforms.htm, COUNTA(Variable)): "Returns the
+  // count of non-blank values in a variable, including text values. ...
+  // COUNTA(A) returns 3 when A contains [10, blank, 30, blank, "abc"]."
+  // The window-functions page says the same ("COUNTA also counts text
+  // values"). Titer's values() is numeric-only, so COUNTA was identical
+  // to COUNT — text cells never counted. A cell with only spaces counts
+  // as blank (the COUNTAIF entry says so). Excluded cells read as blank.
+  const base = mvTable(["Title", "G", "A", "B", "C", "T"], [
+    [null, "1", "10", "x", "1", "1"],
+    [null, "1", "abc", "y", "2", "   "],
+    [null, "1", null, null, "3", "3"],
+    [null, "2", "30", "z", "4", null],
+    [null, "2", "def", null, "5", "x"],
+    [null, "2", null, "w", "6", null],
+  ]);
+  const add = (t: TableData, name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(t, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  const all = (v: string | null): (string | null)[] => Array(6).fill(v);
+  // Text cells count: A holds 10, abc, 30, def — four non-blank cells.
+  deepStrictEqual(add(base, "CountAA", "COUNTA(A)"), all("4"));
+  // COUNT is unchanged: numeric only, and (seq 376) only on rows with a
+  // numeric value of their own — the text rows stay blank.
+  deepStrictEqual(add(base, "CountA", "COUNT(A)"), ["2", null, null, "2", null, null]);
+  // An all-text column: COUNTA counts its text, COUNT reports nothing.
+  deepStrictEqual(add(base, "CountAB", "COUNTA(B)"), all("4"));
+  deepStrictEqual(add(base, "CountB", "COUNT(B)"), all(null));
+  // A numeric column is unchanged for both functions.
+  deepStrictEqual(add(base, "CountAC", "COUNTA(C)"), all("6"));
+  deepStrictEqual(add(base, "CountC", "COUNT(C)"), all("6"));
+  // Spaces-only counts as blank: T holds 1, 3, x — three non-blank cells.
+  deepStrictEqual(add(base, "CountAT", "COUNTA(T)"), all("3"));
+  deepStrictEqual(add(base, "CountT", "COUNT(T)"), ["2", null, "2", null, null, null]);
+  // COUNTAIF counts text in the matching rows too; COUNTIF stays numeric.
+  deepStrictEqual(add(base, "CountAIfHi", "COUNTAIF(A, C > 3)"), all("2"));
+  deepStrictEqual(add(base, "CountAIfLo", "COUNTAIF(A, C <= 3)"), all("2"));
+  deepStrictEqual(add(base, "CountAIfNone", "COUNTAIF(A, A > 100)"), all("0"));
+  deepStrictEqual(add(base, "CountIfHi", "COUNTIF(A, C > 3)"), all("1"));
+  // The windowed COUNTA counts text within each group as well.
+  deepStrictEqual(add(base, "CountAWin", "COUNTA(A) OVER G"), all("2"));
+  deepStrictEqual(add(base, "CountWin", "COUNT(A) OVER G"), ["1", null, null, "1", null, null]);
+  // Excluded cells read as blank: excluding A's "10" drops both counts.
+  const excluded = { ...base, excluded: ["0,2"] };
+  deepStrictEqual(add(excluded, "CountAX", "COUNTA(A)"), all("3"));
+  deepStrictEqual(add(excluded, "CountX", "COUNT(A)"), [null, null, null, "1", null, null]);
 });
 
 // ── Simulate data + Monte Carlo (plan 22) ───────────────────────────────
@@ -32103,6 +36470,2117 @@ check("linked-168: a whole-table write drops the link, so a refresh can't overwr
   strictEqual(harness.state().nodes[tableId]?.data?.linkedPaste, undefined);
   strictEqual(harness.state().nodes[tableId]?.data?.rows[0]?.[1], "9");
 });
+
+// ── seq 331: MV variable types (HALF A) ─────────────────────────────────
+// A Multiple Variables table's columns are typed — Categorical, Continuous
+// or Label — auto-detected from their values, set by hand in the Variable
+// Types panel (or titer_edit_table's set-variable-type), and stored on the
+// table. A manual type sticks; an auto type follows the values.
+
+const mv331 = (): TableData => ({
+  columns: ["Title", "Sex", "Age", "ID"],
+  rows: [
+    ["1", "Female", "34", "S001"],
+    ["2", "Male", "41", "S002"],
+    ["3", "female", "29", "S003"],
+    ["4", "Mael", "52", "S004"],
+    ["5", "male", "38", "S005"],
+  ],
+});
+
+check("seq 331: auto-detect classifies numeric, text, ID and empty columns (Prism's rule)", () => {
+  strictEqual(detectVariableType(["34", "41", "29"]), "continuous");
+  strictEqual(detectVariableType(["1,23", "4,56"]), "continuous", "a decimal comma is still a number");
+  strictEqual(detectVariableType(["1e3", "2.5E-2"]), "continuous", "scientific notation is still a number");
+  strictEqual(detectVariableType(["Female", "Male"]), "categorical");
+  strictEqual(detectVariableType(["12", "Male"]), "categorical", "mixed numbers and text are categorical");
+  strictEqual(
+    detectVariableType(["S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008", "S009", "S010"]),
+    "categorical",
+    "10 distinct values are still categorical",
+  );
+  strictEqual(
+    detectVariableType([
+      "S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008", "S009", "S010", "S011",
+    ]),
+    "label",
+    "more than 10 distinct values read as an ID column",
+  );
+  strictEqual(detectVariableType([]), "continuous", "an empty column reads continuous");
+  strictEqual(detectVariableType(["", null, "  "]), "continuous", "blanks alone read continuous");
+});
+
+check("seq 331: a manual type survives value edits — auto-detect never overwrites it", () => {
+  let data = refreshVariableTypes(mv331());
+  strictEqual(data.variableTypes?.Sex?.type, "categorical");
+  strictEqual(data.variableTypes?.Sex?.manual, false);
+  data = setVariableType(data, "Sex", "label");
+  strictEqual(data.variableTypes?.Sex?.manual, true);
+  // Every value becomes a number — an auto type would flip to continuous.
+  const edited = writeBlock(data, 0, 1, [["34"], ["41"], ["29"], ["52"], ["38"]], "multiple");
+  const refreshed = refreshVariableTypes(edited);
+  strictEqual(refreshed.variableTypes?.Sex?.type, "label", "the hand-set type sticks");
+  strictEqual(refreshed.variableTypes?.Sex?.manual, true);
+  // Turning Auto back on re-detects at once.
+  strictEqual(setVariableTypeAuto(refreshed, "Sex", true).variableTypes?.Sex?.type, "continuous");
+});
+
+check("seq 331: an auto type follows the values when they change", () => {
+  let data = refreshVariableTypes(mv331());
+  strictEqual(data.variableTypes?.Sex?.type, "categorical");
+  const edited = writeBlock(data, 0, 1, [["1"], ["2"], ["3"], ["4"], ["5"]], "multiple");
+  strictEqual(refreshVariableTypes(edited).variableTypes?.Sex?.type, "continuous");
+  // A column nobody typed in keeps its detected type, and a refresh that
+  // moves nothing returns the same record (no phantom undo step).
+  strictEqual(refreshVariableTypes(data), data);
+  // A manual entry with the same value as the detection is kept as-is too.
+  const manual = setVariableType(data, "Age", "continuous");
+  strictEqual(refreshVariableTypes(manual).variableTypes?.Age?.manual, true);
+});
+
+check("seq 331: levels group case-insensitively, with counts and excluded rows", () => {
+  const data: TableData = { ...mv331(), excluded: ["3,1"] };
+  const levels = categoricalLevels(data, "Sex");
+  const byName = Object.fromEntries(levels.map((l) => [l.name, l]));
+  strictEqual(levels.length, 3, "Male/male are one level, Female/female are one level");
+  strictEqual(byName.Female.count, 2, "Female + female");
+  strictEqual(byName.Female.excluded, 0);
+  strictEqual(byName.Male.count, 2, "Male + male");
+  strictEqual(byName.Male.excluded, 0);
+  strictEqual(byName.Mael.count, 0, "the only Mael row is excluded");
+  strictEqual(byName.Mael.excluded, 1);
+  strictEqual(byName.Female.name, "Female", "the first-seen spelling is the display name");
+  deepStrictEqual(categoricalLevels(data, "Nope"), [], "an unknown column has no levels");
+});
+
+check("seq 331: renaming a level rewrites every row and merges onto an existing level", () => {
+  const data: TableData = { ...mv331(), excluded: ["3,1"] };
+  const renamed = renameLevel(data, "Sex", "Mael", "Male");
+  strictEqual(renamed.rows[3]?.[1], "Male", "the typo row takes the new name");
+  strictEqual(renamed.rows[4]?.[1], "male", "other rows keep their spelling");
+  strictEqual(renamed.excluded?.[0], "3,1", "the exclusion stays on its row");
+  const levels = categoricalLevels(renamed, "Sex");
+  strictEqual(levels.length, 2, "Mael folded into Male");
+  const male = levels.find((l) => l.name === "Male")!;
+  strictEqual(male.count, 2, "Male + male (the renamed row is excluded, so it counts there)");
+  strictEqual(male.excluded, 1, "the excluded Mael row is still excluded, as Male");
+  // Renaming onto the same level in another case, or to blank, is a no-op.
+  strictEqual(renameLevel(data, "Sex", "Mael", "mael"), data);
+  strictEqual(renameLevel(data, "Sex", "Mael", "  "), data);
+  strictEqual(renameLevel(data, "Sex", "Nope", "Male"), data);
+});
+
+check("seq 331: a rename carries the type, a delete drops it", () => {
+  let data = refreshVariableTypes(mv331());
+  data = setVariableType(data, "Age", "label");
+  const renamed = renameColumn(data, 2, "AgeYears");
+  strictEqual(renamed.variableTypes?.AgeYears?.type, "label", "the type follows the rename");
+  strictEqual(renamed.variableTypes?.AgeYears?.manual, true);
+  strictEqual(renamed.variableTypes?.Age, undefined);
+  strictEqual(renamed.columns[2], "AgeYears");
+  const deleted = deleteColumns(renamed, 2, 1);
+  strictEqual(deleted.variableTypes?.AgeYears, undefined, "a deleted column takes its type with it");
+  strictEqual(deleted.variableTypes?.Sex?.type, "categorical", "the surviving columns keep theirs");
+  strictEqual(deleted.columns.join(","), "Title,Sex,ID");
+});
+
+check("seq 331: types and manual flags persist through a .hlx save/reload; bogus entries drop", () => {
+  let data = refreshVariableTypes(mv331());
+  data = setVariableType(data, "Sex", "categorical"); // manual, same value as detected
+  const payload: ProjectFilePayload = {
+    nodes: {
+      mv: { id: "mv", type: "table", name: "Subjects", parentId: null, tableType: "multiple", data },
+    },
+    rootOrder: ["mv"],
+    childOrder: { mv: [] },
+    activeNodeId: "mv",
+  };
+  const resaved = parseProjectFile(JSON.parse(serializeProjectFile(payload)));
+  if ("error" in resaved) throw new Error(resaved.error);
+  const reloaded = (resaved.project.nodes.mv as ProjectNode).data!;
+  deepStrictEqual(reloaded.variableTypes?.Sex, { type: "categorical", manual: true });
+  strictEqual(reloaded.variableTypes?.Age?.type, "continuous", "the auto entry round-trips too");
+  strictEqual(reloaded.variableTypes?.Age?.manual, false);
+  strictEqual(reloaded.variableTypes?.ID?.type, "categorical", "5 IDs are too few to read as a label");
+  // A hand-edited file holding a bogus type, an entry for the Title column
+  // or an entry for a column that is gone loses that entry on its own.
+  const tampered = JSON.parse(serializeProjectFile(payload)) as Record<string, unknown>;
+  const tamperedNodes = (tampered.project as Record<string, Record<string, { data: Record<string, unknown> }>>)
+    .nodes;
+  const tamperedData = tamperedNodes.mv.data;
+  tamperedData.variableTypes = {
+    Sex: { type: "categorical", manual: true },
+    Age: { type: "weird", manual: true },
+    Title: { type: "label", manual: true },
+    Gone: { type: "continuous", manual: false },
+  };
+  const reparsed = parseProjectFile(tampered);
+  if ("error" in reparsed) throw new Error(reparsed.error);
+  const fixed = (reparsed.project.nodes.mv as ProjectNode).data!;
+  deepStrictEqual(Object.keys(fixed.variableTypes ?? {}), ["Sex"], "only the valid entry survives");
+  // The reader itself is strict the same way, on its own.
+  deepStrictEqual(readVariableTypes({ Age: { type: "bogus" }, Sex: { type: "label" } }, ["Title", "Sex"]), {
+    Sex: { type: "label", manual: false },
+  });
+});
+
+check("seq 331: MCP set-variable-type sets a column's type by hand and sticks through later writes", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-331-table", "create-table", {
+    table_type: "multiple",
+    columns: ["", "Sex", "Age"],
+    rows: [
+      ["1", "Female", "34"],
+      ["2", "Male", "41"],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  // Creating the table typed its columns on the way in.
+  const created = harness.state().nodes[tableId]!.data!;
+  strictEqual(variableTypesOf(created).Sex.type, "categorical");
+  strictEqual(variableTypesOf(created).Age.type, "continuous");
+  strictEqual(variableTypesOf(created).Age.manual, false);
+  await harness.run("job-331-set", "edit-table", {
+    table_id: tableId,
+    op: "set-variable-type",
+    column: 2,
+    variable_type: "label",
+  });
+  harness.sync();
+  deepStrictEqual(harness.state().nodes[tableId]!.data!.variableTypes?.Age, { type: "label", manual: true });
+  // Setting it again is a no-op success: no second undo step.
+  const pastLen = harness.state().past.length;
+  await harness.run("job-331-set-again", "edit-table", {
+    table_id: tableId,
+    op: "set-variable-type",
+    column: 2,
+    variable_type: "label",
+  });
+  harness.sync();
+  strictEqual(harness.state().past.length, pastLen);
+  // A later write re-detects the auto columns and leaves the manual one alone.
+  await harness.run("job-331-write", "write-table", {
+    table_id: tableId,
+    columns: ["", "Sex", "Age"],
+    rows: [
+      ["1", "Female", "34"],
+      ["2", "Male", "41"],
+      ["3", "Other", "29"],
+    ],
+  });
+  harness.sync();
+  strictEqual(harness.state().nodes[tableId]!.data!.variableTypes?.Age?.type, "label");
+  strictEqual(harness.state().nodes[tableId]!.data!.variableTypes?.Sex?.type, "categorical");
+  // Errors: a non-MV table, an unknown type, and a column that isn't there.
+  const col = await harness.run("job-331-col", "create-table", {
+    table_type: "column",
+    columns: ["", "A"],
+    rows: [["1", "1"]],
+  });
+  const colId = (col.result as { table_id: string }).table_id;
+  harness.sync();
+  await rejects(
+    harness.run("job-331-bad-table", "edit-table", {
+      table_id: colId,
+      op: "set-variable-type",
+      column: 1,
+      variable_type: "label",
+    }),
+    /only Multiple Variables tables/,
+  );
+  await rejects(
+    harness.run("job-331-bad-type", "edit-table", {
+      table_id: tableId,
+      op: "set-variable-type",
+      column: 1,
+      variable_type: "weird",
+    }),
+    /has no variable type/,
+  );
+  await rejects(
+    harness.run("job-331-bad-col", "edit-table", {
+      table_id: tableId,
+      op: "set-variable-type",
+      column: 9,
+      variable_type: "label",
+    }),
+    /has no column 9/,
+  );
+});
+
+// ── seq 332: dates / elapsed time X on XY tables (HALF A) ───────────────
+// Prism lets an XY X column hold dates or elapsed times instead of plain
+// numbers, and converts them to numbers (user-chosen units + start date)
+// before any analysis or graph sees them. The cells keep their typed text;
+// the conversion happens in readTable, so every consumer sees numbers while
+// the grid still shows what was typed. A cell that can't be read shows "?"
+// in the grid and counts as missing.
+
+check("seq 332: a date X column converts to days from the earliest date", () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "2024-01-16", "10"],
+      [null, "2024-01-17", "20"],
+      [null, "2024-01-26", "30"],
+    ],
+    xFormat: "date",
+  };
+  const ds = readTable(data);
+  deepStrictEqual(ds.columns[0].byRow, [0, 1, 10]);
+  deepStrictEqual(ds.columns[0].values, [0, 1, 10]);
+  strictEqual(ds.columns[1].values.length, 3);
+});
+
+check("seq 332: an unparseable date shows '?' and counts as missing", () => {
+  strictEqual(displayXCell("not a date", "date"), "?");
+  strictEqual(displayXCell("2024-01-16", "date"), "2024-01-16");
+  strictEqual(displayXCell("", "date"), "");
+  strictEqual(displayXCell(null, "date"), "");
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "2024-01-16", "10"],
+      [null, "not a date", "20"],
+      [null, "2024-01-18", "30"],
+    ],
+    xFormat: "date",
+  };
+  const ds = readTable(data);
+  deepStrictEqual(ds.columns[0].byRow, [0, null, 2]);
+  deepStrictEqual(ds.columns[0].values, [0, 2]);
+  // The Y value on the "?" row is still there, but the pair drops out of
+  // the fit: xyPoints pairs X with Y, and the "?" row has no X.
+  deepStrictEqual(xyPoints(ds.columns[0], ds.sets[1]).y, [10, 30]);
+});
+
+check("seq 332: conversion to days with a chosen start date matches hand-computed values", () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "2024-01-16", "10"],
+      [null, "2024-01-17", "20"],
+    ],
+    xFormat: "date",
+    xConversion: { units: "days", startDate: "2024-01-01" },
+  };
+  deepStrictEqual(readTable(data).columns[0].values, [15, 16]);
+});
+
+check("seq 332: a date X converts to years at 365.25 days, matching Prism's own x_date fixture", () => {
+  // The .pzfx corpus fixture x_date: "16-Jan-2004" → 0, "9-Apr-2009" →
+  // 5.22929500342231 years. 2004-01-16 → 2009-04-09 is 1910 days, and
+  // 1910 / 365.25 is Prism's number.
+  const zero = parseDateCell("2004-01-16");
+  const value = parseDateCell("2009-04-09");
+  if (zero === null || value === null) throw new Error("fixture dates did not parse");
+  const years = convertXCell("2009-04-09", "date", { units: "years", startDate: "2004-01-16" }, zero);
+  ok(years !== null && Math.abs(years - 5.22929500342231) < 1e-9, `expected 5.22929500342231, got ${years}`);
+  ok(value !== null && Math.abs((value - zero) / 86400000 - 1910) < 1e-9);
+});
+
+check("seq 332: elapsed hh:mm:ss parses and converts; unparseable elapsed shows '?'", () => {
+  strictEqual(parseElapsedCell("1:30:00"), 5400);
+  strictEqual(parseElapsedCell("0:45:30"), 2730);
+  strictEqual(parseElapsedCell("0:00:30.5"), 30.5);
+  strictEqual(parseElapsedCell("90"), 90);
+  strictEqual(parseElapsedCell("1:30"), 90);
+  strictEqual(parseElapsedCell("1:60:00"), null);
+  strictEqual(parseElapsedCell("banana"), null);
+  strictEqual(displayXCell("banana", "elapsed"), "?");
+  strictEqual(displayXCell("1:30:00", "elapsed"), "1:30:00");
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1:30:00", "10"],
+      [null, "0:45:30", "20"],
+      [null, "2:00:00", "30"],
+    ],
+    xFormat: "elapsed",
+    xConversion: { units: "minutes" },
+  };
+  deepStrictEqual(readTable(data).columns[0].values, [90, 45.5, 120]);
+});
+
+check("seq 332: slash dates honor the day-first preference; a first component over 12 is always the day", () => {
+  strictEqual(parseDateCell("03/04/2024", false), Date.UTC(2024, 2, 4));
+  strictEqual(parseDateCell("03/04/2024", true), Date.UTC(2024, 3, 3));
+  strictEqual(parseDateCell("13/04/2024", false), Date.UTC(2024, 3, 13));
+  strictEqual(parseDateCell("13/04/2024", true), Date.UTC(2024, 3, 13));
+  strictEqual(parseDateCell("16-Jan-2004"), Date.UTC(2004, 0, 16));
+  strictEqual(parseDateCell("Sep 6, 2024"), Date.UTC(2024, 8, 6));
+  strictEqual(parseDateCell("6 Sep 2024"), Date.UTC(2024, 8, 6));
+  strictEqual(parseDateCell("2024"), Date.UTC(2024, 0, 1));
+  strictEqual(parseDateCell("2024-02-30"), null);
+  strictEqual(parseDateCell("banana"), null);
+});
+
+check("seq 332: the X format and conversion survive a .hlx save/reload; bogus entries drop", () => {
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Dates",
+        parentId: null,
+        tableType: "xy",
+        data: {
+          columns: ["Title", "X", "Y"],
+          rows: [[null, "2024-01-16", "10"]],
+          xFormat: "date",
+          xConversion: { units: "weeks", startDate: "2024-01-01", dayFirst: true },
+        },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const reread = read(serializeProjectFile(payload));
+  strictEqual(reread.updated, false);
+  const data = reread.project.nodes.t1!.data!;
+  strictEqual(data.xFormat, "date");
+  deepStrictEqual(data.xConversion, { units: "weeks", startDate: "2024-01-01", dayFirst: true });
+  // A hand-edited file holding a bogus format or unit loses both, instead
+  // of carrying a lie into the conversion.
+  const broken = JSON.parse(serializeProjectFile(payload)) as { project: Record<string, any> };
+  broken.project.nodes.t1.data.xFormat = "months";
+  broken.project.nodes.t1.data.xConversion = { units: "fortnights" };
+  const rereadBroken = read(JSON.stringify(broken));
+  strictEqual(rereadBroken.project.nodes.t1!.data!.xFormat, undefined);
+  strictEqual(rereadBroken.project.nodes.t1!.data!.xConversion, undefined);
+});
+
+check("seq 332: .prism round-trip preserves a date X format and its conversion", async () => {
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Dates",
+        parentId: null,
+        tableType: "xy",
+        data: {
+          columns: ["Title", "X", "Y"],
+          rows: [
+            [null, "2024-01-16", "10"],
+            [null, "2024-01-17", "20"],
+          ],
+          xFormat: "date",
+          xConversion: { units: "weeks", startDate: "2024-01-01", dayFirst: true },
+        },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const written = await writePrism(payload, "1.8.2");
+  const back = await convertPrism(written.bytes, "round-trip.prism");
+  const backNode = Object.values(back.project.nodes).find((n) => n.type === "table");
+  if (!backNode || backNode.type !== "table") throw new Error("no table node after round-trip");
+  strictEqual(backNode.data!.xFormat, "date");
+  // The .prism format carries units + zero date, but no day-first flag —
+  // that part is Titer-side only and does not survive the round-trip.
+  deepStrictEqual(backNode.data!.xConversion, { units: "weeks", startDate: "2024-01-01" });
+  deepStrictEqual(backNode.data!.rows, payload.nodes.t1.data!.rows);
+});
+
+check("seq 332: .pzfx writes a date X as years since the first date with an XAdvancedColumn of date strings", () => {
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Dates",
+        parentId: null,
+        tableType: "xy",
+        data: {
+          columns: ["Title", "X", "Y"],
+          rows: [
+            [null, "2024-01-16", "10"],
+            [null, "2024-01-17", "20"],
+            [null, "2024-01-26", "30"],
+          ],
+          xFormat: "date",
+        },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const xml = new TextDecoder().decode(writePzfx(payload, "1.8.2").bytes);
+  ok(xml.includes('XFormat="date"'), "expected XFormat=\"date\" in the written .pzfx");
+  ok(xml.includes("16-Jan-2024") && xml.includes("17-Jan-2024") && xml.includes("26-Jan-2024"), "expected the date strings in an XAdvancedColumn");
+  // The XColumn holds years since the first date (Prism's own shape):
+  // 0, 1/365.25, 10/365.25.
+  const xCol = /<XColumn[^>]*>([\s\S]*?)<\/XColumn>/.exec(xml)?.[1] ?? "";
+  const values = [...xCol.matchAll(/<d>([^<]*)<\/d>/g)].map((m) => Number(m[1]));
+  strictEqual(values.length, 3);
+  ok(Math.abs(values[0] - 0) < 1e-9 && Math.abs(values[1] - 1 / 365.25) < 1e-9 && Math.abs(values[2] - 10 / 365.25) < 1e-9, `expected years [0, ${1 / 365.25}, ${10 / 365.25}], got ${values}`);
+});
+
+check("seq 332: MCP set-x-format sets the format by hand; a non-XY table and bogus values refuse it", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-332-table", "create-table", {
+    table_type: "xy",
+    columns: ["", "X", "Y"],
+    rows: [
+      ["1", "2024-01-16", "10"],
+      ["2", "2024-01-17", "20"],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  await harness.run("job-332-set", "edit-table", {
+    table_id: tableId,
+    op: "set-x-format",
+    x_format: "date",
+    x_units: "weeks",
+    x_start_date: "2024-01-01",
+    x_day_first: true,
+  });
+  harness.sync();
+  const data = harness.state().nodes[tableId]!.data!;
+  strictEqual(data.xFormat, "date");
+  deepStrictEqual(data.xConversion, { units: "weeks", startDate: "2024-01-01", dayFirst: true });
+  // Setting it again is a no-op success: no second undo step.
+  const pastLen = harness.state().past.length;
+  await harness.run("job-332-set-again", "edit-table", {
+    table_id: tableId,
+    op: "set-x-format",
+    x_format: "date",
+    x_units: "weeks",
+    x_start_date: "2024-01-01",
+    x_day_first: true,
+  });
+  harness.sync();
+  strictEqual(harness.state().past.length, pastLen);
+  // Errors: a non-XY table, an unknown format, unknown units, a bad start date.
+  const col = await harness.run("job-332-col", "create-table", {
+    table_type: "column",
+    columns: ["", "A"],
+    rows: [["1", "1"]],
+  });
+  const colId = (col.result as { table_id: string }).table_id;
+  harness.sync();
+  await rejects(
+    harness.run("job-332-bad-table", "edit-table", { table_id: colId, op: "set-x-format", x_format: "date" }),
+    /only XY tables/,
+  );
+  await rejects(
+    harness.run("job-332-bad-format", "edit-table", { table_id: tableId, op: "set-x-format", x_format: "months" }),
+    /numbers, date or elapsed/,
+  );
+  await rejects(
+    harness.run("job-332-bad-units", "edit-table", { table_id: tableId, op: "set-x-format", x_format: "date", x_units: "fortnights" }),
+    /seconds, minutes, hours, days, weeks or years/,
+  );
+  await rejects(
+    harness.run("job-332-bad-start", "edit-table", { table_id: tableId, op: "set-x-format", x_format: "date", x_start_date: "not a date" }),
+    /start date/,
+  );
+});
+
+check("seq 332: changing the X format leaves the Y values alone and is a no-op when nothing changes", () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [[null, "2024-01-16", "10"]],
+    xFormat: "date",
+    xConversion: { units: "days" },
+  };
+  strictEqual(xFormatOf(data), "date");
+  strictEqual(xFormatOf({ columns: ["Title", "X", "Y"], rows: [] }), "numbers");
+  const asNumbers = changeXFormat(data, "numbers");
+  strictEqual(asNumbers.xFormat, undefined);
+  deepStrictEqual(asNumbers.rows, data.rows);
+  const asWeeks = changeXFormat(asNumbers, "date", { units: "weeks" });
+  strictEqual(asWeeks.xFormat, "date");
+  deepStrictEqual(asWeeks.xConversion, { units: "weeks" });
+  // Same format, no new conversion: the same object back, no undo step.
+  strictEqual(changeXFormat(data, "date"), data);
+  const converted = changeXConversion(data, { units: "weeks" });
+  deepStrictEqual(converted.xConversion, { units: "weeks" });
+  strictEqual(changeXConversion(data, { units: "days" }), data);
+});
+
+// ── seq 331: MV variable types (HALF B) ─────────────────────────────────
+// Half A typed the columns; half B makes the types drive the app: analyses
+// respect them instead of re-deriving numeric/text from the cells, a label
+// variable is never offered to an analysis, categories autocomplete while
+// typing, and a label variable can serve as the graph's row-label source.
+
+// Group is a numeric-coded categorical, ID and Site are labels by hand (8
+// rows are too few for the >10 auto-detect).
+const mv331b = (): TableData => ({
+  columns: ["Title", "Y", "Group", "Sex", "ID", "Site"],
+  rows: [
+    ["1", "12", "1", "Female", "S001", "X"],
+    ["2", "15", "2", "Male", "S002", "Y"],
+    ["3", "11", "1", "female", "S003", "X"],
+    ["4", "18", "2", "Male", "S004", "Y"],
+    ["5", "14", "1", "male", "S005", "X"],
+    ["6", "17", "2", "Female", "S006", "Y"],
+    ["7", "13", "1", "Male", "S007", "X"],
+    ["8", "19", "2", "female", "S008", "Y"],
+  ],
+});
+const mv331bTyped = (): TableData => {
+  let data = refreshVariableTypes(mv331b());
+  data = setVariableType(data, "Group", "categorical");
+  data = setVariableType(data, "ID", "label");
+  data = setVariableType(data, "Site", "label");
+  return data;
+};
+
+check("seq 331: readTable threads the resolved variable type onto each column (HALF B)", () => {
+  const dataset = readTable(mv331bTyped());
+  deepStrictEqual(
+    dataset.columns.map((c) => [c.name, c.variableType]),
+    [
+      ["Y", "continuous"],
+      ["Group", "categorical"],
+      ["Sex", "categorical"],
+      ["ID", "label"],
+      ["Site", "label"],
+    ],
+  );
+  deepStrictEqual(dataset.variableTypes?.ID, { type: "label", manual: true });
+  // A table nobody typed yet carries no type info at all, so every consumer
+  // falls back to what it did before types existed.
+  const plain = readTable(mv331b());
+  ok(plain.columns.every((c) => c.variableType === undefined));
+  deepStrictEqual(plain.variableTypes ?? {}, {});
+});
+
+check("seq 331: a numeric-coded categorical dummy-codes, a label never enters a regression (HALF B)", () => {
+  const columns = readTable(mv331bTyped()).columns;
+  const def = selectPredictors(columns, { dependent: "Y" });
+  // The default set is every data-bearing column but the dependent and the
+  // labels — Group enters dummy-coded, not as a number.
+  deepStrictEqual(
+    def.design.map((d) => d.term),
+    ["Group[2]", "Sex[Male]", "Sex[female]", "Sex[male]"],
+  );
+  deepStrictEqual(def.design[0].values, [0, 1, 0, 1, 0, 1, 0, 1]);
+  deepStrictEqual(def.categorical, [
+    { name: "Group", reference: "1", levels: ["1", "2"] },
+    { name: "Sex", reference: "Female", levels: ["Female", "Male", "female", "male"] },
+  ]);
+  deepStrictEqual(def.predictors, [], "no numeric-kind predictor: Group is a factor, Sex is text");
+  deepStrictEqual(def.dropped, []);
+  deepStrictEqual(def.rows, [0, 1, 2, 3, 4, 5, 6, 7]);
+  // Choosing a label as a predictor, or as the dependent, is refused by name.
+  const asPredictor = selectPredictors(columns, { dependent: "Y", predictors: ["ID"] });
+  ok(asPredictor.error?.includes("label variable"), `expected a label error, got: ${asPredictor.error}`);
+  ok(asPredictor.error?.includes("“ID”"), `the error should name the column, got: ${asPredictor.error}`);
+  const asDependent = selectPredictors(columns, { dependent: "ID", predictors: ["Group"] });
+  ok(asDependent.error?.includes("label variable"), `expected a label error, got: ${asDependent.error}`);
+  // The same refusal reaches the MCP run-analysis path (no R: the selector
+  // errors before any fit runs).
+  return (async () => {
+    const out = await runAnalysis("multiple-regression", mv331bTyped(), {
+      dependent: "Y",
+      predictors: ["ID"],
+    });
+    ok("error" in out && out.error.includes("label variable"), JSON.stringify(out));
+  })();
+});
+
+check("seq 331: a numeric label column is never the default dependent (HALF B)", () => {
+  const data: TableData = {
+    columns: ["Title", "ID", "Y"],
+    rows: [
+      ["1", "101", "2"],
+      ["2", "102", "3"],
+      ["3", "103", "5"],
+      ["4", "104", "7"],
+      ["5", "105", "11"],
+    ],
+  };
+  const typed = setVariableType(refreshVariableTypes(data), "ID", "label");
+  const sel = selectPredictors(readTable(typed).columns, {});
+  strictEqual(sel.dep?.name, "Y", "the default dependent skips the numeric label column");
+  deepStrictEqual(sel.design.map((d) => d.term), []);
+});
+
+check("seq 331: the analysis wizards never offer a label variable (HALF B)", () => {
+  const table = readTable(mv331bTyped());
+  type AnyWizard = NonNullable<(typeof WIZARDS)[keyof typeof WIZARDS]>;
+  const namesQ = (w: AnyWizard, a: Answers, t: Dataset, id: string) =>
+    (w.questions(a, t).filter(Boolean) as Question[]).find((q) => q.id === id) as
+      | { kind: "names"; options: string[] }
+      | undefined;
+  const choiceQ = (w: AnyWizard, a: Answers, t: Dataset, id: string, ty?: TableType) =>
+    (w.questions(a, t, ty).filter(Boolean) as Question[]).find((q) => q.id === id) as
+      | { kind: "choice"; options: { value: string }[] }
+      | undefined;
+  // Regression predictors: Group (numeric-coded) and Sex; ID and Site absent.
+  const reg = WIZARDS["multiple-regression"]!;
+  deepStrictEqual(namesQ(reg, { dependent: "Y" }, table, "predictors")?.options, ["Group", "Sex"]);
+  deepStrictEqual(
+    choiceQ(reg, {}, table, "dependent")?.options.map((o) => o.value),
+    ["Y", "Group"],
+  );
+  // A t test's grouping variable: Group's two codes qualify; the two-level
+  // label Site does not.
+  const ttest = WIZARDS["compare-two-groups"]!;
+  deepStrictEqual(
+    choiceQ(ttest, { paired: "unpaired", response: "Y" }, table, "groupBy", "multiple")?.options.map((o) => o.value),
+    ["Group"],
+  );
+  // Multifactor factors: Group and Sex; the labels are not factors.
+  const multi = WIZARDS["multifactor-anova"]!;
+  deepStrictEqual(namesQ(multi, { response: "Y" }, table, "factors")?.options, ["Group", "Sex"]);
+  // Cox covariates: Sex only, once time and status are taken.
+  const cox = WIZARDS["cox-proportional-hazards"]!;
+  deepStrictEqual(namesQ(cox, { time: "Y", status: "Group" }, table, "covariates")?.options, ["Sex"]);
+  // A numeric column set to label drops out of the numeric offerings too.
+  const numericLabel = readTable(setVariableType(mv331bTyped(), "Group", "label"));
+  deepStrictEqual(choiceQ(reg, {}, numericLabel, "dependent")?.options.map((o) => o.value), ["Y"]);
+  deepStrictEqual(namesQ(reg, { dependent: "Y" }, numericLabel, "predictors")?.options, ["Sex"]);
+});
+
+check("seq 331: category autocomplete suggests the column's levels, prefix-matched (HALF B)", () => {
+  const data = mv331bTyped();
+  deepStrictEqual(levelSuggestions(data, "Sex", "m"), ["Male"]);
+  deepStrictEqual(levelSuggestions(data, "Sex", "M"), ["Male"], "the prefix match ignores case");
+  deepStrictEqual(levelSuggestions(data, "Sex", "male"), [], "an exact level is not suggested back");
+  deepStrictEqual(levelSuggestions(data, "Sex", ""), ["Female", "Male"], "an empty cell offers every level");
+  deepStrictEqual(levelSuggestions(data, "Sex", "z"), []);
+  deepStrictEqual(levelSuggestions(data, "Y", ""), [], "a continuous column has no levels to suggest");
+  deepStrictEqual(levelSuggestions(data, "Nope", ""), []);
+  // The preference: on by default, off when saved off, on for anything unusable.
+  strictEqual(loadCategoryAutocomplete(), true);
+  const store = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+  };
+  try {
+    saveCategoryAutocomplete(false);
+    strictEqual(loadCategoryAutocomplete(), false);
+    store.set(CATEGORY_AUTOCOMPLETE_KEY, "yes");
+    strictEqual(loadCategoryAutocomplete(), true);
+    store.set(CATEGORY_AUTOCOMPLETE_KEY, "");
+    strictEqual(loadCategoryAutocomplete(), true);
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+});
+
+check("seq 331: a label variable can serve as the row-label source (HALF B)", () => {
+  const data = mv331bTyped();
+  strictEqual(labelVariableOf(data), undefined, "no label variable is chosen yet");
+  strictEqual(setLabelVariable(data, "Sex"), data, "a categorical column cannot be the row-label source");
+  strictEqual(setLabelVariable(data, "Nope"), data, "an unknown column cannot be the row-label source");
+  const labelled = setLabelVariable(data, "ID");
+  strictEqual(labelled.labelVariable, "ID");
+  strictEqual(labelVariableOf(labelled), "ID");
+  deepStrictEqual(rowLabelsOf(labelled), ["S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008"]);
+  deepStrictEqual(rowLabelsOf(data), ["1", "2", "3", "4", "5", "6", "7", "8"], "without one, the row titles are the labels");
+  strictEqual(setLabelVariable(labelled, undefined).labelVariable, undefined, "clearing goes back to row titles");
+  // A rename carries the choice; deleting the column drops it.
+  const renamed = renameColumn(labelled, 4, "SubjectID");
+  strictEqual(renamed.labelVariable, "SubjectID");
+  strictEqual(labelVariableOf(renamed), "SubjectID");
+  strictEqual(deleteColumns(renamed, 4, 1).labelVariable, undefined);
+  // The choice persists through a .hlx save/reload; a bogus one drops.
+  const payload: ProjectFilePayload = {
+    nodes: {
+      mv: { id: "mv", type: "table", name: "Subjects", parentId: null, tableType: "multiple", data: labelled },
+    },
+    rootOrder: ["mv"],
+    childOrder: { mv: [] },
+    activeNodeId: "mv",
+  };
+  const resaved = parseProjectFile(JSON.parse(serializeProjectFile(payload)));
+  if ("error" in resaved) throw new Error(resaved.error);
+  strictEqual((resaved.project.nodes.mv as ProjectNode).data?.labelVariable, "ID");
+  const tampered = JSON.parse(serializeProjectFile(payload)) as Record<string, unknown>;
+  (tampered.project as Record<string, Record<string, { data: Record<string, unknown> }>>).nodes.mv.data.labelVariable = "Gone";
+  const reparsed = parseProjectFile(tampered);
+  if ("error" in reparsed) throw new Error(reparsed.error);
+  strictEqual((reparsed.project.nodes.mv as ProjectNode).data?.labelVariable, undefined);
+});
+
+check("seq 331: point labels show the label variable's values when one is chosen (HALF B)", () => {
+  const labelled = setLabelVariable(mv331bTyped(), "ID");
+  const dataset = readTable(labelled);
+  deepStrictEqual(dataset.rowLabels, ["S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008"]);
+  const options = {
+    ...newGraphOptions("individual"),
+    points: { "Y#0": { label: true }, "Y#1": { label: true } },
+  };
+  const names = pointLabels(
+    GRAPHS.individual.build(dataset.numeric, options, paintOf(options, 1)).data,
+    options.points,
+    dataset.rowLabels,
+    13,
+  );
+  deepStrictEqual(
+    names.map((n) => n.text),
+    ["S001", "S002"],
+  );
+});
+
+// ── seq 379: label variables refused as grouping variables / factors ──
+// Seq 331 half B refused labels as regression/Cox predictors; the grouping
+// paths had no such check — an MCP run_analysis naming a label as the
+// grouping variable ran instead of erroring. The four entry points below
+// (compare-two-groups groupBy, survival groupBy, multifactor factors,
+// extract-rearrange grouping / rowFactor / columnFactor / rowVariable /
+// outcome) refuse a label with the same named error. Deliberately NOT
+// rejected: extract-rearrange `subject` (a replicate identifier — subject
+// IDs are what labels are for) and `rowTitles` (the label's natural home).
+
+// Group and Sex are independent (all four combinations, twice each), so a
+// two-way fit has no empty cell; ID and Site are labels by hand.
+const mv379 = (): TableData => ({
+  columns: ["Title", "Y", "Group", "Sex", "ID", "Site", "Status"],
+  rows: [
+    ["1", "12", "1", "Female", "S001", "X", "1"],
+    ["2", "15", "2", "Male", "S002", "Y", "1"],
+    ["3", "11", "1", "Male", "S003", "X", "0"],
+    ["4", "18", "2", "Female", "S004", "Y", "0"],
+    ["5", "14", "1", "Female", "S005", "X", "0"],
+    ["6", "17", "2", "Male", "S006", "Y", "1"],
+    ["7", "13", "1", "Male", "S007", "X", "1"],
+    ["8", "19", "2", "Female", "S008", "Y", "0"],
+  ],
+});
+const mv379Typed = (): TableData => {
+  let data = refreshVariableTypes(mv379());
+  data = setVariableType(data, "Group", "categorical");
+  data = setVariableType(data, "ID", "label");
+  data = setVariableType(data, "Site", "label");
+  return data;
+};
+
+check("seq 379: a label variable is refused as the compare-two-groups grouping variable", () => {
+  const columns = readTable(mv379Typed()).columns;
+  deepStrictEqual(
+    columns.map((c) => [c.name, c.variableType]),
+    [
+      ["Y", "continuous"],
+      ["Group", "categorical"],
+      ["Sex", "categorical"],
+      ["ID", "label"],
+      ["Site", "label"],
+      ["Status", "continuous"],
+    ],
+  );
+  // A label as the grouping variable is refused by name; a categorical
+  // (text or numeric-coded) still works.
+  const tParams = { paired: false, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided" } as const;
+  const asLabel = compareTwoGroupsSpec.check!(columns, { ...tParams, response: "Y", groupBy: "ID" });
+  ok(asLabel?.includes("label variable"), `expected a label error, got: ${asLabel}`);
+  ok(asLabel?.includes("“ID”"), `the error should name the column, got: ${asLabel}`);
+  ok(asLabel?.includes("grouping variable"), `the error should name the role, got: ${asLabel}`);
+  const asSite = compareTwoGroupsSpec.check!(columns, { ...tParams, response: "Y", groupBy: "Site" });
+  ok(asSite?.includes("“Site”"), `expected Site named, got: ${asSite}`);
+  strictEqual(compareTwoGroupsSpec.check!(columns, { ...tParams, response: "Y", groupBy: "Sex" }), undefined);
+  strictEqual(compareTwoGroupsSpec.check!(columns, { ...tParams, response: "Y", groupBy: "Group" }), undefined);
+  // The same refusal reaches the MCP run-analysis path (no R: the spec
+  // check errors before any test runs).
+  return (async () => {
+    const out = await runAnalysis("compare-two-groups", mv379Typed(), { ...tParams, response: "Y", groupBy: "ID" });
+    ok("error" in out && out.error.includes("label variable"), JSON.stringify(out));
+  })();
+});
+
+check("seq 379: a label variable is refused as the survival grouping variable", async () => {
+  const data = mv379Typed();
+  const params = { curveTest: "logrank", correction: "holm", time: "Y", status: "Status" } as const;
+  const asLabel = await runAnalysis("survival", data, { ...params, groupBy: "ID" });
+  ok("error" in asLabel && asLabel.error.includes("label variable"), JSON.stringify(asLabel));
+  ok("error" in asLabel && asLabel.error.includes("“ID”"), JSON.stringify(asLabel));
+  const asSite = await runAnalysis("survival", data, { ...params, groupBy: "Site" });
+  ok("error" in asSite && asSite.error.includes("“Site”"), JSON.stringify(asSite));
+  // A categorical grouping still runs (two groups each).
+  const bySex = await runAnalysis("survival", data, { ...params, groupBy: "Sex" });
+  ok(!("error" in bySex), JSON.stringify(bySex));
+  deepStrictEqual(bySex.survivalGroups?.map((g) => g.group), ["Female", "Male"]);
+  const byGroup = await runAnalysis("survival", data, { ...params, groupBy: "Group" });
+  ok(!("error" in byGroup), JSON.stringify(byGroup));
+  deepStrictEqual(byGroup.survivalGroups?.map((g) => g.group), ["1", "2"]);
+});
+
+check("seq 379: a label variable is refused as a multifactor ANOVA factor", async () => {
+  const data = mv379Typed();
+  const asLabel = await runAnalysis("multifactor-anova", data, { response: "Y", factors: ["ID"], posthoc: "none" });
+  ok("error" in asLabel && asLabel.error.includes("label variable"), JSON.stringify(asLabel));
+  ok("error" in asLabel && asLabel.error.includes("“ID”"), JSON.stringify(asLabel));
+  ok("error" in asLabel && asLabel.error.includes("factor"), JSON.stringify(asLabel));
+  const asSite = await runAnalysis("multifactor-anova", data, { response: "Y", factors: ["Site"], posthoc: "none" });
+  ok("error" in asSite && asSite.error.includes("“Site”"), JSON.stringify(asSite));
+  // Categorical factors (text and numeric-coded) still fit, two-way included.
+  const twoWay = await runAnalysis("multifactor-anova", data, { response: "Y", factors: ["Group", "Sex"], posthoc: "none" });
+  ok(!("error" in twoWay), JSON.stringify(twoWay));
+  ok(twoWay.stats.some((s) => s.label === "Group:Sex F"), JSON.stringify(twoWay.stats));
+  // The default factor set never auto-picks a label: a table with only a
+  // label beside the response has no factor at all.
+  const labelOnly: TableData = setVariableType(
+    refreshVariableTypes({
+      columns: ["Title", "Y", "ID"],
+      rows: [
+        ["1", "12", "S001"],
+        ["2", "15", "S002"],
+        ["3", "11", "S003"],
+        ["4", "18", "S004"],
+        ["5", "14", "S005"],
+        ["6", "17", "S006"],
+        ["7", "13", "S007"],
+        ["8", "19", "S008"],
+      ],
+    }),
+    "ID",
+    "label",
+  );
+  const auto = await runAnalysis("multifactor-anova", labelOnly, { response: "Y", posthoc: "none" });
+  ok("error" in auto && auto.error.includes("needs at least one factor"), JSON.stringify(auto));
+});
+
+// ── seq 389: multifactor Cohen's f + % of total variation ──
+// Balanced 2×2, two replicates per cell, cell means 0/2/4/6 with ±1
+// replicates: SS_Fertilizer = 32, SS_Watering = 8, SS_interaction = 0,
+// SS_resid = 8, SS_total = 48 (balanced, so Type III = Type I = II).
+// Hand-computed: Fertilizer η² = 32/48, partial η² = 32/40 = 0.8,
+// f = √(0.8/0.2) = 2; Watering η² = 8/48, partial η² = 8/16 = 0.5,
+// f = 1; interaction 0 throughout. The same formulas give Prism's docs
+// example (partial η² 0.7543390 → f √(0.7543390/0.2456610) = 1.752327;
+// η² 0.4150244 → 41.50244%).
+check("seq 389: multifactor ANOVA reports Cohen's f and % of total variation per term", async () => {
+  const data: TableData = refreshVariableTypes({
+    columns: ["Title", "Y", "Fertilizer", "Watering"],
+    rows: [
+      ["1", "-1", "Low", "Low"],
+      ["2", "1", "Low", "Low"],
+      ["3", "1", "Low", "High"],
+      ["4", "3", "Low", "High"],
+      ["5", "3", "High", "Low"],
+      ["6", "5", "High", "Low"],
+      ["7", "5", "High", "High"],
+      ["8", "7", "High", "High"],
+    ],
+  });
+  const out = await runAnalysis("multifactor-anova", data, {
+    response: "Y",
+    factors: ["Fertilizer", "Watering"],
+    posthoc: "none",
+  });
+  ok(!("error" in out), JSON.stringify(out));
+  const row = (label: string) => out.stats.find((s) => s.label === label)?.value;
+  const close = (got: number | null | undefined, want: number, tol = 1e-9) => {
+    ok(got !== null && got !== undefined && Math.abs(got - want) <= tol, `expected ${want}, got ${got}`);
+  };
+  close(row("Fertilizer % of total variation"), 200 / 3);
+  close(row("Fertilizer eta squared"), 2 / 3);
+  close(row("Fertilizer partial eta squared"), 0.8);
+  close(row("Fertilizer Cohen's f"), 2);
+  close(row("Watering % of total variation"), 100 / 6);
+  close(row("Watering eta squared"), 1 / 6);
+  close(row("Watering partial eta squared"), 0.5);
+  close(row("Watering Cohen's f"), 1);
+  close(row("Fertilizer:Watering % of total variation"), 0);
+  close(row("Fertilizer:Watering eta squared"), 0);
+  close(row("Fertilizer:Watering partial eta squared"), 0);
+  close(row("Fertilizer:Watering Cohen's f"), 0);
+  // Prism's column order for the effect-size rows: % of total variation,
+  // eta squared, partial eta squared, Cohen's f.
+  const labels = out.stats.map((s) => s.label);
+  const at = (label: string) => labels.indexOf(label);
+  for (const term of ["Fertilizer", "Watering", "Fertilizer:Watering"]) {
+    ok(at(`${term} % of total variation`) < at(`${term} eta squared`), `seq 389 order ${term} %`);
+    ok(at(`${term} eta squared`) < at(`${term} partial eta squared`), `seq 389 order ${term} eta`);
+    ok(at(`${term} partial eta squared`) < at(`${term} Cohen's f`), `seq 389 order ${term} partial`);
+  }
+});
+
+// A perfect fit (no residual error) leaves partial eta squared at 1, so
+// Cohen's f is null — never Infinity. Same 2×2 means as above, but with
+// identical replicates: SS_resid = 0, SS_total = 40.
+check("seq 389: Cohen's f is null when partial eta squared is 1", async () => {
+  const data: TableData = refreshVariableTypes({
+    columns: ["Title", "Y", "Fertilizer", "Watering"],
+    rows: [
+      ["1", "0", "Low", "Low"],
+      ["2", "0", "Low", "Low"],
+      ["3", "2", "Low", "High"],
+      ["4", "2", "Low", "High"],
+      ["5", "4", "High", "Low"],
+      ["6", "4", "High", "Low"],
+      ["7", "6", "High", "High"],
+      ["8", "6", "High", "High"],
+    ],
+  });
+  const out = await runAnalysis("multifactor-anova", data, {
+    response: "Y",
+    factors: ["Fertilizer", "Watering"],
+    posthoc: "none",
+  });
+  ok(!("error" in out), JSON.stringify(out));
+  const row = (label: string) => out.stats.find((s) => s.label === label)?.value;
+  const close = (got: number | null | undefined, want: number, tol = 1e-9) => {
+    ok(got !== null && got !== undefined && Math.abs(got - want) <= tol, `expected ${want}, got ${got}`);
+  };
+  strictEqual(row("Fertilizer Cohen's f"), null, "Fertilizer f at partial eta squared 1");
+  strictEqual(row("Watering Cohen's f"), null, "Watering f at partial eta squared 1");
+  // The % of total variation still reads off eta squared with no error term.
+  close(row("Fertilizer % of total variation"), 80);
+  close(row("Watering % of total variation"), 20);
+  // The interaction's f is deliberately NOT pinned here: on a perfect fit
+  // R's drop1 returns floating-point noise for the zero-SS term (mse ~1e-30,
+  // interaction SS ~1e-32), so its partial eta squared is a meaningless
+  // ratio of two residuals rather than 0/0.
+});
+
+// ── seq 392: multifactor partial-eta-squared CIs via etaCI ──
+// Same balanced 2×2 fixture as seq 389 (SS_Fert = 32, SS_Wat = 8,
+// SS_int = 0, SS_resid = 8, N = 8): Fertilizer F = 16, Watering F = 4,
+// interaction F = 0, all d1 = 1, d2 = 4. Expected CIs are the etaCI
+// closed form (base.ts:663, the same helper + argument order as the
+// one-way ANOVA's anova.ts:233 call), computed through webR itself —
+// etaCI(16,1,4,8) = [0.038710166725199904, 0.867640122887004],
+// etaCI(4,1,4,8) = [0, 0.6974633393355257]; F = 0 collapses the CI to
+// [0, 0] by fci's construction (pf(0, …) = 0, so both bounds fall to 0).
+// Each CI contains its term's partial eta squared (0.8 / 0.5 / 0).
+check("seq 392: multifactor ANOVA reports the partial eta squared 95% CI per term", async () => {
+  const data: TableData = refreshVariableTypes({
+    columns: ["Title", "Y", "Fertilizer", "Watering"],
+    rows: [
+      ["1", "-1", "Low", "Low"],
+      ["2", "1", "Low", "Low"],
+      ["3", "1", "Low", "High"],
+      ["4", "3", "Low", "High"],
+      ["5", "3", "High", "Low"],
+      ["6", "5", "High", "Low"],
+      ["7", "5", "High", "High"],
+      ["8", "7", "High", "High"],
+    ],
+  });
+  const out = await runAnalysis("multifactor-anova", data, {
+    response: "Y",
+    factors: ["Fertilizer", "Watering"],
+    posthoc: "none",
+  });
+  ok(!("error" in out), JSON.stringify(out));
+  const row = (label: string) => out.stats.find((s) => s.label === label)?.value;
+  const close = (got: number | null | undefined, want: number, tol = 1e-9) => {
+    ok(got !== null && got !== undefined && Math.abs(got - want) <= tol, `expected ${want}, got ${got}`);
+  };
+  close(row("Fertilizer partial eta squared 95% CI lower"), 0.038710166725199904);
+  close(row("Fertilizer partial eta squared 95% CI upper"), 0.867640122887004);
+  strictEqual(row("Watering partial eta squared 95% CI lower"), 0);
+  close(row("Watering partial eta squared 95% CI upper"), 0.6974633393355257);
+  strictEqual(row("Fertilizer:Watering partial eta squared 95% CI lower"), 0);
+  strictEqual(row("Fertilizer:Watering partial eta squared 95% CI upper"), 0);
+  // The CI rows sit right after their term's partial-eta-squared row,
+  // in the same stats table as the other effect-size rows.
+  const labels = out.stats.map((s) => s.label);
+  const at = (label: string) => labels.indexOf(label);
+  for (const term of ["Fertilizer", "Watering", "Fertilizer:Watering"]) {
+    ok(at(`${term} partial eta squared`) < at(`${term} partial eta squared 95% CI lower`), `seq 392 order ${term} lo`);
+    ok(at(`${term} partial eta squared 95% CI lower`) < at(`${term} partial eta squared 95% CI upper`), `seq 392 order ${term} hi`);
+    ok(at(`${term} partial eta squared 95% CI upper`) < at(`${term} Cohen's f`), `seq 392 order ${term} f`);
+  }
+  // The CI survives recompute: a second run reports the same bounds.
+  const out2 = await runAnalysis("multifactor-anova", data, {
+    response: "Y",
+    factors: ["Fertilizer", "Watering"],
+    posthoc: "none",
+  });
+  ok(!("error" in out2), JSON.stringify(out2));
+  const row2 = (label: string) => out2.stats.find((s) => s.label === label)?.value;
+  close(row2("Fertilizer partial eta squared 95% CI lower"), 0.038710166725199904);
+  close(row2("Fertilizer partial eta squared 95% CI upper"), 0.867640122887004);
+});
+
+// A null F gives a null CI, never an invented bound: etaCI(NA, …) is
+// c(NA, NA) by the helper's own guard (fci returns NA,NA for a
+// non-finite F), and evalNamedVector maps NA to null. No multifactor
+// design reaches a null F through the runner (empty cells and rank
+// deficiency are refused up front), so this pins the helper contract
+// directly through webR, the same engine the runner uses.
+check("seq 392: etaCI returns a null CI for a null F statistic", async () => {
+  const v = await evalNamedVector(`${R_EFFECT_CI};c(lo=etaCI(NA,1,4,8)[1],hi=etaCI(NA,1,4,8)[2])`);
+  strictEqual(v.lo, null, "etaCI(NA) lower is null");
+  strictEqual(v.hi, null, "etaCI(NA) upper is null");
+});
+
+check("seq 379: a label variable is refused as an extract-rearrange grouping / factor", async () => {
+  const data = mv379Typed();
+  const run = (params: object) => runAnalysis("extract-rearrange", data, params);
+  // XY / Column grouping.
+  const xyLabel = await run({ target: "xy", x: "Y", response: "Group", grouping: "ID" });
+  ok("error" in xyLabel && xyLabel.error.includes("label variable"), JSON.stringify(xyLabel));
+  ok("error" in xyLabel && xyLabel.error.includes("“ID”"), JSON.stringify(xyLabel));
+  const colLabel = await run({ target: "column", response: "Y", grouping: "Site" });
+  ok("error" in colLabel && colLabel.error.includes("“Site”"), JSON.stringify(colLabel));
+  const xyOk = await run({ target: "xy", x: "Y", response: "Group", grouping: "Sex" });
+  ok(!("error" in xyOk), JSON.stringify(xyOk));
+  // Grouped factors.
+  const rowLabel = await run({ target: "grouped", response: "Y", rowFactor: "ID", columnFactor: "Group" });
+  ok("error" in rowLabel && rowLabel.error.includes("“ID”"), JSON.stringify(rowLabel));
+  const colFactorLabel = await run({ target: "grouped", response: "Y", rowFactor: "Sex", columnFactor: "Site" });
+  ok("error" in colFactorLabel && colFactorLabel.error.includes("“Site”"), JSON.stringify(colFactorLabel));
+  const groupedOk = await run({ target: "grouped", response: "Y", rowFactor: "Sex", columnFactor: "Group" });
+  ok(!("error" in groupedOk), JSON.stringify(groupedOk));
+  // Contingency axes.
+  const rowVar = await run({ target: "contingency", rowVariable: "ID", outcome: "Group" });
+  ok("error" in rowVar && rowVar.error.includes("“ID”"), JSON.stringify(rowVar));
+  const outcome = await run({ target: "contingency", rowVariable: "Sex", outcome: "Site" });
+  ok("error" in outcome && outcome.error.includes("“Site”"), JSON.stringify(outcome));
+  const contOk = await run({ target: "contingency", rowVariable: "Sex", outcome: "Group" });
+  ok(!("error" in contOk), JSON.stringify(contOk));
+  deepStrictEqual(contOk.extracted?.table.rows, [
+    ["Female", "2", "2"],
+    ["Male", "2", "2"],
+  ]);
+  // Labels still belong where they are the identifier: as the subject
+  // (replicate IDs) and as the row-titles source.
+  const subjOk = await run({ target: "xy", x: "Y", response: "Group", subject: "ID" });
+  ok(!("error" in subjOk), JSON.stringify(subjOk));
+  const titlesOk = await run({ target: "xy", x: "Y", response: "Group", rowTitles: "ID" });
+  ok(!("error" in titlesOk), JSON.stringify(titlesOk));
+});
+
+// ── seq 332: dates / elapsed time X on XY tables (PART D — axis scales) ─
+// Part D puts the date/elapsed scale on the X axis itself: the Format Axes
+// dialog picks the display format, and the axis draws date labels (smart
+// spacing) or elapsed labels (h / h:mm / h:mm:ss / h:mm:ss.ms) instead of
+// plain numbers. Fits already see converted numbers (readTable, half A) —
+// the pins below prove the fit entry points agree.
+
+check("seq 332: the axis display formats in GRAPH_CHOICES match axis-dates.ts", () => {
+  // GRAPH_CHOICES carries literal lists — the mcp-coverage gate parses them
+  // literally, so it can't read spreads. This pin keeps the two copies
+  // equal, so a format added in one place lands in the other.
+  deepStrictEqual([...GRAPH_CHOICES.xDateFormat], [...DATE_DISPLAY_FORMATS]);
+  deepStrictEqual([...GRAPH_CHOICES.xElapsedFormat], [...ELAPSED_DISPLAY_FORMATS]);
+});
+
+check("seq 332: a date axis renders date labels in several display formats", () => {
+  const zero = Date.UTC(2024, 0, 16);
+  strictEqual(formatDateTick(zero, "16-jan-2004"), "16-Jan-2024");
+  strictEqual(formatDateTick(zero, "jan 16, 2004"), "Jan 16, 2024");
+  const conversion = { units: "days" } as const;
+  // A 10-day span: daily ticks would be 11, over the 8-tick cap, so the
+  // spacing steps to 2 days — ticks at 0, 2, 4, 6, 8, 10 days.
+  const iso = dateAxisTicksForValues(0, 10, conversion, zero, "16-jan-2004");
+  deepStrictEqual(iso.tickvals, [0, 2, 4, 6, 8, 10]);
+  deepStrictEqual(iso.ticktext, ["16-Jan-2024", "18-Jan-2024", "20-Jan-2024", "22-Jan-2024", "24-Jan-2024", "26-Jan-2024"]);
+  deepStrictEqual(dateAxisTicksForValues(0, 10, conversion, zero, "jan 16, 2004").ticktext, [
+    "Jan 16, 2024", "Jan 18, 2024", "Jan 20, 2024", "Jan 22, 2024", "Jan 24, 2024", "Jan 26, 2024",
+  ]);
+  deepStrictEqual(dateAxisTicksForValues(0, 10, conversion, zero, "2024-01-16").ticktext, [
+    "2024-01-16", "2024-01-18", "2024-01-20", "2024-01-22", "2024-01-24", "2024-01-26",
+  ]);
+  // A 5-year span in month-year and year formats: yearly ticks on Jan 1.
+  // A calendar year is not exactly 365.25 days, so the tick *values* are
+  // fractional years (Jan 1 2021 is 366/365.25 years out) — the labels are
+  // what the reader sees, and Jan 1 2025 sits just past the 5-year edge.
+  const years = { units: "years" } as const;
+  const zero20 = Date.UTC(2020, 0, 1);
+  const five = dateAxisTicksForValues(0, 5, years, zero20, "2004");
+  deepStrictEqual(five.ticktext, ["2020", "2021", "2022", "2023", "2024"]);
+  ok(five.tickvals.length === 5 && five.tickvals[0] === 0, "five yearly ticks from the zero");
+  ok(five.tickvals.every((v, i) => i === 0 || v > five.tickvals[i - 1]), "ticks increase");
+  deepStrictEqual(dateAxisTicksForValues(0, 5, years, zero20, "jan 2004").ticktext, [
+    "Jan 2020", "Jan 2021", "Jan 2022", "Jan 2023", "Jan 2024",
+  ]);
+});
+
+check("seq 332: an elapsed axis renders h:mm:ss labels (and h, h:mm:ss.ms)", () => {
+  const conversion = { units: "seconds" } as const;
+  strictEqual(formatElapsedTick(5400, "h:mm:ss"), "1:30:00");
+  strictEqual(formatElapsedTick(5400, "h"), "1.5");
+  strictEqual(formatElapsedTick(30.5, "h:mm:ss.ms"), "0:00:30.500");
+  // 0–5400 s (1.5 h): the step nearest five ticks is 1800 s (4 ticks) —
+  // 900 s would be 7, nearer the cap than the aim.
+  const hms = elapsedAxisTicksForValues(0, 5400, conversion, "h:mm:ss");
+  deepStrictEqual(hms.tickvals, [0, 1800, 3600, 5400]);
+  deepStrictEqual(hms.ticktext, ["0:00:00", "0:30:00", "1:00:00", "1:30:00"]);
+  deepStrictEqual(elapsedAxisTicksForValues(0, 5400, conversion, "h").ticktext, ["0", "0.5", "1", "1.5"]);
+  deepStrictEqual(elapsedAxisTicksForValues(0, 5400, conversion, "h:mm").ticktext, ["0:00", "0:30", "1:00", "1:30"]);
+  deepStrictEqual(elapsedAxisTicksForValues(0, 5400, conversion, "h:mm:ss.ms").ticktext, [
+    "0:00:00.000", "0:30:00.000", "1:00:00.000", "1:30:00.000",
+  ]);
+});
+
+check("seq 332: smart date spacing picks sensible ticks and aligns them", () => {
+  const zero = Date.UTC(2024, 0, 16);
+  // A 3-hour span steps hourly, aligned to the hour.
+  deepStrictEqual(dateAxisTicksForValues(0, 3, { units: "hours" }, zero, "16-jan-2004").tickvals, [0, 1, 2, 3]);
+  // A 10-day span steps 2 days, aligned to midnight (all ticks whole days).
+  const ten = dateAxisTicksForValues(0, 10, { units: "days" }, zero, "16-jan-2004");
+  ok(ten.tickvals.length <= 8, `expected at most 8 ticks, got ${ten.tickvals.length}`);
+  ok(ten.tickvals.every((v) => Number.isInteger(v)), "day ticks land on whole days");
+  // A 5-year span steps yearly, aligned to Jan 1 (labels are the assertion —
+  // the values are fractional years, a calendar year not being 365.25 days).
+  const five = dateAxisTicksForValues(0, 5, { units: "years" }, Date.UTC(2020, 0, 1), "2004");
+  deepStrictEqual(five.ticktext, ["2020", "2021", "2022", "2023", "2024"]);
+  // A degenerate range (all X the same) still yields one tick, not none.
+  deepStrictEqual(dateAxisTicksForValues(4, 4, { units: "days" }, zero, "16-jan-2004").tickvals, [4]);
+  // Elapsed: a 90-second span steps 30 s (4 ticks, nearest the five-tick aim).
+  deepStrictEqual(elapsedAxisTicksForValues(0, 90, { units: "seconds" }, "h:mm:ss").tickvals, [0, 30, 60, 90]);
+});
+
+check("seq 332: a fit on a date X converts to numbers and matches hand-computed values", () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "2024-01-16", "10"],
+      [null, "2024-01-17", "20"],
+      [null, "2024-01-18", "30"],
+      [null, "2024-01-26", "40"],
+      [null, "2024-01-27", "50"],
+    ],
+    xFormat: "date",
+  };
+  const ds = readTable(data);
+  const pts = xyPoints(ds.columns[0], ds.sets[1]);
+  deepStrictEqual(pts.x, [0, 1, 2, 10, 11]);
+  const fit = fitLinear(pts.x, pts.y, false);
+  if (fit === null) throw new Error("the date-X fit must exist");
+  // Hand-computed OLS: Sxy = 310, Sxx = 110.8, x̄ = 4.8, ȳ = 30.
+  ok(Math.abs(fit.slope - 310 / 110.8) < 1e-9, `expected slope ${310 / 110.8}, got ${fit.slope}`);
+  ok(Math.abs(fit.intercept - (30 - (310 / 110.8) * 4.8)) < 1e-9, `expected intercept, got ${fit.intercept}`);
+  // The same points as plain numbers fit identically — the conversion, not
+  // the fit, is what changed.
+  const numeric: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "0", "10"],
+      [null, "1", "20"],
+      [null, "2", "30"],
+      [null, "10", "40"],
+      [null, "11", "50"],
+    ],
+  };
+  const npts = xyPoints(readTable(numeric).columns[0], readTable(numeric).sets[1]);
+  const nfit = fitLinear(npts.x, npts.y, false);
+  deepStrictEqual({ slope: fit.slope, intercept: fit.intercept }, { slope: nfit!.slope, intercept: nfit!.intercept });
+  // The nonlinear-fit entry point sees the same converted X (a 4PL needs at
+  // least 5 points, hence the fifth row above).
+  const prepared = prepareFit(readTable(data).columns, "Y", "sigmoidal-4pl-x");
+  if ("error" in prepared) throw new Error(prepared.error);
+  deepStrictEqual(prepared.xs, [0, 1, 2, 10, 11]);
+  // And an elapsed X converts to seconds for the fit.
+  const elapsed: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "0:00:30", "10"],
+      [null, "0:01:00", "20"],
+      [null, "0:01:30", "30"],
+      [null, "0:02:00", "40"],
+      [null, "0:02:30", "50"],
+    ],
+    xFormat: "elapsed",
+    xConversion: { units: "seconds" },
+  };
+  const eprepared = prepareFit(readTable(elapsed).columns, "Y", "sigmoidal-4pl-x");
+  if ("error" in eprepared) throw new Error(eprepared.error);
+  deepStrictEqual(eprepared.xs, [30, 60, 90, 120, 150]);
+});
+
+check("seq 332: a real xy-scatter figure draws date labels on its X axis", () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "2024-01-16", "10"],
+      [null, "2024-01-17", "20"],
+      [null, "2024-01-26", "30"],
+    ],
+    xFormat: "date",
+  };
+  const ds = readTable(data);
+  const options = { ...newGraphOptions("xy-scatter"), xDateFormat: "16-jan-2004" as const };
+  const columns = plotColumns(ds, "xy-scatter", options, "xy");
+  const fig = GRAPHS["xy-scatter"].build(columns, options, paintOf(options, 1, ["Y"]), ds.titles, ds.summary, "xy");
+  const xaxis = fig.layout.xaxis as Record<string, unknown>;
+  // Before the date scale applies, the axis carries plain numbers.
+  strictEqual(xaxis.tickmode, undefined);
+  const zeroMs = xZeroMs(
+    data.rows.map((r) => r[1] ?? null),
+    data.xConversion ?? { units: "days" },
+  );
+  applyDateAxis(fig, options, { format: "date", conversion: { units: "days" }, zeroMs });
+  strictEqual(xaxis.tickmode, "array");
+  deepStrictEqual(xaxis.tickvals, [0, 2, 4, 6, 8, 10]);
+  deepStrictEqual(xaxis.ticktext, ["16-Jan-2024", "18-Jan-2024", "20-Jan-2024", "22-Jan-2024", "24-Jan-2024", "26-Jan-2024"]);
+  // A log X scale keeps its numeric ticks: dates have no log scale, so the
+  // date axis leaves a log axis exactly as the builder made it.
+  const logFig = GRAPHS["xy-scatter"].build(columns, { ...options, xScale: "log10" }, paintOf(options, 1, ["Y"]), ds.titles, ds.summary, "xy");
+  const logAxis = logFig.layout.xaxis as Record<string, unknown>;
+  const logVals = logAxis.tickvals;
+  const logText = logAxis.ticktext;
+  applyDateAxis(logFig, { ...options, xScale: "log10" }, { format: "date", conversion: { units: "days" }, zeroMs });
+  deepStrictEqual((logFig.layout.xaxis as Record<string, unknown>).tickvals, logVals);
+  deepStrictEqual((logFig.layout.xaxis as Record<string, unknown>).ticktext, logText);
+});
+
+check("seq 332: only a graph whose X is the table's X column gets a date axis", () => {
+  const base = newGraphOptions("xy-scatter");
+  ok(hasTableXAxis("xy-scatter", base));
+  ok(hasTableXAxis("xy-bar", base));
+  ok(hasTableXAxis("xy-area", base));
+  ok(hasTableXAxis("smooth-curve", base));
+  ok(hasTableXAxis("residuals", { ...base, residualsAs: "x" }));
+  // A residual QQ plot's X is a z-score, not the table's X.
+  ok(!hasTableXAxis("residuals", { ...base, residualsAs: "qq" }));
+  // A volcano's X is an effect size, a survival curve's X is analysis time.
+  ok(!hasTableXAxis("volcano", base));
+  ok(!hasTableXAxis("survival", base));
+  ok(!hasTableXAxis("roc-curve", base));
+  ok(!hasTableXAxis("bland-altman", base));
+});
+
+check("seq 332: the X date/elapsed display format survives a .hlx save/reload; bogus values fall back to the default", () => {
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Dates",
+        parentId: null,
+        tableType: "xy",
+        data: {
+          columns: ["Title", "X", "Y"],
+          rows: [[null, "2024-01-16", "10"]],
+          xFormat: "date",
+        },
+      },
+      g1: {
+        id: "g1",
+        type: "graph",
+        name: "Scatter",
+        parentId: "t1",
+        graphType: "xy-scatter",
+        graphOptions: { ...newGraphOptions("xy-scatter"), xDateFormat: "jan 16, 2004", xElapsedFormat: "h:mm" },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: ["g1"] },
+    activeNodeId: "t1",
+  };
+  const reread = read(serializeProjectFile(payload));
+  strictEqual(reread.updated, false);
+  strictEqual(reread.project.nodes.g1!.graphOptions!.xDateFormat, "jan 16, 2004");
+  strictEqual(reread.project.nodes.g1!.graphOptions!.xElapsedFormat, "h:mm");
+  // A hand-edited file holding a bogus format falls back to the default,
+  // instead of carrying a lie into the axis.
+  const broken = JSON.parse(serializeProjectFile(payload)) as { project: Record<string, any> };
+  broken.project.nodes.g1.graphOptions.xDateFormat = "Fortnightly";
+  broken.project.nodes.g1.graphOptions.xElapsedFormat = "fortnights";
+  const rereadBroken = read(JSON.stringify(broken));
+  strictEqual(rereadBroken.project.nodes.g1!.graphOptions!.xDateFormat, "16-jan-2004");
+  strictEqual(rereadBroken.project.nodes.g1!.graphOptions!.xElapsedFormat, "h:mm:ss");
+});
+
+check("seq 332: .prism round-trip preserves a date X format with an axis scale set", async () => {
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Dates",
+        parentId: null,
+        tableType: "xy",
+        data: {
+          columns: ["Title", "X", "Y"],
+          rows: [
+            [null, "2024-01-16", "10"],
+            [null, "2024-01-17", "20"],
+          ],
+          xFormat: "date",
+          xConversion: { units: "weeks", startDate: "2024-01-01", dayFirst: true },
+        },
+      },
+      g1: {
+        id: "g1",
+        type: "graph",
+        name: "Scatter",
+        parentId: "t1",
+        graphType: "xy-scatter",
+        graphOptions: { ...newGraphOptions("xy-scatter"), xDateFormat: "jan 16, 2004" },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: ["g1"] },
+    activeNodeId: "t1",
+  };
+  const written = await writePrism(payload, "1.8.2");
+  const back = await convertPrism(written.bytes, "round-trip.prism");
+  const backNode = Object.values(back.project.nodes).find((n) => n.type === "table");
+  if (!backNode || backNode.type !== "table") throw new Error("no table node after round-trip");
+  strictEqual(backNode.data!.xFormat, "date");
+  deepStrictEqual(backNode.data!.xConversion, { units: "weeks", startDate: "2024-01-01" });
+});
+
+check("seq 332 (MCP): update-graph accepts the date/elapsed axis formats and refuses bogus ones", async () => {
+  const harness = mcpLaggingHarness(true);
+  harness.dispatch({
+    type: "create",
+    node: { id: "t2", type: "table", name: "Dates", parentId: null, tableType: "xy", data: { columns: ["Title", "X", "Y1"], rows: [[null, "2024-01-16", "2"]] } },
+  });
+  harness.dispatch({
+    type: "create",
+    node: { id: "g1", type: "graph", name: "Scatter", parentId: "t2", graphType: "xy-scatter", graphOptions: newGraphOptions("xy-scatter") },
+  });
+  harness.sync();
+  await harness.run("job-332d-opt", "update-graph", { graph_id: "g1", options: { xDateFormat: "jan 16, 2004", xElapsedFormat: "h:mm" } });
+  strictEqual(harness.state().nodes.g1.graphOptions?.xDateFormat, "jan 16, 2004");
+  strictEqual(harness.state().nodes.g1.graphOptions?.xElapsedFormat, "h:mm");
+  await rejects(
+    harness.run("job-332d-bad", "update-graph", { graph_id: "g1", options: { xDateFormat: "Fortnightly" } }),
+    /must be one of/,
+  );
+});
+
+// ── seq 340: MV categorical level ordering ────────────────────────────────
+
+// A Multiple Variables table's categorical levels have a stored order
+// (Prism 11.2 Level Order): drag/step/preset commands set it, new levels
+// append at the end, renames keep their position, and the analyses read
+// their levels — including the dummy-coding reference — in that order.
+// Entry order (first appearance in the table) is the default; Prism's docs
+// don't define Entry vs Row operationally, so Titer reads them as: Entry is
+// the order levels entered the table (the stored order, once one exists),
+// Row re-derives first-appearance order from the current rows. Blank cells
+// are no level at all, so there is no (blank) level to pin at the top.
+const mv340 = (): TableData => ({
+  columns: ["Title", "Group", "Score"],
+  rows: [
+    ["1", "Beta", "10"],
+    ["2", "Alpha", "20"],
+    ["3", "Beta", "30"],
+    ["4", "Gamma", "40"],
+    ["5", "Alpha", "50"],
+    ["6", "Beta", "60"],
+    ["7", "Alpha", "70"],
+    ["8", "Gamma", "80"],
+  ],
+});
+const mv340Levels = (data: TableData): string[] => categoricalLevels(data, "Group").map((l) => l.name);
+
+check("seq 340: the default level order is Entry order, not size-then-name", () => {
+  // Entry: Beta, Alpha, Gamma. Size-then-name would read Alpha, Beta,
+  // Gamma (Beta and Alpha tie at 3, Gamma has 2) — the panel used to sort
+  // that way; the stored order now replaces it.
+  deepStrictEqual(mv340Levels(mv340()), ["Beta", "Alpha", "Gamma"]);
+  deepStrictEqual(orderedLevelKeys(mv340(), "Group"), ["beta", "alpha", "gamma"]);
+  deepStrictEqual(orderedLevelKeys(mv340(), "Nope"), []);
+  deepStrictEqual(categoricalLevels(mv340(), "Score"), [], "a continuous column has no levels");
+});
+
+check("seq 340: a stored order is kept, and a new level appends at the end", () => {
+  const fresh = mv340();
+  const ordered = setLevelOrder(fresh, "Group", ["Gamma", "Alpha", "Beta"]);
+  deepStrictEqual(ordered.levelOrder, { Group: ["gamma", "alpha", "beta"] });
+  deepStrictEqual(mv340Levels(ordered), ["Gamma", "Alpha", "Beta"]);
+  // Setting the same order again, or the entry order on a fresh table, is a
+  // no-op: no phantom undo step.
+  strictEqual(setLevelOrder(ordered, "Group", ["Gamma", "Alpha", "Beta"]), ordered);
+  strictEqual(setLevelOrder(fresh, "Group", ["Beta", "Alpha", "Gamma"]), fresh);
+  // An unknown level drops; a level left out of the list appends in Entry
+  // order; duplicate keys collapse to one.
+  deepStrictEqual(setLevelOrder(fresh, "Group", ["Gamma", "Nope", "Alpha"]).levelOrder, {
+    Group: ["gamma", "alpha", "beta"],
+  });
+  deepStrictEqual(setLevelOrder(fresh, "Group", ["Beta", "Beta", "Gamma"]).levelOrder, {
+    Group: ["beta", "gamma", "alpha"],
+  });
+  strictEqual(setLevelOrder(fresh, "Nope", ["Beta"]), fresh, "an unknown column is a no-op");
+  // A new level typed into the table appends at the end of the stored order.
+  const added = writeBlock(ordered, 8, 1, [["Delta"]], "multiple");
+  const refreshed = refreshLevelOrder(added);
+  deepStrictEqual(refreshed.levelOrder, { Group: ["gamma", "alpha", "beta", "delta"] });
+  deepStrictEqual(mv340Levels(refreshed), ["Gamma", "Alpha", "Beta", "Delta"]);
+  // A refresh that moves nothing returns the same record.
+  strictEqual(refreshLevelOrder(ordered), ordered);
+  // A level whose rows are all deleted drops from the resolved order, and a
+  // deleted column takes its stored order with it.
+  const noGamma = deleteRows(ordered, 3, 1);
+  const noGamma2 = deleteRows(noGamma, 6, 1);
+  deepStrictEqual(orderedLevelKeys(refreshLevelOrder(noGamma2), "Group"), ["alpha", "beta"]);
+  const gone = deleteColumns(ordered, 1, 1);
+  strictEqual(gone.levelOrder, undefined);
+  strictEqual(gone.columns.join(","), "Title,Score");
+});
+
+check("seq 340: moving a level (drag / step buttons) reorders it", () => {
+  const ordered = setLevelOrder(mv340(), "Group", ["Beta", "Alpha", "Gamma"]);
+  // Drag Gamma (index 2) to the top.
+  deepStrictEqual(mv340Levels(moveLevel(ordered, "Group", 2, 0)), ["Gamma", "Beta", "Alpha"]);
+  // Step Beta (index 0) down one.
+  deepStrictEqual(mv340Levels(moveLevel(ordered, "Group", 0, 1)), ["Alpha", "Beta", "Gamma"]);
+  // Step Alpha (index 1) to the bottom.
+  deepStrictEqual(mv340Levels(moveLevel(ordered, "Group", 1, 2)), ["Beta", "Gamma", "Alpha"]);
+  // Out of range, or a move onto itself, is a no-op.
+  strictEqual(moveLevel(ordered, "Group", 0, 0), ordered);
+  strictEqual(moveLevel(ordered, "Group", -1, 2), ordered);
+  strictEqual(moveLevel(ordered, "Group", 0, 3), ordered);
+  const fresh = mv340();
+  strictEqual(moveLevel(fresh, "Nope", 0, 1), fresh);
+});
+
+check("seq 340: sort presets produce the expected orders", () => {
+  const data = mv340();
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "entry", "asc")), ["Beta", "Alpha", "Gamma"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "entry", "desc")), ["Gamma", "Alpha", "Beta"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "name", "asc")), ["Alpha", "Beta", "Gamma"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "name", "desc")), ["Gamma", "Beta", "Alpha"]);
+  // Frequency desc: Beta and Alpha tie at 3, so Entry order breaks the tie.
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "frequency", "desc")), ["Beta", "Alpha", "Gamma"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "frequency", "asc")), ["Gamma", "Beta", "Alpha"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "row", "asc")), ["Beta", "Alpha", "Gamma"]);
+  // Entry vs Row, told apart: a custom order, then the first row deleted.
+  // Entry keeps the stored positions; Row re-derives from the current rows.
+  const custom = setLevelOrder(data, "Group", ["Gamma", "Alpha", "Beta"]);
+  const cut = deleteRows(custom, 0, 1);
+  deepStrictEqual(mv340Levels(sortLevelOrder(cut, "Group", "entry", "asc")), ["Gamma", "Alpha", "Beta"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(cut, "Group", "row", "asc")), ["Alpha", "Beta", "Gamma"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(cut, "Group", "row", "desc")), ["Gamma", "Beta", "Alpha"]);
+});
+
+check("seq 340: renaming a level keeps its position; merging keeps the surviving level's", () => {
+  const ordered = setLevelOrder(mv340(), "Group", ["Gamma", "Alpha", "Beta"]);
+  const renamed = renameLevel(ordered, "Group", "Beta", "Beta2");
+  deepStrictEqual(renamed.levelOrder, { Group: ["gamma", "alpha", "beta2"] });
+  deepStrictEqual(mv340Levels(renamed), ["Gamma", "Alpha", "Beta2"]);
+  // Renaming onto another level merges: Gamma keeps its position, Alpha's
+  // key drops.
+  const merged = renameLevel(ordered, "Group", "Alpha", "Gamma");
+  deepStrictEqual(merged.levelOrder, { Group: ["gamma", "beta"] });
+  deepStrictEqual(mv340Levels(merged), ["Gamma", "Beta"]);
+  // A rename carries the stored order through a column rename, too.
+  const recolumned = renameColumn(ordered, 1, "Arm");
+  deepStrictEqual(recolumned.levelOrder, { Arm: ["gamma", "alpha", "beta"] });
+  deepStrictEqual(
+    categoricalLevels(recolumned, "Arm").map((l) => l.name),
+    ["Gamma", "Alpha", "Beta"],
+  );
+});
+
+check("seq 340: the stored order persists through a .hlx save/reload; bogus entries drop", () => {
+  const data = setLevelOrder(mv340(), "Group", ["Gamma", "Alpha", "Beta"]);
+  const payload: ProjectFilePayload = {
+    nodes: {
+      mv: { id: "mv", type: "table", name: "Arms", parentId: null, tableType: "multiple", data },
+    },
+    rootOrder: ["mv"],
+    childOrder: { mv: [] },
+    activeNodeId: "mv",
+  };
+  const resaved = parseProjectFile(JSON.parse(serializeProjectFile(payload)));
+  if ("error" in resaved) throw new Error(resaved.error);
+  deepStrictEqual((resaved.project.nodes.mv as ProjectNode).data?.levelOrder, {
+    Group: ["gamma", "alpha", "beta"],
+  });
+  // A hand-edited file holding a bogus order, a non-array, or an entry for
+  // a column that is gone loses that entry on its own.
+  const tampered = JSON.parse(serializeProjectFile(payload)) as Record<string, unknown>;
+  const tamperedData = (tampered.project as Record<string, Record<string, { data: Record<string, unknown> }>>).nodes
+    .mv.data;
+  tamperedData.levelOrder = {
+    Group: ["gamma", "alpha", "beta"],
+    // Score is a data column, so its entry survives shape validation — but
+    // its values are normalized and de-duplicated like any other order.
+    Score: ["gamma", 3, "", "  ALPHA  "],
+    Gone: ["a"],
+    Bad: "gamma",
+  };
+  const reparsed = parseProjectFile(tampered);
+  if ("error" in reparsed) throw new Error(reparsed.error);
+  deepStrictEqual((reparsed.project.nodes.mv as ProjectNode).data?.levelOrder, {
+    Group: ["gamma", "alpha", "beta"],
+    Score: ["gamma", "alpha"],
+  });
+  // The reader itself is strict the same way, on its own.
+  deepStrictEqual(readLevelOrder({ Group: ["Beta", "beta", 7, ""], Nope: ["x"] }, ["Title", "Group"]), {
+    Group: ["beta"],
+  });
+  strictEqual(readLevelOrder("nope", ["Title", "Group"]), undefined);
+  strictEqual(readLevelOrder({}, ["Title", "Group"]), undefined);
+});
+
+check("seq 340: levelsOf and the dummy-coding reference follow the stored order", () => {
+  const ordered = setLevelOrder(mv340(), "Group", ["Gamma", "Alpha", "Beta"]);
+  const dataset = readTable(ordered);
+  const group = dataset.columns.find((c) => c.name === "Group")!;
+  deepStrictEqual(levelsOf(group), ["Gamma", "Alpha", "Beta"]);
+  deepStrictEqual(group.levelOrder, ["gamma", "alpha", "beta"]);
+  // Without a stored order, levelsOf reads first-appearance order as before.
+  deepStrictEqual(levelsOf(readTable(mv340()).columns.find((c) => c.name === "Group")!), [
+    "Beta",
+    "Alpha",
+    "Gamma",
+  ]);
+  // The dummy-coding reference is the first level in the stored order.
+  const def = selectPredictors(dataset.columns, { dependent: "Score", predictors: ["Group"] });
+  deepStrictEqual(def.categorical, [{ name: "Group", reference: "Gamma", levels: ["Gamma", "Alpha", "Beta"] }]);
+  deepStrictEqual(def.design.map((d) => d.term), ["Group[Alpha]", "Group[Beta]"]);
+  // And the reference follows a re-sort.
+  const resorted = setLevelOrder(mv340(), "Group", ["Alpha", "Beta", "Gamma"]);
+  const def2 = selectPredictors(readTable(resorted).columns, { dependent: "Score", predictors: ["Group"] });
+  strictEqual(def2.categorical[0]?.reference, "Alpha");
+});
+
+check("seq 340: category autocomplete follows the stored order", () => {
+  // Autocomplete only runs on a typed table (the grid's MV tables are
+  // typed by the store funnel), so the fixture goes through the detector.
+  const typed = refreshVariableTypes(mv340());
+  const ordered = setLevelOrder(typed, "Group", ["Gamma", "Alpha", "Beta"]);
+  deepStrictEqual(levelSuggestions(ordered, "Group", ""), ["Gamma", "Alpha", "Beta"]);
+  deepStrictEqual(levelSuggestions(ordered, "Group", "a"), ["Alpha"]);
+  deepStrictEqual(levelSuggestions(typed, "Group", ""), ["Beta", "Alpha", "Gamma"]);
+});
+
+check("seq 340: MCP set-level-order sets the order and a later write appends a new level", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-340-table", "create-table", {
+    table_type: "multiple",
+    columns: ["", "Group", "Score"],
+    rows: [
+      ["1", "Beta", "10"],
+      ["2", "Alpha", "20"],
+      ["3", "Beta", "30"],
+      ["4", "Gamma", "40"],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  await harness.run("job-340-set", "edit-table", {
+    table_id: tableId,
+    op: "set-level-order",
+    column: 1,
+    level_order: ["Gamma", "Alpha", "Beta"],
+  });
+  harness.sync();
+  deepStrictEqual(harness.state().nodes[tableId]!.data!.levelOrder, { Group: ["gamma", "alpha", "beta"] });
+  // Setting it again is a no-op success: no second undo step.
+  const pastLen = harness.state().past.length;
+  await harness.run("job-340-set-again", "edit-table", {
+    table_id: tableId,
+    op: "set-level-order",
+    column: 1,
+    level_order: ["Gamma", "Alpha", "Beta"],
+  });
+  harness.sync();
+  strictEqual(harness.state().past.length, pastLen);
+  // A later write adds a new level: it appends at the end of the stored order.
+  await harness.run("job-340-write", "write-table", {
+    table_id: tableId,
+    columns: ["", "Group", "Score"],
+    rows: [
+      ["1", "Beta", "10"],
+      ["2", "Alpha", "20"],
+      ["3", "Beta", "30"],
+      ["4", "Gamma", "40"],
+      ["5", "Delta", "50"],
+    ],
+  });
+  harness.sync();
+  deepStrictEqual(harness.state().nodes[tableId]!.data!.levelOrder, {
+    Group: ["gamma", "alpha", "beta", "delta"],
+  });
+  // Errors: a non-MV table, an unknown column, an unknown level, and a
+  // column that isn't categorical.
+  const col = await harness.run("job-340-col", "create-table", {
+    table_type: "column",
+    columns: ["", "A"],
+    rows: [["1", "1"]],
+  });
+  const colId = (col.result as { table_id: string }).table_id;
+  harness.sync();
+  await rejects(
+    harness.run("job-340-bad-table", "edit-table", {
+      table_id: colId,
+      op: "set-level-order",
+      column: 1,
+      level_order: ["A"],
+    }),
+    /only Multiple Variables tables/,
+  );
+  await rejects(
+    harness.run("job-340-bad-col", "edit-table", {
+      table_id: tableId,
+      op: "set-level-order",
+      column: 9,
+      level_order: ["Beta"],
+    }),
+    /has no column 9/,
+  );
+  await rejects(
+    harness.run("job-340-bad-level", "edit-table", {
+      table_id: tableId,
+      op: "set-level-order",
+      column: 1,
+      level_order: ["Gamma", "Nope"],
+    }),
+    /has no level/,
+  );
+  await rejects(
+    harness.run("job-340-bad-type", "edit-table", {
+      table_id: tableId,
+      op: "set-level-order",
+      column: 2,
+      level_order: ["10"],
+    }),
+    /not a categorical variable/,
+  );
+});
+
+ // ── seq 390: MV level order in .prism/.pzfx ──────────────────────────────
+
+// Investigation verdict: NOT A GAP — a format ceiling, not a missing
+// feature. Neither format carries a level-order field in any file Prism
+// wrote that Titer can observe:
+//   • .pzfx: the Prism 8 XSD's Table/YColumn/XColumn vocabularies have no
+//     level-order, variable-type or label-variable field, and the Prism
+//     8.0.1-written MV table in the corpus (zenodo-18255034, Table12) is
+//     Title + YColumns only. Prism 11-written files still carry
+//     PrismXMLVersion="5.00" with no new Table attribute or element (the
+//     only addition is file-level MostRecentVersion). Variable types
+//     themselves (Prism 9+) have no XML representation — they live in the
+//     compressed <Template> blob, which is opaque (graph-import spike
+//     NO-GO) — and Titer writes an empty <Template> by design (BUG-21: a
+//     non-empty blob fails to open in Prism 11.2.0), so the blob is not a
+//     writable channel either. The writer demotes MV tables to OneWay
+//     with a warning (pzfx-write.ts).
+//   • .prism: the writer demotes MV tables to Column with a warning and
+//     content.json carries only counts; real Prism's data.bin is opaque.
+// One confirmation is still owed, not a blocker for the verdict: no Prism
+// 11.2-written .pzfx holding an MV table exists in the corpus, so an
+// MV-only 11.2 XML element cannot be excluded from files alone — the
+// seq 310 Mac-slot fixture (a Prism-written .pzfx with reordered levels)
+// settles it. Until then these pins record the ceiling: the order is kept
+// in .hlx only (seq 340) and is dropped, with a warning, on both Prism
+// writes. If either format ever gains a field, these pins fail on
+// purpose — re-investigate then, do not invent a field now.
+check("seq 390: a .pzfx write carries no level-order field and the order is lost on read-back", () => {
+  const data = setLevelOrder(mv340(), "Group", ["Gamma", "Alpha", "Beta"]);
+  const payload: ProjectFilePayload = {
+    nodes: {
+      mv: { id: "mv", type: "table", name: "Arms", parentId: null, tableType: "multiple", data },
+    },
+    rootOrder: ["mv"],
+    childOrder: { mv: [] },
+    activeNodeId: "mv",
+  };
+  const written = writePzfx(payload, "1.0.7");
+  const xml = new TextDecoder().decode(written.bytes);
+  ok(!/levelorder/i.test(xml), "the written .pzfx must carry no level-order field");
+  ok(!/variabletype/i.test(xml), "the written .pzfx must carry no variable-type field either");
+  ok(!/labelvariable/i.test(xml), "the written .pzfx must carry no label-variable field either");
+  ok(xml.includes('TableType="OneWay"'), "an MV table is written as a plain OneWay table");
+  ok(
+    written.report.issues.some(
+      (i) => i.severity === "warning" && /Multiple variables table/.test(i.message),
+    ),
+    "the write report warns the MV table was demoted",
+  );
+  // Read-back: values and names survive, the order does not — and the
+  // table comes back a plain Column table, not an MV table.
+  const back = parsePzfx(xml);
+  const table = Object.values(back.project.nodes).find((n) => n?.type === "table");
+  strictEqual(table?.tableType, "column");
+  deepStrictEqual(table?.data?.columns, data.columns);
+  deepStrictEqual(table?.data?.rows, data.rows);
+  strictEqual(table?.data?.levelOrder, undefined, "levelOrder does not survive a .pzfx round-trip");
+});
+
+check("seq 390: a .prism write carries no level-order field", async () => {
+  const data = setLevelOrder(mv340(), "Group", ["Gamma", "Alpha", "Beta"]);
+  const payload: ProjectFilePayload = {
+    nodes: {
+      mv: { id: "mv", type: "table", name: "Arms", parentId: null, tableType: "multiple", data },
+    },
+    rootOrder: ["mv"],
+    childOrder: { mv: [] },
+    activeNodeId: "mv",
+  };
+  const written = await writePrism(payload, "1.0.7");
+  ok(
+    written.report.issues.some(
+      (i) => i.severity === "warning" && /Multiple variables table/.test(i.message),
+    ),
+    "the write report warns the MV table was demoted",
+  );
+  const zip = await JSZip.loadAsync(written.bytes);
+  for (const entry of Object.values(zip.files)) {
+    if (entry.dir) continue;
+    const text = await entry.async("string");
+    ok(!/levelorder/i.test(text), `${entry.name} must not carry a level order`);
+    ok(!/variabletype/i.test(text), `${entry.name} must not carry a variable type`);
+  }
+});
+
+check("seq 390: the Prism 8 .pzfx schema itself has no level-order field", () => {
+  // The schema is the format's own vocabulary: if a later Prism XSD ever
+  // gains a level-order (or variable-type) field, this fails and the
+  // investigation re-opens — it is not a pin to waive past.
+  const xsd = readFileSync("tests/testdata/Prism8XMLSchema-stripped.xsd", "utf8");
+  ok(!/levelorder/i.test(xsd), "the .pzfx schema defines no level-order field");
+  ok(!/variabletype/i.test(xsd), "the .pzfx schema defines no variable-type field");
+  ok(/MultipleVariables/.test(xsd), "sanity: the schema does know MV tables (ExtTableType)");
+});
+
+// ── seq 391: Hanes-Woolf + Lineweaver-Burk missing from the transform
+// schema enums ─────────────────────────────────────────────────────────
+// The seq 381 (Hanes-Woolf) and seq 384 (Lineweaver-Burk) lanes
+// implemented the transforms but never added them to the transform-data
+// function/xFunction enums in src-tauri/src/analysis-params-schema.json,
+// so MCP clients could not discover or validate them. These pins assert
+// both names appear in both enums — so a future transform cannot silently
+// skip the schema again. (The Rust schema test
+// analysis_params_schema_covers_all_types passes regardless; it does not
+// require full coverage.)
+function transformDataEnums391() {
+  const schema = JSON.parse(
+    readFileSync(new URL("../src-tauri/src/analysis-params-schema.json", import.meta.url), "utf8"),
+  ) as Record<string, { params: { name: string; enum?: string[] }[] }>;
+  const params = schema["transform-data"]?.params ?? [];
+  const byName = (name: string) => params.find((p) => p.name === name)?.enum ?? [];
+  return { fn: byName("function"), xFn: byName("xFunction") };
+}
+
+check("seq 391: the transform-data function enum advertises hanes-woolf and lineweaver-burk", () => {
+  const { fn } = transformDataEnums391();
+  for (const name of ["hanes-woolf", "lineweaver-burk"] as const) {
+    ok(fn.includes(name), `function enum must include ${name}, got: ${JSON.stringify(fn)}`);
+  }
+  // Sanity: the siblings that were already advertised are still there.
+  for (const name of ["eadie-hofstee", "log-log", "hill-plot", "scatchard"] as const) {
+    ok(fn.includes(name), `function enum must still include ${name}`);
+  }
+});
+
+check("seq 391: the transform-data xFunction enum advertises hanes-woolf and lineweaver-burk", () => {
+  const { xFn } = transformDataEnums391();
+  for (const name of ["hanes-woolf", "lineweaver-burk"] as const) {
+    ok(xFn.includes(name), `xFunction enum must include ${name}, got: ${JSON.stringify(xFn)}`);
+  }
+  for (const name of ["eadie-hofstee", "log-log", "hill-plot", "scatchard"] as const) {
+    ok(xFn.includes(name), `xFunction enum must still include ${name}`);
+  }
+});
+
+check("seq 378: a write-table replace keeps the row-label source when its column survives, drops it when the column is gone", async () => {
+  const harness = mcpLaggingHarness(true);
+  const base = setLabelVariable(mv331bTyped(), "ID");
+  strictEqual(labelVariableOf(base), "ID");
+  harness.dispatch({
+    type: "create",
+    node: { id: "mv378", type: "table", name: "Subjects", parentId: null, tableType: "multiple", data: base },
+  });
+  harness.sync();
+  // Same columns, same values: the choice carries over.
+  await harness.run("job-378-keep", "write-table", {
+    table_id: "mv378",
+    columns: ["Title", "Y", "Group", "Sex", "ID", "Site"],
+    rows: [
+      ["1", "12", "1", "Female", "S001", "X"],
+      ["2", "15", "2", "Male", "S002", "Y"],
+      ["3", "11", "1", "female", "S003", "X"],
+      ["4", "18", "2", "Male", "S004", "Y"],
+      ["5", "14", "1", "male", "S005", "X"],
+      ["6", "17", "2", "Female", "S006", "Y"],
+      ["7", "13", "1", "Male", "S007", "X"],
+      ["8", "19", "2", "female", "S008", "Y"],
+    ],
+  });
+  harness.sync();
+  const kept = harness.state().nodes["mv378"]!.data!;
+  strictEqual(kept.labelVariable, "ID");
+  strictEqual(labelVariableOf(kept), "ID");
+  // The label column is gone from the replacement: the choice drops with it.
+  await harness.run("job-378-drop", "write-table", {
+    table_id: "mv378",
+    columns: ["Title", "Y", "Group", "Sex", "Site"],
+    rows: [
+      ["1", "12", "1", "Female", "X"],
+      ["2", "15", "2", "Male", "Y"],
+      ["3", "11", "1", "female", "X"],
+      ["4", "18", "2", "Male", "Y"],
+      ["5", "14", "1", "male", "X"],
+      ["6", "17", "2", "Female", "Y"],
+      ["7", "13", "1", "Male", "X"],
+      ["8", "19", "2", "female", "Y"],
+    ],
+  });
+  harness.sync();
+  const dropped = harness.state().nodes["mv378"]!.data!;
+  strictEqual(dropped.labelVariable, undefined);
+  strictEqual(labelVariableOf(dropped), undefined);
+});
+
+check("seq 378: a non-MV replace stays untouched and a kept label survives a .hlx round-trip", async () => {
+  const harness = mcpLaggingHarness(true);
+  // A column table never carries a row-label source.
+  const made = await harness.run("job-378-col", "create-table", {
+    table_type: "column",
+    columns: ["", "A"],
+    rows: [["1", "1"]],
+  });
+  const colId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  await harness.run("job-378-col-write", "write-table", {
+    table_id: colId,
+    columns: ["", "A"],
+    rows: [["1", "2"]],
+  });
+  harness.sync();
+  strictEqual(harness.state().nodes[colId]!.data!.labelVariable, undefined);
+  // The kept label survives a .hlx save/reload after the replace.
+  const base = setLabelVariable(mv331bTyped(), "ID");
+  harness.dispatch({
+    type: "create",
+    node: { id: "mv378b", type: "table", name: "Subjects", parentId: null, tableType: "multiple", data: base },
+  });
+  harness.sync();
+  await harness.run("job-378-rt", "write-table", {
+    table_id: "mv378b",
+    columns: ["Title", "Y", "Group", "Sex", "ID", "Site"],
+    rows: [
+      ["1", "12", "1", "Female", "S001", "X"],
+      ["2", "15", "2", "Male", "S002", "Y"],
+      ["3", "11", "1", "female", "S003", "X"],
+      ["4", "18", "2", "Male", "S004", "Y"],
+      ["5", "14", "1", "male", "S005", "X"],
+      ["6", "17", "2", "Female", "S006", "Y"],
+      ["7", "13", "1", "Male", "S007", "X"],
+      ["8", "19", "2", "female", "S008", "Y"],
+    ],
+  });
+  harness.sync();
+  const kept = harness.state().nodes["mv378b"]!.data!;
+  strictEqual(kept.labelVariable, "ID");
+  const payload: ProjectFilePayload = {
+    nodes: {
+      mv: { id: "mv", type: "table", name: "Subjects", parentId: null, tableType: "multiple", data: kept },
+    },
+    rootOrder: ["mv"],
+    childOrder: { mv: [] },
+    activeNodeId: "mv",
+  };
+  const resaved = parseProjectFile(JSON.parse(serializeProjectFile(payload)));
+  if ("error" in resaved) throw new Error(resaved.error);
+  strictEqual((resaved.project.nodes.mv as ProjectNode).data?.labelVariable, "ID");
+});
+
+// seq 374: MCP set-decimal-places (seq 333 follow-up). On the pre-fix code
+// there is no such op, so the first edit-table call fails with "has no edit
+// op". The op sets a data column's decimal places (0–6) or clears it back
+// to Default with null; the stored values keep full precision throughout.
+check("seq 374: MCP set-decimal-places sets the places, clears to Default, and keeps full precision", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-374-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B"],
+    rows: [
+      ["r1", "1.23456", "2.5"],
+      ["r2", "3.14159", "4"],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  const data = () => harness.state().nodes[tableId]!.data!;
+  // Set 2 places on column A: the setting lands, the stored values keep
+  // full precision, and copy/export still carry it.
+  await harness.run("job-374-set", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 1,
+    places: 2,
+  });
+  harness.sync();
+  deepStrictEqual(data().decimals, { A: 2 });
+  deepStrictEqual(data().rows, [
+    ["r1", "1.23456", "2.5"],
+    ["r2", "3.14159", "4"],
+  ]);
+  strictEqual(toTSV(data(), { r0: 0, r1: 1, c0: 0, c1: 2 }), "r1\t1.23456\t2.5\nr2\t3.14159\t4");
+  // Setting it again is a no-op success: no second undo step.
+  const pastLen = harness.state().past.length;
+  await harness.run("job-374-set-again", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 1,
+    places: 2,
+  });
+  harness.sync();
+  strictEqual(harness.state().past.length, pastLen);
+  // 0 and 6 both work; clearing with null drops the setting.
+  await harness.run("job-374-zero", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 1,
+    places: 0,
+  });
+  harness.sync();
+  deepStrictEqual(data().decimals, { A: 0 });
+  await harness.run("job-374-six", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 2,
+    places: 6,
+  });
+  harness.sync();
+  deepStrictEqual(data().decimals, { A: 0, B: 6 });
+  await harness.run("job-374-clear", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 1,
+    places: null,
+  });
+  harness.sync();
+  deepStrictEqual(data().decimals, { B: 6 });
+  await harness.run("job-374-clear-b", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 2,
+    places: null,
+  });
+  harness.sync();
+  strictEqual(data().decimals, undefined);
+  // A write-table replace keeps the setting.
+  await harness.run("job-374-set2", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 1,
+    places: 2,
+  });
+  harness.sync();
+  await harness.run("job-374-write", "write-table", {
+    table_id: tableId,
+    columns: ["", "A", "B"],
+    rows: [
+      ["r1", "1.23456", "2.5"],
+      ["r2", "3.14159", "4"],
+    ],
+  });
+  harness.sync();
+  deepStrictEqual(data().decimals, { A: 2 });
+  // The setting survives a .hlx save/load round-trip.
+  const st = harness.state();
+  const payload: ProjectFilePayload = {
+    nodes: st.nodes,
+    rootOrder: st.rootOrder,
+    childOrder: st.childOrder,
+    activeNodeId: st.activeNodeId,
+  };
+  const back = read(serializeProjectFile(payload));
+  deepStrictEqual((back.project.nodes[tableId] as ProjectNode).data?.decimals, { A: 2 });
+  strictEqual(back.updated, false);
+  // Errors: an unsupported table kind, an unknown column, column 0, and
+  // out-of-range / fractional / mistyped / missing places — MCP errors
+  // plainly, never silently clamps.
+  const cont = await harness.run("job-374-cont", "create-table", {
+    table_type: "contingency",
+    columns: ["", "A", "B"],
+    rows: [
+      ["r1", 5, 7],
+      ["r2", 3, 9],
+    ],
+  });
+  const contId = (cont.result as { table_id: string }).table_id;
+  harness.sync();
+  await rejects(
+    harness.run("job-374-bad-table", "edit-table", {
+      table_id: contId,
+      op: "set-decimal-places",
+      column: 1,
+      places: 2,
+    }),
+    /do not offer decimal places/,
+  );
+  const surv = await harness.run("job-374-surv", "create-table", {
+    table_type: "survival",
+    columns: ["", "X", "A"],
+    rows: [
+      ["1", "0", "10"],
+      ["2", "5", "8"],
+    ],
+  });
+  const survId = (surv.result as { table_id: string }).table_id;
+  harness.sync();
+  await rejects(
+    harness.run("job-374-bad-surv", "edit-table", {
+      table_id: survId,
+      op: "set-decimal-places",
+      column: 1,
+      places: 2,
+    }),
+    /do not offer decimal places/,
+  );
+  await rejects(
+    harness.run("job-374-bad-col", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 9,
+      places: 2,
+    }),
+    /has no column 9/,
+  );
+  await rejects(
+    harness.run("job-374-bad-col0", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 0,
+      places: 2,
+    }),
+    /has no column 0/,
+  );
+  await rejects(
+    harness.run("job-374-bad-high", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 1,
+      places: 7,
+    }),
+    /needs places to be 0–6/,
+  );
+  await rejects(
+    harness.run("job-374-bad-neg", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 1,
+      places: -1,
+    }),
+    /needs places to be 0–6/,
+  );
+  await rejects(
+    harness.run("job-374-bad-frac", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 1,
+      places: 2.5,
+    }),
+    /needs places to be 0–6/,
+  );
+  await rejects(
+    harness.run("job-374-bad-type", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 1,
+      places: "2",
+    }),
+    /needs places to be 0–6/,
+  );
+  await rejects(
+    harness.run("job-374-bad-missing", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 1,
+    }),
+    /needs places/,
+  );
+});
+
 
 // ── Run ──────────────────────────────────────────────────────────────────
 

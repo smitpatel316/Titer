@@ -25,7 +25,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
       y: drawn.y,
       ...(set.name === right ? { yaxis: "y2" } : {}),
       marker: paint.bars(set.name, i),
-      ...(drawn.errors ? { error_y: paint.errorBars(set.name, i, drawn.errors) } : {}),
+      ...(drawn.errors ? { error_y: paint.errorBars(set.name, i, drawn.errors, drawn.errorMinus) } : {}),
       ...(drawn.xErrors ? { error_x: paint.errorBars(set.name, i, drawn.xErrors) } : {}),
       hoverinfo: "x+y",
     };
@@ -42,4 +42,11 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
   };
 }
 
-export const xyBar: GraphModule = { label: "Column or bar", family: "xy", patterns: () => true, build };
+export const xyBar: GraphModule = {
+  label: "Column or bar",
+  family: "xy",
+  patterns: () => true,
+  // A bar stands for one value per X: replicates as their center, whatever `xyReplicates`.
+  summarizes: () => true,
+  build,
+};

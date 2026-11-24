@@ -12,6 +12,13 @@
 // level that only occurs on rows the fit drops cannot silently re-anchor
 // the reference; coefficients are named Variable[Level], Prism's form.
 //
+// A typed table (seq 331 half B) drives the split instead of the cells: a
+// column whose variable type is Categorical dummy-codes even when its
+// codes are numbers (1/2/3 are levels, not values), a Continuous column
+// enters as-is, and a Label column never enters at all — neither by
+// default nor when chosen by name. An untyped table reads exactly as
+// before, from its cells.
+//
 // A chosen predictor whose column holds no numbers and no text levels is
 // invisible to `dataGroups`, so filtering the chosen names against it drops
 // the predictor without a word and the fit runs on the subset — R² /
@@ -21,7 +28,7 @@
 // 39). A chosen name that is not a column at all never reaches here:
 // runAnalysis errors on it first with missingColumn.
 import { dataGroups, type Group } from "../column/base";
-import { levelsOf } from "../../lib/dataset";
+import { levelsOf, orderLevels } from "../../lib/dataset";
 import { sd } from "../../lib/summary";
 import type { Column } from "../types";
 
@@ -74,6 +81,37 @@ export interface PredictorSelection {
   error?: string;
 }
 
+/** What a column is to a fit: its stored MV variable type when the table
+ *  was typed (seq 331 half B), else what its cells say — a numeric column
+ *  is numeric, a text column categorical, a column holding neither is
+ *  empty. The type wins over the cells: a numeric-coded categorical
+ *  (1/2/3) is a factor, not a number, and a label is never a predictor. */
+export function columnKind(column: Column): "numeric" | "categorical" | "label" | "empty" {
+  if (column.variableType === "label") return "label";
+  if (column.variableType === "categorical") return "categorical";
+  if (column.variableType === "continuous") return "numeric";
+  if (column.values.length > 0) return "numeric";
+  if (levelsOf(column).length > 0) return "categorical";
+  return "empty";
+}
+
+/** The error when a label variable is chosen as a predictor or covariate:
+ *  refused by name, never fitted without it. */
+export function labelPredictorError(name: string, noun = "predictor"): string {
+  return (
+    `“${name}” is a label variable — label variables never enter analyses. ` +
+    `Choose a categorical or continuous variable as the ${noun} instead.`
+  );
+}
+
+/** The column's text on the row (trimmed), or undefined when blank — unlike
+ *  `textCell`, a numeric cell still reads as its text, so a numeric-coded
+ *  categorical's codes ("1", "2") are its levels. */
+export function levelCell(column: Column, row: number): string | undefined {
+  const t = column.cells[row]?.trim();
+  return t ? t : undefined;
+}
+
 /** The column's text on the row (trimmed), or undefined when blank — a
  *  numeric cell is not text, even though its raw cell reads as a number. */
 export function textCell(column: Column, row: number): string | undefined {
@@ -109,18 +147,22 @@ export function anyValueRows(used: Column[]): number[] {
   return rows;
 }
 
-/** A text column's distinct levels on the given rows, first-appearance order. */
+/** A text column's distinct levels on the given rows, first-appearance order.
+ *  Levels read from the raw cell text, so a numeric-coded categorical's
+ *  codes are its levels too. When the column carries a stored level order
+ *  (seq 340), the levels come back in that order — so the dummy-coding
+ *  reference (the first level) follows the table's order. */
 export function levelsOnRows(column: Column, rows: readonly number[]): string[] {
   const seen = new Set<string>();
   const levels: string[] = [];
   for (const r of rows) {
-    const t = textCell(column, r);
+    const t = levelCell(column, r);
     if (t && !seen.has(t)) {
       seen.add(t);
       levels.push(t);
     }
   }
-  return levels;
+  return orderLevels(levels, column.levelOrder);
 }
 
 /** Expand chosen columns into design columns on the given complete rows: a
@@ -146,7 +188,19 @@ export function expandDesign(
   const singleLevel: string[] = [];
   const droppedNoComplete: string[] = [];
   for (const c of chosen) {
-    if (c.values.length > 0) {
+    // The type decides, not the cells: a numeric-coded categorical
+    // dummy-codes, a continuous column enters as-is, and a label is
+    // refused outright (callers filter them first; this is the backstop).
+    if (columnKind(c) === "label") {
+      return {
+        design,
+        categorical,
+        singleLevel,
+        droppedNoComplete,
+        error: labelPredictorError(c.name, noun),
+      };
+    }
+    if (columnKind(c) === "numeric") {
       design.push({ term: c.name, source: c.name, kind: "numeric", values: rows.map((r) => c.byRow[r]!) });
       continue;
     }
@@ -174,7 +228,7 @@ export function expandDesign(
           term: `${c.name}[${level}]`,
           source: c.name,
           kind: "dummy",
-          values: rows.map((r) => (textCell(c, r) === level ? 1 : 0)),
+          values: rows.map((r) => (levelCell(c, r) === level ? 1 : 0)),
           level,
           reference,
         });
@@ -223,7 +277,22 @@ export function selectPredictors(
   columns: Column[],
   params: { dependent?: string; predictors?: string[] } | undefined,
 ): PredictorSelection {
-  const vars = dataGroups(columns);
+  // Labels never enter a fit: not as the default dependent, not in the
+  // default predictor set, and not when chosen by name — those are refused
+  // with the label named (seq 331 half B).
+  const vars = dataGroups(columns).filter((c) => c.variableType !== "label");
+  const labelDep =
+    params?.dependent !== undefined
+      ? columns.find((c) => c.name === params.dependent && c.variableType === "label")
+      : undefined;
+  const labelPred = (params?.predictors ?? [])
+    .map((name) => columns.find((c) => c.name === name))
+    .find((c) => c?.variableType === "label");
+  const labelError = labelDep
+    ? `“${labelDep.name}” is a label variable — it cannot be the dependent variable. Choose a continuous variable instead.`
+    : labelPred
+      ? labelPredictorError(labelPred.name)
+      : undefined;
   const dep = params?.dependent === undefined ? vars[0] : vars.find((c) => c.name === params.dependent);
   const chosen = params?.predictors;
   const explicit = chosen !== undefined && chosen.length > 0;
@@ -237,10 +306,14 @@ export function selectPredictors(
           .filter((name) => name !== dep.name)
           .map((name) => columns.find((c) => c.name === name))
           .filter((c): c is Column => c !== undefined)
-      : columns.filter((c) => c !== dep && (c.values.length > 0 || levelsOf(c).length > 0))
+      : columns.filter(
+          (c) => c !== dep && c.variableType !== "label" && (c.values.length > 0 || levelsOf(c).length > 0),
+        )
     : [];
-  const chosenCols = resolved.filter((c) => c.values.length > 0 || levelsOf(c).length > 0);
-  const predictors = chosenCols.filter((c) => c.values.length > 0);
+  const chosenCols = resolved.filter(
+    (c) => c.variableType !== "label" && (c.values.length > 0 || levelsOf(c).length > 0),
+  );
+  const predictors = chosenCols.filter((c) => columnKind(c) === "numeric");
   const { rows, kept, droppedNoComplete: droppedEmpty } = dep
     ? completeRowsDroppingEmptyText([dep], chosenCols)
     : { rows: [] as number[], kept: [] as Column[], droppedNoComplete: [] as string[] };
@@ -260,7 +333,7 @@ export function selectPredictors(
     singleLevel: expanded.singleLevel,
     rows,
     depValues,
-    ...(expanded.error ? { error: expanded.error } : {}),
+    ...(labelError ? { error: labelError } : expanded.error ? { error: expanded.error } : {}),
   };
 }
 

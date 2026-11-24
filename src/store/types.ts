@@ -2,7 +2,9 @@
 // modules can depend on it without creating a cycle.
 
 import type { AnalysisParams, AnalysisResult, AnalysisType, SimulationSpec } from "../stats/types";
+import type { XColumnFormat, XConversion } from "../lib/date-time";
 import type { SummaryFormat } from "../lib/summary-format";
+import type { CellBackgroundColor } from "../lib/cell-colors";
 
 export type NodeType = "table" | "analysis" | "graph" | "figure" | "info";
 /** What an item is, as menus name it ("Delete Graph…"). */
@@ -81,11 +83,18 @@ export type GraphType =
 /** The choices of a graph's options, one list each: the types come from them, and a
  *  file's value outside them is read as the option's default. */
 export const GRAPH_CHOICES = {
-  center: ["mean", "median"],
-  error: ["none", "sd", "sem", "ci"],
+  center: ["mean", "median", "geomean"],
+  error: ["none", "sd", "sem", "ci", "range", "iqr", "geosd", "geoci"],
   xScale: ["linear", "log10", "log2"],
   yScale: ["linear", "log10", "log2"],
   y2Scale: ["linear", "log10", "log2"],
+  // A date/elapsed X axis's tick labels (seq 332 part D): the display format
+  // for the dates / elapsed times on an XY graph's X axis. Literal lists,
+  // not spreads of axis-dates.ts: the mcp-coverage gate parses these arrays
+  // literally — and a CHECK pin keeps them equal to DATE_DISPLAY_FORMATS /
+  // ELAPSED_DISPLAY_FORMATS, so the two copies can't drift.
+  xDateFormat: ["16-jan-2004", "jan 16, 2004", "2024-01-16", "16 jan 2004", "jan 2004", "2004", "16-jan", "01/16/2004"],
+  xElapsedFormat: ["h", "h:mm", "h:mm:ss", "h:mm:ss.ms"],
   stackAs: ["values", "percent"],
   shape: ["bar", "point", "line"],
   kind: ["box", "violin"],
@@ -106,6 +115,19 @@ export const GRAPH_CHOICES = {
   pieValue: ["sum", "mean"],
   groupLayout: ["interleaved", "separated", "superimposed"],
   sigDisplay: ["stars", "pvalue", "pvalue-eq", "letters"],
+  // Compact Letter Display format (Prism's Format CLD dialog): where the
+  // letters sit — above the data, or outside the graphing area in one row
+  // per letter (outside only allows stacked); their direction — auto
+  // (horizontal above the data, stacked outside), horizontal, vertical up
+  // or down, or stacked; and their identifiers — upper case, lower case
+  // (Prism's default), or numbers.
+  lettersLocation: ["above", "outside"],
+  lettersDirection: ["auto", "horizontal", "vertical-up", "vertical-down", "stacked"],
+  lettersIdentifier: ["upper", "lower", "numbers"],
+  // The letters' font family ("default" is the app's font); the family is
+  // chosen from this list rather than typed free, so a file can't carry an
+  // unusable one (see LETTERS_FONT_FAMILIES in significance-overlay).
+  lettersFont: ["default", "arial", "helvetica", "times", "georgia", "courier", "verdana"],
   regBand: ["confidence", "prediction"],
   residualsAs: ["x", "qq"],
   survivalMode: ["codes", "counts"],
@@ -146,6 +168,8 @@ export const GRAPH_LIMITS = {
   xTitleGap: { min: 0, max: 40 },
   yTitleGap: { min: 0, max: 40 },
   fontSize: { min: 8, max: 28 },
+  /** A Compact Letter Display label's size, in px (Prism's CLD font size). */
+  lettersSize: { min: 6, max: 36 },
   volcanoLabelCount: { min: 0, max: 50 },
   volcanoFcThreshold: { min: 0, max: Infinity },
   volcanoPThreshold: { min: 0, max: Infinity },
@@ -246,6 +270,12 @@ export interface GraphOptions {
   xNumberFormat?: AxisNumberFormat;
   yNumberFormat?: AxisNumberFormat;
   y2NumberFormat?: AxisNumberFormat;
+  // A date/elapsed X axis's tick labels (seq 332 part D): the display format
+  // for the dates / elapsed times on an XY graph's X axis. The defaults are
+  // Prism's own shapes ("16-Jan-2004", "h:mm:ss"); a file's bogus value
+  // reads as the default (see readOptions).
+  xDateFormat: Choice<"xDateFormat">;
+  xElapsedFormat: Choice<"xElapsedFormat">;
   // An axis limit hooked to an info constant (the constant's name, not its
   // value): resolved live in GraphView, so editing the constant moves the
   // axis. A hooked limit wins over its number above when it resolves.
@@ -265,6 +295,20 @@ export interface GraphOptions {
   sigAnalysisIds?: string[];
   sigPairs?: string[];
   sigDisplay: Choice<"sigDisplay">;
+  // Compact Letter Display format (see GRAPH_CHOICES above for the option
+  // sets): where the letters sit, their direction, their identifiers, their
+  // font family, their size in px, their color, and whether the size is
+  // automatic — smaller with more groups (14 for ≤4 groups, 12 for ≤8,
+  // 10 for ≤12, else 8; see lettersAutoSize in significance-overlay).
+  // Defaults reproduce today's rendering: above, horizontal, lowercase,
+  // system font, 14 px, the default ink.
+  lettersLocation: Choice<"lettersLocation">;
+  lettersDirection: Choice<"lettersDirection">;
+  lettersIdentifier: Choice<"lettersIdentifier">;
+  lettersFont: Choice<"lettersFont">;
+  lettersSize: number;
+  lettersColor: string;
+  lettersFontAuto: boolean;
   // A regression of the table drawn on an XY scatter: a linear one's line and 95% band,
   // computed from the plotted pairs (regression-overlay.ts, checked against R's), or a
   // nonlinear one's curve from its result (fitted-curve.ts); and its note.
@@ -466,6 +510,13 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   pieShowPercent: true,
   groupLayout: "interleaved",
   sigDisplay: "stars",
+  lettersLocation: "above",
+  lettersDirection: "auto",
+  lettersIdentifier: "lower",
+  lettersFont: "default",
+  lettersSize: 14,
+  lettersColor: "#111827", // INK (plot-helpers) — the default letters color
+  lettersFontAuto: false,
   regShowLine: true,
   regShowBand: true,
   regBand: "confidence",
@@ -499,6 +550,8 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   xScale: "linear",
   yScale: "linear",
   y2Scale: "linear",
+  xDateFormat: "16-jan-2004",
+  xElapsedFormat: "h:mm:ss",
   axisWidth: 1,
   gridX: "none",
   gridY: "none",
@@ -555,12 +608,15 @@ export const FILL_PATTERNS = [
 export type FillPattern = (typeof FILL_PATTERNS)[number];
 
 /** How one series is drawn: its color (#RRGGBB), its points' shape, its line's dashes,
- *  and the pattern over its bars, areas or slices. */
+ *  and the pattern over its bars, areas or slices. `center`/`error` override the graph's
+ *  center/error choice for this series alone (seq 375); unset means the graph's choice. */
 export interface SeriesStyle {
   color?: string;
   shape?: PointShape;
   dash?: LineDash;
   pattern?: FillPattern;
+  center?: Choice<"center">;
+  error?: Choice<"error">;
 }
 
 /** How one point is drawn, over its series' and the graph's style; `label`: it shows
@@ -755,6 +811,20 @@ export interface LinkedPaste {
   autoUpdate: boolean;
 }
 
+/** A Multiple Variables column's type (Prism 11, seq 331): Categorical
+ *  (text or coded levels, any number of levels), Continuous (numbers
+ *  incl. integers), Label (IDs/names/notes, never used in analyses,
+ *  unlimited count). */
+export type VariableType = "categorical" | "continuous" | "label";
+export const VARIABLE_TYPES = ["categorical", "continuous", "label"] as const;
+/** One column's variable type, and whether the user set it by hand (orange
+ *  in Prism) or it was auto-detected from its values (gray). */
+export interface VariableTypeInfo {
+  type: VariableType;
+  /** True when the user set the type by hand; false = auto-detected. */
+  manual: boolean;
+}
+
 export interface TableData {
   columns: string[];
   rows: (string | null)[][];
@@ -763,6 +833,29 @@ export interface TableData {
    *  `recomputeCalculated`, so every analysis and graph reads them exactly
    *  like typed variables. Omitted when the table has none. */
   calculated?: CalculatedVariable[];
+  /** A Multiple Variables table's per-column variable types (seq 331):
+   *  the resolved type of each data column, keyed by column name (so a
+   *  rename carries it, like `widths`). An entry marked manual sticks —
+   *  auto-detect never overwrites it; an auto entry is re-detected on
+   *  every edit. Omitted when the table has no typed columns (a fresh
+   *  table, or a non-MV table). */
+  variableTypes?: Record<string, VariableTypeInfo>;
+  /** The row-label source (seq 331 half B): the name of a label-typed
+   *  column whose cells name the points on the table's graphs, instead of
+   *  the row titles. Omitted = row titles. The choice only resolves while
+   *  the column is label-typed (see `labelVariableOf`); a hand-edited file
+   *  naming a column that is gone loses it on read. */
+  labelVariable?: string;
+  /** A Multiple Variables table's per-column level orders (seq 340, Prism
+   *  11.2): the display order of a categorical column's levels, keyed by
+   *  column name (so a rename carries it, like `variableTypes`) to an
+   *  array of normalized level keys (trimmed, lowercased — "Male" and
+   *  "male" share one position). Omitted = Entry order (first appearance
+   *  in the table). A hand-edited file holding a bogus entry loses it on
+   *  read; a level whose rows are gone drops out of the resolved order,
+   *  and a new level appends at the end. Blank cells are no level, so
+   *  there is no (blank) level to pin at the top. */
+  levelOrder?: Record<string, string[]>;
   /** A linked paste (Prism 11, seq 168): this table's cells pasted from a
    *  data file that stay linked to it — see `LinkedPaste`. Omitted when
    *  the table holds no linked block. The link is Titer-local: the
@@ -775,6 +868,10 @@ export interface TableData {
    *  made from the table; a graph's own error setting still wins for that
    *  graph. Omitted = SEM, the graphs' default. */
   errorFormat?: TableErrorFormat;
+  /** What an XY table's X column holds: plain numbers, dates, or elapsed times (Prism 11, seq 332). */
+  xFormat?: XColumnFormat;
+  /** How a date/elapsed X column converts to numbers (units + start date). */
+  xConversion?: XConversion;
   /** Grouped tables only: number of top-level group headers (Group A, B, …). */
   groups?: number;
   /** Grouped tables only: replicate sub-columns per group. */
@@ -798,8 +895,22 @@ export interface TableData {
    * every analysis and graph via `readTable()`. Omitted when nothing is excluded.
    */
   excluded?: string[];
+  /**
+   * Per-cell background colors (seq 325): `"row,col"` keys in full-grid coords
+   * → one of Prism's 8 named colors (`CellBackgroundColor`). Presentation state
+   * only — unlike `excluded`, a colored value is still read by every analysis
+   * and graph. Omitted when no cell is colored.
+   */
+  cellBackgrounds?: Record<string, CellBackgroundColor>;
   /** Column widths (px) the user set, keyed by column name; others fit their content. */
   widths?: Record<string, number>;
+  /** Per-column decimal places (Prism 11, seq 333): how many decimals the
+   *  grid shows for a column's numbers, keyed by column name. Display-only
+   *  — the stored values keep full precision, and the focused cell shows
+   *  them; analyses, graphs, export and copy always use the full values.
+   *  Omitted = full precision. Not offered on contingency or survival-Y
+   *  tables (see `decimalsSupported`). */
+  decimals?: Record<string, number>;
   /** Keep column 0 (the row titles) visible while scrolling right. */
   freezeTitle?: boolean;
   /** Provenance note (e.g. a simulated table's distribution + seed) — kept
@@ -898,6 +1009,13 @@ export interface ProjectNode {
    *  Written to the `.hlx` file with the node, so the results survive a
    *  save and reload. */
   cachedResult?: AnalysisResult;
+  /** Analysis nodes only: per-cell background colors of the results tables
+   *  (seq 325), keyed `"section|row|col"` — the section is the results
+   *  table's title (or an explicit key for untitled tables), row/col are
+   *  0-based within that table. Presentation state: a color survives
+   *  recompute (it stays at its address even if the values move) and a
+   *  save/reload. Omitted when no results cell is colored. */
+  resultCellBackgrounds?: Record<string, CellBackgroundColor>;
   /** Frozen — the sheet stops auto-updating when the data change (Prism's
    *  freeze button). Analyses show `cachedResult`; graphs and figures show
    *  their frozen data snapshot instead of the live table (seq 237). */

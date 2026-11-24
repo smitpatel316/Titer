@@ -3,16 +3,18 @@
 import * as React from "react";
 import {
   GROUPED_LIMITS,
+  TAG_COLORS,
   tableErrorFormat,
   type ProjectNode,
   type RowGroup,
   type TableData,
   type TableErrorFormat,
+  type VariableType,
 } from "../../store/types";
 import type { TableMove } from "../../store/references";
 import { useProjectActions } from "../../store/use-project-store";
 import { Row, Section, Stepper, WithInspector } from "../../components/inspector";
-import { Button, IconButton, Input, NumberInput, RadioList, Select } from "../../ui/controls";
+import { Button, Checkbox, IconButton, Input, NumberInput, RadioList, Segmented, Select } from "../../ui/controls";
 import { useLayout } from "../../store/use-layout";
 import { ColumnsIcon, MinusIcon, PlusIcon, SnowflakeIcon } from "@phosphor-icons/react";
 import { Grid } from "./grid";
@@ -25,6 +27,8 @@ import {
   applySummaryFormatXY,
   applySummaryFormatXYLoses,
   changeErrorFormat,
+  changeXConversion,
+  changeXFormat,
   defaultRowGroups,
   regroupLoses,
   regroupTable,
@@ -35,13 +39,28 @@ import {
   rowGroupTotal,
   setRowGroupCount,
   setRowGroupName,
+  xFormatOf,
 } from "./table-data";
+import { DATE_UNITS, type XColumnFormat, type XConversion } from "../../lib/date-time";
 import { isGrouped, isNested } from "../../lib/dataset";
 import {
   addCalculatedVariable,
+  isCalculatedColumn,
   removeCalculatedVariable,
   setCalculatedFormula,
 } from "../../lib/calcvars";
+import {
+  categoricalLevels,
+  labelVariableOf,
+  moveLevel,
+  renameLevel,
+  setLabelVariable,
+  setVariableType,
+  setVariableTypeAuto,
+  sortLevelOrder,
+  variableTypesOf,
+  type LevelOrderPreset,
+} from "../../lib/variable-types";
 import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../../lib/summary-format";
 import { MAX_SERIES_VALUES, generateXSeries, validateSeriesSpec } from "../../lib/series";
 import { seriesKeyOf } from "../../lib/columns";
@@ -148,6 +167,7 @@ export function TableView({ node }: { node: ProjectNode }) {
           <>
             <ReplicatesPanel data={data} update={update} />
             <XSeriesPanel data={data} update={update} />
+            <XFormatPanel data={data} update={update} />
             <FormatPanel data={data} update={update} />
           </>
         }
@@ -179,7 +199,12 @@ export function TableView({ node }: { node: ProjectNode }) {
         title={node.name}
         tag={tag}
         node={node}
-        settings={<CalculatedVariablesPanel data={data} update={update} />}
+        settings={
+          <>
+            <VariableTypesPanel data={data} update={update} />
+            <CalculatedVariablesPanel data={data} update={update} />
+          </>
+        }
         actions={actions}
       >
         {sheet}
@@ -268,6 +293,77 @@ function XSeriesPanel({ data, update }: { data: TableData; update: (next: TableD
  *  values are really SD can be switched). Switching relabels its summary
  *  error columns (`_SD` ↔ `_SEM`, values untouched) and sets the default
  *  error bars of graphs made from the table; graphs already made keep their own. */
+/** An XY table's X column format (Prism 11, seq 332): what the X values
+ *  are — plain numbers, dates, or elapsed times — and how dates/elapsed
+ *  times convert to numbers for analyses and graphs. The cells keep their
+ *  typed text either way; a cell that can't be read shows "?" in the grid
+ *  and counts as missing. The axis itself still plots the converted
+ *  numbers — date/elapsed axis labels are a later lane (part D). */
+function XFormatPanel({ data, update }: { data: TableData; update: (next: TableData, label: string) => void }) {
+  const format: XColumnFormat = xFormatOf(data);
+  const conversion: XConversion = data.xConversion ?? { units: "days" };
+  const setConversion = (next: XConversion) => {
+    update(changeXConversion(data, next), "Change X Conversion");
+  };
+  return (
+    <Section title="X Format" icon={<ColumnsIcon />}>
+      <Row label="X values">
+        <RadioList
+          value={format}
+          onChange={(next) => {
+            if (next === format) return;
+            update(changeXFormat(data, next), "Change X Format");
+          }}
+          options={[
+            { value: "numbers", label: "Numbers" },
+            { value: "date", label: "Dates" },
+            { value: "elapsed", label: "Elapsed time" },
+          ]}
+        />
+      </Row>
+      {format !== "numbers" && (
+        <>
+          <Row label="Convert to">
+            <Select
+              value={conversion.units}
+              onChange={(units) => setConversion({ ...conversion, units })}
+              options={DATE_UNITS.map((u) => ({ value: u, label: `${u.charAt(0).toUpperCase()}${u.slice(1)}` }))}
+            />
+          </Row>
+          {format === "date" && (
+            <>
+              <Row label="Start date">
+                <Input
+                  type="date"
+                  aria-label="Start date"
+                  value={conversion.startDate ?? ""}
+                  onChange={(e) =>
+                    setConversion({
+                      ...conversion,
+                      startDate: e.target.value === "" ? undefined : e.target.value,
+                    })
+                  }
+                />
+              </Row>
+              <Row label="Day first">
+                <Checkbox
+                  checked={conversion.dayFirst ?? false}
+                  onChange={(dayFirst) => setConversion({ ...conversion, dayFirst: dayFirst ? true : undefined })}
+                />
+              </Row>
+            </>
+          )}
+          <p className="text-small text-secondary">
+            {format === "date"
+              ? "Dates convert to numbers in the unit above, counted from the start date (blank = the earliest date in the column). A year is 365.25 days. Slash dates read month-first unless Day first is on."
+              : "Elapsed times convert to numbers in the unit above (\"1:30:00\" is one hour thirty minutes). A cell that can't be read shows \"?\" and counts as missing."}
+          </p>
+        </>
+      )}
+    </Section>
+  );
+}
+
 function FormatPanel({ data, update }: { data: TableData; update: (next: TableData, label: string) => void }) {
   const format: TableErrorFormat = tableErrorFormat(data);
   return (
@@ -300,6 +396,267 @@ function FormatPanel({ data, update }: { data: TableData; update: (next: TableDa
  *  run); the add form and the per-variable edit take a formula with or
  *  without its leading `=`. Removing one deletes its column and its values
  *  (Undo brings them back). */
+/** Variable Types (Prism 11, seq 331): a Multiple Variables table's per-column
+ *  types — Categorical, Continuous or Label — and a categorical column's
+ *  levels. A gray dot is auto-detected from the values, an orange dot is set
+ *  by hand (the Auto checkbox flips between the two); auto-detect never
+ *  overwrites a manual type. Renaming a level rewrites every row holding it
+ *  (any case); renaming onto another level merges the two, so a typo folds
+ *  into its level. A calculated column's levels come from its formula, so
+ *  its levels show without a rename box.
+ *  Level Order (Prism 11.2, seq 340): a categorical column's levels list in
+ *  their stored order — the order the graphs and the dummy-coding reference
+ *  follow (the first level is the reference). Drag a level to move it, click
+ *  one to select it and use the Top / Up / Down / Bottom buttons, or sort
+ *  with a preset (Entry, Name, Row or Frequency, ascending or descending —
+ *  a one-time command that sets a new static order, not a persistent rule).
+ *  A renamed level keeps its position; a level typed into the table later
+ *  appends at the end. Blank cells are no level, so there is no (blank)
+ *  level to pin at the top. */
+export function VariableTypesPanel({
+  data,
+  update,
+}: {
+  data: TableData;
+  update: (next: TableData, label: string) => void;
+}) {
+  const [filter, setFilter] = React.useState<"all" | VariableType>("all");
+  const [open, setOpen] = React.useState<string | null>(null);
+  const [renames, setRenames] = React.useState<Record<string, string>>({});
+  const [sortPreset, setSortPreset] = React.useState<LevelOrderPreset>("entry");
+  const [sortDirection, setSortDirection] = React.useState<"asc" | "desc">("asc");
+  const [selectedLevel, setSelectedLevel] = React.useState<string | null>(null);
+  const [dragIndex, setDragIndex] = React.useState<number | null>(null);
+  const types = variableTypesOf(data);
+  const columns = data.columns.slice(1);
+  const shown = columns.filter((name) => filter === "all" || types[name].type === filter);
+  const labelColumns = columns.filter((name) => types[name].type === "label");
+  const typeLabel = (t: VariableType) =>
+    t === "categorical" ? "Categorical" : t === "continuous" ? "Continuous" : "Label";
+  const clearRename = (key: string) =>
+    setRenames((r) => {
+      const next = { ...r };
+      delete next[key];
+      return next;
+    });
+  return (
+    <Section title="Variable Types">
+      {labelColumns.length > 0 && (
+        <div className="flex items-center gap-2" title="Which variable names the points on this table's graphs">
+          <span className="min-w-0 flex-1 truncate text-regular font-medium">Row labels</span>
+          <Select<string>
+            value={labelVariableOf(data) ?? ""}
+            onChange={(next) => update(setLabelVariable(data, next === "" ? undefined : next), "Set Row Labels")}
+            options={[
+              { value: "", label: "Row titles" },
+              ...labelColumns.map((name) => ({ value: name, label: name })),
+            ]}
+          />
+        </div>
+      )}
+      <Segmented<"all" | VariableType>
+        value={filter}
+        onChange={setFilter}
+        options={[
+          { value: "all", label: "All" },
+          { value: "categorical", label: "Categorical" },
+          { value: "continuous", label: "Continuous" },
+          { value: "label", label: "Label" },
+        ]}
+        wrap
+      />
+      {shown.map((name) => {
+        const info = types[name];
+        const calculated = isCalculatedColumn(data, name);
+        const levels = info.type === "categorical" ? categoricalLevels(data, name) : [];
+        const expanded = open === name;
+        return (
+          <div
+            key={name}
+            className="flex flex-col gap-1 border-b border-separator pb-2 last:border-0 last:pb-0"
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ background: info.manual ? TAG_COLORS.orange : TAG_COLORS.gray }}
+                title={info.manual ? "Set by hand" : "Auto-detected from the values"}
+              />
+              <span className="min-w-0 flex-1 truncate text-regular font-medium">{name}</span>
+              <Select<VariableType>
+                value={info.type}
+                onChange={(next) => update(setVariableType(data, name, next), "Set Variable Type")}
+                options={[
+                  { value: "categorical", label: "Categorical" },
+                  { value: "continuous", label: "Continuous" },
+                  { value: "label", label: "Label" },
+                ]}
+              />
+              <label className="flex shrink-0 items-center gap-1 text-small text-secondary">
+                <Checkbox
+                  checked={!info.manual}
+                  onChange={(auto) =>
+                    update(
+                      setVariableTypeAuto(data, name, auto),
+                      auto ? "Auto-detect Variable Type" : "Set Variable Type",
+                    )
+                  }
+                />
+                Auto
+              </label>
+            </div>
+            {info.type === "categorical" && (
+              <>
+                <div>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setOpen(expanded ? null : name);
+                      setSelectedLevel(null);
+                    }}
+                  >
+                    {expanded ? "Hide levels" : `Show levels (${levels.length})`}
+                  </Button>
+                </div>
+                {expanded &&
+                  (levels.length === 0 ? (
+                    <p className="text-small text-secondary">No values yet — levels appear as you type them.</p>
+                  ) : (
+                    <>
+                      {levels.length > 1 && (
+                        <div className="flex items-center gap-2 pl-4">
+                          <span className="text-small text-secondary">Sort</span>
+                          <Select<LevelOrderPreset>
+                            value={sortPreset}
+                            onChange={setSortPreset}
+                            options={[
+                              { value: "entry", label: "Entry" },
+                              { value: "name", label: "Name" },
+                              { value: "row", label: "Row" },
+                              { value: "frequency", label: "Frequency" },
+                            ]}
+                          />
+                          <Select<"asc" | "desc">
+                            value={sortDirection}
+                            onChange={setSortDirection}
+                            options={[
+                              { value: "asc", label: "Ascending" },
+                              { value: "desc", label: "Descending" },
+                            ]}
+                          />
+                          <Button
+                            size="small"
+                            onClick={() =>
+                              update(sortLevelOrder(data, name, sortPreset, sortDirection), "Sort Levels")
+                            }
+                          >
+                            Apply
+                          </Button>
+                        </div>
+                      )}
+                      {(() => {
+                        const selectedIdx = levels.findIndex((l) => l.name === selectedLevel);
+                        if (selectedIdx < 0) return null;
+                        const move = (to: number) =>
+                          update(moveLevel(data, name, selectedIdx, to), "Move Level");
+                        return (
+                          <div className="flex items-center gap-1 pl-4">
+                            <Button size="small" disabled={selectedIdx === 0} onClick={() => move(0)}>
+                              Top
+                            </Button>
+                            <Button size="small" disabled={selectedIdx === 0} onClick={() => move(selectedIdx - 1)}>
+                              Up
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={selectedIdx === levels.length - 1}
+                              onClick={() => move(selectedIdx + 1)}
+                            >
+                              Down
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={selectedIdx === levels.length - 1}
+                              onClick={() => move(levels.length - 1)}
+                            >
+                              Bottom
+                            </Button>
+                          </div>
+                        );
+                      })()}
+                      {levels.map((level, idx) => {
+                        const key = `${name}:${level.name}`;
+                        const draft = renames[key] ?? level.name;
+                        const canRename =
+                          !calculated &&
+                          draft.trim() !== "" &&
+                          draft.trim().toLowerCase() !== level.name.toLowerCase();
+                        const rename = () => {
+                          update(renameLevel(data, name, level.name, draft), "Rename Level");
+                          clearRename(key);
+                        };
+                        return (
+                          <div
+                            key={level.name}
+                            draggable
+                            onDragStart={() => setDragIndex(idx)}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={() => {
+                              if (dragIndex !== null && dragIndex !== idx) {
+                                update(moveLevel(data, name, dragIndex, idx), "Move Level");
+                              }
+                              setDragIndex(null);
+                            }}
+                            onDragEnd={() => setDragIndex(null)}
+                            onClick={() => setSelectedLevel(level.name)}
+                            className="flex items-center gap-2 pl-4"
+                            title="Drag to reorder — click to select, then Top / Up / Down / Bottom"
+                          >
+                            <span className="min-w-0 flex-1 truncate text-small">
+                              {level.name} · {level.count}
+                              {level.excluded > 0 ? ` (${level.excluded} excluded)` : ""}
+                            </span>
+                            {!calculated && (
+                              <>
+                                <Input
+                                  value={draft}
+                                  aria-label={`Rename level ${level.name}`}
+                                  className="w-28"
+                                  onChange={(e) => setRenames((r) => ({ ...r, [key]: e.target.value }))}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" && canRename) rename();
+                                  }}
+                                />
+                                <Button size="small" disabled={!canRename} onClick={rename}>
+                                  Rename
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </>
+                  ))}
+                {calculated && (
+                  <p className="text-small text-secondary">A calculated column's levels come from its formula.</p>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+      {shown.length === 0 && (
+        <p className="text-small text-secondary">
+          No {filter === "all" ? "" : `${typeLabel(filter).toLowerCase()} `}variables.
+        </p>
+      )}
+      <p className="text-small text-secondary">
+        A gray dot is auto-detected from the values; an orange dot was set by hand and stays put. A column of numbers
+        is Continuous, text is Categorical, and an ID column with more than 10 distinct values is a Label.
+      </p>
+    </Section>
+  );
+}
+
 function CalculatedVariablesPanel({
   data,
   update,

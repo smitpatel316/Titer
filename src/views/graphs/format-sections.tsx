@@ -102,6 +102,7 @@ export const GROUPED_SOURCES = new Set<AnalysisType | undefined>(["two-way-anova
 const CENTER_ITEMS = [
   { value: "mean" as const, label: "Mean" },
   { value: "median" as const, label: "Median" },
+  { value: "geomean" as const, label: "Geometric mean" },
 ];
 // The graphs that draw a center with error bars; Individual values and Interleaved
 // scatter draw it as a short line, styled with them.
@@ -120,6 +121,10 @@ const ERROR_ITEMS = [
   { value: "sd" as const, label: "SD" },
   { value: "sem" as const, label: "SEM" },
   { value: "ci" as const, label: "95% CI" },
+  { value: "range" as const, label: "Range" },
+  { value: "iqr" as const, label: "Interquartile range" },
+  { value: "geosd" as const, label: "Geometric SD" },
+  { value: "geoci" as const, label: "Geometric 95% CI" },
 ];
 
 // ── Statistics: what's computed and drawn on the graph ──────────────────
@@ -607,6 +612,87 @@ function PcaControls({
   );
 }
 
+/** The Compact Letter Display format controls (Prism's Format CLD dialog):
+ *  where the letters sit, their direction, their identifiers, and their
+ *  font — shared by the single- and multi-analysis significance controls.
+ *  Outside the graph only allows stacked letters (Prism's rule), so the
+ *  direction choice gives way to a note there. */
+export function LettersFormatControls({ options, set }: { options: GraphOptions; set: SetOptions }) {
+  const outside = options.lettersLocation === "outside";
+  const color = /^#[0-9a-fA-F]{6}$/.test(options.lettersColor ?? "") ? options.lettersColor! : "#111827";
+  return (
+    <>
+      <Choice
+        label="Location"
+        value={options.lettersLocation}
+        onChange={(lettersLocation) => set({ lettersLocation })}
+        items={[
+          { value: "above", label: "Above the data" },
+          { value: "outside", label: "Outside the graph" },
+        ]}
+      />
+      {outside ? (
+        <p className="text-small text-secondary">Outside the graph, the letters stack in one row per letter.</p>
+      ) : (
+        <Choice
+          label="Direction"
+          value={options.lettersDirection}
+          onChange={(lettersDirection) => set({ lettersDirection })}
+          items={[
+            { value: "auto", label: "Automatic" },
+            { value: "horizontal", label: "Horizontal" },
+            { value: "vertical-up", label: "Vertical (up)" },
+            { value: "vertical-down", label: "Vertical (down)" },
+            { value: "stacked", label: "Stacked" },
+          ]}
+        />
+      )}
+      <Choice
+        label="Labels"
+        value={options.lettersIdentifier}
+        onChange={(lettersIdentifier) => set({ lettersIdentifier })}
+        items={[
+          { value: "upper", label: "Upper case" },
+          { value: "lower", label: "Lower case" },
+          { value: "numbers", label: "Numbers" },
+        ]}
+      />
+      <Choice
+        label="Font"
+        value={options.lettersFont}
+        onChange={(lettersFont) => set({ lettersFont })}
+        wrap
+        items={[
+          { value: "default", label: "Default" },
+          { value: "arial", label: "Arial" },
+          { value: "helvetica", label: "Helvetica" },
+          { value: "times", label: "Times" },
+          { value: "georgia", label: "Georgia" },
+          { value: "courier", label: "Courier" },
+          { value: "verdana", label: "Verdana" },
+        ]}
+      />
+      <Toggle
+        label="Automatically determine the font size"
+        checked={options.lettersFontAuto}
+        onChange={(lettersFontAuto) => set({ lettersFontAuto })}
+      />
+      {options.lettersFontAuto ? null : (
+        <Stepper label="Font size" value={options.lettersSize} min={6} max={36} step={1} onChange={(lettersSize) => set({ lettersSize })} />
+      )}
+      <Row label="Font color">
+        <input
+          type="color"
+          aria-label="Letters color"
+          value={color}
+          onChange={(e) => set({ lettersColor: e.target.value })}
+          className="size-6 cursor-pointer appearance-none rounded-full bg-transparent p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-edge [&::-webkit-color-swatch-wrapper]:p-0"
+        />
+      </Row>
+    </>
+  );
+}
+
 /** Pick several analyses, then which of each one's pairwise comparisons get a bracket —
  *  a grouped-scatter's multiple t tests, one per copy table. An analysis of another
  *  table is listed with its table's name; one that ran on other data sets than the
@@ -709,12 +795,15 @@ function MultiSignificanceControls({
           {comparisons === null ? (
             <p className="text-small text-secondary">Running the analyses…</p>
           ) : options.sigDisplay === "letters" ? (
-            <p className="text-small text-secondary">
-              {lettersFit(lettered)
-                ? "Groups that share a letter don't differ significantly (P ≥ 0.05); “a” goes to the highest."
-                : "Letters need every pair compared (Tukey's test, say): this analysis compares only some pairs."}
-              {chosen.length > 1 ? " Letters come from the first analysis only." : ""}
-            </p>
+            <>
+              <p className="text-small text-secondary">
+                {lettersFit(lettered)
+                  ? "Groups that share a letter don't differ significantly (P ≥ 0.05); “a” goes to the highest."
+                  : "Letters need every pair compared (Tukey's test, say): this analysis compares only some pairs."}
+                {chosen.length > 1 ? " Letters come from the first analysis only." : ""}
+              </p>
+              <LettersFormatControls options={options} set={set} />
+            </>
           ) : (
             chosen.map((a) => {
               const pairs = comparisons.filter((c) => c.analysisId === a.id);
@@ -799,11 +888,14 @@ function SignificanceControls({
           {comparisons === null ? (
             <p className="text-small text-secondary">Running the analysis…</p>
           ) : options.sigDisplay === "letters" ? (
-            <p className="text-small text-secondary">
-              {lettersFit(comparisons)
-                ? "Groups that share a letter don't differ significantly (P ≥ 0.05); “a” goes to the highest."
-                : "Letters need every pair compared (Tukey's test, say): this analysis compares only some pairs."}
-            </p>
+            <>
+              <p className="text-small text-secondary">
+                {lettersFit(comparisons)
+                  ? "Groups that share a letter don't differ significantly (P ≥ 0.05); “a” goes to the highest."
+                  : "Letters need every pair compared (Tukey's test, say): this analysis compares only some pairs."}
+              </p>
+              <LettersFormatControls options={options} set={set} />
+            </>
           ) : comparisons.length ? (
             <Row label="Comparisons">
               <div className="flex flex-col gap-1.5">
@@ -1097,11 +1189,22 @@ function dataOptions(c: SectionContext): React.ReactNode {
   const error = (
     <Choice label="Error bars" value={options.error} onChange={(error) => set({ error })} items={ERROR_ITEMS} />
   );
+  // The geometric kinds need all-positive values: a set with a zero or
+  // negative value plots without a point or error bar, never a wrong one.
+  const geoNote =
+    (options.center === "geomean" || options.error === "geosd" || options.error === "geoci") &&
+    (
+      <p className="text-small text-secondary">
+        Geometric mean needs all-positive values — a data set with a zero or negative value plots without a point
+        or error bar.
+      </p>
+    );
   if (WITH_ERROR_BARS.has(graphType)) {
     return (
       <>
         {center}
         {error}
+        {geoNote}
       </>
     );
   }
@@ -1226,6 +1329,22 @@ function dataOptions(c: SectionContext): React.ReactNode {
             {error}
           </>
         )
+      );
+    case "mv-strip-plot":
+    case "mv-summary-symbol":
+    case "mv-bar-strip":
+    case "mv-before-after-bar-strip":
+    case "mv-bar-chart":
+      // The MV error-bar kinds reuse the column builders (individual /
+      // mean-error / before-after bar-and-strip), so they take the same
+      // center and error choices — the box and violin MV kinds draw no
+      // center or error bars and keep the default (no controls).
+      return (
+        <>
+          {center}
+          {error}
+          {geoNote}
+        </>
       );
     case "volcano":
       return (

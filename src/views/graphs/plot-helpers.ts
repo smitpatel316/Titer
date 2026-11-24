@@ -11,12 +11,15 @@ import {
   type PointShape,
   type PointStyle,
   type RefLabelPlace,
+  type SeriesStyle,
 } from "../../store/types";
 import { xyPoints, xyRows, type Column, type DataSet } from "../../lib/dataset";
 import { pointKeyOf } from "../../lib/columns";
 import type { GraphFigure } from ".";
+import { dateAxisTicksForValues, elapsedAxisTicksForValues } from "../../lib/axis-dates";
+import type { XConversion } from "../../lib/date-time";
 import { paletteColor, paletteOf, withOpacity } from "../../lib/palettes";
-import { boxOf, mean, median, quantile, sd, sem } from "../../lib/summary";
+import { boxOf, geometricCi, geometricMean, geometricSdFactor, mean, median, quantile, sd, sem } from "../../lib/summary";
 import { summaryFormatDef, type SummaryFormat } from "../../lib/summary-format";
 import { tCrit95 } from "../../lib/student-t";
 
@@ -303,7 +306,7 @@ export function sortPairsByX(
 }
 
 /** The graphs' font. */
-const FONT = "system-ui, -apple-system, sans-serif";
+export const FONT = "system-ui, -apple-system, sans-serif";
 // Texts are measured in it before drawing; where there is no page (the tests), estimated.
 const measure = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
 
@@ -476,13 +479,63 @@ export const pointName = (
   font: { color: INK, size: fontSize },
 });
 
-/** Center value per column (mean or median). */
-export const centers = (cols: Column[], center: GraphOptions["center"]) =>
-  cols.map((c) => (center === "median" ? median(c.values) : mean(c.values)));
+/** One group's center value: mean, median, or geometric mean. An undefined
+ *  geometric mean (a zero or negative value) is NaN, like `mean([])` — the
+ *  graph draws no point there, never a wrong one. */
+export const centerOf = (v: number[], center: GraphOptions["center"]) =>
+  center === "median" ? median(v) : center === "geomean" ? (geometricMean(v) ?? NaN) : mean(v);
 
-/** The error of `v`: its SD, its SEM, or the half-width of its mean's 95% CI (t × SEM). */
-export const errorOf = (v: number[], kind: GraphOptions["error"]) =>
-  kind === "sem" ? sem(v) : kind === "ci" ? (v.length < 2 ? 0 : tCrit95(v.length - 1) * sem(v)) : sd(v);
+/** A series' center choice: its own, else the graph's (seq 375). */
+export const seriesCenter = (
+  styles: Record<string, SeriesStyle> | undefined,
+  key: string,
+  fallback: GraphOptions["center"],
+): GraphOptions["center"] => styles?.[key]?.center ?? fallback;
+
+/** A series' error choice: its own, else the graph's (seq 375). */
+export const seriesError = (
+  styles: Record<string, SeriesStyle> | undefined,
+  key: string,
+  fallback: GraphOptions["error"],
+): GraphOptions["error"] => styles?.[key]?.error ?? fallback;
+
+/** Center value per column (mean, median or geometric mean) — each column taking
+ *  its series' override when it has one, else the graph's choice. */
+export const centers = (
+  cols: Column[],
+  center: GraphOptions["center"],
+  styles?: Record<string, SeriesStyle>,
+) => cols.map((c) => centerOf(c.values, seriesCenter(styles, c.name, center)));
+
+/** The error of `v` around its `center` value, as the two sides Plotly draws:
+ *  `error` above the center, `errorMinus` below it (null for the symmetric
+ *  kinds). SD, SEM and the 95% CI half-width are symmetric; range is
+ *  max−center above and center−min below; IQR is Q3−center above and
+ *  center−Q1 below (Titer's type-6 quartiles, as the boxes draw them);
+ *  the geometric SD factor multiplies/divides the geometric mean, and the
+ *  geometric 95% CI back-transforms the log-scale interval. The geometric
+ *  kinds are undefined on a zero or negative value — both sides null, so
+ *  the bar blanks instead of plotting a wrong value. "none" is null on both
+ *  sides; callers that already guard "none" never see it. */
+export const errorOf = (
+  v: number[],
+  kind: GraphOptions["error"],
+  center: number,
+): { error: number | null; errorMinus: number | null } => {
+  if (kind === "none") return { error: null, errorMinus: null };
+  if (kind === "sem") return { error: sem(v), errorMinus: null };
+  if (kind === "ci") return { error: v.length < 2 ? 0 : tCrit95(v.length - 1) * sem(v), errorMinus: null };
+  if (kind === "sd") return { error: sd(v), errorMinus: null };
+  if (kind === "range") return { error: maxOf(v) - center, errorMinus: center - minOf(v) };
+  if (kind === "iqr") return { error: quantile(v, 0.75) - center, errorMinus: center - quantile(v, 0.25) };
+  const factor = geometricSdFactor(v);
+  if (kind === "geosd")
+    return factor == null
+      ? { error: null, errorMinus: null }
+      : { error: center * factor - center, errorMinus: center - center / factor };
+  const ci = geometricCi(v, v.length < 2 ? 0 : tCrit95(v.length - 1));
+  return ci == null ? { error: null, errorMinus: null } : { error: ci.high - center, errorMinus: center - ci.low };
+};
 
 /** An XY table's X-error column, if one was imported: Prism's X-error
  *  subcolumn arrives as a column named "<X> error" (see pzfx.ts) — a Y
@@ -503,7 +556,14 @@ export function xyDrawn(
   options: GraphOptions,
   summary: SummaryFormat = "replicates",
   xErrorCol?: Column,
-): { x: number[]; y: number[]; keys?: string[]; errors?: number[]; xErrors?: number[] } {
+): {
+  x: number[];
+  y: number[];
+  keys?: string[];
+  errors?: number[];
+  errorMinus?: number[];
+  xErrors?: number[];
+} {
   const xErrors = (rows: number[]): number[] | undefined =>
     options.xError && xErrorCol ? rows.map((r) => xErrorCol.byRow[r] ?? 0) : undefined;
   // A summary table's Y set holds its stored Mean (and error) columns, not
@@ -538,19 +598,51 @@ export function xyDrawn(
     };
   }
   const rows = xyRows(x, set);
+  // One dataset, one series: its center/error override (seq 375) governs every X.
+  const sCenter = seriesCenter(options.series, set.name, options.center);
+  const sError = seriesError(options.series, set.name, options.error);
+  const y = rows.values.map((v) => centerOf(v, sCenter));
+  const errs =
+    sError === "none"
+      ? null
+      : rows.values.map((v, i) => (v.length < 2 ? { error: 0, errorMinus: null } : errorOf(v, sError, y[i])));
   return {
     x: rows.x,
-    y: rows.values.map((v) => (options.center === "median" ? median(v) : mean(v))),
-    ...(options.error === "none"
-      ? {}
-      : { errors: rows.values.map((v) => (v.length < 2 ? 0 : errorOf(v, options.error))) }),
+    y,
+    ...(errs
+      ? {
+          errors: errs.map((e) => e.error ?? NaN),
+          ...(errs.some((e) => e.errorMinus != null)
+            ? { errorMinus: errs.map((e) => e.errorMinus ?? NaN) }
+            : {}),
+        }
+      : {}),
     xErrors: xErrors(rows.rows),
   };
 }
 
-/** Error magnitude per column (SD, SEM or 95% CI), or null when error is off. */
-export const errors = (cols: Column[], kind: GraphOptions["error"]) =>
-  kind === "none" ? null : cols.map((c) => errorOf(c.values, kind));
+/** Error magnitude per column, with the lower side for the asymmetric kinds
+ *  (range, IQR, geometric SD/CI) — or null when error is off. `center` is
+ *  the columns' plotted centers, one per column: the asymmetric kinds are
+ *  measured from them. A null side becomes NaN ("no error bar", the grouped
+ *  builders' convention); `errorMinus` is null outright when the kind is
+ *  symmetric, so callers pass it only where it exists. Each column takes its
+ *  series' error override when it has one, else the graph's kind — and off
+ *  stays off unless a series overrides to a real kind. */
+export const errors = (
+  cols: Column[],
+  kind: GraphOptions["error"],
+  center: number[],
+  styles?: Record<string, SeriesStyle>,
+): { error: number[]; errorMinus: number[] | null } | null => {
+  if (kind === "none" && !cols.some((c) => seriesError(styles, c.name, kind) !== "none")) return null;
+  const pairs = cols.map((c, i) => errorOf(c.values, seriesError(styles, c.name, kind), center[i]));
+  const minus = pairs.map((p) => p.errorMinus);
+  return {
+    error: pairs.map((p) => p.error ?? NaN),
+    errorMinus: minus.every((m) => m == null) ? null : minus.map((m) => m ?? NaN),
+  };
+};
 
 /** Deterministic jitter in [-0.15, 0.15] so points don't jump on option changes. */
 export const jitter = (col: number, i: number) => {
@@ -773,6 +865,87 @@ export function applyNumberFormats(fig: GraphFigure, options: GraphOptions): voi
     if (axis.tickmode === "array") continue;
     axis.tickformat = tickformat;
   }
+}
+
+/** The graph types whose X axis is the table's X column (seq 332 part D):
+ *  the core XY plots, a residual plot against X (not its QQ form, whose X
+ *  is a z-score), and the curves plotted against X. Every other xy-family
+ *  type plots something else on X — a survival curve's time, a volcano's
+ *  effect size, a ROC curve's 1 − specificity — so no date axis applies. */
+export const TABLE_X_GRAPH_TYPES = [
+  "xy-scatter",
+  "xy-bar",
+  "xy-area",
+  "xy-spikes",
+  "xy-bar-scatter",
+  "residuals",
+  "smooth-curve",
+  "logistic-curve",
+] as const;
+
+/** Whether this graph's X axis is the table's X column, so a date/elapsed
+ *  X deserves date/elapsed tick labels on it. */
+export function hasTableXAxis(type: GraphType, options: GraphOptions): boolean {
+  if (type === "residuals") return options.residualsAs === "x";
+  return (TABLE_X_GRAPH_TYPES as readonly string[]).includes(type);
+}
+
+/** What a date/elapsed X axis needs: the table's format + conversion, and
+ *  the conversion's zero (xZeroMs) for dates. */
+export interface DateAxisInfo {
+  format: "date" | "elapsed";
+  conversion: XConversion;
+  zeroMs: number | null;
+}
+
+/**
+ * Draws a date/elapsed X axis on a built figure (seq 332 part D): the
+ * axis's numeric range becomes date labels (smart spacing) or elapsed
+ * labels, at the display format the Format Axes dialog chose. Runs after
+ * applyNumberFormats — a date axis replaces the number format, so any
+ * tickformat on X is dropped. Skips log axes (dates have no log scale),
+ * category axes, and figures with no X data to span; the manual min/max
+ * still bound the range, and a date step (xStep) is ignored — the smart
+ * spacing picks the step. Mutates the figure in place.
+ */
+export function applyDateAxis(fig: GraphFigure, options: GraphOptions, info: DateAxisInfo | null): void {
+  if (!info || options.xScale !== "linear") return;
+  const axis = fig.layout.xaxis as Record<string, unknown> | undefined;
+  if (!axis || typeof axis !== "object") return;
+  if (axis.type === "category" || axis.type === "log") return;
+  // The visible range: the manual min/max when set, else the plotted X.
+  let lo: number | undefined;
+  let hi: number | undefined;
+  const range = axis.range as unknown;
+  if (
+    Array.isArray(range) &&
+    range.length === 2 &&
+    typeof range[0] === "number" &&
+    typeof range[1] === "number"
+  ) {
+    [lo, hi] = range;
+  } else {
+    const xs: number[] = [];
+    for (const trace of fig.data as { x?: unknown }[]) {
+      if (!Array.isArray(trace.x)) continue;
+      for (const v of trace.x) if (typeof v === "number" && Number.isFinite(v)) xs.push(v);
+    }
+    if (xs.length === 0) return;
+    lo = Math.min(...xs);
+    hi = Math.max(...xs);
+  }
+  if (lo === undefined || hi === undefined || !Number.isFinite(lo) || !Number.isFinite(hi)) return;
+  const ticks =
+    info.format === "date"
+      ? info.zeroMs === null
+        ? null
+        : dateAxisTicksForValues(lo, hi, info.conversion, info.zeroMs, options.xDateFormat)
+      : elapsedAxisTicksForValues(lo, hi, info.conversion, options.xElapsedFormat);
+  if (!ticks || ticks.tickvals.length === 0) return;
+  axis.tickmode = "array";
+  axis.tickvals = ticks.tickvals;
+  axis.ticktext = ticks.ticktext;
+  delete axis.tickformat;
 }
 
 /** A logarithmic axis: ticks at the powers of `base` (only those in range show), small
@@ -1091,28 +1264,43 @@ function groupRow(cols: Column[], r: number): number[] {
   return cols.flatMap((c) => (c.byRow[r] == null ? [] : [c.byRow[r]!]));
 }
 
-/** Per-row center (mean/median) and optional error (SD/SEM) for one group.
- *  `center[r]` is null where the group has no data in that row (leaves a gap);
- *  `error[r]` where it has a single value (no error bar, as in Prism). */
+/** Per-row center (mean/median/geometric mean) and optional error for one
+ *  group. `center[r]` is null where the group has no data in that row (or
+ *  its geometric mean is undefined — a zero or negative value, which leaves
+ *  a gap); `error[r]` where it has a single value (no error bar, as in
+ *  Prism). `errorMinus[r]` is the lower side for the asymmetric kinds
+ *  (range, IQR, geometric SD/CI), null outright when the kind is symmetric. */
 export function perRowStats(
   cols: Column[],
   rows: number,
   center: GraphOptions["center"],
   error: GraphOptions["error"],
-): { center: (number | null)[]; error: (number | null)[] | null } {
+): { center: (number | null)[]; error: (number | null)[] | null; errorMinus: (number | null)[] | null } {
   const c: (number | null)[] = [];
   const e: (number | null)[] | null = error === "none" ? null : [];
+  const em: (number | null)[] | null = error === "none" ? null : [];
   for (let r = 0; r < rows; r++) {
     const v = groupRow(cols, r);
     if (v.length === 0) {
       c.push(null);
       if (e) e.push(null);
+      if (em) em.push(null);
       continue;
     }
-    c.push(center === "median" ? median(v) : mean(v));
-    if (e) e.push(v.length < 2 ? null : errorOf(v, error));
+    const cv = centerOf(v, center);
+    c.push(Number.isNaN(cv) ? null : cv);
+    if (e && em) {
+      if (v.length < 2) {
+        e.push(null);
+        em.push(null);
+      } else {
+        const p = errorOf(v, error, cv);
+        e.push(p.error);
+        em.push(p.errorMinus);
+      }
+    }
   }
-  return { center: c, error: e };
+  return { center: c, error: e, errorMinus: em?.every((m) => m == null) ? null : em };
 }
 
 /** A column name's sub-column suffix — the part after the last ":"
@@ -1138,6 +1326,11 @@ export function summaryErrorAt(
   const col = (suffix: string) => cols.find((c) => summarySuffix(c.name) === suffix);
   const m = col("Mean")?.byRow[r] ?? null;
   if (m == null || error === "none") return { error: null, errorMinus: null };
+  // Range, IQR and the geometric kinds need the raw replicates: a stored
+  // Mean/SD/N cannot produce them, so there is no error bar — never a
+  // guessed number (the same contract as a conversion that needs a missing N).
+  if (error === "range" || error === "iqr" || error === "geosd" || error === "geoci")
+    return { error: null, errorMinus: null };
   const n = col("N")?.byRow[r] ?? null;
   if (def.errorKind === "plus-minus") {
     return { error: col("+error")?.byRow[r] ?? null, errorMinus: col("−error")?.byRow[r] ?? null };
@@ -1186,8 +1379,9 @@ export function summaryErrorAt(
  *  `center[r]` is null where the group has no Mean in that row.
  *  A group holding several Mean columns (a nested table's subgroups) is
  *  read as the subgroup Means themselves: the center is their mean or
- *  median, the error their SD/SEM/CI — the nested pooling the replicate
- *  graphs already do, applied to the stored Means. */
+ *  median, the error their SD/SEM/CI — or the new kinds, pooled the same
+ *  way — the nested pooling the replicate graphs already do, applied to the
+ *  stored Means. */
 export function perRowSummaryStats(
   cols: Column[],
   rows: number,
@@ -1196,8 +1390,7 @@ export function perRowSummaryStats(
 ): { center: (number | null)[]; error: (number | null)[] | null; errorMinus: (number | null)[] | null } {
   const meanCols = cols.filter((c) => summarySuffix(c.name) === "Mean");
   if (meanCols.length > 1) {
-    const stats = perRowStats(meanCols, rows, "mean", error);
-    return { ...stats, errorMinus: null };
+    return perRowStats(meanCols, rows, "mean", error);
   }
   const err: (number | null)[] | null = error === "none" ? null : [];
   const errMinus: (number | null)[] | null = error === "none" ? null : [];

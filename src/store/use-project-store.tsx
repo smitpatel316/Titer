@@ -19,18 +19,20 @@ import {
 } from "./types";
 import { TRANSFORM_NAMES, transformTable } from "../lib/transform";
 import { recomputeCalculated } from "../lib/calcvars";
+import { refreshLevelOrder, refreshVariableTypes } from "../lib/variable-types";
 import { remapQualifiedOptions, restoreForeignPoints } from "../lib/multi-table";
 import { MAX_INFO_SHEETS, newInfoSheetData } from "../lib/info-sheets";
 import type { AnalysisParams, AnalysisPickerValue, AnalysisResult, AnalysisType } from "../stats/types";
 import { TABLES } from "../views/tables";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions } from "../views/graphs";
 import type { TemplateKind } from "../lib/template";
-import { ANALYSES } from "../stats";
+import { analysisTitle } from "../stats";
 import { followTable, type TableMove } from "./references";
 import { pushHistory } from "../lib/sheet-navigation";
 import { repointCandidates } from "../lib/repoint-analysis";
 import { dependentAnalyses } from "../lib/dataset-manager";
 import { applyWand as planWand, type WandReport } from "../lib/wand";
+import type { CellBackgroundColor } from "../lib/cell-colors";
 import { cloneGraphPlan, type CloneOptions, type ClonePlan } from "../lib/clone-graph";
 import { DEFAULT_FIGURE_DPI, DEFAULT_FIGURE_SIZE, DEFAULT_LABEL_STYLE, newFigurePanels } from "../lib/figure";
 import { clearRegenPlans } from "../lib/prism-graph-regen";
@@ -40,12 +42,13 @@ export type { ProjectNode } from "./types";
 
 /** What the universal selector is currently choosing. */
 /** The Preferences dialog's sections (seq 225). */
-export type PreferenceSection = "general" | "appearance" | "ai" | "feedback" | "print";
+export type PreferenceSection = "general" | "data-entry" | "appearance" | "ai" | "feedback" | "print";
 
 type Selector =
   | { kind: "new-table" }
   | { kind: "new-analysis"; tableId: string; forGraph?: ForGraph }
   | { kind: "analysis-params"; tableId: string; testType: AnalysisPickerValue; forGraph?: ForGraph }
+  | { kind: "edit-analysis-params"; nodeId: string }
   | { kind: "new-graph"; tableId: string }
   | { kind: "wand"; tableId: string }
   | { kind: "clone-graph"; graphId: string }
@@ -161,8 +164,11 @@ type Action =
   | { type: "setTableFrozen"; id: string; frozen: boolean }
   /** Replace an analysis node's params (a rerun with overrides, via MCP):
    *  the next run — and the UI — see the new params. Orphaned sheets
-   *  keep their params (their source table is gone). */
-  | { type: "setAnalysisParams"; id: string; params: AnalysisParams }
+   *  keep their params (their source table is gone). `name` renames the node
+   *  in the same undo step (Change Parameters Apply, seq 373 follow-up):
+   *  the title tracks the params. Absent, the title is left alone (the MCP
+   *  rerun path, which passes no name). */
+  | { type: "setAnalysisParams"; id: string; params: AnalysisParams; name?: string }
   /** Move an orphaned analysis under another table that offers its test
    *  (seq 242): the saved results stay until the re-run lands, and the
    *  orphan flag + source name go away. Refuses anything else. */
@@ -225,6 +231,10 @@ type Action =
   | { type: "updateFloatingNotes"; id: string; notes: FloatingNote[]; at: number }
   /** `highlight`: the sheet's Navigator color, or null to clear it. */
   | { type: "setHighlight"; id: string; highlight: SheetHighlight | null }
+  /** Paint (or clear) one results-table cell (seq 325): `key` is a
+   *  `"section|row|col"` address, `color` one of Prism's 8 names or null
+   *  to clear it. Presentation only — the values never change. */
+  | { type: "setResultCellBackground"; id: string; key: string; color: CellBackgroundColor | null }
   | {
       type: "updateFigure";
       id: string;
@@ -526,7 +536,14 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       if (!node || node.type !== "analysis" || node.orphaned) return state;
       return {
         ...state,
-        nodes: { ...state.nodes, [action.id]: { ...node, analysisParams: action.params } },
+        nodes: {
+          ...state.nodes,
+          [action.id]: {
+            ...node,
+            analysisParams: action.params,
+            ...(action.name !== undefined ? { name: action.name } : {}),
+          },
+        },
         isDirty: true,
       };
     }
@@ -853,8 +870,15 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         // source value, pasting, inserting rows, an MCP write — because the
         // recompute runs here, the one funnel every edit passes through. A
         // table computed from another (a Transform) never recomputes: its
-        // values come from its source table, not from formulas.
+        // values come from its source table, not from formulas. A Multiple
+        // Variables table's types are re-detected here too (gray in Prism):
+        // an auto type follows the values the user just typed, a manual
+        // type (orange) sticks; a Transform keeps its computed types as-is.
         if (!before.transform) data = recomputeCalculated(data);
+        if (!before.transform && before.tableType === "multiple") data = refreshVariableTypes(data);
+        // The stored level orders are maintained by the same funnel (seq 340):
+        // a new level appends at the end, a level whose rows are gone drops out.
+        if (!before.transform && before.tableType === "multiple") data = refreshLevelOrder(data);
         nodes[id] = { ...before, data };
         // The table's analyses and graphs follow its renamed columns and groups, its moved
         // rows and its deleted columns.
@@ -873,8 +897,8 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         }
         // Its values changed, not only a column's width: the tables computed from it follow.
         const old = before.data;
-        const same = (k: "rows" | "columns" | "excluded" | "groups" | "replicates") => old?.[k] === data[k];
-        if (same("rows") && same("columns") && same("excluded") && same("groups") && same("replicates")) return;
+        const same = (k: "rows" | "columns" | "excluded" | "cellBackgrounds" | "groups" | "replicates") => old?.[k] === data[k];
+        if (same("rows") && same("columns") && same("excluded") && same("cellBackgrounds") && same("groups") && same("replicates")) return;
         for (const t of Object.values(nodes)) {
           if (t.transform?.from === id) update(t.id, transformTable(data, t.tableType!, t.transform, t.data));
         }
@@ -1040,6 +1064,24 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         isDirty: true,
       };
     }
+    case "setResultCellBackground": {
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "analysis") return state;
+      const key = action.key;
+      const current = node.resultCellBackgrounds?.[key];
+      if (current === (action.color ?? undefined)) return state;
+      const next = { ...node };
+      const colors = { ...(node.resultCellBackgrounds ?? {}) };
+      if (action.color) colors[key] = action.color;
+      else delete colors[key];
+      if (Object.keys(colors).length) next.resultCellBackgrounds = colors;
+      else delete next.resultCellBackgrounds;
+      return {
+        ...state,
+        nodes: { ...state.nodes, [action.id]: next },
+        isDirty: true,
+      };
+    }
     case "updateFigure": {
       const node = state.nodes[action.id];
       if (!node || node.type !== "figure") return state;
@@ -1186,6 +1228,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "setTags",
   "setScripts",
   "setHighlight",
+  "setResultCellBackground",
   "updateFigure",
   "applyScript",
   "reorderRoot",
@@ -1275,6 +1318,8 @@ function changeName(action: Action): string {
       return "Note Change";
     case "setHighlight":
       return "Highlight Sheet";
+    case "setResultCellBackground":
+      return "Cell Background Color";
     case "updateFigure":
       return "Figure Change";
     case "applyScript":
@@ -1417,8 +1462,9 @@ interface ProjectActions {
   setAnalysisFrozen: (id: string, frozen: boolean) => void;
   /** Freeze (or unfreeze) a data table: frozen, it can't be edited. */
   setTableFrozen: (id: string, frozen: boolean) => void;
-  /** Replace an analysis node's params (a rerun with overrides). */
-  setAnalysisParams: (id: string, params: AnalysisParams) => void;
+  /** Replace an analysis node's params (a rerun with overrides). `name`
+   *  renames the node in the same undo step (Change Parameters Apply). */
+  setAnalysisParams: (id: string, params: AnalysisParams, name?: string) => void;
   /** Move an orphaned analysis under a table that offers its test (seq 242). */
   repointAnalysis: (id: string, tableId: string) => void;
   /** Change a graph's type, keeping its title and size (seq 244). */
@@ -1434,6 +1480,9 @@ interface ProjectActions {
    *  snapshots the parent tables' data, so the sheet draws the snapshot
    *  while the live data keep changing. */
   setGraphFrozen: (id: string, kind: "graph" | "figure", frozen: boolean) => void;
+  /** Paint (or clear) one results-table cell (seq 325): `key` is a
+   *  `"section|row|col"` address, `color` one of Prism's 8 names or null. */
+  setResultCellBackground: (id: string, key: string, color: CellBackgroundColor | null) => void;
   /** Add a text/drawing/picture object to a graph or figure sheet (seq 238). */
   addDrawingObject: (nodeId: string, object: DrawingObject) => void;
   /** Change one drawing object (its id and kind never change). */
@@ -1612,14 +1661,13 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       },
       // Named for the test it runs, as in Prism.
       createAnalysis: (parentId, analysisType, analysisParams) => {
-        const { label, name } = ANALYSES[analysisType];
         const id = genId("analysis");
         dispatch({
           type: "create",
           node: {
             id,
             type: "analysis",
-            name: name?.(analysisParams) ?? label,
+            name: analysisTitle(analysisType, analysisParams),
             parentId,
             analysisType,
             analysisParams,
@@ -1716,7 +1764,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       cacheAnalysisResult: (id, result) => dispatch({ type: "cacheAnalysisResult", id, result }),
       setAnalysisFrozen: (id, frozen) => dispatch({ type: "setAnalysisFrozen", id, frozen }),
       setTableFrozen: (id, frozen) => dispatch({ type: "setTableFrozen", id, frozen }),
-      setAnalysisParams: (id, params) => dispatch({ type: "setAnalysisParams", id, params }),
+      setAnalysisParams: (id, params, name?) =>
+        dispatch({ type: "setAnalysisParams", id, params, ...(name !== undefined ? { name } : {}) }),
       repointAnalysis: (id, tableId) => dispatch({ type: "repointAnalysis", id, tableId }),
       changeGraphType: (id, graphType, options) =>
         dispatch({ type: "changeGraphType", id, graphType, ...(options ? { options } : {}) }),
@@ -1739,6 +1788,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       updateGraphs: (updates) => dispatch({ type: "updateGraphs", updates, at: Date.now() }),
       updateFloatingNotes: (id, notes) => dispatch({ type: "updateFloatingNotes", id, notes, at: Date.now() }),
       setSheetHighlight: (id, highlight) => dispatch({ type: "setHighlight", id, highlight }),
+      setResultCellBackground: (id, key, color) => dispatch({ type: "setResultCellBackground", id, key, color }),
       openSelector: (selector) => dispatch({ type: "openSelector", selector }),
       closeSelector: () => dispatch({ type: "closeSelector" }),
       setOpenError: (error) => dispatch({ type: "setOpenError", error }),

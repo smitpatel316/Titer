@@ -3,6 +3,7 @@
 import type { Column } from "../types";
 import { levelsOf, pairUp, splitXY, xyProblem } from "../../lib/dataset";
 import { missingColumn } from "../column/base";
+import { labelPredictorError } from "../multiple/predictors";
 import { num } from "../../lib/format";
 
 interface SurvivalGroup {
@@ -53,6 +54,10 @@ function survivalGroupsByAssignment(
   if (timeCol === statusCol) return { error: "The time and event-code variables must be different variables." };
   const groupCol = columns.find((c) => c.name === groupBy);
   if (!groupCol) return { error: missingColumn(groupBy) };
+  // A label never groups the curves (seq 379): refused by name, like a
+  // label covariate in Cox.
+  if (groupCol.variableType === "label")
+    return { error: labelPredictorError(groupBy, "grouping variable") };
   const levels = levelsOf(groupCol);
   if (levels.length < 2)
     return {

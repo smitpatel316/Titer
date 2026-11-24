@@ -6,6 +6,12 @@ import { hasXColumn, type TableData, type TableType } from "../../store/types";
 import type { TableMove } from "../../store/references";
 import type { MenuItems } from "../../native";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
+import { decimalsSupported, setDecimalPlaces } from "../../lib/decimal-format";
+import {
+  CELL_BACKGROUND_COLORS,
+  CELL_BACKGROUND_LABELS,
+  type CellBackgroundColor,
+} from "../../lib/cell-colors";
 import {
   convertCommaDecimals,
   deleteColumns,
@@ -14,8 +20,10 @@ import {
   insertColumns,
   insertRows,
   isRangeExcluded,
+  rangeCellBackground,
   rowsDeleted,
   rowsInserted,
+  setCellBackground,
   toggleExcluded,
   type Range,
 } from "./table-data";
@@ -25,6 +33,32 @@ export type MenuZone = "cell" | "row" | "column";
 type Item = MenuItems[number];
 
 const SEPARATOR = { item: "Separator" } as const;
+
+/** Prism's paint-bucket (seq 325) as menu items: the 8 colors, checked on
+ *  the range's uniform color, then None to clear. Shared by the data grid's
+ *  context menu and the results tables' cell menu — the pick closes over
+ *  the caller's update. */
+export function cellBackgroundMenuItems(
+  current: CellBackgroundColor | "mixed" | null,
+  onPick: (color: CellBackgroundColor | null) => void,
+): Item[] {
+  return [
+    ...CELL_BACKGROUND_COLORS.map(
+      (color) =>
+        ({
+          text: CELL_BACKGROUND_LABELS[color],
+          checked: current === color,
+          action: () => onPick(color),
+        }) as Item,
+    ),
+    SEPARATOR,
+    {
+      text: "None",
+      enabled: current !== null,
+      action: () => onPick(null),
+    },
+  ];
+}
 
 const plural = (n: number, word: string) => (n > 1 ? `${n} ${word}s` : word);
 
@@ -71,6 +105,19 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
       enabled: !tableFrozen,
       action: () => update(toggleExcluded(data, range), exclude),
     },
+    // Prism's paint-bucket (seq 325): Titer has no Change menu, so the
+    // grid's right-click menu carries it — beside Exclude, the other
+    // per-cell flag.
+    {
+      text: "Cell Background Color",
+      enabled: !tableFrozen,
+      items: cellBackgroundMenuItems(rangeCellBackground(data, range), (color) =>
+        update(
+          setCellBackground(data, range, color),
+          color === null ? "Clear Cell Background Color" : `Cell Background Color: ${CELL_BACKGROUND_LABELS[color]}`,
+        ),
+      ),
+    } as Item,
     SEPARATOR,
     { item: "Cut" },
     { item: "Copy" },
@@ -153,6 +200,40 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
         text: "Rename Group",
         enabled: !tableFrozen,
         action: () => renameGroup(range.c0),
+      });
+    }
+  }
+
+  // Per-column decimal places (Prism 11, seq 333): Default (full precision)
+  // or 0–6 decimals, applied to every stored data column the selection
+  // covers. Display-only — the values keep full precision. Not offered on
+  // contingency or survival-Y tables.
+  if (decimalsSupported(type) && zone !== "row" && onCells && range.c1 >= 1) {
+    const first = Math.max(range.c0, 1);
+    const last = Math.min(range.c1, data.columns.length - 1);
+    if (first <= last) {
+      const current = data.decimals?.[data.columns[first]];
+      const setPlaces = (places: number | undefined) => {
+        let next = data;
+        for (let c = first; c <= last; c++) next = setDecimalPlaces(next, data.columns[c], places);
+        update(next, places === undefined ? "Decimal Places: Default" : `Decimal Places: ${places}`);
+      };
+      items.push(SEPARATOR, {
+        text: "Decimal Places",
+        items: [
+          {
+            text: "Default (full precision)",
+            checked: current === undefined,
+            enabled: !tableFrozen,
+            action: () => setPlaces(undefined),
+          },
+          ...[0, 1, 2, 3, 4, 5, 6].map((n) => ({
+            text: `${n} decimal${n === 1 ? "" : "s"}`,
+            checked: current === n,
+            enabled: !tableFrozen,
+            action: () => setPlaces(n),
+          })),
+        ],
       });
     }
   }

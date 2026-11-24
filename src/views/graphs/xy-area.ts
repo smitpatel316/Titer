@@ -23,6 +23,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
       x: order.map((k) => raw.x[k]),
       y: order.map((k) => raw.y[k]),
       ...(raw.errors ? { errors: order.map((k) => raw.errors![k]) } : {}),
+      ...(raw.errorMinus ? { errorMinus: order.map((k) => raw.errorMinus![k]) } : {}),
       ...(raw.xErrors ? { xErrors: order.map((k) => raw.xErrors![k]) } : {}),
     };
     const over = paint.pattern(set.name, i);
@@ -37,7 +38,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
       fill: "tozeroy",
       fillcolor: paint.fill(set.name, i),
       ...(over && { fillpattern: over }),
-      ...(drawn.errors ? { error_y: paint.errorBars(set.name, i, drawn.errors) } : {}),
+      ...(drawn.errors ? { error_y: paint.errorBars(set.name, i, drawn.errors, drawn.errorMinus) } : {}),
       ...(drawn.xErrors ? { error_x: paint.errorBars(set.name, i, drawn.xErrors) } : {}),
       hoverinfo: "x+y",
     };
@@ -51,5 +52,7 @@ export const xyArea: GraphModule = {
   family: "xy",
   defaults: { fill: 0.5, outline: 2 },
   patterns: () => true,
+  // An area joins one value per X: replicates as their center, whatever `xyReplicates`.
+  summarizes: () => true,
   build,
 };

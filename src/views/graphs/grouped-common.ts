@@ -17,6 +17,8 @@ import {
   interleavedPositions,
   jitter,
   separatedPositions,
+  seriesCenter,
+  seriesError,
   seriesMarker,
   seriesPoints,
   scatterOffsets,
@@ -67,13 +69,17 @@ export function buildGroupedBars(
   // fill is semi-transparent (the Format panel says so); the gap between
   // bars has nothing to separate here. Stacked bars never superimpose.
 
-  // A summary table's stats carry a lower side too (asymmetric errors); a
-  // replicates table's don't — normalised to the same shape here.
-  const stats = groups.map((g) =>
-    summary === "replicates"
-      ? { ...perRowStats(g.columns, rows, options.center, showError ? options.error : "none"), errorMinus: null }
-      : perRowSummaryStats(g.columns, rows, summary, showError ? options.error : "none"),
-  );
+  // A summary table's stats and a replicates table's both carry a lower
+  // side for the asymmetric kinds (range, IQR, geometric SD/CI) — the two
+  // shapes are normalised to the same { center, error, errorMinus }.
+  const stats = groups.map((g) => {
+    // One group, one series: its center/error override governs every row.
+    const center = seriesCenter(options.series, g.name, options.center);
+    const error = showError ? seriesError(options.series, g.name, options.error) : "none";
+    return summary === "replicates"
+      ? perRowStats(g.columns, rows, center, error)
+      : perRowSummaryStats(g.columns, rows, summary, error);
+  });
   // 100 % stacked bars: each group's share of its row's total.
   const percent = mode === "stack" && options.stackAs === "percent";
   if (percent) {
@@ -225,10 +231,11 @@ export function buildGroupedLines(
   const x = labels.map((_, i) => i);
 
   const data = groups.map((g, i) => {
+    // One group, one series: its center/error override governs every row.
     const { center, error, errorMinus } =
       summary === "replicates"
-        ? { ...perRowStats(g.columns, rows, options.center, options.error), errorMinus: null }
-        : perRowSummaryStats(g.columns, rows, summary, options.error);
+        ? perRowStats(g.columns, rows, seriesCenter(options.series, g.name, options.center), seriesError(options.series, g.name, options.error))
+        : perRowSummaryStats(g.columns, rows, summary, seriesError(options.series, g.name, options.error));
     return {
       type: "scatter",
       mode: "lines+markers",
@@ -312,10 +319,11 @@ export function buildGroupedScatter(
     }
 
     // Center line + optional error whiskers at each row for this group.
+    // One group, one series: its center/error override governs every row.
     const { center, error, errorMinus } =
       summary === "replicates"
-        ? { ...perRowStats(g.columns, rows, options.center, options.error), errorMinus: null }
-        : perRowSummaryStats(g.columns, rows, summary, options.error);
+        ? perRowStats(g.columns, rows, seriesCenter(options.series, g.name, options.center), seriesError(options.series, g.name, options.error))
+        : perRowSummaryStats(g.columns, rows, summary, seriesError(options.series, g.name, options.error));
     const lineX: (number | null)[] = [];
     const lineY: (number | null)[] = [];
     center.forEach((c, r) => {

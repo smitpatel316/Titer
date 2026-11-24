@@ -256,7 +256,7 @@ const scopeText = (scope: string): string => {
   }
 };
 
-const EXPECTED_TOOL_COUNT = 75;
+const EXPECTED_TOOL_COUNT = 76;
 const EXPECTED_ANALYSIS_TYPES = 61;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
@@ -564,6 +564,24 @@ const ROWS: Row[] = [
     ],
   },
   {
+    item: "372",
+    title: "Calculated variables: conditional aggregation (part A) + window functions (part B)",
+    status: "covered",
+    note:
+      "The *IF family (MINIF/MAXIF/SUMIF/MEANIF/STDEVIF/STDERRIF/COUNTIF/COUNTAIF) + the WHERE-clause form, " +
+      "and window functions (OVER / WHERE / ORDER BY / ROWS on the windowable aggregates, CENTER / " +
+      "STANDARDIZE / ZSCORE / RANK, and the *IF family with OVER) — all through the existing " +
+      "titer_edit_table add/set-calculated-variable ops.",
+    checks: [
+      { kind: "tool", tool: "titer_edit_table" },
+      { kind: "sourceContains", file: "src/lib/calcvars.ts", text: "CONDITIONAL_AGGREGATES" },
+      { kind: "sourceContains", file: "src/lib/calcvars.ts", text: "kind: \"condagg\"" },
+      { kind: "sourceContains", file: "src/lib/calcvars.ts", text: "conditionalAggregate" },
+      { kind: "sourceContains", file: "src/lib/calcvars.ts", text: "kind: \"window\"" },
+      { kind: "sourceContains", file: "src/lib/calcvars.ts", text: "computeWindow" },
+    ],
+  },
+  {
     item: "158",
     title: "Classic analyses from Multiple Variables tables",
     status: "covered",
@@ -611,11 +629,41 @@ const ROWS: Row[] = [
     note:
       "CORRECTED vs the audit (which said GAP): compactLetters is implemented " +
       "(significance-overlay.ts), sigDisplay 'letters' is a valid choice, and " +
-      "build_graph/update_graph take partial GraphOptions.",
+      "build_graph/update_graph take partial GraphOptions. The 1.9 remainder " +
+      "adds the CLD format options (Prism's Format CLD dialog): location, " +
+      "direction, identifier, font/size/color incl. auto-size — the overlay " +
+      "honors them, the Format panel exposes them, and checks.ts pins them.",
     checks: [
       { kind: "sourceContains", file: "sigOverlay", text: "export function compactLetters" },
       { kind: "sourceContains", file: "sigOverlay", text: 'options.sigDisplay === "letters"' },
+      { kind: "sourceContains", file: "sigOverlay", text: "export function formatLetters" },
       { kind: "graphChoice", choice: "sigDisplay", value: "letters" },
+      { kind: "graphChoice", choice: "lettersLocation", value: "outside" },
+      { kind: "graphChoice", choice: "lettersDirection", value: "stacked" },
+      { kind: "graphChoice", choice: "lettersIdentifier", value: "numbers" },
+      { kind: "graphChoice", choice: "lettersFont", value: "arial" },
+      { kind: "graphOption", field: "lettersSize" },
+      { kind: "graphOption", field: "lettersColor" },
+      { kind: "graphOption", field: "lettersFontAuto" },
+      { kind: "tool", tool: "titer_build_graph" },
+      { kind: "tool", tool: "titer_update_graph" },
+    ],
+  },
+  {
+    item: "351",
+    title: "Error-bar center/error choices: geometric mean, range, median + IQR",
+    status: "covered",
+    note:
+      "Merged on check/v19: geometric mean center + range / IQR / geometric SD / geometric 95% CI errors " +
+      "in GRAPH_CHOICES (center/error), computed on the single centers()/errorOf() path with asymmetric " +
+      "arrayminus bars; build_graph/update_graph take them as GraphOptions.",
+    checks: [
+      { kind: "graphChoice", choice: "center", value: "geomean" },
+      { kind: "graphChoice", choice: "error", value: "range" },
+      { kind: "graphChoice", choice: "error", value: "iqr" },
+      { kind: "graphChoice", choice: "error", value: "geosd" },
+      { kind: "graphChoice", choice: "error", value: "geoci" },
+      { kind: "sourceContains", file: "src/views/graphs/plot-helpers.ts", text: "geometricMean(v) ?? NaN" },
       { kind: "tool", tool: "titer_build_graph" },
       { kind: "tool", tool: "titer_update_graph" },
     ],
@@ -787,6 +835,66 @@ const ROWS: Row[] = [
     status: "covered",
     note: "Covered via save_project (tip path); fix in flight on fix/18-289-prism-ranges.",
     checks: [{ kind: "tool", tool: "titer_save_project" }],
+  },
+  {
+    item: "331",
+    title: "MV variable types (HALF A + B)",
+    status: "covered",
+    note: "Auto-detect + manual override + level rename on Multiple Variables tables: variable_type + variable_type_manual on titer_list_tables columns (MV only), titer_edit_table set-variable-type op; .hlx round-trip via readVariableTypes. Half B: types drive the analyses (label variables never offered or fitted, numeric-coded categoricals dummy-code), categories autocomplete, a label variable can serve as the graph's row-label source.",
+    checks: [
+      { kind: "editOpsContains", op: "set-variable-type" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "set-variable-type" },
+      { kind: "structContains", struct: "EditTableArgs", text: "variable_type" },
+      { kind: "sourceContainsRe", scope: "src", re: "variableTypes" },
+      { kind: "sourceContainsRe", scope: "stats", re: "is a label variable" },
+      { kind: "sourceContainsRe", scope: "src", re: "labelVariable" },
+      { kind: "sourceContainsRe", scope: "src", re: "levelSuggestions" },
+    ],
+  },
+  {
+    item: "340",
+    title: "MV categorical level ordering",
+    status: "covered",
+    note: "A Multiple Variables categorical column's levels in a stored order (Prism 11.2): level_order on titer_list_tables columns (MV only; null when the column isn't categorical), titer_edit_table set-level-order op; .hlx round-trip via readLevelOrder. The order is the panel's Level Order section (drag-and-drop + Top/Up/Down/Bottom + Entry/Name/Row/Frequency sort presets) and the dummy-coding reference (the first level) and the graphs' level order follow it. A renamed level keeps its position; a new level appends at the end. Blank cells are no level, so there is no (blank) level to pin at the top.",
+    checks: [
+      { kind: "editOpsContains", op: "set-level-order" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "set-level-order" },
+      { kind: "structContains", struct: "EditTableArgs", text: "level_order" },
+      { kind: "sourceContainsRe", scope: "src", re: "levelOrder" },
+      { kind: "sourceContainsRe", scope: "stats", re: "levelOrder" },
+    ],
+  },
+
+  {
+    item: "332",
+    title: "Dates / elapsed time X (HALF A + PART D)",
+    status: "covered",
+    note: "X-column format (numbers/date/elapsed) + conversion (units/start date/day-first) on XY tables: x_format + x_conversion on titer_read_table_summary (XY only), titer_edit_table set-x-format op; .hlx round-trip via readXFormat/readXConversion; .prism round-trip preserves the format. Part D: date/elapsed axis scales — xDateFormat + xElapsedFormat graph options (Format Axes dialog), smart-spaced date ticks / elapsed ticks via applyDateAxis on the table-X graphs; fits see converted numbers via readTable.",
+    checks: [
+      { kind: "editOpsContains", op: "set-x-format" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "set-x-format" },
+      { kind: "structContains", struct: "EditTableArgs", text: "x_format" },
+      { kind: "sourceContainsRe", scope: "src", re: "xFormat" },
+      { kind: "graphOption", field: "xDateFormat" },
+      { kind: "graphOption", field: "xElapsedFormat" },
+      { kind: "graphChoice", choice: "xDateFormat", value: "16-jan-2004" },
+      { kind: "graphChoice", choice: "xElapsedFormat", value: "h:mm:ss" },
+      { kind: "sourceContains", file: "graphView", text: "applyDateAxis" },
+      { kind: "sourceContainsRe", scope: "graphs", re: "hasTableXAxis" },
+    ],
+  },
+
+  {
+    item: "374",
+    title: "MCP set-decimal-places op",
+    status: "covered",
+    note: "Per-column decimal places via MCP (seq 333 follow-up): titer_edit_table set-decimal-places op (places 0–6, or null to clear to Default); decimals on titer_list_tables columns for read-back; .hlx round-trip via readDecimals. Out-of-range places error plainly, never silently clamp.",
+    checks: [
+      { kind: "editOpsContains", op: "set-decimal-places" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "set-decimal-places" },
+      { kind: "structContains", struct: "EditTableArgs", text: "places" },
+      { kind: "sourceContainsRe", scope: "src", re: "setDecimalPlaces" },
+    ],
   },
 
   // ── Covered in flight (surface on the named branch, not on this tip) ──
@@ -1091,6 +1199,77 @@ const ROWS: Row[] = [
     ],
   },
   {
+    item: "341",
+    title: "Transform function library beyond arithmetic",
+    status: "covered",
+    note: "Merged on check/v19: transform-data gained Prism's remaining documented functions (logit, probit, rank, zscore, trig, ABS, Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions, user-defined) plus a per-data-set K (constants), X function + interchange (xFunction, interchange), error-bar handling (errorMode) and a user-defined formula (formula). Scatchard (seq 386) added later as a cross-column function: X becomes Y, Y becomes Y/X.",
+    checks: [
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "logit" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "probit" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "rank" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "zscore" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "sin" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "cos" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "tan" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "arcsin" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "abs" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "y-plus-random" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "round-k" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "y-power-k" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "ten-power-y" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "two-power-y" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "neg-log10" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "x-divided-by-y" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "y-divided-by-x" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "y-minus-x" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "y-plus-x" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "y-times-x" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "x-minus-y" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "eadie-hofstee" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "scatchard" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "user-defined" },
+      { kind: "analysisParam", type: "transform-data", param: "constants" },
+      { kind: "analysisParam", type: "transform-data", param: "x" },
+      { kind: "analysisParam", type: "transform-data", param: "xFunction" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "xFunction", value: "sqrt" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "xFunction", value: "eadie-hofstee" },
+      { kind: "analysisParam", type: "transform-data", param: "interchange" },
+      { kind: "analysisParam", type: "transform-data", param: "errorMode" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "errorMode", value: "mean-only" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "errorMode", value: "erase" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "errorMode", value: "to-ci" },
+      { kind: "analysisParam", type: "transform-data", param: "formula" },
+    ],
+  },
+  {
+    item: "385",
+    title: "Log-log transform",
+    status: "covered",
+    note: "Merged on check/v19: transform-data gained the log-log function — log10 of both X and Y (X via the existing xFn path with log10, Y via log10); wizard entry + MCP schema enum.",
+    checks: [{ kind: "analysisParamEnum", type: "transform-data", param: "function", value: "log-log" }],
+  },
+  {
+    item: "383",
+    title: "Hill plot transform",
+    status: "covered",
+    note: "Merged on check/v19: transform-data gained the Hill plot (Y becomes log10(Y/(Ymax−Y)) with a required Ymax; X becomes log10(X) unless entered as log(concentration) via xIsLog) plus the wizard's Ymax prompt and X-units choice.",
+    checks: [
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "hill-plot" },
+      { kind: "analysisParam", type: "transform-data", param: "ymax" },
+      { kind: "analysisParam", type: "transform-data", param: "xIsLog" },
+    ],
+  },
+  {
+    item: "387",
+    title: "Ambiguous-fit handling (dependency method)",
+    status: "covered",
+    note: "Merged on check/v19: dependency per parameter (FAQ 931 closed form 1 − s²/(V_ii·HH_ii), verified against the refit definition on the FAQ's worked example), a third difficultFitHandling mode \"ambiguous\" (dependency > 0.9999 flags the fit ambiguous, ~ values and very wide CIs), and a reportDependency Diagnostics option (Prism's Diagnostics tab). Pinned in checks.ts (FAQ 931 + FAQ 1462 fixtures).",
+    checks: [
+      { kind: "analysisParamEnum", type: "nonlinear-regression", param: "difficultFitHandling", value: "ambiguous" },
+      { kind: "analysisParam", type: "nonlinear-regression", param: "reportDependency" },
+    ],
+  },
+  {
     item: "206",
     title: "Remove-baseline column math",
     status: "covered",
@@ -1294,6 +1473,19 @@ const ROWS: Row[] = [
     checks: [{ kind: "structContains", struct: "UpdateGraphArgs", text: "graph_type" }],
   },
   {
+    item: "325",
+    title: "Cell background color",
+    status: "covered",
+    note: "Merged on check/v19: Prism's paint-bucket — 8 colors (yellow, red, blue, green, purple, orange, tan, gray) on data cells (titer_edit_table set-cell-background op; titer_write_table cell_backgrounds replaces or preserves them) and on results cells (titer_set_result_cell_background, addressed by section|row|col, survives recompute). Colors persist in the .hlx; .pzfx carries no per-cell color, so there is no round-trip.",
+    checks: [
+      { kind: "tool", tool: "titer_set_result_cell_background" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "set-cell-background" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "set-result-cell-background" },
+      { kind: "structContains", struct: "WriteTableArgs", text: "cell_backgrounds" },
+      { kind: "structContains", struct: "EditTableArgs", text: "set-cell-background" },
+    ],
+  },
+  {
     item: "#46",
     title: "Compare slopes/intercepts",
     status: "covered",
@@ -1313,6 +1505,18 @@ const ROWS: Row[] = [
     status: "covered",
     note: "Merged on check/v18: executeSaveProject returns write_report (tables/analyses written vs dropped + summary) for .prism/.pzfx, null for .hlx (Mansi P0 #6, cherry-picked from fix/18-m2-mcp-result).",
     checks: [{ kind: "saveResultHasReport" }],
+  },
+  {
+    item: "373",
+    title: "Change an analysis's parameters in place (GUI)",
+    status: "covered",
+    note: "GUI path for the seq 172 engine (titer_rerun_analysis + setAnalysisParams): answersFromParams re-opens the wizard pre-filled from stored params, Apply validates and dispatches setAnalysisParams; toolbar button, Analysis menu Change Parameters… (CmdOrCtrl+T), navigator context menu. Unmapped types (Monte Carlo, plot-function, plain nonlinear-regression, extract-rearrange, select-transform, Kolmogorov-Smirnov, transpose) stay disabled with a reason.",
+    checks: [
+      { kind: "sourceContainsRe", scope: "src", re: "answersFromParams" },
+      { kind: "sourceContainsRe", scope: "src", re: "edit-analysis-params" },
+      { kind: "sourceContainsRe", scope: "src", re: "Change Parameters" },
+      { kind: "sourceContainsRe", scope: "src", re: "CmdOrCtrl\\+T" },
+    ],
   },
 
   // ── No meaningful MCP operation ──

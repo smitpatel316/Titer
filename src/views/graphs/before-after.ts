@@ -298,6 +298,7 @@ export const beforeAfter: GraphModule = {
   family: "column",
   points: () => true,
   lines: () => true,
+  summarizes: () => true,
   build: buildBeforeAfter,
 };
 
@@ -313,8 +314,8 @@ function buildMvBeforeAfterBarStrip(
   titles?: (string | null)[],
 ): GraphFigure {
   const names = columns.map((c) => c.name);
-  const center = centers(columns, options.center);
-  const errs = errors(columns, options.error);
+  const center = centers(columns, options.center, options.series);
+  const errs = errors(columns, options.error, center, options.series);
   const data: unknown[] = [];
 
   columns.forEach((c, i) => {
@@ -332,7 +333,7 @@ function buildMvBeforeAfterBarStrip(
         x: [i],
         y: [center[i]],
         marker: { opacity: 0 },
-        error_y: paint.errorBars(c.name, i, [errs[i]]),
+        error_y: paint.errorBars(c.name, i, [errs.error[i]], errs.errorMinus ? [errs.errorMinus[i]] : undefined),
         hoverinfo: "skip",
       });
     }
@@ -374,5 +375,6 @@ export const groupedBeforeAfter: GraphModule = {
   family: "grouped",
   points: () => true,
   lines: () => true,
+  summarizes: () => true,
   build: buildGroupedBeforeAfter,
 };

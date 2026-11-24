@@ -8,6 +8,7 @@ export const groupedHbars: GraphModule = {
   family: "grouped",
   patterns: () => true,
   points: (options) => options.showPoints,
+  summarizes: () => true,
   build: (columns, options, paint, titles, summary) =>
     buildGroupedBars(columns, options, "group", true, paint, titles, summary),
 };

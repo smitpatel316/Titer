@@ -49,6 +49,7 @@ import {
   TRANSFORMS,
   Z_WITHIN,
 } from "../store/types";
+import { isCellBackgroundColor, parseResultCellBackgroundKey, type CellBackgroundColor } from "./cell-colors";
 import {
   type AnalysisParams,
   type AnalysisResult,
@@ -98,6 +99,7 @@ import {
   TAILS,
   THREE_WAY_POSTHOC_SCOPES,
   THREE_WAY_TERMS,
+  TRANSFORM_ERROR_MODES,
   TRANSFORM_FUNCTIONS,
   TWO_WAY_DESIGNS,
 } from "../stats/types";
@@ -109,9 +111,11 @@ import { GRAPHS, GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 import { ANALYSES } from "../stats";
 import { isGrouped, isNested } from "./dataset";
 import { isSummaryFormatValue, summarySubcolumns } from "./summary-format";
+import { isDateUnit, isoDateOf, parseDateCell, type XColumnFormat, type XConversion } from "./date-time";
 import { groupRuns } from "./columns";
 import { regroupDropped, regroupTable, renestDropped, renestTable } from "../views/tables/table-data";
 import { readCalculated, recomputeCalculated } from "./calcvars";
+import { readLevelOrder, readVariableTypes } from "./variable-types";
 import { readLinkedPaste } from "./linked-paste";
 import { readSimulationSpec } from "../stats/simulation/simulate";
 import { transformTable } from "./transform";
@@ -235,7 +239,7 @@ const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "proje
 // prettier-ignore
 const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1, transform: 1, notes: 1, tags: 1,
-  analysisType: 1, analysisParams: 1, cachedResult: 1, frozen: 1, orphaned: 1, sourceTableName: 1, orphanedDataSet: 1, graphType: 1, graphOptions: 1,
+  analysisType: 1, analysisParams: 1, cachedResult: 1, resultCellBackgrounds: 1, frozen: 1, orphaned: 1, sourceTableName: 1, orphanedDataSet: 1, graphType: 1, graphOptions: 1,
   sourceTableIds: 1,
   frozenData: 1, frozenDataByGraph: 1, drawingObjects: 1,
   panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, figureBackground: 1, dpi: 1,
@@ -243,8 +247,8 @@ const NODE_KEYS = Object.keys({
 } satisfies Record<keyof ProjectNode, 1>);
 // prettier-ignore
 const DATA_KEYS = Object.keys({
-  columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1,
-  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1, simulation: 1,
+  columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1, cellBackgrounds: 1,
+  widths: 1, decimals: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1, simulation: 1, variableTypes: 1, labelVariable: 1, xFormat: 1, xConversion: 1, levelOrder: 1,
 } satisfies Record<keyof TableData, 1>);
 
 // Graph options without a default, by the kind of value they hold.
@@ -342,6 +346,11 @@ const PARAMS = {
   centered: "yes/no",
   // Seq 200: the nonlinear fitting method (least squares / robust / Poisson).
   fitMethod: ["least-squares", "robust", "poisson"],
+  // Seq 323: difficult-fit handling (identify unstable parameters / neither).
+  // Seq 387: a third mode, identify ambiguous fits — and the Diagnostics
+  // option that reports each parameter's dependency.
+  difficultFitHandling: ["unstable", "ambiguous", "none"],
+  reportDependency: "yes/no",
   compareModel: [...NONLINEAR_MODELS],
   globalY: "names",
   sharedParams: "names",
@@ -468,6 +477,20 @@ const PARAMS = {
   rout: "yes/no", x: "name",
   // Transform data (v2): which function to apply.
   function: TRANSFORM_FUNCTIONS,
+  // Transform data (seq 341): a constant K per data set; the X column's
+  // function; whether X and Y are interchanged first; how error bars on a
+  // mean±SD/SEM table are handled; the user-defined formula (a free string,
+  // like nonlinear regression's customEquation — NOT the plot-function
+  // `equation`, which is a model name).
+  constants: "numbers-by-name",
+  xFunction: TRANSFORM_FUNCTIONS,
+  interchange: "yes/no",
+  errorMode: TRANSFORM_ERROR_MODES,
+  formula: "name",
+  // Hill plot (seq 383): the maximum response, and whether X was entered
+  // as log(concentration) (a yes/no boolean in the schema).
+  ymax: "number",
+  xIsLog: "yes/no",
   // Plot a function (v2): the equation, the X range, how many line segments
   // draw each curve, the extra series, and the curves themselves (each a
   // label + its parameter values, read by the "plot-curves" kind below).
@@ -542,13 +565,15 @@ function readStyles(v: unknown): Record<string, SeriesStyle> | undefined {
   const out = Object.entries(v)
     .filter((e): e is [string, Obj] => isObj(e[1]))
     .map(([key, raw]) => {
-      const style = canonical(raw, ["color", "shape", "dash", "pattern"]);
+      const style = canonical(raw, ["color", "shape", "dash", "pattern", "center", "error"]);
       const shape = oneOf(GRAPH_CHOICES.pointShape, style.shape);
       const dash = oneOf(GRAPH_CHOICES.lineDash, style.dash);
       const pattern = oneOf(FILL_PATTERNS, style.pattern);
+      const center = oneOf(GRAPH_CHOICES.center, style.center);
+      const error = oneOf(GRAPH_CHOICES.error, style.error);
       return [
         key,
-        defined({ ...style, color: isHex(style.color) ? style.color : undefined, shape, dash, pattern }),
+        defined({ ...style, color: isHex(style.color) ? style.color : undefined, shape, dash, pattern, center, error }),
       ] as const;
     })
     .filter(([, style]) => Object.keys(style).length);
@@ -675,6 +700,30 @@ function describeDroppedBand(b: unknown): string {
   return typeof b.count === "number" ? `${name} (count ${b.count})` : `${name} (no count)`;
 }
 
+/** An XY table's X format as a file holds it (Prism 11, seq 332): only
+ *  "date" or "elapsed" survives, and only on an XY table — a hand-edited
+ *  file holding anything else, or any format on another table type, reads
+ *  as plain numbers. "numbers" is the default, so it is never stored. */
+function readXFormat(v: unknown, type: unknown): XColumnFormat | undefined {
+  if (type !== "xy") return undefined;
+  return v === "date" || v === "elapsed" ? v : undefined;
+}
+
+/** An X conversion as a file holds it: a bad unit is days, an unparseable
+ *  start date is dropped (the earliest date becomes the zero instead), and
+ *  a conversion that is all-default is dropped — it would read as the
+ *  default anyway. The conversion is kept even when the format is numbers,
+ *  so switching back to dates restores the units and start date. */
+function readXConversion(v: unknown): XConversion | undefined {
+  if (!isObj(v)) return undefined;
+  const units = isDateUnit(v.units) ? v.units : "days";
+  const parsedStart = typeof v.startDate === "string" ? parseDateCell(v.startDate) : null;
+  const startDate = isoDateOf(parsedStart);
+  const dayFirst = v.dayFirst === true ? true : undefined;
+  if (units === "days" && startDate === undefined && dayFirst === undefined) return undefined;
+  return { units, ...(startDate === undefined ? {} : { startDate }), ...(dayFirst === undefined ? {} : { dayFirst }) };
+}
+
 /** A table's data, and the colors it kept for its graphs. */
 /** A table's data, put straight: no value beyond its last column (`beyond` counts those left
  *  out), exclusions and widths only on cells and columns it has, and a grouped table's
@@ -710,9 +759,30 @@ function readData(
     return r < rows.length && c < columns.length;
   };
   const excluded = Array.isArray(d.excluded) ? d.excluded.filter(onCell) : [];
+  // Cell background colors survive only as in-bounds "row,col" keys naming
+  // one of Prism's 8 colors; anything else is dropped, like a bogus exclusion.
+  const cellBackgrounds = isObj(d.cellBackgrounds)
+    ? Object.fromEntries(Object.entries(d.cellBackgrounds).filter(([k, v]) => onCell(k) && isCellBackgroundColor(v)))
+    : {};
   const widths = isObj(d.widths)
     ? Object.fromEntries(
         Object.entries(d.widths).filter(([name, w]) => columns.includes(name) && isFiniteNumber(w) && w > 0),
+      )
+    : {};
+  // A decimal-places setting survives only as an integer 0–15 on a data
+  // column (column 0 holds the row titles): a hand-edited file holding
+  // anything else reads as no setting for that column.
+  const decimals = isObj(d.decimals)
+    ? Object.fromEntries(
+        Object.entries(d.decimals).filter(
+          ([name, v]) =>
+            columns.includes(name) &&
+            columns.indexOf(name) >= 1 &&
+            typeof v === "number" &&
+            Number.isInteger(v) &&
+            v >= 0 &&
+            v <= 15,
+        ),
       )
     : {};
   const rowGroups = readRowGroups(d.rowGroups);
@@ -737,13 +807,34 @@ function readData(
     subgroups: grouping && isCount(d.subgroups) ? d.subgroups : undefined,
     rowGroups: rowGroups.groups,
     excluded: excluded.length ? excluded : undefined,
+    cellBackgrounds: Object.keys(cellBackgrounds).length ? (cellBackgrounds as Record<string, CellBackgroundColor>) : undefined,
     widths: Object.keys(widths).length ? (widths as Record<string, number>) : undefined,
+    decimals: Object.keys(decimals).length ? (decimals as Record<string, number>) : undefined,
     freezeTitle: d.freezeTitle === true || undefined,
     // Only "sd" or "sem" survives: a hand-edited file holding anything else
     // reads as SEM, the default, instead of carrying a bogus format.
     errorFormat: d.errorFormat === "sd" || d.errorFormat === "sem" ? d.errorFormat : undefined,
+    // A date/elapsed X column survives only on an XY table, with a valid
+    // conversion (seq 332).
+    xFormat: readXFormat(d.xFormat, type),
+    xConversion: readXConversion(d.xConversion),
     calculated,
     linkedPaste,
+    // A variable type survives only as an entry naming a data column with a
+    // known type: a hand-edited file holding a bogus type, or an entry for
+    // a column that is gone, loses that entry on its own.
+    variableTypes: readVariableTypes(d.variableTypes, columns),
+    // A row-label source survives only when it names a data column that is
+    // still there — the type is checked at use time, not here, so a column
+    // set back to Label later picks the choice up again.
+    labelVariable:
+      typeof d.labelVariable === "string" && columns.slice(1).includes(d.labelVariable)
+        ? d.labelVariable
+        : undefined,
+    // A level order survives only as an entry naming a data column with
+    // an array of level names: a hand-edited file holding a bogus entry
+    // loses that entry on its own.
+    levelOrder: readLevelOrder(d.levelOrder, columns),
     // A simulated table's spec survives only when it is a valid spec:
     // a hand-edited one is dropped, so the table can't re-run on a lie.
     simulation: readSimulationSpec(d.simulation),
@@ -1066,7 +1157,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "descriptive-statistics": ["sets"],
   "frequency-distribution": ["binMode", "binWidth", "binCount", "startAt", "sets"],
   "fraction-of-total": ["ys", "x", "totalBy", "format", "ci", "sets"],
-  "transform-data": ["function", "constant", "sets"],
+  "transform-data": ["function", "constant", "constants", "x", "xFunction", "interchange", "errorMode", "formula", "ymax", "xIsLog", "sets"],
   "transform-concentrations": ["column", "fromUnit", "toUnit", "sets"],
   "remove-baseline": ["ys", "x", "baselineMethod", "firstN", "controls", "constant", "constantHook", "columnMathOperation", "columnMathA", "columnMathB", "sets"],
   normalize: [
@@ -1103,7 +1194,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "area-under-curve": ["baseline", "ignorePeaksBelow", "peaksAboveBaselineOnly", "sets"],
   "row-means-totals": ["ys", "x", "rowScope", "sets"],
   "nonlinear-regression": [
-    "x", "y", "ys", "model", "centered", "fitMethod", "compareWith", "compare", "interpolate", "weights", "fitXMin", "fitXMax", "fixed", "bounds", "fixedConstants",
+    "x", "y", "ys", "model", "centered", "fitMethod", "difficultFitHandling", "reportDependency", "compareWith", "compare", "interpolate", "weights", "fitXMin", "fitXMax", "fixed", "bounds", "fixedConstants",
     "boundsConstants", "compareModel", "globalY", "sharedParams", "ligandConcentration", "ligandKd",
     "ligandConcentrationConstant", "ligandKdConstant", "fitKi", "rout", "q", "ecx", "customEquation", "customParameters",
     "sets",
@@ -1583,6 +1674,19 @@ function readFrozenData(raw: unknown): TableData | undefined {
         Object.entries(d.widths).filter(([name, w]) => columns.includes(name) && isFiniteNumber(w) && w > 0),
       )
     : {};
+  const decimals = isObj(d.decimals)
+    ? Object.fromEntries(
+        Object.entries(d.decimals).filter(
+          ([name, v]) =>
+            columns.includes(name) &&
+            columns.indexOf(name) >= 1 &&
+            typeof v === "number" &&
+            Number.isInteger(v) &&
+            v >= 0 &&
+            v <= 15,
+        ),
+      )
+    : {};
   return defined({
     columns,
     rows,
@@ -1591,9 +1695,15 @@ function readFrozenData(raw: unknown): TableData | undefined {
     subgroups: isCount(d.subgroups) ? (d.subgroups as number) : undefined,
     excluded: Array.isArray(d.excluded) ? d.excluded.filter(onCell) : undefined,
     widths: Object.keys(widths).length ? widths : undefined,
+    decimals: Object.keys(decimals).length ? decimals : undefined,
     freezeTitle: d.freezeTitle === true || undefined,
     errorFormat: oneOf(["sd", "sem"] as const, d.errorFormat),
     summaryFormat: isSummaryFormatValue(d.summaryFormat) ? d.summaryFormat : undefined,
+    // A frozen snapshot holds no table type, so the format is accepted on
+    // its own merits — the snapshot comes from the app's own tables, never
+    // from a hand-edited file.
+    xFormat: d.xFormat === "date" || d.xFormat === "elapsed" ? d.xFormat : undefined,
+    xConversion: readXConversion(d.xConversion),
     notes: typeof d.notes === "string" && d.notes ? d.notes : undefined,
   }) as TableData;
 }
@@ -1762,6 +1872,18 @@ function readFigure(
 }
 
 /** `tableColors`: where a table leaves the colors it kept for its graphs. */
+/** Results-cell background colors (seq 325): a map of `"section|row|col"`
+ *  keys to one of Prism's 8 named colors. Only well-formed keys naming a
+ *  real color survive; anything else is dropped. */
+function readResultCellBackgrounds(raw: unknown): Record<string, CellBackgroundColor> | undefined {
+  if (!isObj(raw)) return undefined;
+  const out: Record<string, CellBackgroundColor> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (parseResultCellBackgroundKey(k) && isCellBackgroundColor(v)) out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 function readNode(
   id: string,
   raw: unknown,
@@ -1877,6 +1999,12 @@ function readNode(
     const cached = readCachedResult(node.cachedResult, node.analysisType as string, node.name, issues);
     if (cached) node.cachedResult = cached;
     else delete node.cachedResult;
+    // Results-cell background colors (seq 325): only well-formed
+    // "section|row|col" keys naming one of the 8 colors survive — a
+    // hand-edited file holding anything else loses the bad entries.
+    const resultCellBackgrounds = readResultCellBackgrounds(n.resultCellBackgrounds);
+    if (resultCellBackgrounds) node.resultCellBackgrounds = resultCellBackgrounds;
+    else delete node.resultCellBackgrounds;
   } else if (type === "info") {
     // An info sheet lives at the project root, never under a table.
     node.parentId = null;

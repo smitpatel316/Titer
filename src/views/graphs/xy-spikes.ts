@@ -49,7 +49,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
         ...(drawn.keys
           ? seriesPoints(paint, set.name, i, drawn.keys)
           : { marker: seriesMarker(paint, set.name, i) }),
-        ...(drawn.errors ? { error_y: paint.errorBars(set.name, i, drawn.errors) } : {}),
+        ...(drawn.errors ? { error_y: paint.errorBars(set.name, i, drawn.errors, drawn.errorMinus) } : {}),
         hoverinfo: "x+y",
       },
     ];
@@ -66,5 +66,7 @@ export const xySpikes: GraphModule = {
   family: "xy",
   points: () => true,
   lines: () => true,
+  // Replicates are summarized only when shown as their center.
+  summarizes: (options) => options.xyReplicates === "mean",
   build,
 };

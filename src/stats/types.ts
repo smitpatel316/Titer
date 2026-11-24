@@ -225,14 +225,27 @@ export const CORRELATION_METHODS = ["pearson", "spearman"] as const;
 /** The Transform functions (Prism's documented standard set — Prism 8 User
  *  Guide, "Transform data"): log10, ln, log2, sqrt, reciprocal, exp, square —
  *  plus Prism's arithmetic transforms (seq 205), which apply a constant K to
- *  every value: Y+K, Y−K, Y×K, Y/K, K−Y, K/Y. The arithmetic functions read
- *  the constant from TransformDataParams.constant. */
+ *  every value: Y+K, Y−K, Y×K, Y/K, K−Y, K/Y — plus the rest of Prism's
+ *  documented set (seq 341): logit, probit, rank, zscore, trig, ABS,
+ *  Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions
+ *  and user-defined transforms. The arithmetic functions read the constant
+ *  from TransformDataParams.constant (or per-data-set from `constants`).
+ *  Lineweaver-Burk landed here (seq 384): it is the reciprocal under its own name, so the
+ *  Y side reads `lineweaver-burk` and the X side the existing `reciprocal`
+ *  through the `xFn` path. Log-log landed here (seq 385): both sides
+ *  log10. Hanes-Woolf landed here (seq 381): Y becomes X/Y, X unchanged.
+ *  The Hill plot landed in seq 383 (Y becomes log10(Y/(Ymax−Y)), X becomes
+ *  log10(X) unless entered as log(concentration)). Eadie-Hofstee (seq 380) IS here: an X transform (X becomes Y/X, Y
+ *  unchanged), so it is also in TRANSFORM_CROSS_FUNCTIONS below. Scatchard
+ *  landed in seq 386 as a cross-column function: X becomes Y, Y becomes
+ *  Y/X. All six pharmacology transforms are now here. */
 export const TRANSFORM_FUNCTIONS = [
   "log10",
   "ln",
   "log2",
   "sqrt",
   "reciprocal",
+  "lineweaver-burk",
   "exp",
   "square",
   "y-plus-k",
@@ -241,6 +254,33 @@ export const TRANSFORM_FUNCTIONS = [
   "y-divided-by-k",
   "k-minus-y",
   "k-divided-by-y",
+  "logit",
+  "probit",
+  "rank",
+  "zscore",
+  "sin",
+  "cos",
+  "tan",
+  "arcsin",
+  "abs",
+  "y-plus-random",
+  "round-k",
+  "y-power-k",
+  "ten-power-y",
+  "two-power-y",
+  "neg-log10",
+  "log-log",
+  "x-divided-by-y",
+  "y-divided-by-x",
+  "y-minus-x",
+  "y-plus-x",
+  "y-times-x",
+  "x-minus-y",
+  "eadie-hofstee",
+  "hanes-woolf",
+  "scatchard",
+  "user-defined",
+  "hill-plot",
 ] as const;
 export type TransformFunction = (typeof TRANSFORM_FUNCTIONS)[number];
 /** The arithmetic Transform functions — the ones that need a constant K
@@ -254,6 +294,38 @@ export const TRANSFORM_ARITHMETIC_FUNCTIONS = [
   "k-divided-by-y",
 ] as const;
 export type TransformArithmeticFunction = (typeof TRANSFORM_ARITHMETIC_FUNCTIONS)[number];
+/** The Transform functions that need a constant K (seq 205 arithmetic plus
+ *  seq 341: Y^K, rounding to K digits, Y+Random's noise SD). */
+export const TRANSFORM_K_FUNCTIONS = [
+  ...TRANSFORM_ARITHMETIC_FUNCTIONS,
+  "y-power-k",
+  "round-k",
+  "y-plus-random",
+] as const;
+export type TransformKFunction = (typeof TRANSFORM_K_FUNCTIONS)[number];
+/** The cross-column Transform functions (seq 341): they read the paired X
+ *  value for each Y value (TransformDataParams.x names the X column). */
+export const TRANSFORM_CROSS_FUNCTIONS = [
+  "x-divided-by-y",
+  "y-divided-by-x",
+  "y-minus-x",
+  "y-plus-x",
+  "y-times-x",
+  "x-minus-y",
+  "eadie-hofstee",
+  "hanes-woolf",
+  "scatchard",
+] as const;
+export type TransformCrossFunction = (typeof TRANSFORM_CROSS_FUNCTIONS)[number];
+/** The column Transform functions (seq 341): they read the whole column, not
+ *  one value at a time — rank and zscore need the column's other values. */
+export const TRANSFORM_COLUMN_FUNCTIONS = ["rank", "zscore"] as const;
+export type TransformColumnFunction = (typeof TRANSFORM_COLUMN_FUNCTIONS)[number];
+/** How error bars on a mean±SD/SEM table are handled (seq 341): transform
+ *  the mean only (error bars and N pass through unchanged), erase the error
+ *  bars, or convert them to 95% CIs first and transform both ends. */
+export const TRANSFORM_ERROR_MODES = ["mean-only", "erase", "to-ci"] as const;
+export type TransformErrorMode = (typeof TRANSFORM_ERROR_MODES)[number];
 /** Binding — Saturation models (plan 16): one-site total, two-site
  *  specific, and the two-series total+nonspecific fits (NS/Background shared). */
 export const BINDING_SATURATION_MODELS = [
@@ -703,6 +775,17 @@ export type NonlinearWeightScheme = "none" | "1/y" | "1/y2" | "1/x" | "1/x2" | "
  *  likelihood, by iteratively reweighted least squares with weights 1/μ). */
 export const NONLINEAR_FIT_METHODS = ["least-squares", "robust", "poisson"] as const;
 export type NonlinearFitMethod = (typeof NONLINEAR_FIT_METHODS)[number];
+/** How a difficult fit is handled (seq 323, Prism's Confidence tab):
+ *  "unstable" (default since Prism 9.0) identifies parameters the data do
+ *  not determine — the fit's Hessian condition number exceeds 10/√ε
+ *  (about 6.7×10⁸) — and reports their best-fit value as "Unstable" with
+ *  a "Very wide" CI; "ambiguous" (seq 387, Prism's older method, Prism
+ *  7.0–8.1) flags a parameter whose dependency exceeds 0.9999 — its
+ *  best-fit value and SE are preceded by ~ and its CI is "Very wide";
+ *  "none" reports best-fit values no matter what. Diagnostic only — it
+ *  never alters fitted values. */
+export const NONLINEAR_DIFFICULT_FIT_HANDLINGS = ["unstable", "ambiguous", "none"] as const;
+export type NonlinearDifficultFitHandling = (typeof NONLINEAR_DIFFICULT_FIT_HANDLINGS)[number];
 export interface NonlinearRegressionParams {
   /** Multiple Variables tables: the X variable (the Y variable is `y`). */
   x?: string;
@@ -754,6 +837,15 @@ export interface NonlinearRegressionParams {
   /** How the curve is fitted (seq 200): least squares (default), robust
    *  (Tukey biweight), or Poisson (counts). */
   fitMethod?: NonlinearFitMethod;
+  /** How a difficult fit is handled (seq 323): identify unstable
+   *  parameters (default), identify ambiguous fits (seq 387, Prism's
+   *  older method), or report best-fit values no matter what. */
+  difficultFitHandling?: NonlinearDifficultFitHandling;
+  /** Report each parameter's dependency (seq 387, Prism's Diagnostics
+   *  tab): the results sheet gains a Dependency column. The values are
+   *  computed on every nonlinear fit either way; this only controls the
+   *  display. */
+  reportDependency?: boolean;
   /** Extra Y series for a shared-parameter (global) fit. nls models only. */
   globalY?: string[];
   /** Which parameters are shared across the global fit's series (omitted:
@@ -1388,11 +1480,33 @@ export interface FrequencyDistributionParams {
 /** Params for "transform-data": which function to apply to the values. The
  *  wizard always sets it; the runner defaults to log10 when it is absent.
  *  `constant` is the K of the arithmetic functions (Y±K, Y×K, Y/K, K−Y, K/Y)
- *  — required for those, ignored by the rest. */
+ *  — required for those, ignored by the rest. Seq 341 adds: `constants` (a
+ *  K per data set), `x`/`xFunction`/`interchange` (XY tables), `errorMode`
+ *  (mean±SD/SEM tables) and `formula` (user-defined transforms). */
 export interface TransformDataParams {
   function: TransformFunction;
   /** The constant K for the arithmetic functions (seq 205). */
   constant?: number;
+  /** A constant K per data set, keyed by data-set name — overrides `constant` for that set (seq 341). */
+  constants?: Record<string, number>;
+  /** The X column (XY tables): the value paired with each Y value for the cross-column functions, and the column the X function applies to (seq 341). */
+  x?: string;
+  /** The function applied to the X values (XY tables); omitted: X passes through unchanged (seq 341). */
+  xFunction?: TransformFunction;
+  /** Swap the X and Y roles before transforming (XY tables): the Y function applies to the old X values, the X function to the old Y values (seq 341). */
+  interchange?: boolean;
+  /** How error bars on a mean±SD/SEM table are handled (seq 341); the default is mean-only. */
+  errorMode?: TransformErrorMode;
+  /** The user-defined transform (function "user-defined", seq 341): lines separated by `;` or newlines, each optionally starting with a designator `<Name>` (only that data set) or `<~Name>` (all data sets except it), then an expression with an optional `Y =` prefix. */
+  formula?: string;
+  /** The maximum response Ymax for the Hill plot (function "hill-plot",
+   *  seq 383): Y becomes log10(Y/(Ymax−Y)). Required — the run errors
+   *  without it — and it must be greater than 0. */
+  ymax?: number;
+  /** Whether the X values were entered as log(concentration) (function
+   *  "hill-plot", seq 383): true leaves X unchanged; omitted or false
+   *  means concentrations, so X becomes log10(X). */
+  xIsLog?: boolean;
 }
 /** Molar concentration units (Prism's set), in descending magnitude: each
  *  step is a factor of 1000. µ is U+00B5 MICRO SIGN, matching the bUnits in
@@ -2062,6 +2176,21 @@ export interface RegressionCoefficient {
   stdError: number | null;
   t: number | null;
   p: number | null;
+  /** Seq 323: true when the data do not determine this parameter (Prism's
+   *  unstable-parameter check — the fit's Hessian condition number exceeds
+   *  10/√ε). The numeric estimate is kept (the overlays draw the curve
+   *  from it); the results view shows "Unstable" / "Very wide" instead. */
+  unstable?: boolean;
+  /** Seq 387: true when this parameter's dependency exceeds 0.9999 and
+   *  the fit ran with the ambiguous handling — Prism precedes its
+   *  best-fit value and standard error with ~ and reports its CI as
+   *  "very wide". The numeric estimate is kept, as with `unstable`. */
+  ambiguous?: boolean;
+  /** Seq 387: this parameter's dependency (0–1; how much the other
+   *  parameters can compensate for a change in it), null when undefined
+   *  (no Hessian, noiseless data, robust/Poisson refit). Computed on
+   *  every nonlinear fit; shown only when the run asked for it. */
+  dependency?: number | null;
   /** Denominator degrees of freedom behind `p` (mixed-effects only):
    *  Satterthwaite / Kenward-Roger are usually fractional, Legacy whole. */
   df?: number | null;
@@ -2639,6 +2768,9 @@ export interface AnalysisResult {
   covariance?: CovarianceMatrix;
   /** A curve fit's best-fit values, one column per data set (two when curves are compared). */
   fit?: { sets: string[]; rows: FitRow[] };
+  /** Seq 387: the results sheet shows a Dependency column for the
+   *  coefficients (set when the run asked for it with reportDependency). */
+  showDependency?: boolean;
   /** A standard curve's unknowns, interpolated. */
   interpolated?: InterpolatedRow[];
   /** The radioligand concentration [L] a homologous-competition fit used

@@ -2,7 +2,7 @@
 // the app's, not a window's) and set again when what it shows changes (active table
 // type, selection, unsaved state, recent files, theme) or another window comes to
 // the front. Its project-free parts are in menus.ts.
-import { WIZARDS } from "./views/analyses/wizards";
+import { canEditAnalysisParams, WIZARDS } from "./views/analyses/wizards";
 import * as React from "react";
 import { closeAll, isMac, isNative, onFocusChange, setTheme, type Theme } from "./native";
 import { THEME_CHANGED_EVENT, THEME_KEY, loadTheme } from "./lib/theme";
@@ -13,7 +13,7 @@ import { useDrawingSelection } from "./store/drawing-selection";
 import { zoomActualSize, zoomFitNode, zoomInNode, zoomOutNode } from "./store/use-zoom";
 import { insertPictureObject, newDrawingObject } from "./components/drawing-objects";
 import { removeWithConfirm, type DocumentActions } from "./store/use-document";
-import { NODE_NAMES, type DrawingObjectKind, type GraphType, type NodeType } from "./store/types";
+import { NODE_NAMES, type DrawingObjectKind, type GraphType, type NodeType, type ProjectNode } from "./store/types";
 import { TABLE_TYPE_OPTIONS } from "./views/tables";
 import { TABLE_DATA_EXPORT_FORMATS, exportTableData } from "./views/tables/table-data-export";
 import { analysisOptionsForTable, analysisOptionsKey } from "./views/analyses";
@@ -58,6 +58,11 @@ function edit(command: EditCommand) {
     window.dispatchEvent(new CustomEvent<EditCommand>("titer:edit", { detail: command }));
   }
 }
+
+/** Whether the Change Parameters menu entry is live for this node (seq 373):
+ *  an analysis whose wizard can re-open it, unfrozen and not orphaned. */
+const isEditableAnalysis = (node: ProjectNode | undefined | null): boolean =>
+  node?.type === "analysis" && canEditAnalysisParams(node).editable;
 
 export function useAppMenu(doc: DocumentActions) {
   const store = useProjectStore();
@@ -553,6 +558,20 @@ export function useAppMenu(doc: DocumentActions) {
             accelerator: "CmdOrCtrl+Alt+A",
             enabled: hasTable,
             action: run((l, id) => l.store.openSelector({ kind: "new-analysis", tableId: id })),
+          },
+          {
+            // Change Parameters (seq 373): re-opens the active analysis in
+            // its wizard, pre-filled from the stored params.
+            text: "Change Parameters…",
+            accelerator: "CmdOrCtrl+T",
+            enabled: isEditableAnalysis(activeNode),
+            action: () => {
+              // Re-check at click time — the node may have frozen since the menu opened.
+              const node = latest.current.store.activeNode;
+              if (isEditableAnalysis(node)) {
+                latest.current.store.openSelector({ kind: "edit-analysis-params", nodeId: node!.id });
+              }
+            },
           },
           {
             // Creates data, not a result — so it sits next to New Analysis…,

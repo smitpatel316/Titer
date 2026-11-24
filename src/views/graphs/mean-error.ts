@@ -31,8 +31,8 @@ function build(
       ? shown.map((c) => c.name.slice(0, c.name.lastIndexOf(":")))
       : shown.map((c) => c.name);
   const idx = shown.map((_, i) => i);
-  const y = centers(shown, options.center);
-  const errs = errors(shown, options.error);
+  const y = centers(shown, options.center, options.series);
+  const errs = errors(shown, options.error, y, options.series);
   const data: unknown[] = [];
 
   if (options.shape === "line") {
@@ -47,7 +47,9 @@ function build(
   }
 
   shown.forEach((c, i) => {
-    const error_y = errs ? paint.errorBars(c.name, i, [errs[i]]) : { visible: false };
+    const error_y = errs
+      ? paint.errorBars(c.name, i, [errs.error[i]], errs.errorMinus ? [errs.errorMinus[i]] : undefined)
+      : { visible: false };
 
     data.push(
       options.shape === "bar"
@@ -81,5 +83,6 @@ export const meanError: GraphModule = {
   points: (options) => options.shape !== "bar",
   lines: (options) => options.shape === "line",
   patterns: (options) => options.shape === "bar",
+  summarizes: () => true,
   build,
 };

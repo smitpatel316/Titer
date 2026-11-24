@@ -33,7 +33,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
         y: bars.y,
         ...(set.name === right ? { yaxis: "y2" } : {}),
         marker: paint.bars(set.name, i),
-        ...(bars.errors ? { error_y: paint.errorBars(set.name, i, bars.errors) } : {}),
+        ...(bars.errors ? { error_y: paint.errorBars(set.name, i, bars.errors, bars.errorMinus) } : {}),
         hoverinfo: "x+y",
       },
       {
@@ -71,5 +71,7 @@ export const xyBarScatter: GraphModule = {
   points: (options) => options.xyStyle !== "line",
   lines: (options) => options.xyStyle !== "points",
   patterns: () => true,
+  // Its bars are each X's center, whatever `xyReplicates` (the scatter half follows it).
+  summarizes: () => true,
   build,
 };

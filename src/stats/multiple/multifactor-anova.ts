@@ -12,8 +12,9 @@
 // No TukeyHSD call.
 import type { AnalysisOutcome, ComparisonRow, MultifactorAnovaParams } from "../types";
 import { MULTIFACTOR_MAX_FACTORS } from "../types";
-import type { Column } from "../../lib/dataset";
-import { dataGroups, describe, missingColumn, pairIndices, pRow, rStr, rVec } from "../column/base";
+import { orderLevels, type Column } from "../../lib/dataset";
+import { ciRows, dataGroups, describe, missingColumn, pairIndices, pRow, R_EFFECT_CI, rStr, rVec } from "../column/base";
+import { labelPredictorError } from "./predictors";
 import { evalNamedVector } from "../webr";
 import { mean, sd } from "../../lib/summary";
 
@@ -23,7 +24,8 @@ const textOf = (cell: string | null | undefined): string | undefined => {
   return t ? t : undefined;
 };
 
-/** Distinct non-blank cell texts, in first-appearance order. */
+/** Distinct non-blank cell texts, in first-appearance order — or in the
+ *  column's stored level order (seq 340) when it has one. */
 function levelsOf(column: Column): string[] {
   const seen = new Set<string>();
   const levels: string[] = [];
@@ -34,7 +36,7 @@ function levelsOf(column: Column): string[] {
       levels.push(t);
     }
   }
-  return levels;
+  return orderLevels(levels, column.levelOrder);
 }
 
 /** One tested term: its factors (by index into the factor list), its display
@@ -156,12 +158,21 @@ export async function runMultifactorAnova(
   if (named !== undefined && named.length > 0) {
     const missing = named.find((n) => !byName.has(n));
     if (missing !== undefined) return { error: missingColumn(missing) };
+    // A label never enters as a factor (seq 379): refused by name, like a
+    // label predictor in regression.
+    const labelFactor = named.find((n) => byName.get(n)?.variableType === "label");
+    if (labelFactor !== undefined) return { error: labelPredictorError(labelFactor, "factor") };
     if (named.includes(response.name)) {
       return { error: `“${response.name}” is the response — it can't also be a factor.` };
     }
     factorNames = [...new Set(named)];
   } else {
-    factorNames = columns.filter((c) => c !== response && levelsOf(c).length >= 2).map((c) => c.name);
+    // The default set never auto-picks a label either: a label column's
+    // texts are levels, so without this guard it would be picked as a
+    // factor on any table where it is the only other levelled column.
+    factorNames = columns
+      .filter((c) => c !== response && c.variableType !== "label" && levelsOf(c).length >= 2)
+      .map((c) => c.name);
   }
   if (factorNames.length === 0) {
     return {
@@ -275,17 +286,29 @@ export async function runMultifactorAnova(
   // Each term is pulled out by matching drop1's row names — drop1 returns one row
   // per term in formula order ("<none>", then the terms). "Sum of Sq" is the
   // term's Type III sum of squares (the rise in RSS when it is dropped).
+  // Partial eta squared's 95% CI (seq 392) comes from the same helper the
+  // sibling ANOVAs use (`etaCI`, N = total observations), computed per term
+  // from its matched F and Df — never by assumed row index. A null/non-finite
+  // F gives a null CI: etaCI returns c(NA, NA) for it, and evalNamedVector
+  // maps NA to null.
   const keyOf = (term: string) => term.replace(/:/g, "");
   const pick = (term: string, col: string) => `a$${col}[match("${term}",rn)]`;
   const rCode =
-    `${setup};${factors.map((_, i) => `contrasts(F${i + 1})<-"contr.sum"`).join(";")};` +
+    `${R_EFFECT_CI};${setup};${factors.map((_, i) => `contrasts(F${i + 1})<-"contr.sum"`).join(";")};` +
     `f<-aov(${formula});a<-drop1(f,~.,test="F");dfr<-df.residual(f);mse<-deviance(f)/dfr;rn<-rownames(a);` +
     `sstot<-sum((v-mean(v))^2);` +
+    `${terms
+      .map(
+        (t) =>
+          `ec${keyOf(t.rTerm)}<-etaCI(${pick(t.rTerm, '"F value"')},${pick(t.rTerm, "Df")},dfr,length(v))`,
+      )
+      .join(";")};` +
     `c(${terms
       .map(
         (t) =>
           `${keyOf(t.rTerm)}F=${pick(t.rTerm, '"F value"')},${keyOf(t.rTerm)}Df=${pick(t.rTerm, "Df")},` +
-          `${keyOf(t.rTerm)}P=${pick(t.rTerm, '"Pr(>F)"')},${keyOf(t.rTerm)}SS=${pick(t.rTerm, '"Sum of Sq"')}`,
+          `${keyOf(t.rTerm)}P=${pick(t.rTerm, '"Pr(>F)"')},${keyOf(t.rTerm)}SS=${pick(t.rTerm, '"Sum of Sq"')},` +
+          `${keyOf(t.rTerm)}Lo=ec${keyOf(t.rTerm)}[1],${keyOf(t.rTerm)}Hi=ec${keyOf(t.rTerm)}[2]`,
       )
       .join(",")},dfResid=dfr,mse=mse,sstot=sstot)`;
 
@@ -295,12 +318,29 @@ export async function runMultifactorAnova(
     const ss = v[`${keyOf(term.rTerm)}SS`] ?? null;
     const partial = ss != null && ssResid != null ? ss / (ss + ssResid) : null;
     const eta = ss != null && v.sstot != null && v.sstot !== 0 ? ss / v.sstot : null;
+    // Prism's Source of Variation Summary, per term (seq 389): % of total
+    // variation = 100 × eta squared; Cohen's f = √(partial / (1 − partial)),
+    // the same formula effectSizeRow uses — null when partial is null, 1
+    // (a perfect fit has no error term to scale against), or non-finite.
+    const pctTotal = eta != null ? 100 * eta : null;
+    const cohensF =
+      partial == null || !Number.isFinite(partial) || partial >= 1 ? null : Math.sqrt(partial / (1 - partial));
     return [
       { label: `${term.label} F`, value: v[`${keyOf(term.rTerm)}F`] ?? null },
       { label: `${term.label} DFn`, value: v[`${keyOf(term.rTerm)}Df`] ?? null },
       pRow(`${term.label} P value`, v[`${keyOf(term.rTerm)}P`] ?? null),
-      { label: `${term.label} partial eta squared`, value: partial },
+      { label: `${term.label} % of total variation`, value: pctTotal },
       { label: `${term.label} eta squared`, value: eta },
+      { label: `${term.label} partial eta squared`, value: partial },
+      // Partial eta squared's 95% CI (seq 392), flat rows in the same stats
+      // table — the same label style the sibling ANOVAs' ciRows use.
+      ...ciRows(
+        "two-sided",
+        v[`${keyOf(term.rTerm)}Lo`] ?? null,
+        v[`${keyOf(term.rTerm)}Hi`] ?? null,
+        `${term.label} partial eta squared `,
+      ),
+      { label: `${term.label} Cohen's f`, value: cohensF },
     ];
   };
   const stats = [...terms.flatMap(effect), { label: "DFd (residual)", value: v.dfResid ?? null }];

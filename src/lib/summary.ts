@@ -31,6 +31,33 @@ export function median(v: number[]): number {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
+/** The geometric mean (exp of the mean of the logs), or null when any value
+ *  is zero or negative — the log is undefined there, so Prism plots no
+ *  geometric mean at all rather than a wrong value. Null, not NaN: the
+ *  graph callers decide how an undefined center shows (see `centerOf`). */
+export function geometricMean(v: number[]): number | null {
+  if (v.length === 0 || v.some((x) => x <= 0)) return null;
+  return Math.exp(mean(v.map((x) => Math.log(x))));
+}
+
+/** The geometric SD factor (exp of the SD of the logs), or null when any
+ *  value is zero or negative — same undefinedness as the geometric mean. */
+export function geometricSdFactor(v: number[]): number | null {
+  if (v.length === 0 || v.some((x) => x <= 0)) return null;
+  return Math.exp(sd(v.map((x) => Math.log(x))));
+}
+
+/** The geometric 95% CI (the log-scale mean ± t·SEM, back-transformed), or
+ *  null when any value is zero or negative. Needs the t critical value, so
+ *  it takes it as a parameter instead of importing the t distribution here. */
+export function geometricCi(v: number[], tCrit: number): { low: number; high: number } | null {
+  if (v.length < 2 || v.some((x) => x <= 0)) return null;
+  const logs = v.map((x) => Math.log(x));
+  const half = tCrit * sem(logs);
+  const m = mean(logs);
+  return { low: Math.exp(m - half), high: Math.exp(m + half) };
+}
+
 /** The `p` quantile as Descriptive statistics gives it (R's type 6, the (n + 1)p method):
  *  between the two values ranked around (n + 1)p, the smallest or largest beyond them. */
 export function quantile(v: number[], p: number): number {

@@ -3,7 +3,7 @@
 // and how the answers make the test's params; analysis-wizard.tsx asks them.
 // A test without an entry here runs as soon as it is picked.
 import { DOSE_MODELS, CONCENTRATION_UNITS, GOF_EXPECTED_MODES, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, MULTIFACTOR_MAX_FACTORS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, SELECT_TRANSFORM_KINDS, SELECT_TRANSFORM_NEEDS_K, fdrQError, isFdrPValueMethod, pValueAlphaError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloParams, type MonteCarloSimulationDistribution, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel, type PValueStackParams, type SelectTransformKind, type SelectTransformOperator } from "../../stats/types";
-import type { PlotFunctionExtra, PlotFunctionModel } from "../../stats/types";
+import type { PlotFunctionExtra, PlotFunctionModel, TransformDataParams } from "../../stats/types";
 import {
   PLOT_FUNCTION_DEFAULTS,
   PLOT_FUNCTION_LABEL,
@@ -13,11 +13,11 @@ import {
   plotFunctionParams,
   plotFunctionXRange,
 } from "../../stats/xy/plot-function";
-import { hasXColumn, type RowGroup, type TableType, type Transform } from "../../store/types";
+import { hasXColumn, type ProjectNode, type RowGroup, type TableType, type Transform } from "../../store/types";
 import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
 import { isPolynomialModel, modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
-import { isArithmeticTransform } from "../../stats/column/transform-data";
+import { isArithmeticTransform, isCrossTransform, isKTransform, parseUserFormula } from "../../stats/column/transform-data";
 import { pairedDifferences } from "../../stats/simulation/monte-carlo";
 import { dataGroups, incompleteRows, pairedGroups, pairIndices } from "../../stats/column/base";
 import { flattenThreeWay, groupRows, rowGroupBands, rowName, threeWayTermCells } from "../../stats/grouped/base";
@@ -477,15 +477,21 @@ const fittedYs = (a: Answers) => {
   return ys === undefined ? {} : ys.length === 1 ? { y: ys[0] } : { ys };
 };
 const yNames = (table: Dataset) => splitXY(table.columns).ys.map((c) => c.name);
-const dataNames = (table: Dataset) => table.numeric.map((c) => c.name);
+const dataNames = (table: Dataset) =>
+  table.numeric.filter((c) => !isLabel(table, c.name)).map((c) => c.name);
+
+/** Whether the named column is a label variable on this table — never
+ *  offered to an analysis (seq 331 half B). Untyped tables have no labels,
+ *  so every offering reads exactly as before on them. */
+const isLabel = (table: Dataset, name: string) => table.variableTypes?.[name]?.type === "label";
 
 /** The variables usable as regression predictors / Cox covariates: numeric
  *  columns, plus text columns with at least two levels — a text column is
  *  dummy-coded (seq 224), so a single-level text column cannot be a
- *  predictor and is not offered. */
+ *  predictor and is not offered. A label variable is never offered. */
 const predictorNames = (table: Dataset, exclude?: string) =>
   table.columns
-    .filter((c) => c.name !== exclude && (c.values.length > 0 || levelsOf(c).length >= 2))
+    .filter((c) => c.name !== exclude && !isLabel(table, c.name) && (c.values.length > 0 || levelsOf(c).length >= 2))
     .map((c) => c.name);
 
 /** The levels of the named column (distinct non-blank cell texts, first-appearance
@@ -497,19 +503,23 @@ const levelsOfName = (table: Dataset, name: string | undefined): string[] => {
 
 /** The variables with exactly two levels — a t test's grouping-variable candidates. */
 const twoLevelNames = (table: Dataset, exclude?: string) =>
-  table.columns.filter((c) => c.name !== exclude && levelsOf(c).length === 2).map((c) => c.name);
+  table.columns
+    .filter((c) => c.name !== exclude && !isLabel(table, c.name) && levelsOf(c).length === 2)
+    .map((c) => c.name);
 
 /** The variables with at least two levels — a survival analysis's grouping candidates. */
 const groupingNames = (table: Dataset, exclude?: (string | undefined)[]) =>
   table.columns
-    .filter((c) => !(exclude ?? []).includes(c.name) && levelsOf(c).length >= 2)
+    .filter((c) => !(exclude ?? []).includes(c.name) && !isLabel(table, c.name) && levelsOf(c).length >= 2)
     .map((c) => c.name);
 
 /** The numeric variables holding only 0/1 — a survival analysis's event-code candidates
  *  (or every numeric variable, when none is binary: the runner then says so). */
 const binaryNames = (table: Dataset, exclude?: string) => {
   const binary = table.numeric
-    .filter((c) => c.name !== exclude && c.values.length > 0 && c.values.every((v) => v === 0 || v === 1))
+    .filter(
+      (c) => c.name !== exclude && !isLabel(table, c.name) && c.values.length > 0 && c.values.every((v) => v === 0 || v === 1),
+    )
     .map((c) => c.name);
   return binary.length > 0 ? binary : dataNames(table).filter((n) => n !== exclude);
 };
@@ -537,6 +547,15 @@ const someSets = (table: Dataset, min: number): Question[] => {
   return [{ id: "sets", ask, kind: "names", options: sets, min }];
 };
 
+/** The transform-data wizard's X column and Y data sets: on an XY table the
+ *  X column is the pairing column, not a data set to transform — so the sets
+ *  question offers the Y sets only, and the finish can name the X column. */
+const transformXY = (table: Dataset, type?: TableType) => {
+  const xName = type === "xy" ? splitXY(table.columns).x?.name : undefined;
+  const ySetNames = xName ? setNames(table).filter((n) => n !== xName) : setNames(table);
+  return { xName, ySetNames };
+};
+
 /** The one data set a test reads, asked as a single choice only when there
  *  is a choice: the observed-vs-expected tests (chi-square goodness of fit,
  *  the binomial test) read exactly one data set — `someSets` would let the
@@ -560,6 +579,672 @@ export function answersFor(wizard: Wizard, table: Dataset, tableType: TableType 
   if (asked.has("sets")) return { sets };
   if (asked.has("set1") && sets.length >= 2) return { set1: sets[0], set2: sets[1] };
   return {};
+}
+
+// ── Changing an analysis's parameters in place (seq 373) ────────────────
+// The engine already swaps params (`setAnalysisParams`, undoable; the
+// `useAnalysis` hook re-runs on the new params) and MCP already drives it
+// (`titer_rerun_analysis`, seq 172). What was missing is the GUI: re-opening
+// the same wizard pre-filled from the stored params. These three functions
+// are that bridge — the wizard a stored analysis re-opens in, the answers
+// its params came from, and whether the entry is live for a node.
+
+/** The wizard that edits an existing analysis's parameters, if one can: the
+ *  picker value whose `finish` makes this type. `compare-many-groups` is
+ *  the one wizard for four types (it resolves the type from the answers);
+ *  `interpolate` is the nonlinear-regression wizard for a standard curve
+ *  (`interpolate: true`). Null when no wizard can re-open the type. */
+export function wizardForAnalysis(
+  type: AnalysisType | undefined,
+  params?: AnalysisParams,
+): AnalysisPickerValue | null {
+  if (!type) return null;
+  switch (type) {
+    case "anova":
+    case "kruskal-wallis":
+    case "rm-anova":
+    case "friedman":
+      return "compare-many-groups";
+    case "nonlinear-regression":
+      return (params as { interpolate?: unknown } | undefined)?.interpolate === true ? "interpolate" : null;
+    // No wizard asks these, so there is nothing to re-open them in: a
+    // Kolmogorov-Smirnov node comes from the Shapiro-Wilk wizard's test
+    // choice (its own wizard keeps its type), transpose is a table
+    // operation, and the rest have no inverse mapping yet.
+    case "kolmogorov-smirnov":
+    case "transpose":
+    case "monte-carlo":
+    case "plot-function":
+    case "extract-rearrange":
+    case "select-transform":
+      return null;
+    default:
+      return type;
+  }
+}
+
+/** Whether the Change Parameters entry is live for this analysis node, and
+ *  why not when it isn't — the same reasons the engine refuses (frozen,
+ *  orphaned) plus the types no wizard can re-open yet. */
+export function canEditAnalysisParams(
+  node: Pick<ProjectNode, "analysisType" | "analysisParams" | "frozen" | "orphaned">,
+): { editable: boolean; reason?: string } {
+  if (node.frozen)
+    return { editable: false, reason: "This analysis is frozen — unfreeze it to change its parameters." };
+  if (node.orphaned)
+    return {
+      editable: false,
+      reason: "This analysis is orphaned — its source table was deleted, so its parameters cannot be changed.",
+    };
+  if (wizardForAnalysis(node.analysisType, node.analysisParams) === null)
+    return {
+      editable: false,
+      reason: "This test's parameters can't be changed in the wizard yet — run it again from the Analysis menu instead.",
+    };
+  return { editable: true };
+}
+
+/** A stored params object read as a plain record. */
+type StoredParams = Record<string, unknown>;
+const storedString = (p: StoredParams, key: string): string | undefined =>
+  typeof p[key] === "string" ? (p[key] as string) : undefined;
+const storedNumber = (p: StoredParams, key: string): number | undefined =>
+  typeof p[key] === "number" ? (p[key] as number) : undefined;
+const storedStrings = (p: StoredParams, key: string): string[] | undefined =>
+  Array.isArray(p[key]) ? (p[key] as string[]) : undefined;
+const storedBool = (p: StoredParams, key: string): boolean => p[key] === true;
+/** A wizard constant answer (a number, or a `{{Name}}` hook) back to text — the inverse of `constantParam`. */
+const constantText = (p: StoredParams, key: string, hookKey: string): string => {
+  const hook = storedString(p, hookKey);
+  if (hook) return `{{${hook}}}`;
+  const n = storedNumber(p, key);
+  return n === undefined ? "" : String(n);
+};
+/** A stored number (or nothing) back to a text answer — blank means "not supplied". */
+const numberText = (p: StoredParams, key: string): string => {
+  const n = storedNumber(p, key);
+  return n === undefined ? "" : String(n);
+};
+/** The Y data sets a stored `y`/`ys` came from (the inverse of `fittedYs`):
+ *  nothing when the table offers no choice — the wizard ticks them all. */
+const fittedYsAnswers = (p: StoredParams, table: Dataset): Answers => {
+  if (yNames(table).length <= 1) return {};
+  const ys = storedStrings(p, "ys");
+  if (ys) return { ys };
+  const y = storedString(p, "y");
+  return y === undefined ? {} : { ys: [y] };
+};
+/** The data-set answers for stored `sets`: `sets` when the wizard asks for
+ *  several, `set1`/`set2` when it asks for two, `set` when it asks for one.
+ *  The stored sets are included whenever present — even when the wizard
+ *  wouldn't ask the question for this table (too few sets to choose from):
+ *  `finish` still reads them (`withSets`/`chosenSets`), so leaving them out
+ *  would drop the selection on Apply. Unasked answers ride along in the
+ *  dialog's state untouched, so the user never sees a question they didn't. */
+const setAnswers = (p: StoredParams, mode: "some" | "two" | "one"): Answers => {
+  const sets = storedStrings(p, "sets");
+  if (!sets || sets.length === 0) return {};
+  if (mode === "one") return { set: sets[0] };
+  if (mode === "two") return sets.length > 1 ? { set1: sets[0], set2: sets[1] } : { sets };
+  return { sets };
+};
+
+/** The wizard answers a stored params object came from — the inverse of the
+ *  wizard's `finish`, so reopening the wizard shows the current parameters
+ *  and Apply replays them. Null when the type has no wizard (see
+ *  `wizardForAnalysis`). Only answers the wizard would ask with these
+ *  answers are returned: a branch the stored params never took stays
+ *  unanswered, so its question keeps its default — and `finish` reproduces
+ *  the stored params exactly (pinned per wizard in tests/checks.ts). */
+export function answersFromParams(
+  type: AnalysisType,
+  params: AnalysisParams,
+  table: Dataset,
+  tableType?: TableType,
+): Answers | null {
+  const key = wizardForAnalysis(type, params);
+  if (key === null) return null;
+  const p = params as unknown as StoredParams;
+  switch (key) {
+    case "descriptive-statistics":
+      return setAnswers(p, "some");
+    case "compare-two-groups": {
+      const paired = storedBool(p, "paired");
+      const gaussian = storedBool(p, "gaussian");
+      const out: Answers = {
+        paired: paired ? "paired" : "unpaired",
+        gaussian: gaussian ? "yes" : "no",
+        tails: storedString(p, "tails") ?? "two-sided",
+      };
+      if (tableType === "multiple") {
+        if (paired) {
+          const sets = storedStrings(p, "sets");
+          if (sets) {
+            out.set1 = sets[0];
+            out.set2 = sets[1];
+          }
+        } else {
+          const response = storedString(p, "response");
+          if (response) out.response = response;
+          const groupBy = storedString(p, "groupBy");
+          if (groupBy) out.groupBy = groupBy;
+        }
+      } else {
+        Object.assign(out, setAnswers(p, "two"));
+      }
+      if (gaussian && paired) out.ratio = storedBool(p, "ratio") ? "ratio" : "diff";
+      if (gaussian && !paired) {
+        out.lognormal = storedBool(p, "lognormal") ? "yes" : "no";
+        out.variance = p.equalVariance === false ? "unequal" : "equal";
+      }
+      return out;
+    }
+    case "compare-many-groups": {
+      const paired = type === "rm-anova" || type === "friedman";
+      const gaussian = type === "anova" || type === "rm-anova";
+      const posthoc = storedString(p, "posthoc") ?? "none";
+      const out: Answers = {
+        ...setAnswers(p, "some"),
+        paired: paired ? "paired" : "unpaired",
+        gaussian: gaussian ? "yes" : "no",
+        posthoc,
+      };
+      if (type === "anova") {
+        out.lognormal = storedBool(p, "lognormal") ? "yes" : "no";
+        out.equalSd = p.equalSd === false ? "no" : "yes";
+        if (posthoc === "dunnett") {
+          const control = storedString(p, "control");
+          if (control) out.control = control;
+        }
+        if (storedBool(p, "trend")) out.trend = "yes";
+      }
+      if (type === "rm-anova") {
+        if (storedBool(p, "mixed")) {
+          out.mixed = "yes";
+        } else {
+          // The mixed question is only asked when the table has gaps; with
+          // gaps and "no", or without gaps, sphericity is the question.
+          if (gaps(table, storedStrings(p, "sets"))) out.mixed = "no";
+          out.sphericity = storedBool(p, "sphericity") ? "yes" : "no";
+        }
+      }
+      if ((PAIR_CORRECTIONS as readonly unknown[]).includes(posthoc)) {
+        const compared = storedStrings(p, "compared");
+        if (compared) {
+          const sets = storedStrings(p, "sets") ?? setNames(table);
+          const labels = pairLabels(sets)
+            .filter((pair) => compared.includes(pair.key))
+            .map((pair) => pair.label);
+          if (labels.length) out.compared = labels;
+        }
+      }
+      return out;
+    }
+    case "mixed-effects": {
+      if (isGroupedTable(table)) {
+        return {
+          matched: "matched",
+          interaction: p.interaction === false ? "no" : "yes",
+          dfMethod: storedString(p, "dfMethod") ?? "kenward-roger",
+        };
+      }
+      const out: Answers = {
+        matched: "matched",
+        dfMethod: storedString(p, "dfMethod") ?? "kenward-roger",
+        groups: "no",
+      };
+      const sets = storedStrings(p, "sets");
+      if (sets) out.sets = sets;
+      const subjectFactor = p.subjectFactor as { name?: unknown; levels?: unknown } | undefined;
+      if (subjectFactor && typeof subjectFactor === "object") {
+        const name = typeof subjectFactor.name === "string" ? subjectFactor.name : undefined;
+        const levels = Array.isArray(subjectFactor.levels) ? (subjectFactor.levels as string[]) : undefined;
+        if (name && levels) {
+          out.groups = "yes";
+          out.groupName = name;
+          out.groupLevels = levels.join(", ");
+        }
+      }
+      return out;
+    }
+    case "one-sample-t": {
+      const gaussian = storedBool(p, "gaussian");
+      const out: Answers = {
+        ...setAnswers(p, "some"),
+        value: storedNumber(p, "hypotheticalValue") ?? 0,
+        gaussian: gaussian ? "yes" : "no",
+        tails: storedString(p, "tails") ?? "two-sided",
+      };
+      if (gaussian) out.lognormal = storedBool(p, "lognormal") ? "yes" : "no";
+      return out;
+    }
+    case "p-value-stack": {
+      const method = storedString(p, "method") ?? "holm-sidak";
+      return {
+        ...setAnswers(p, "some"),
+        method,
+        ...(isFdrPValueMethod(method) ? { q: storedNumber(p, "q") ?? 5 } : { alpha: storedNumber(p, "alpha") ?? 0.05 }),
+      };
+    }
+    case "shapiro-wilk":
+      return {
+        ...setAnswers(p, "some"),
+        test: storedString(p, "test") ?? "shapiro-wilk",
+        lognormal: storedBool(p, "lognormal") ? "yes" : "no",
+      };
+    case "one-sample-ks": {
+      const distribution = storedString(p, "distribution") ?? "normal";
+      const specified = storedString(p, "paramsFrom") === "specified";
+      const out: Answers = {
+        ...setAnswers(p, "some"),
+        distribution,
+        paramsFrom: specified ? "specified" : "estimated",
+        tails: storedString(p, "tails") ?? "two-sided",
+      };
+      if (specified && distribution === "normal") {
+        out.mean = storedNumber(p, "mean") ?? 0;
+        out.sd = storedNumber(p, "sd") ?? 1;
+      }
+      if (specified && distribution === "lognormal") {
+        out.meanlog = storedNumber(p, "meanlog") ?? 0;
+        out.sdlog = storedNumber(p, "sdlog") ?? 1;
+      }
+      if (specified && distribution === "exponential") out.rate = storedNumber(p, "rate") ?? 1;
+      if (specified && distribution === "uniform") {
+        out.min = storedNumber(p, "min") ?? 0;
+        out.max = storedNumber(p, "max") ?? 1;
+      }
+      return out;
+    }
+    case "frequency-distribution": {
+      const binMode = storedString(p, "binMode") ?? "auto";
+      const out: Answers = { ...setAnswers(p, "some"), binMode };
+      if (binMode === "width") {
+        out.binWidth = storedNumber(p, "binWidth") ?? 0;
+        out.startAt = storedNumber(p, "startAt") ?? 0;
+      }
+      if (binMode === "count") {
+        out.binCount = storedNumber(p, "binCount") ?? 0;
+        out.startAt = storedNumber(p, "startAt") ?? 0;
+      }
+      return out;
+    }
+    case "transform-data": {
+      const fn = storedString(p, "function") ?? "log10";
+      return {
+        ...setAnswers(p, "some"),
+        function: fn,
+        ...(isArithmeticTransform(fn as TransformFunction) ? { constant: storedNumber(p, "constant") ?? 1 } : {}),
+      };
+    }
+    case "transform-concentrations":
+      return {
+        column: storedString(p, "column") ?? "",
+        fromUnit: storedString(p, "fromUnit") ?? "M",
+        toUnit: storedString(p, "toUnit") ?? "M",
+      };
+    case "bland-altman": {
+      const sets = storedStrings(p, "sets") ?? [];
+      return { first: sets[0] ?? "", second: sets[1] ?? "" };
+    }
+    case "roc-curve": {
+      const out: Answers = {
+        truth: storedString(p, "truth") ?? "",
+        score: storedString(p, "score") ?? "",
+      };
+      const positive = p.positive;
+      if (positive !== undefined) out.positive = String(positive);
+      return out;
+    }
+    case "linear-regression": {
+      if (tableType === "multiple") {
+        return {
+          x: storedString(p, "x") ?? "",
+          y: storedString(p, "y") ?? "",
+          origin: storedBool(p, "forceOrigin") ? "yes" : "no",
+        };
+      }
+      const out: Answers = { ...fittedYsAnswers(p, table) };
+      const compare = storedBool(p, "compareSlopes");
+      if (storedBool(p, "forceOrigin")) {
+        // Forcing through the origin leaves no compare question (and the
+        // finish drops forceOrigin when comparing), so the two never mix.
+        out.origin = "yes";
+      } else {
+        out.origin = "no";
+        out.compare = compare ? "yes" : "no";
+      }
+      if (!compare) out.weights = storedString(p, "weights") ?? "none";
+      return out;
+    }
+    case "compare-slopes": {
+      // Its finish stores `ys` always (never `y` — CompareSlopesParams has
+      // no `y`), so the inverse is the stored `ys` as-is.
+      const ys = storedStrings(p, "ys");
+      return ys ? { ys } : {};
+    }
+    case "deming-regression":
+      return { y: storedString(p, "y") ?? "", lambda: storedNumber(p, "lambda") ?? 1 };
+    case "simple-logistic-regression": {
+      const y = storedString(p, "y");
+      return y === undefined ? {} : { y };
+    }
+    case "area-under-curve": {
+      const out: Answers = {
+        baseline: storedNumber(p, "baseline") ?? 0,
+        peaksAboveBaselineOnly: storedBool(p, "peaksAboveBaselineOnly") ? "yes" : "no",
+      };
+      const ignore = storedNumber(p, "ignorePeaksBelow");
+      if (ignore !== undefined && ignore > 0) out.ignorePeaksBelow = ignore;
+      return out;
+    }
+    case "remove-baseline": {
+      const columnMathOperation = storedString(p, "columnMathOperation");
+      if (columnMathOperation) {
+        return {
+          mode: "column-math",
+          columnMathA: storedString(p, "columnMathA") ?? "",
+          columnMathB: storedString(p, "columnMathB") ?? "",
+          columnMathOperation,
+        };
+      }
+      const method = storedString(p, "baselineMethod") ?? "first-value";
+      const out: Answers = {
+        mode: "remove-baseline",
+        ys: storedStrings(p, "ys") ?? [],
+        baselineMethod: method,
+      };
+      if (method === "mean-first-n") out.firstN = storedNumber(p, "firstN") ?? 3;
+      if (method === "mean-of-controls") out.controls = storedStrings(p, "controls") ?? [];
+      if (method === "constant") out.constant = constantText(p, "constant", "constantHook");
+      return out;
+    }
+    case "prune-rows": {
+      const condition = storedString(p, "condition") ?? "empty";
+      const out: Answers = { ys: storedStrings(p, "ys") ?? [], condition };
+      if (condition === "below" || condition === "above") out.threshold = storedNumber(p, "threshold") ?? 0;
+      if (condition === "outside") {
+        out.low = storedNumber(p, "low") ?? 0;
+        out.high = storedNumber(p, "high") ?? 100;
+      }
+      return out;
+    }
+    case "fraction-of-total":
+      return {
+        ys: storedStrings(p, "ys") ?? [],
+        totalBy: storedString(p, "totalBy") ?? "column",
+        format: storedString(p, "format") ?? "fraction",
+        ci: storedString(p, "ci") ?? "none",
+      };
+    case "row-means-totals":
+      return { ys: storedStrings(p, "ys") ?? [], rowScope: storedString(p, "rowScope") ?? "pooled" };
+    case "normalize": {
+      const method = storedString(p, "normalizeMethod") ?? "percent-of-largest";
+      const out: Answers = { ys: storedStrings(p, "ys") ?? [], normalizeMethod: method };
+      if (method !== "zero-to-hundred") out.scale = p.asPercent === false ? "fraction" : "percent";
+      if (method === "percent-of-mean-controls") out.controls = storedStrings(p, "controls") ?? [];
+      if (method === "percent-of-constant") out.constant = constantText(p, "constant", "constantHook");
+      if (method === "zero-to-hundred") {
+        out.zeroDef = storedString(p, "zeroDef") ?? "smallest";
+        if (storedString(p, "zeroDef") === "constant") {
+          out.zeroConstant = constantText(p, "zeroConstant", "zeroConstantHook");
+        }
+        out.hundredDef = storedString(p, "hundredDef") ?? "largest";
+        if (storedString(p, "hundredDef") === "constant") {
+          out.hundredConstant = constantText(p, "hundredConstant", "hundredConstantHook");
+        }
+      }
+      return out;
+    }
+    case "spline-lowess": {
+      const method = storedString(p, "method") ?? "lowess";
+      const out: Answers = { y: storedString(p, "y") ?? "", method };
+      if (method === "lowess") out.f = storedNumber(p, "f") ?? 2 / 3;
+      else out.spar = p.spar === null || p.spar === undefined ? "" : String(p.spar);
+      return out;
+    }
+    case "smooth-differentiate-integrate": {
+      const operation = storedString(p, "operation") ?? "smooth";
+      const smoothResults = storedBool(p, "smoothResults");
+      const out: Answers = { ys: storedStrings(p, "ys") ?? [], operation };
+      if (operation === "first-derivative" || operation === "second-derivative" || operation === "integral") {
+        out.smoothResults = smoothResults ? "yes" : "no";
+      }
+      if (operation === "smooth" || smoothResults) {
+        out.window = String(storedNumber(p, "window") ?? 9);
+        out.order = String(storedNumber(p, "order") ?? 3);
+      }
+      if (operation === "integral") {
+        out.baseline = storedNumber(p, "baseline") ?? 0;
+        out.startValue = storedNumber(p, "startValue") ?? 0;
+      }
+      return out;
+    }
+    case "two-way-anova": {
+      const out: Answers = { ...setAnswers(p, "some") };
+      // Without replicates the wizard asks no design/post-hoc questions and
+      // finish takes its defaults — the stored params are exactly those.
+      if (!replicated(table)) return out;
+      const design = storedString(p, "design") ?? "ordinary";
+      out.design = design;
+      if (design === "repeated-measures") out.sphericity = storedBool(p, "sphericity") ? "yes" : "no";
+      const posthoc = storedString(p, "posthoc") ?? "none";
+      out.posthoc = posthoc;
+      if (design !== "nonparametric") {
+        out.posthocTarget = storedString(p, "posthocTarget") ?? "groups";
+        if (posthoc === "dunnett") {
+          const control = storedString(p, "control");
+          if (control) out.control = control;
+        }
+        if (posthoc === "fdr") {
+          out.fdrMethod = storedString(p, "fdrMethod") ?? "bh";
+          out.fdrQ = storedNumber(p, "fdrQ") ?? 5;
+        }
+      }
+      return out;
+    }
+    case "three-way-anova": {
+      const out: Answers = { ...setAnswers(p, "some") };
+      const posthoc = storedString(p, "posthoc") ?? "none";
+      out.posthoc = posthoc;
+      if (posthoc !== "none") {
+        out.posthocTerm = storedString(p, "posthocTerm") ?? "A";
+        const scope = storedString(p, "posthocScope");
+        if (scope) out.posthocScope = scope;
+        if (posthoc === "dunnett") {
+          const control = storedString(p, "control");
+          if (control) out.control = control;
+        }
+        if (posthoc === "fdr") {
+          out.fdrMethod = storedString(p, "fdrMethod") ?? "bh";
+          out.fdrQ = storedNumber(p, "fdrQ") ?? 5;
+        }
+      }
+      return out;
+    }
+    case "nested-t-test":
+      return setAnswers(p, "two");
+    case "nested-anova":
+      return { ...setAnswers(p, "some"), posthoc: storedString(p, "posthoc") ?? "none" };
+    case "multiple-t-tests": {
+      const gaussian = storedBool(p, "gaussian");
+      const correction = storedString(p, "correction") ?? "holm-sidak";
+      const out: Answers = {
+        ...setAnswers(p, "two"),
+        paired: storedBool(p, "paired") ? "paired" : "unpaired",
+        gaussian: gaussian ? "yes" : "no",
+        ...(gaussian ? { pooled: storedBool(p, "pooledSd") ? "yes" : "no" } : {}),
+        correction,
+      };
+      if (correction === "fdr" || correction === "fdr-bky" || correction === "fdr-by") {
+        out.q = storedNumber(p, "q") ?? 5;
+      }
+      return out;
+    }
+    case "correlation-matrix":
+      return { ...setAnswers(p, "some"), method: storedString(p, "method") ?? "pearson" };
+    case "multiple-regression":
+      return {
+        dependent: storedString(p, "dependent") ?? "",
+        predictors: storedStrings(p, "predictors") ?? [],
+      };
+    case "multifactor-anova": {
+      const posthoc = storedString(p, "posthoc") ?? "none";
+      const factors = storedStrings(p, "factors") ?? [];
+      const out: Answers = {
+        response: storedString(p, "response") ?? "",
+        factors,
+        posthoc,
+      };
+      if (posthoc !== "none") out.posthocTerm = storedString(p, "posthocTerm") ?? factors[0] ?? "";
+      return out;
+    }
+    case "multiple-logistic-regression":
+      return {
+        dependent: storedString(p, "dependent") ?? "",
+        predictors: storedStrings(p, "predictors") ?? [],
+      };
+    case "poisson-regression":
+      return {
+        dependent: storedString(p, "dependent") ?? "",
+        predictors: storedStrings(p, "predictors") ?? [],
+        quasi: storedBool(p, "quasi") ? "yes" : "no",
+      };
+    case "principal-component-analysis":
+      return { scale: storedString(p, "scale") ?? "correlation", components: storedNumber(p, "components") ?? 0 };
+    case "k-means":
+      return { clusters: storedNumber(p, "clusters") ?? 2, standardise: p.standardise === false ? "no" : "yes" };
+    case "hierarchical-clustering":
+      return {
+        clusters: storedNumber(p, "clusters") ?? 2,
+        linkage: storedString(p, "linkage") ?? "complete",
+        distance: storedString(p, "distance") ?? "euclidean",
+        standardise: p.standardise === false ? "no" : "yes",
+      };
+    case "cox-proportional-hazards":
+      return {
+        time: storedString(p, "time") ?? "",
+        status: storedString(p, "status") ?? "",
+        covariates: storedStrings(p, "covariates") ?? [],
+        stratifyBy: storedString(p, "stratifyBy") ?? "none",
+        ties: storedString(p, "ties") ?? "efron",
+      };
+    case "chi-square": {
+      const out: Answers = { trendOrdered: storedBool(p, "trendOrdered") ? "yes" : "no" };
+      const test = storedString(p, "test");
+      if (test) out.test = test;
+      return out;
+    }
+    case "chi-square-gof": {
+      const mode = storedString(p, "expectedMode") ?? "equal";
+      const out: Answers = { ...setAnswers(p, "one"), expectedMode: mode };
+      if (mode === "counts" || mode === "percent") {
+        const values = p.expectedValues;
+        out.expectedValues = Array.isArray(values) ? values.join(", ") : "";
+      }
+      return out;
+    }
+    case "binomial-test":
+      return { ...setAnswers(p, "one"), expectedProportion: storedNumber(p, "expectedProportion") ?? 0.5 };
+    case "mcnemar":
+      return { paired: "yes", continuityCorrection: p.continuityCorrection === false ? "no" : "yes" };
+    case "outliers": {
+      const out: Answers = { ...setAnswers(p, "some") };
+      if (storedString(p, "method") === "grubbs") {
+        out.method = "grubbs";
+        out.alpha = storedNumber(p, "alpha") ?? 0.05;
+        out.iterate = p.iterate === false ? "no" : "yes";
+      } else {
+        out.method = "rout";
+        out.q = storedNumber(p, "q") ?? 1;
+      }
+      return out;
+    }
+    case "correlation": {
+      const mode = storedString(p, "mode") ?? "x-vs-every-y";
+      const out: Answers = { method: storedString(p, "method") ?? "pearson", mode };
+      if (mode === "two-datasets") {
+        const datasets = storedStrings(p, "datasets") ?? [];
+        out.first = datasets[0] ?? "";
+        out.second = datasets[1] ?? "";
+      }
+      return out;
+    }
+    case "interpolate":
+      return { y: storedString(p, "y") ?? "", model: storedString(p, "model") ?? "sigmoidal-4pl-logx" };
+    case "survival": {
+      const out: Answers = {
+        curveTest: storedString(p, "curveTest") ?? "logrank",
+        correction: storedString(p, "correction") ?? "holm",
+      };
+      if (tableType === "multiple") {
+        const time = storedString(p, "time");
+        if (time) out.time = time;
+        const status = storedString(p, "status");
+        if (status) out.status = status;
+        const groupBy = storedString(p, "groupBy");
+        if (groupBy) out.groupBy = groupBy;
+      }
+      return out;
+    }
+    case "cox":
+      return { reference: storedString(p, "reference") ?? "" };
+    case "binding-saturation": {
+      const out: Answers = { y: storedString(p, "y") ?? "", model: storedString(p, "model") ?? "one-site-total" };
+      const y2 = storedString(p, "y2");
+      if (y2) out.y2 = y2;
+      return out;
+    }
+    case "binding-kinetics": {
+      const model = storedString(p, "model") ?? "association-one-phase";
+      const out: Answers = { y: storedString(p, "y") ?? "", model };
+      if (model === "association-one-phase") {
+        out.ligandConcentration = numberText(p, "ligandConcentration");
+        out.koff = numberText(p, "koff");
+      }
+      if (model === "association-then-dissociation") {
+        out.hotNM = numberText(p, "hotNM");
+        out.time0 = numberText(p, "time0");
+      }
+      return out;
+    }
+    case "enzyme-inhibition": {
+      const model = storedString(p, "model") ?? "mixed";
+      const y = storedStrings(p, "y") ?? [];
+      const out: Answers = { model, y };
+      if (model !== "morrison") {
+        const concs = p.inhibitorConcentrations as Record<string, unknown> | undefined;
+        for (const name of y) {
+          const v = concs?.[name];
+          out[`I:${name}`] = typeof v === "number" ? String(v) : "";
+        }
+      } else {
+        out.enzymeConcentration = numberText(p, "enzymeConcentration");
+        out.substrateConcentration = numberText(p, "substrateConcentration");
+        out.kmForMorrison = numberText(p, "kmForMorrison");
+      }
+      return out;
+    }
+    case "dose-response-special": {
+      const model = storedString(p, "model") ?? "schild-slope-1";
+      const ys = storedStrings(p, "ys") ?? [];
+      const out: Answers = { model, ys, first: ys[0] ?? "" };
+      if (model === "schild" || model === "schild-slope-1" || model === "ec50-shift") {
+        const concs = p.antagonistConcentrations as Record<string, unknown> | undefined;
+        for (const name of ys.slice(1)) {
+          const v = concs?.[name];
+          out[`B:${name}`] = typeof v === "number" ? String(v) : "";
+        }
+        out.bUnits = storedString(p, "bUnits") ?? "M";
+      }
+      if (model === "schild" || model === "schild-slope-1") {
+        out.fixHillSlope = storedBool(p, "fixHillSlope") ? "yes" : "no";
+      }
+      return out;
+    }
+    default:
+      return null;
+  }
 }
 
 /** How a table computed from this one transforms its values (lib/transform.ts): a percent
@@ -2263,19 +2948,55 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
     }),
   },
 
-  // Transform data (v2, item 1): one function applied to every value of the
-  // chosen columns. Prism's standard set (log10, ln, log2, sqrt, reciprocal,
-  // exp, square); a value the function is undefined for is left blank in
-  // the results sheet, never NaN — the runner states the reason in its notes.
+  // Transform data (v2, item 1; extended 1.9, seq 341): one function applied
+  // to every value of the chosen columns. Prism's standard set (log10, ln,
+  // log2, sqrt, reciprocal, exp, square) plus the arithmetic transforms
+  // (seq 205) and the rest of Prism's documented set (seq 341): logit,
+  // probit, rank, zscore, trig, ABS, Y+Random, rounding, Y^K, 10^Y, 2^Y,
+  // −log10, log-log (seq 385: log10 of both X and Y), the X/Y cross-column functions (XY tables only — there is no X
+  // column to pair with on other tables), X transforms + interchange (XY),
+  // a K per data set, error-bar handling on summary tables, and
+  // user-defined transforms (one formula line per data set, `;`-separated) —
+  // plus Lineweaver-Burk (seq 384), the double-reciprocal re-plot: Y
+  // through `lineweaver-burk`, X through the `xFn` path with `reciprocal`.
+  // Eadie-Hofstee (seq 380) is an X transform — X becomes Y/X, Y unchanged —
+  // so it asks no transform-X or interchange question.
+
+  // A value the function is undefined for is left blank in the results
+  // sheet, never NaN — the runner states the reason in its notes.
   "transform-data": {
-    questions: (a, table) => [
-      ...someSets(table, 1),
-      choice("function", "Which function should be applied to the values?", [
+    questions: (a, table, type) => {
+      const fn = (a.function as TransformFunction | undefined) ?? "log10";
+      const { xName, ySetNames } = transformXY(table, type);
+      const chosen = chosenSets(a) ?? ySetNames;
+      const setsQ: Question[] =
+        ySetNames.length <= 1
+          ? []
+          : [{ id: "sets", ask: "Choose the data sets to analyze.", kind: "names", options: ySetNames, min: 1 }];
+      const kValidate = (f: TransformFunction) => (v: number): string | undefined => {
+        if (f === "round-k" && (!Number.isInteger(v) || v < 0 || v > 15))
+          return "K must be a whole number from 0 to 15 for rounding.";
+        if (f === "y-plus-random" && v <= 0) return "K must be greater than 0 — K is the noise SD.";
+        if (f === "y-divided-by-k" && v === 0) return "K must not be 0 for Y/K — dividing by 0 is undefined.";
+        return undefined;
+      };
+      const kQuestion = (id: string, ask: string, f: TransformFunction): Question => ({
+        id,
+        ask,
+        kind: "number",
+        label: "Constant K",
+        initial: 1,
+        validate: kValidate(f),
+      });
+      // The Y function: the full set, but the cross-column functions only
+      // where an X column exists to pair with (an XY table with X values).
+      const fnOptions: [string, string][] = [
         ["log10", "log10(Y) — logarithm, base 10"],
         ["ln", "ln(Y) — natural logarithm"],
         ["log2", "log2(Y) — logarithm, base 2"],
         ["sqrt", "sqrt(Y) — square root"],
         ["reciprocal", "1/Y — reciprocal"],
+        ["lineweaver-burk", "Lineweaver-Burk — 1/Y, the double-reciprocal re-plot (transform X with 1/X too)"],
         ["exp", "exp(Y) — e to the power of Y"],
         ["square", "Y² — square"],
         ["y-plus-k", "Y+K — add a constant to every value"],
@@ -2284,28 +3005,181 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["y-divided-by-k", "Y/K — divide every value by a constant"],
         ["k-minus-y", "K−Y — subtract every value from a constant"],
         ["k-divided-by-y", "K/Y — divide a constant by every value"],
-      ]),
-      isArithmeticTransform((a.function as TransformFunction | undefined) ?? "log10") && {
-        id: "constant",
-        ask: "What is the constant K to apply?",
-        kind: "number",
-        label: "Constant K",
-        initial: 1,
-        validate: (v) =>
-          a.function === "y-divided-by-k" && v === 0
-            ? "K must not be 0 for Y/K — dividing by 0 is undefined."
-            : undefined,
-      },
-    ],
-    finish: (a) => ({
-      type: "transform-data",
-      params: withSets(a, {
-        function: (a.function as TransformFunction | undefined) ?? "log10",
-        ...(isArithmeticTransform((a.function as TransformFunction | undefined) ?? "log10")
-          ? { constant: a.constant as number }
-          : {}),
-      }),
-    }),
+        ["logit", "logit(Y) — ln(Y/(1−Y)), for proportions"],
+        ["probit", "probit(Y) — Φ⁻¹(Y)+5, for proportions"],
+        ["rank", "rank(Y) — smallest value = 1"],
+        ["zscore", "zscore(Y) — standard deviations from the mean"],
+        ["sin", "sin(Y) — sine (radians)"],
+        ["cos", "cos(Y) — cosine (radians)"],
+        ["tan", "tan(Y) — tangent (radians)"],
+        ["arcsin", "arcsin(Y) — inverse sine (radians)"],
+        ["abs", "|Y| — absolute value"],
+        ["y-plus-random", "Y+Random — add Gaussian noise (SD = K)"],
+        ["round-k", "round(Y, K) — round to K digits after the decimal"],
+        ["y-power-k", "Y^K — raise every value to the power K"],
+        ["ten-power-y", "10^Y — 10 to the power of Y"],
+        ["two-power-y", "2^Y — 2 to the power of Y"],
+        ["neg-log10", "−log10(Y) — negative logarithm, base 10"],
+        ["log-log", "log-log — log10 of both X and Y"],
+        ["hill-plot", "Hill plot — log10(Y/(Ymax−Y)), for dose-response data"],
+        ...(xName
+          ? ([
+              ["x-divided-by-y", "X/Y — divide X by Y"],
+              ["y-divided-by-x", "Y/X — divide Y by X"],
+              ["eadie-hofstee", "Eadie-Hofstee — plot Y against Y/X (X becomes Y/X; Y unchanged)"],
+              ["y-minus-x", "Y−X — subtract X from Y"],
+              ["y-plus-x", "Y+X — add X to Y"],
+              ["y-times-x", "Y×X — multiply Y by X"],
+              ["x-minus-y", "X−Y — subtract Y from X"],
+              ["hanes-woolf", "Hanes-Woolf — X/Y, for enzyme kinetics"],
+              ["scatchard", "Scatchard — Y/X vs Y (bound/free vs bound)"],
+            ] as [string, string][])
+          : []),
+        ["user-defined", "User-defined — write your own formula"],
+      ];
+      // The X function takes any built-in function (a user-defined transform
+      // applies to the Y values only — the runner refuses it for X). Log-log
+      // is not offered for X: as an X function it is just log10, which the
+      // list already has (the runner still accepts it directly).
+      const xFnOptions = fnOptions.filter(([v]) => v !== "user-defined" && v !== "log-log");
+      const xFn = (a.xFunction as TransformFunction | undefined) ?? "log10";
+      return [
+        ...setsQ,
+        choice("function", "Which function should be applied to the values?", fnOptions),
+        isKTransform(fn) &&
+          chosen.length > 1 &&
+          choice("kMode", "One K for every data set, or a different K per data set?", [
+            ["same", "Same K for every data set"],
+            ["per-dataset", "A different K for each data set"],
+          ]),
+        isKTransform(fn) &&
+          (chosen.length <= 1 || a.kMode !== "per-dataset") &&
+          kQuestion("constant", "What is the constant K to apply?", fn),
+        ...(isKTransform(fn) && chosen.length > 1 && a.kMode === "per-dataset"
+          ? chosen.map((name, i) => kQuestion(`k_${i}`, `What is K for data set “${name}”?`, fn))
+          : []),
+        // The Hill plot (seq 383): Ymax is the maximum response — Y becomes
+        // log10(Y/(Ymax−Y)). Prefilled 100 (the usual case: Y as a percent
+        // of the maximum); change it when Y is not a percent.
+        fn === "hill-plot" && {
+          id: "ymax",
+          ask: "What is Ymax — the maximum response?",
+          kind: "number",
+          label: "Ymax",
+          initial: 100,
+          validate: (v: number): string | undefined =>
+            !Number.isFinite(v) || v <= 0 ? "Ymax must be a number greater than 0." : undefined,
+        },
+        fn === "user-defined" && {
+          id: "formula",
+          ask: "Write the transform as a formula — one line per data set, separated by “;”, with an optional designator such as <B> or <~A> at the start of a line.",
+          kind: "text",
+          label: "Formula",
+          initial: "",
+          placeholder: "Y = IF(Y<0, Y, Y*Y)",
+          parse: (text: string) => {
+            const r = parseUserFormula(text, table.columns);
+            return "error" in r ? { error: r.error } : {};
+          },
+        },
+        table.summary !== "replicates" &&
+          choice("errorMode", "This table holds pre-calculated means and error bars. How should the error bars be handled?", [
+            ["mean-only", "Transform the mean only — the error bars stay as they are"],
+            ["erase", "Erase the error bars"],
+            ["to-ci", "Convert the error bars to 95% confidence intervals first, then transform both ends"],
+          ]),
+        // The Hill plot's X units (seq 383): concentrations take log10(X);
+        // log(concentration) leaves X as it is. The generic X-function
+        // questions below are hidden for the Hill plot — xIsLog governs X.
+        // Eadie-Hofstee (seq 380) already transforms X (and an interchange
+        // would fight it), so those questions are hidden for it too.
+        xName !== undefined &&
+          fn === "hill-plot" &&
+          choice("xUnits", "Were the X values entered as concentrations or as log(concentration)?", [
+            ["concentrations", "Concentrations — take log10(X)"],
+            ["log", "log(concentration) — leave X as it is"],
+          ]),
+        xName !== undefined &&
+          fn !== "hill-plot" &&
+          fn !== "eadie-hofstee" &&
+          // Scatchard rewrites X itself (X becomes Y), so there is no
+          // separate X function to ask about (seq 386).
+          fn !== "scatchard" &&
+          choice("transformX", "Transform the X values too?", [
+            ["no", "No — leave the X values as they are"],
+            ["yes", "Yes — apply a function to the X values as well"],
+          ]),
+        xName !== undefined &&
+          fn !== "hill-plot" &&
+          fn !== "eadie-hofstee" &&
+          a.transformX === "yes" &&
+          choice("xFunction", "Which function should be applied to the X values?", xFnOptions),
+        xName !== undefined &&
+          fn !== "hill-plot" &&
+          fn !== "eadie-hofstee" &&
+          a.transformX === "yes" &&
+          isKTransform(xFn) &&
+          kQuestion("xConstant", "What is the constant K for the X values?", xFn),
+        xName !== undefined &&
+          fn !== "hill-plot" &&
+          fn !== "eadie-hofstee" &&
+          choice("interchange", "Interchange X and Y before transforming?", [
+            ["no", "No — transform Y with the chosen function"],
+            ["yes", "Yes — swap X and Y first (the Y function applies to the old X values)"],
+          ]),
+      ];
+    },
+    finish: (a, table, type) => {
+      const fn = (a.function as TransformFunction | undefined) ?? "log10";
+      const { xName, ySetNames } = transformXY(table, type);
+      // Log-log (seq 385) transforms both axes: unless the user said not to
+      // touch X, the X values go through the existing xFn path with log10 —
+      // the same function the Y values get. An explicit X choice wins.
+      const xFn =
+        a.transformX === "yes"
+          ? ((a.xFunction as TransformFunction | undefined) ?? "log10")
+          : fn === "log-log" && xName !== undefined && a.transformX !== "no"
+            ? "log10"
+            : undefined;
+      const interchange = xName !== undefined && a.interchange === "yes";
+      const needsX =
+        xName !== undefined &&
+        (isCrossTransform(fn) || xFn !== undefined || interchange || fn === "user-defined" || fn === "log-log" || fn === "hill-plot");
+      const params: { function: TransformFunction } & Partial<TransformDataParams> = { function: fn };
+      // The K: one constant, or one per data set (keyed by data-set name);
+      // the X column's K joins the per-set map under the X column's name.
+      const constants: Record<string, number> = {};
+      if (isKTransform(fn) && a.kMode === "per-dataset") {
+        const chosen = chosenSets(a) ?? ySetNames;
+        chosen.forEach((name, i) => {
+          const k = a[`k_${i}`] as number | undefined;
+          if (k !== undefined) constants[name] = k;
+        });
+      } else if (isKTransform(fn) && a.constant !== undefined) {
+        params.constant = a.constant as number;
+      }
+      if (xFn !== undefined && isKTransform(xFn) && a.xConstant !== undefined && xName) {
+        constants[xName] = a.xConstant as number;
+      }
+      if (Object.keys(constants).length > 0) params.constants = constants;
+      if (fn === "user-defined" && a.formula !== undefined) params.formula = a.formula as string;
+      if (fn === "hill-plot") {
+        if (a.ymax !== undefined) params.ymax = a.ymax as number;
+        if (a.xUnits === "log") params.xIsLog = true;
+      }
+      if (a.errorMode !== undefined) params.errorMode = a.errorMode as TransformDataParams["errorMode"];
+      if (xFn !== undefined) params.xFunction = xFn;
+      if (interchange) params.interchange = true;
+      if (needsX && xName) params.x = xName;
+      const out = withSets(a, params) as typeof params & { sets?: string[] };
+      // The X column travels with the run when it is needed: setColumns only
+      // keeps the chosen sets, so name it alongside them (unless every set
+      // is in play, when it travels anyway).
+      if (needsX && xName && out.sets && !out.sets.includes(xName)) {
+        return { type: "transform-data", params: { ...out, sets: [...out.sets, xName] } };
+      }
+      return { type: "transform-data", params: out };
+    },
   },
   // Transform concentrations (v2): one numeric column (an XY table's X
   // dose column, or any Y / Column-table column) between molar units.
@@ -3362,6 +4236,25 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ["robust", "Robust regression (Tukey biweight — outliers barely move the fit)"],
           ["poisson", "Poisson (for counts — maximum Poisson likelihood)"],
         ]),
+        // Seq 323 (Prism's Confidence tab): what happens when a parameter
+        // is unstable — the data don't determine it (the fit's Hessian
+        // condition number exceeds 10/√ε, about 6.7×10⁸). Seq 387: a
+        // third mode, identify ambiguous fits (Prism's older method —
+        // a parameter whose dependency exceeds 0.9999 is flagged, with
+        // ~ values and very wide CIs).
+        choice("difficultFitHandling", "How should difficult fits be handled (parameters the data don't determine)?", [
+          ["unstable", "Identify unstable parameters (recommended — Prism's default)"],
+          ["ambiguous", "Identify ambiguous fits (Prism's older method — dependency above 0.9999)"],
+          ["none", "Neither — report best-fit values no matter what"],
+        ]),
+        // Seq 387 (Prism's Diagnostics tab): report each parameter's
+        // dependency — how much the other parameters can compensate for
+        // a change in it. The values are computed on every fit; this
+        // only controls whether the results sheet shows them.
+        choice("reportDependency", "Report each parameter's dependency?", [
+          ["no", "No"],
+          ["yes", "Yes — show dependency for each parameter"],
+        ]),
         // Seq 166 (Prism 11 Range tab): "Don't fit points when X is less
         // than / greater than …" — points outside the range are ignored
         // entirely. Either bound alone is enough; both blank fits all.
@@ -3631,6 +4524,11 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ...(a.fitMethod !== undefined && a.fitMethod !== "least-squares"
             ? { fitMethod: a.fitMethod as NonlinearRegressionParams["fitMethod"] }
             : {}),
+          ...(a.difficultFitHandling !== undefined && a.difficultFitHandling !== "unstable"
+            ? { difficultFitHandling: a.difficultFitHandling as NonlinearRegressionParams["difficultFitHandling"] }
+            : {}),
+          // Seq 387: the dependency report is opt-in (Prism's Diagnostics tab).
+          ...(a.reportDependency === "yes" ? { reportDependency: true } : {}),
           ...compareModel,
           ...global,
           ...sharedParams,
@@ -4448,9 +5346,12 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       const byName = new Map(table.columns.map((c) => [c.name, c]));
       const all = table.columns.map((c) => c.name);
       // Only columns with ≥ 2 levels can be a factor (a numeric-coded factor
-      // counts — its codes are its levels). When none qualifies, offer every
-      // column but the response and let the runner say so.
-      const factorable = all.filter((n) => n !== response && levelsOf(byName.get(n)!).length >= 2);
+      // counts — its codes are its levels). A label variable is never a
+      // factor. When none qualifies, offer every column but the response and
+      // let the runner say so.
+      const factorable = all.filter(
+        (n) => n !== response && !isLabel(table, n) && levelsOf(byName.get(n)!).length >= 2,
+      );
       const factorOptions = factorable.length > 0 ? factorable : all.filter((n) => n !== response);
       const terms = multifactorTerms((a.factors as string[] | undefined) ?? []);
       return [

@@ -8,8 +8,8 @@ import { baseLayout, centers, COLUMN_BAR, errors, scatterOffsets, seriesPoints, 
 import { pointKeyOf } from "../../lib/columns";
 
 function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFigure {
-  const center = centers(columns, options.center);
-  const errs = errors(columns, options.error);
+  const center = centers(columns, options.center, options.series);
+  const errs = errors(columns, options.error, center, options.series);
   const data: unknown[] = [];
 
   columns.forEach((c, i) => {
@@ -42,7 +42,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
         x: [i],
         y: [center[i]],
         marker: { opacity: 0 },
-        error_y: paint.errorBars(c.name, i, [errs[i]]),
+        error_y: paint.errorBars(c.name, i, [errs.error[i]], errs.errorMinus ? [errs.errorMinus[i]] : undefined),
         hoverinfo: "skip",
       });
     }
@@ -80,5 +80,6 @@ export const individual: GraphModule = {
   defaults: { fill: 0.5 },
   points: () => true,
   patterns: (options) => options.bars,
+  summarizes: () => true,
   build,
 };

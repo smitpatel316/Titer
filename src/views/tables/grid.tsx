@@ -11,6 +11,19 @@ import { clamp, type TableData, type TableType } from "../../store/types";
 import type { TableMove } from "../../store/references";
 import type { EditCommand } from "../../app-menu";
 import { parseCell } from "../../lib/numeric";
+import {
+  DECIMAL_SEPARATOR_CHANGED_EVENT,
+  displayCellValue,
+  loadDecimalSeparator,
+  type DecimalSeparator,
+} from "../../lib/decimal-format";
+import {
+  CATEGORY_AUTOCOMPLETE_CHANGED_EVENT,
+  loadCategoryAutocomplete,
+} from "../../lib/category-autocomplete";
+import { CELL_BACKGROUND_HEX, type CellBackgroundColor } from "../../lib/cell-colors";
+import { displayXCell } from "../../lib/date-time";
+import { levelSuggestions } from "../../lib/variable-types";
 import { fileName } from "../../lib/paths";
 import { seriesKeyOf } from "../../lib/columns";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
@@ -194,6 +207,25 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
   };
   const range = toRange(sel);
   const active = sel.anchor; // the cell typing goes to, as in Excel
+  // The decimal separator (Preferences ▸ Data Entry): entry, paste, copy
+  // and the cell display all read it; changing it re-renders at once.
+  const [separator, setSeparator] = React.useState<DecimalSeparator>(loadDecimalSeparator);
+  React.useEffect(() => {
+    const onSep = () => setSeparator(loadDecimalSeparator());
+    window.addEventListener(DECIMAL_SEPARATOR_CHANGED_EVENT, onSep);
+    return () => window.removeEventListener(DECIMAL_SEPARATOR_CHANGED_EVENT, onSep);
+  }, []);
+  // Category autocomplete (Preferences ▸ Data Entry): the grid re-reads the
+  // preference at once, like the decimal separator.
+  const [autocomplete, setAutocomplete] = React.useState(loadCategoryAutocomplete);
+  React.useEffect(() => {
+    const onAc = () => setAutocomplete(loadCategoryAutocomplete());
+    window.addEventListener(CATEGORY_AUTOCOMPLETE_CHANGED_EVENT, onAc);
+    return () => window.removeEventListener(CATEGORY_AUTOCOMPLETE_CHANGED_EVENT, onAc);
+  }, []);
+  // The highlighted autocomplete suggestion (-1: none) — reset on every
+  // keystroke and every new edit, so a stale highlight never fills a value.
+  const [suggestIdx, setSuggestIdx] = React.useState(-1);
 
   // Keep the selection inside the table when it shrinks (undo, delete, resize).
   const clampPoint = (p: Point): Point => ({
@@ -248,7 +280,7 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
   // ── Editing ──────────────────────────────────────────────────────────
 
   const write = (r: number, c: number, block: (string | null)[][], label: string) =>
-    update(writeBlock(data, r, c, block, type), label);
+    update(writeBlock(data, r, c, block, type, separator), label);
   const clear = (g: Range, label = "Clear") => update(fillRange(data, g, null), label);
 
   /** The range, cut at the stored data when it runs to the end of the shown rows or
@@ -284,6 +316,7 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
         : (data.rows[r]?.[c] ?? ""));
     reveal({ r, c });
     setEditing({ kind: "cell", r, c, value: shown, typed });
+    setSuggestIdx(-1);
     focusGrid();
   };
   const startRename = (c: number) => {
@@ -387,6 +420,27 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
       ArrowRight: [0, 1],
     };
     if (editing) {
+      // While category suggestions are open, the arrows move through them
+      // and Enter fills the highlighted one instead of saving — the typed
+      // arrow-to-save below only runs when no list is open.
+      if (editing.kind === "cell" && suggestions.length > 0) {
+        if (e.key === "ArrowDown") {
+          setSuggestIdx((i) => Math.min(i + 1, suggestions.length - 1));
+          e.preventDefault();
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          setSuggestIdx((i) => Math.max(i - 1, -1));
+          e.preventDefault();
+          return;
+        }
+        if (e.key === "Enter" && suggestion !== undefined) {
+          setEditing({ ...editing, value: suggestion });
+          setSuggestIdx(-1);
+          e.preventDefault();
+          return;
+        }
+      }
       if (e.key === "Enter") finishEdit(false, e.shiftKey ? -1 : 1);
       else if (e.key === "Tab") finishEdit(false, 0, e.shiftKey ? -1 : 1);
       else if (e.key === "Escape") finishEdit(true);
@@ -425,7 +479,7 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
   const onCopy = (e: React.ClipboardEvent, cut = false) => {
     if (editing) return;
     e.preventDefault();
-    e.clipboardData.setData("text/plain", toTSV(data, range));
+    e.clipboardData.setData("text/plain", toTSV(data, range, separator));
     if (cut) clear(range, "Cut");
   };
 
@@ -790,6 +844,16 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
   const cellEditing = editing?.kind === "cell" ? editing : null;
   const inputAt = cellEditing ?? active;
 
+  /** The levels offered while typing a category: the active cell's column,
+   *  when it is a categorical column of a Multiple Variables table and the
+   *  preference is on. Anything else suggests nothing. */
+  const suggestions =
+    cellEditing && type === "multiple" && autocomplete
+      ? levelSuggestions(data, data.columns[cellEditing.c] ?? "", cellEditing.value)
+      : [];
+  const suggestion =
+    suggestIdx >= 0 && suggestIdx < suggestions.length ? suggestions[suggestIdx] : undefined;
+
   const rows: number[] = [];
   for (let r = r0; r <= r1; r++) rows.push(r);
   const selectedCols = (c: number) => c >= range.c0 && c <= range.c1;
@@ -837,7 +901,21 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
   );
 
   const cells = (from: number, to: number, origin: number) => (
-    <Cells data={data} excluded={excluded} query={query} xs={xs} r0={r0} r1={r1} c0={from} c1={to} origin={origin} />
+    <Cells
+      data={data}
+      excluded={excluded}
+      cellBackgrounds={data.cellBackgrounds}
+      query={query}
+      xs={xs}
+      r0={r0}
+      r1={r1}
+      c0={from}
+      c1={to}
+      origin={origin}
+      decimals={data.decimals}
+      separator={separator}
+      active={active}
+    />
   );
 
   const cellEvents = {
@@ -858,13 +936,14 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
       data-grid-idle={cellEditing ? undefined : ""}
       style={box(inputAt.c, inputAt.r * ROW_H, ROW_H)}
       className={cn(EDITOR, !cellEditing && "opacity-0")}
-      onChange={(e) =>
+      onChange={(e) => {
+        setSuggestIdx(-1);
         setEditing(
           cellEditing
             ? { ...cellEditing, value: e.target.value }
             : { kind: "cell", r: active.r, c: active.c, value: e.target.value, typed: true },
-        )
-      }
+        );
+      }}
       onBlur={() => editingRef.current?.kind === "cell" && finishEdit(false)}
       onKeyDown={onCellKey}
       onCopy={onCopy}
@@ -892,6 +971,32 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
           />
         )}
         {inFrozen(inputAt.c) === frozenPane && cellInput}
+        {suggestions.length > 0 && inFrozen(inputAt.c) === frozenPane && (
+          <div
+            className="absolute z-30 max-h-40 overflow-auto rounded border border-separator bg-surface shadow-md"
+            style={{ ...box(inputAt.c, (inputAt.r + 1) * ROW_H, 0), height: "auto" }}
+            role="listbox"
+            aria-label="Category suggestions"
+          >
+            {suggestions.map((level, i) => (
+              <div
+                key={level}
+                role="option"
+                aria-selected={i === suggestIdx}
+                className={cn("cursor-pointer px-2 py-1 text-regular", i === suggestIdx && "bg-accent/10")}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  if (!cellEditing) return;
+                  setEditing({ ...cellEditing, value: level });
+                  setSuggestIdx(-1);
+                  focusGrid();
+                }}
+              >
+                {level}
+              </div>
+            ))}
+          </div>
+        )}
       </>
     );
   };
@@ -1076,10 +1181,13 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
 }
 
 /** The cells of rows r0–r1 and columns c0–c1, laid out from column `origin`'s left edge.
- *  Apart from the grid, so moving the selection or typing in a cell redraws none of them. */
+ *  Apart from the grid, so moving the selection or typing in a cell redraws none of them.
+ *  A column's decimal-places setting rounds what a cell shows — except the
+ *  focused cell, which shows the full stored digits (seq 333). */
 function Cells({
   data,
   excluded,
+  cellBackgrounds,
   query,
   xs,
   r0,
@@ -1087,9 +1195,13 @@ function Cells({
   c0,
   c1,
   origin,
+  decimals,
+  separator,
+  active,
 }: {
   data: TableData;
   excluded: Set<string>;
+  cellBackgrounds?: Record<string, CellBackgroundColor>;
   query: string | null;
   xs: number[];
   r0: number;
@@ -1097,12 +1209,28 @@ function Cells({
   c0: number;
   c1: number;
   origin: number;
+  decimals?: Record<string, number>;
+  separator: DecimalSeparator;
+  active: Point;
 }) {
   const found = query?.toLowerCase();
   const cells: React.ReactNode[] = [];
   for (let r = r0; r <= r1; r++) {
     for (let c = c0; c <= c1; c++) {
       const value = data.rows[r]?.[c];
+      // A date/elapsed X cell that can't be read shows "?" (seq 332) — the
+      // original text stays in the cell, so editing it starts from what was typed.
+      const shown =
+        c === 1 && (data.xFormat === "date" || data.xFormat === "elapsed")
+          ? displayXCell(value ?? null, data.xFormat, data.xConversion)
+          : displayCellValue(
+              value ?? null,
+              c >= 1 ? decimals?.[data.columns[c]] : undefined,
+              separator,
+              r === active.r && c === active.c,
+            );
+      const isHit = Boolean(found && value?.toLowerCase().includes(found));
+      const tint = cellBackgrounds?.[`${r},${c}`];
       cells.push(
         <div
           key={`${r}:${c}`}
@@ -1110,11 +1238,19 @@ function Cells({
             "absolute truncate border-r border-b border-separator px-1.5 leading-[24px]",
             value && parseCell(value) !== null && "text-right tabular-nums",
             excluded.has(`${r},${c}`) && "text-excluded italic after:content-['*']",
-            found && value?.toLowerCase().includes(found) && "bg-yellow-300/50",
+            isHit && "bg-yellow-300/50",
           )}
-          style={{ left: xs[c] - xs[origin], top: r * ROW_H, width: xs[c + 1] - xs[c], height: ROW_H }}
+          style={{
+            left: xs[c] - xs[origin],
+            top: r * ROW_H,
+            width: xs[c + 1] - xs[c],
+            height: ROW_H,
+            // A painted cell keeps its tint; a search hit still shows
+            // yellow while finding, so the match stays visible.
+            ...(tint && !isHit ? { backgroundColor: CELL_BACKGROUND_HEX[tint] } : {}),
+          }}
         >
-          {value}
+          {shown}
         </div>,
       );
     }
