@@ -1016,8 +1016,21 @@ export async function openProjectWindows(): Promise<OpenProjectWindow[]> {
   );
 }
 
+/** Whether the Window menu carries the app's own open-project list (seq 396):
+ *  on macOS AppKit appends its own working window list once the menu is the
+ *  app's windows menu, and the app's entries there never focus their window
+ *  (proven live Nov 23: the app's entries no-op while AppKit's focus) — so
+ *  macOS leaves the list to AppKit and the menu has exactly one working
+ *  entry per project, no duplicates. Other platforms keep the app's list:
+ *  their only window switcher, and the windows-menu registration is a
+ *  macOS-only no-op there. */
+export function includeAppWindowList(isMacOs: boolean): boolean {
+  return !isMacOs;
+}
+
 /** Installs the app's menu bar: `menus`, then Window (Minimize / Maximize /
- *  BringAllToFront, plus the open-project list from seq 299) and Help, which
+ *  BringAllToFront, plus the open-project list from seq 299 — on Linux and
+ *  Windows only; on macOS the list is AppKit's, seq 396) and Help, which
  *  macOS fills with its menu search. */
 export function installMenuBar(menus: MenuItems, windowItems: MenuItems, helpItems: MenuItems): Promise<void> {
   if (!isNative) return Promise.resolve();
@@ -1025,8 +1038,11 @@ export function installMenuBar(menus: MenuItems, windowItems: MenuItems, helpIte
     // The open-project list (seq 299): every project window by file name,
     // frontmost checkmarked, picking one focuses it. The menu is rebuilt
     // whenever the window in front changes, so the list follows windows
-    // opening and closing.
-    const open = await openProjectWindows();
+    // opening and closing. On macOS the list is AppKit's, not the app's
+    // (seq 396): the app's entries there never focus, and AppKit appends
+    // its own working list anyway — building the app's too would duplicate
+    // every project and leave dead entries in the menu.
+    const open = includeAppWindowList(isMac) ? await openProjectWindows() : [];
     const windows = await Submenu.new({
       text: "Window",
       items: [

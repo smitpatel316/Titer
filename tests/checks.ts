@@ -353,7 +353,7 @@ import {
   setFigureDragTarget,
 } from "../src/lib/figure-drag";
 import { overlayReport } from "../src/store/mcp-export";
-import { createEvalDedupe, ensureSaveExtension, windowMenuItems, type OpenProjectWindow } from "../src/native";
+import { createEvalDedupe, ensureSaveExtension, includeAppWindowList, windowMenuItems, type OpenProjectWindow } from "../src/native";
 import { defaultExportAllFolder, planExportAll } from "../src/lib/export-all";
 import { engineStatusText, getEngineStatus, onEngineStatus, setEngineStatus } from "../src/stats/engine-status";
 import {
@@ -2497,6 +2497,35 @@ check("seq 299: Window menu lists open project windows, frontmost checkmarked, c
   const native = readFileSync("src/native.ts", "utf8");
   ok(/windowMenuItems\(/.test(native), "installMenuBar never builds the window list");
   ok(/getAllWebviewWindows/.test(native), "native never enumerates the open windows");
+});
+
+// ── seq 396 (Window menu: app's own project entries don't focus) ─────────
+
+// seq 396: on macOS the app's own Window-menu project entries never focus
+// their window (proven live Nov 23: the app's entries no-op while AppKit's
+// auto-appended entries focus), and every project shows twice — so macOS
+// leaves the list to AppKit and the menu has exactly one working entry per
+// project. Other platforms keep the app's list: their only window switcher.
+check("seq 396: Window menu leaves the project list to AppKit on macOS, keeps it elsewhere", () => {
+  // macOS: no app-owned list (AppKit appends its own working entries).
+  strictEqual(includeAppWindowList(true), false);
+  // Linux/Windows: the app's list is the only window switcher.
+  strictEqual(includeAppWindowList(false), true);
+  // And the shell actually wires the gate into the Window submenu build.
+  const native = readFileSync("src/native.ts", "utf8");
+  ok(
+    /includeAppWindowList\(isMac\)/.test(native),
+    "installMenuBar never gates the window list on macOS",
+  );
+  ok(
+    /setAsWindowsMenuForNSApp/.test(native),
+    "Window submenu is no longer registered with AppKit",
+  );
+  // The app's list itself is unchanged for the platforms that keep it.
+  ok(
+    /windowMenuItems\(open,/.test(native),
+    "installMenuBar no longer builds the app window list at all",
+  );
 });
 
 // seq 242 (re-point orphaned analysis): only tables that offer the test
