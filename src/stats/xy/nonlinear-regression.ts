@@ -1976,6 +1976,47 @@ async function runGlobalNonlinear(
     { label: "Degrees of freedom", value: statOf("Degrees of freedom") },
   ];
   const perSeriesParams = spec.terms.filter((t) => !shared.includes(t) && !Object.hasOwn(fixed, t));
+  // Seq 388 (global-derived-note38): the derived rows this fit reports
+  // — a shared EC50/IC50, a per-series Span — need their unstable
+  // sources named in the notes, but the stacked def carries no `derived`
+  // (runGlobalFit can only return what the def declares), so build them
+  // here from the renamed coefficients: same labels as the fit rows,
+  // sources naming their set ("Top (Y2)"), like the comparison path's
+  // set-prefixed sources. A fixed parameter is never a source (the
+  // single-curve path substitutes fixed parameters out of the derived
+  // expressions too); a stable source earns no clause.
+  const unstableTerms = new Set(coefficients.filter((c) => c.unstable).map((c) => c.term));
+  const sourceTerm = (term: string, setName: string): string | null => {
+    if (Object.hasOwn(fixed, term)) return null;
+    return shared.includes(term) ? termLabel(term) : `${termLabel(term)} (${setName})`;
+  };
+  const derivedRow = (label: string, value: number | null, sources: (string | null)[]): DerivedRow => {
+    const named = sources.filter((s): s is string => s != null);
+    const unstableSources = named.filter((s) => unstableTerms.has(s));
+    return {
+      label,
+      value,
+      ...(named.length ? { sources: named } : {}),
+      ...(unstableSources.length ? { unstableSources } : {}),
+    };
+  };
+  const derivedRows: DerivedRow[] = [];
+  if (midpoint && shared.includes(midpoint)) {
+    const mid = coefficients.find((c) => c.term === termLabel(midpoint));
+    if (mid?.estimate != null) {
+      const label = midpoint === "LogIC50" ? "IC50" : "EC50";
+      const value = midpoint.startsWith("Log") ? 10 ** mid.estimate : mid.estimate;
+      derivedRows.push(derivedRow(label, value, [sourceTerm(midpoint, sets[0]!)]));
+    }
+  }
+  if (spec.terms.includes("Top") && spec.terms.includes("Bottom")) {
+    const spanRow = rows.find((r) => r.label === "Span");
+    sets.forEach((s, i) => {
+      const value = spanRow?.values?.[i] ?? null;
+      if (value != null)
+        derivedRows.push(derivedRow("Span", value, [sourceTerm("Top", s), sourceTerm("Bottom", s)]));
+    });
+  }
   const groups = (await describe([xCol, ...yCols])).groups;
   const notes =
     `Global (shared-parameter) fit (“${MODEL_LABEL[model]}”) of ${sets.map((s) => `“${s}”`).join(", ")} on “${xCol.name}”. ` +
@@ -1986,7 +2027,7 @@ async function runGlobalNonlinear(
     unstableNote([
       {
         coefficients,
-        ...(result.derived ? { derived: result.derived } : {}),
+        ...(derivedRows.length ? { derived: derivedRows } : {}),
         ...(result.hessianCondition != null ? { hessianCondition: result.hessianCondition } : {}),
       },
     ]) +
