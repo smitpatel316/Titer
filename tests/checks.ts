@@ -278,6 +278,12 @@ import {
   setBackupOnSheetSwitch,
   untitledBackupId,
 } from "../src/lib/backup";
+import {
+  BackupRecoveryDialog,
+  RECOVERY_SHEET_BUTTONS,
+  recoverySheetKeyAction,
+} from "../src/components/backup-recovery-dialog";
+import type { BackupEntry } from "../src/native";
 import { convertPrism } from "../src/lib/prism";
 import { yieldToPaint } from "../src/lib/yield-to-paint";
 import { fitWidths, fitZoom } from "../src/store/use-layout";
@@ -30871,6 +30877,69 @@ check("seq 226: the backup engine, settings, dialog and shell commands are wired
   // tool steps up one level — listing the mcp dir would always come back
   // empty.
   ok(mcp.includes("mcp_dir.parent()"), "titer_list_backups must step up from the MCP dir to the app-data dir");
+});
+
+// ── seq 397: backup-recovery sheet buttons (Mac proof, Nov 23) ──────────
+// Live on Mac the "Recovered backup found" sheet's buttons did not dismiss
+// on HID clicks (Escape did): the sheet was a native <dialog> shown with
+// showModal(), and on this Mac WebKit the top-layer dialog takes keyboard
+// but not pointer events. The sheet is a plain fixed overlay instead —
+// normal DOM buttons, which take clicks everywhere else in the app.
+check("seq 397: the recovery sheet renders as a plain overlay, not a native <dialog>", () => {
+  const entry: BackupEntry = {
+    key: "65debf67a100c394",
+    display_name: "repro-397.hlx",
+    source_path: "/tmp/repro-397.hlx",
+    saved_at_ms: 1795485090205,
+    source_mtime_ms: 1795481490204,
+    size_bytes: 932321,
+  };
+  const html = renderToStaticMarkup(
+    createElement(BackupRecoveryDialog, {
+      recovery: { identity: "file:/tmp/repro-397.hlx", entry },
+      onChoose: () => {},
+    }),
+  );
+  ok(!html.includes("<dialog"), "the recovery sheet must not use a native <dialog> — its buttons take no clicks on Mac WebKit");
+  ok(html.includes('role="alertdialog"'), "the recovery sheet must label itself an alertdialog");
+  for (const label of ["Cancel", "Restore backup", "Keep current file", "Discard backup"]) {
+    ok(html.includes(label), `the recovery sheet must offer "${label}"`);
+  }
+  const buttons = html.match(/<button type="button"/g) ?? [];
+  strictEqual(buttons.length, 4, `the recovery sheet must render four buttons, got ${buttons.length}`);
+});
+
+check("seq 397: the recovery sheet's buttons carry their choices, in macOS order", () => {
+  strictEqual(RECOVERY_SHEET_BUTTONS.length, 4, "the recovery sheet must offer four buttons");
+  const got = RECOVERY_SHEET_BUTTONS.map((b) => `${b.label}=${b.choice}`);
+  deepStrictEqual(
+    got,
+    ["Cancel=keep", "Restore backup=restore", "Keep current file=keep", "Discard backup=discard"],
+    `the recovery buttons must be Cancel/keep, Restore/restore, Keep/keep, Discard/discard in that order, got ${got.join(", ")}`,
+  );
+  strictEqual(
+    RECOVERY_SHEET_BUTTONS.find((b) => b.choice === "restore")?.variant,
+    "accent",
+    "Restore is the sheet's default action and must read as the accent button",
+  );
+});
+
+check("seq 397: the recovery sheet's keys keep, restore, or do nothing — never discard", () => {
+  strictEqual(recoverySheetKeyAction("Escape", false), "keep", "Escape must keep the file");
+  strictEqual(recoverySheetKeyAction("Escape", true), "keep", "Escape must keep even from a focused button");
+  strictEqual(recoverySheetKeyAction("Enter", false), "restore", "Return off a button must restore");
+  strictEqual(recoverySheetKeyAction("Enter", true), null, "Return on a button must let the button act, not restore");
+  strictEqual(recoverySheetKeyAction("Tab", false), null, "Tab must only move focus");
+  strictEqual(recoverySheetKeyAction(" ", false), null, "Space must not answer the sheet");
+  strictEqual(recoverySheetKeyAction("Delete", false), null, "no key may discard the backup");
+});
+
+check("seq 397: offering recovery closes Welcome, so no top-layer dialog can hide the sheet", () => {
+  const document = readFileSync("src/store/use-document.ts", "utf8");
+  const offer = document.indexOf("setBackupRecovery({ identity: backupId, entry })");
+  ok(offer > 0, "use-document offers the recovery from the backup check");
+  const closeBefore = document.lastIndexOf("setWelcomeOpen(false)", offer);
+  ok(closeBefore > 0 && offer - closeBefore < 600, "the offer must close Welcome just before showing the sheet");
 });
 
 // ── seq 155 MCP coverage (titer_import_data_file) ────────────────────────
