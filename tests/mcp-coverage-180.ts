@@ -39,7 +39,8 @@
 // graph regenerate, 1.8.2, which adds titer_list_regenerable_graphs +
 // titer_regenerate_graphs; 74 since seq 296, 1.8.3, which adds
 // titer_copy_graph_image; 75 since seq 207, 1.8.3, which adds
-// titer_sample_size_power),
+// titer_sample_size_power; 76 since seq 325, 1.9, which adds
+// titer_set_result_cell_background),
 // 61 AnalysisType variants / schema keys / runner keys (was 54; 60 since
 // seq 177 select-transform; 61 since #46 compare-slopes).
 // ONE correction vs the audit stands: row 178 said GAP, but Compact
