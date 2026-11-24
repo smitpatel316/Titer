@@ -136,11 +136,7 @@ impl FlowStore {
             samples: Mutex::new(FlowStoreInner {
                 samples: HashMap::new(),
                 bytes: 0,
-                budget_bytes: if budget_bytes > 0 {
-                    budget_bytes
-                } else {
-                    FLOW_STORE_DEFAULT_BUDGET_BYTES
-                },
+                budget_bytes: if budget_bytes > 0 { budget_bytes } else { FLOW_STORE_DEFAULT_BUDGET_BYTES },
             }),
         }
     }
@@ -190,12 +186,7 @@ impl FlowStore {
         };
         inner.samples.insert(
             sample_id.to_string(),
-            LoadedSample {
-                info: info.clone(),
-                param_names,
-                columns,
-                last_used: Instant::now(),
-            },
+            LoadedSample { info: info.clone(), param_names, columns, last_used: Instant::now() },
         );
         inner.bytes += bytes;
         // Evict least-recently-used samples until the store fits its budget.
@@ -403,11 +394,7 @@ pub fn flow_sample_stats(
 #[tauri::command]
 pub fn flow_store_status(state: tauri::State<'_, FlowStore>) -> Result<FlowStoreStatus, String> {
     let inner = state.samples.lock().map_err(|_| "Flow store lock is poisoned.".to_string())?;
-    Ok(FlowStoreStatus {
-        samples: inner.samples.len(),
-        bytes: inner.bytes,
-        budget_bytes: inner.budget_bytes,
-    })
+    Ok(FlowStoreStatus { samples: inner.samples.len(), bytes: inner.bytes, budget_bytes: inner.budget_bytes })
 }
 
 #[cfg(test)]
@@ -461,9 +448,7 @@ mod tests {
         // Budget fits 4 samples of 20 B; the 5th load evicts the oldest.
         let store = FlowStore::with_budget(80);
         for id in ["a", "b", "c", "d", "e"] {
-            store
-                .insert(id, None, None, vec!["FSC-A".to_string()], vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]])
-                .unwrap();
+            store.insert(id, None, None, vec!["FSC-A".to_string()], vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]]).unwrap();
         }
         let inner = store.samples.lock().unwrap();
         assert!(!inner.samples.contains_key("a"));
