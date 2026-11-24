@@ -22,6 +22,7 @@ import {
 } from "../../lib/figure";
 import { buildGraphFigure, type GraphOverlayStatus } from "../graphs/graph-figure";
 import type { ExportFormat, Resolution } from "../graphs/graph-export";
+import { clipboardSupportsPdf, vectorClipboardItem } from "../graphs/graph-export";
 import { buildOfficeDocument, officeDialogTitle, officeExtension, type OfficeTarget } from "../../lib/office-export";
 import type { FigurePanel, ProjectNode } from "../../store/types";
 
@@ -303,6 +304,33 @@ export async function renderFigureSvg(
   return { svg, missing, width, height, overlays: mergePanelOverlays(panelOverlays) };
 }
 
+/** The figure as a PDF blob: true vector when the composed SVG converts,
+ *  the raster PDF when a panel has content the converter cannot draw —
+ *  the same bytes the PDF export writes. `capped`/`reason` report the
+ *  raster fallback's size cap (the vector path never caps). Seq 431
+ *  reuses this for the clipboard, so a copied figure is the same PDF an
+ *  exported file is. */
+export async function renderFigurePdf(
+  figure: ProjectNode,
+  nodes: Record<string, ProjectNode>,
+  dpi: Resolution,
+  colorMode: ColorMode = "color",
+): Promise<{ blob: Blob; vector: boolean; missing: number; capped: boolean; reason?: string }> {
+  const svgOut = await renderFigureSvg(figure, nodes, dpi, colorMode);
+  try {
+    return {
+      blob: new Blob([svgToPdf(svgOut.svg, { colorMode }) as BlobPart], { type: "application/pdf" }),
+      vector: true,
+      missing: svgOut.missing,
+      capped: false,
+    };
+  } catch (err) {
+    if (!(err instanceof VectorExportError)) throw err;
+    const out = await renderFigureRaster(figure, nodes, "pdf", dpi, colorMode);
+    return { blob: out.blob, vector: false, missing: out.missing, capped: out.capped, reason: out.reason };
+  }
+}
+
 export async function saveFigureImage(
   figure: ProjectNode,
   nodes: Record<string, ProjectNode>,
@@ -332,21 +360,12 @@ export async function saveFigureImage(
       missing = out.missing;
       vector = true;
     } else if (format === "pdf") {
-      // True vector when the composed SVG converts; the raster PDF when a
-      // panel has content the converter cannot draw.
-      const svgOut = await renderFigureSvg(figure, nodes, dpi, colorMode);
-      missing = svgOut.missing;
-      try {
-        bytes = svgToPdf(svgOut.svg, { colorMode });
-        vector = true;
-      } catch (err) {
-        if (!(err instanceof VectorExportError)) throw err;
-        const out = await renderFigureRaster(figure, nodes, "pdf", dpi, colorMode);
-        bytes = new Uint8Array(await out.blob.arrayBuffer());
-        missing = out.missing;
-        capped = out.capped;
-        capReason = out.reason;
-      }
+      const out = await renderFigurePdf(figure, nodes, dpi, colorMode);
+      bytes = new Uint8Array(await out.blob.arrayBuffer());
+      missing = out.missing;
+      vector = out.vector;
+      capped = out.capped;
+      capReason = out.reason;
     } else {
       const out = await renderFigureRaster(figure, nodes, format, dpi, colorMode);
       bytes = new Uint8Array(await out.blob.arrayBuffer());
@@ -383,9 +402,14 @@ export async function saveFigureImage(
   }
 }
 
-/** Starts the clipboard write inside the click, with a promised image, as
- *  WebKit requires. Clipboard images must be raster: always PNG. Grayscale
- *  applies; CMYK falls back to colour (the clipboard has no CMYK). */
+/** Starts the clipboard write inside the click, with promised images, as
+ *  WebKit requires. Vector PDF first (seq 431 — Prism copies a layout as
+ *  vector PDF on Mac), PNG as the fallback for apps that take no PDF;
+ *  when this webview reports no PDF support the copy is PNG-only, the
+ *  old behaviour. A rejected vector write falls back to a PNG-only write,
+ *  so a platform that takes the PDF type but refuses the write still
+ *  leaves the PNG on the clipboard. Grayscale applies; CMYK falls back
+ *  to colour (the clipboard has no CMYK). */
 export function copyFigureImage(
   figure: ProjectNode,
   nodes: Record<string, ProjectNode>,
@@ -394,13 +418,18 @@ export function copyFigureImage(
 ) {
   if (!figure.panels?.length) return void alert("Couldn't Copy the Figure", "Add a panel first.", "error");
   const mode = colorMode === "cmyk" ? "color" : colorMode;
+  // The PDF render only runs where the platform takes it.
+  const pdf = clipboardSupportsPdf()
+    ? renderFigurePdf(figure, nodes, dpi, mode).then((out) => out.blob)
+    : undefined;
+  const png = renderFigureRaster(figure, nodes, "png", dpi, mode).then((out) => out.blob);
   navigator.clipboard
-    .write([
-      new ClipboardItem({
-        "image/png": renderFigureRaster(figure, nodes, "png", dpi, mode).then((out) => out.blob),
-      }),
-    ])
-    .catch((err) => alert("Couldn't Copy the Figure", reason(err), "error"));
+    .write([new ClipboardItem(vectorClipboardItem(pdf, png))])
+    .catch(() =>
+      navigator.clipboard
+        .write([new ClipboardItem({ "image/png": png })])
+        .catch((err) => alert("Couldn't Copy the Figure", reason(err), "error")),
+    );
 }
 
 /** One-click Send to Word / PowerPoint / Keynote for a whole layout
