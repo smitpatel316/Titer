@@ -12979,8 +12979,11 @@ check("seq 388 a derived row is flagged with its unstable sources", () => {
 });
 
 // Seq 388: the shared choke point — fitModelSpec carries the unstable
-// sources on its derived rows, so the global-fit / binding / enzyme
-// paths (which all run through it) see them too.
+// sources on its derived rows, so the binding / enzyme paths (whose defs
+// carry `derived` through runGlobalFit) see them too. The nonlinear
+// global path does NOT run through it that way: runGlobalNonlinear
+// builds its def without `derived`, so it builds its own derived rows
+// from the renamed coefficients instead (global-derived-note38).
 check("seq 388 fitModelSpec carries unstable sources on derived rows", async () => {
   const xs = [-9, -8.5, -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4];
   const ys = xs.map((x, i) => 1 + (1e5 - 1) / (1 + 10 ** (-8.5 - x)) + 0.8 * Math.sin(1.7 * i + 0.5));
@@ -13031,6 +13034,36 @@ check("seq 388 a derived row from stable parameters is not noted", async () => {
   ok(!out.notes?.includes("“Half-life” is derived"), `Half-life should not be noted, got ${out.notes}`);
   // ...but Span derives from Y0 (unstable): it is noted.
   ok(out.notes?.includes("“Span” is derived from “Y0”"), `notes should name Span's unstable source, got ${out.notes}`);
+});
+
+// Seq 388 (global-derived-note38, cycle 38): the global fit reports a
+// per-series Span from the stacked coefficients, but runGlobalNonlinear
+// builds its def without `derived`, so the note never named the Span
+// whose Top was unstable — the stacked fit flags "Top (Y2)" while the
+// Y2 Span was silently numbered. The global path builds its derived
+// rows from the renamed coefficients, so the note names the Span and
+// its unstable source, with the value itself still reported.
+check("seq 388 global fit names an unstable derived Span", async () => {
+  const xs = [-10, -9.75, -9.5, -9.25, -9, -8.75, -8.5, -8.25, -8, -7.75, -7.5];
+  const ys1 = [2.943893, -4.255733, 2.078608, 1.239577, 3.97826, 4.082017, 8.805844, 10.346663, 16.181165, 27.507357, 39.882054];
+  const ys2 = [0.504, 0.162, 1.142, 0.735, 2.601, 3.004, 6.765, 9.399, 17.756, 25.937, 40.134];
+  const table: TableData = {
+    columns: ["Title", "X", "Y1", "Y2"],
+    rows: xs.map((x, i) => ["", String(x), String(ys1[i]), String(ys2[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", table, {
+    y: "Y1",
+    model: "sigmoidal-4pl-logx",
+    globalY: ["Y2"],
+  });
+  ok(!("error" in out), `global 4PL fit failed: ${"error" in out ? out.error : ""}`);
+  ok(out.coefficients?.find((c) => c.term === "Top (Y2)")?.unstable === true, "Top (Y2) should be flagged unstable");
+  ok(
+    out.notes?.includes("“Span” is derived from “Top (Y2)”"),
+    `notes should name the Span's unstable source, got ${out.notes}`,
+  );
+  const span = out.fit?.rows.find((r) => r.label === "Span");
+  ok(span?.values?.[1] != null && Number.isFinite(span.values[1]), `Span Y2 should still report a value, got ${JSON.stringify(span)}`);
 });
 
 // Seq 387: Prism's dependency method (FAQ 931) — dependency_i = 1 − s²/(V_ii·HH_ii),
