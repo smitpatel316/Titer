@@ -8,12 +8,13 @@ import { Button, IconButton } from "../../ui/controls";
 import { WithInspector } from "../../components/inspector";
 import { isNative, setSpinner } from "../../native";
 import { ANALYSES } from "../../stats";
+import { resolveAnalysis } from "../../plugins";
 import { cancelActiveEvals } from "../../stats/webr";
 import { titleCase } from "../../lib/format";
 import { AnalysisResultsView } from "./analysis-results-view";
 import { canEditAnalysisParams } from "./wizards";
 import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
-import { useAnalysis, useEngineBootStatus, useRQueue } from "./use-analysis";
+import { useAnalysis, useEngineBootStatus, usePluginAnalysis, useRQueue } from "./use-analysis";
 import { publishAnalysisResult } from "../../store/mcp-publish";
 import { rQueueStatusText } from "../../stats/r-queue";
 import { engineStatusText } from "../../stats/engine-status";
@@ -67,7 +68,19 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
   const liveData = frozenOrOrphaned ? undefined : data;
   // Bumps to re-run the test after an error, a timeout or a cancel.
   const [retryNonce, setRetryNonce] = React.useState(0);
-  const outcome = useAnalysis(node.analysisType, liveData, node.analysisParams, { retryKey: retryNonce });
+  // A plugin node runs its plugin analysis (cached per table version, as
+  // the first-party run is); a first-party node runs its test. Exactly one
+  // of the two hooks has something to run — the other returns null.
+  const firstPartyOutcome = useAnalysis(
+    node.pluginAnalysisId ? undefined : node.analysisType,
+    liveData,
+    node.analysisParams,
+    { retryKey: retryNonce },
+  );
+  const pluginOutcome = usePluginAnalysis(node.pluginAnalysisId, liveData, node.pluginAnalysisParams, {
+    retryKey: retryNonce,
+  });
+  const outcome = pluginOutcome ?? firstPartyOutcome;
   const queue = useRQueue();
   const bootStatus = useEngineBootStatus();
   const bootFailure = engineStatusText(bootStatus);
@@ -109,7 +122,9 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
     <WithInspector
       title={node.name}
       tag={
-        titleCase(ANALYSES[node.analysisType!].kind?.(node.analysisParams) ?? ANALYSES[node.analysisType!].label) +
+        (node.pluginAnalysisId
+          ? (resolveAnalysis(node.pluginAnalysisId)?.label ?? node.pluginAnalysisId)
+          : titleCase(ANALYSES[node.analysisType!].kind?.(node.analysisParams) ?? ANALYSES[node.analysisType!].label)) +
         (node.frozen ? " · Frozen" : node.orphaned ? " · Orphaned" : "")
       }
       node={node}

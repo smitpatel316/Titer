@@ -69,7 +69,13 @@ export type AnalysisType =
 /** What the New Analysis picker offers: a test, or "Compare more than two groups",
  *  which its wizard resolves to one-way ANOVA, Kruskal-Wallis, repeated-measures ANOVA
  *  or Friedman (as Prism does). */
-export type AnalysisPickerValue = AnalysisType | "compare-many-groups" | "interpolate" | "transform";
+export type AnalysisPickerValue =
+  | AnalysisType
+  | "compare-many-groups"
+  | "interpolate"
+  | "transform"
+  /** A plugin analysis, by its namespaced id (`plugin:<plugin-id>:<analysis-id>`). */
+  | `plugin:${string}:${string}`;
 
 // The choices of the params, one list each: wizards ask among them, the types come from
 // them, and a file's value outside them is left out (the test takes its default).

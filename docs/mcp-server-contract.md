@@ -1,6 +1,6 @@
 # MCP server contract — Titer (v1.6.0, Phase 2) ↔ stdio bridge
 
-**Status:** Phase 2 + v1.7.4 P0 + 1.8 backup list + 1.8.0 data-file import + 1.8.0 linked paste + 1.8.0 merge project + 1.8.0 menus batch B + 1.8.0 menus batch C + 1.8.2 graph regenerate + 1.8.3 copy-graph-image + 1.8.3 sample-size-power + 1.9 cell background color (76 tools: read, write, run, graph, export, cloud)
+**Status:** Phase 2 + v1.7.4 P0 + 1.8 backup list + 1.8.0 data-file import + 1.8.0 linked paste + 1.8.0 merge project + 1.8.0 menus batch B + 1.8.0 menus batch C + 1.8.2 graph regenerate + 1.8.3 copy-graph-image + 1.8.3 sample-size-power + 1.9 cell background color + marketplace M4 plugin analyses (78 tools: read, write, run, graph, export, cloud)
 **Server branch:** `check/v16-mcp-phase2` (v1.6.0); the v1.7.4 P0 tools
 (`titer_project_summary`, `titer_search`, `titer_get_analysis_params`,
 `titer_rerun_analysis`, `await_result` on `titer_run_analysis`) were
@@ -123,11 +123,11 @@ SSE stream (`text/event-stream`). Lifecycle:
    `2025-06-18`), `capabilities`, `clientInfo`. Server answers with its
    own `protocolVersion` (the negotiated one — the highest both support),
    `capabilities: { "tools": {} }`, `serverInfo: { "name": "titer",
-    "version": "<app version>" }`, and `instructions` (the 76 tools:
+    "version": "<app version>" }`, and `instructions` (the 78 tools:
     read-only vs mutating, the job model, cloud/export notes — the full
     text lives in `get_info` in `src-tauri/src/mcp.rs`).
  2. `notifications/initialized` — client sends after `initialize`.
- 3. `tools/list` — returns all 76 tools in one page (`nextCursor`
+ 3. `tools/list` — returns all 78 tools in one page (`nextCursor`
    absent). No pagination.
 4. `tools/call` — `{ "name": "<tool>", "arguments": { … } }`.
 5. Sessions: 2025-11-25 clients use protocol-level sessions; the server
@@ -299,6 +299,7 @@ treat it as a local-only read.
 |---|---|---|
 | `titer_list_projects` | — | `{ projects: [{ project_id, file_path, revision, tables, analyses, graphs, figures, info_sheets }] }` — every node with `id`, `name`, and its kind (`table_type` / `analysis_type` / `graph_type`). The discovery call; the other tools' ids come from here. **Phase 2 addition:** the `info_sheets` array (GAP-3 fix — info nodes were previously dropped). |
 | `titer_list_tables` | `project_id?` | `{ project_id, tables: [{ id, name, table_type, rows, data_columns }] }`. `table_type` is one of Column, XY, Grouped, Multiple variables, Contingency, Survival, Nested. |
+| `titer_list_plugin_analyses` | `project_id?` | `{ plugin_analyses: [{ id, plugin_id, label, description?, table_types, min_columns }] }` — every installed plugin analysis, with the table types it applies to. The discovery call before `titer_run_plugin_analysis`: ask this instead of guessing a namespaced id (`plugin:<plugin-id>:<analysis-id>`). The list is app-wide (the plugin registry is not per-project), but the job that reads it runs in a project window, so a project must be open. |
 | `titer_read_table_summary` | `project_id?`, `table_id`, `include_values?` (default false), `max_rows?` (default 100, max 1000) | Columns with `name`, `role` (derived from the table type — X / Y / dataset / group · replicate / variable / category / time …), `unit_hint` (parsed from header brackets, e.g. `[nM]` — Titer records no units field, so this is a hint, said as one), `numeric_values` / `missing_values` / `non_numeric_values`, `range` (`min`/`max`/`mean`, null when no numbers); `rows`, `data_columns`, `excluded_cells` (count — excluded cells are dropped from the ranges), `units_note`, `notes` (provenance, when the table has one), `structure` (groups/replicates/subgroups/rowGroups, Grouped/Nested only). With `include_values: true`, a `values` block: capped rows as `{ row, cells }` (row titles in column 0; excluded cells shown as null). |
 | `titer_read_results` | `project_id?`, `analysis_id` | `{ status, project_id, analysis_id, name, analysis_type, … }`. `status: "computed"` carries the full cached result under `result` (statistics, p-values, CIs, notes — the `AnalysisResult` shape the app itself renders). `status: "not_computed"` means the analysis has not been run in this Titer session: the message says to open the analysis in Titer and run it — the bridge/client must NOT invent a result. `status: "error"` carries the run's error message. `status: "unknown_analysis"` / `"not_an_analysis"` mean the id is wrong. After Phase 2, a `titer_run_analysis` job's completion publishes here too, so this tool is the read path for agent-run results as well as UI-run ones. |
 | `titer_read_graph` | `project_id?`, `graph_id` | `{ graph_type, source_table: { id, name, table_type }, extra_source_tables: [{ id, name, table_type }], title, x_label, y_label, linked_analyses: [{ link, analysis_id, analysis_name }], figures: [{ id, name }], export_state }`. `extra_source_tables` is the graph's further tables beyond its primary (one graph from multiple tables, #48) — empty for a single-table graph. `export_state` is a plain-language note: the v1.0 project model keeps no export history, so whether the graph has been exported is unknown to this tool. |
@@ -343,6 +344,7 @@ valid analyses for that table type.
 | Tool | Arguments | Returns |
 |---|---|---|
 | `titer_run_analysis` | `project_id?`, `table_id`, `analysis_type`, `params?`, `name?`, `await_result?` (default false), `await_seconds?` (default 30, 1–120) | `{ job_id, status: "queued", analysis_id, project_id }` — immediately (async, §5.2). Creates the analysis node (`createAnalysis` with `analysis_type` + `params`) and enqueues the run; poll `titer_read_job` — `done` carries the full `AnalysisResult` (same shape as `titer_read_results` `"computed"`). `name?` overrides the node's display name. `table_id` is required — every analysis has a parent table. With `await_result: true` a run that finishes within `await_seconds` returns inline instead: `{ job_id, status: "done", analysis_id, project_id, result }`; a run still going returns the queued shape plus a `note` naming the `job_id` to poll (§5.2). |
+| `titer_run_plugin_analysis` | `project_id?`, `table_id`, `analysis_id`, `params?`, `name?`, `await_result?` (default false), `await_seconds?` (default 30, 1–120) | `{ job_id, status: "queued", analysis_id, project_id }` — immediately (async, §5.2), the same shape as `titer_run_analysis`, but for a plugin analysis: `analysis_id` is a namespaced id (`plugin:<plugin-id>:<analysis-id>`, from `titer_list_plugin_analyses`). Creates the plugin analysis node (`create-plugin-analysis` with `analysis_id` + `params`) and enqueues the run; poll `titer_read_job` — `done` carries the full `PluginAnalysisResult` (same shape as `titer_read_results` `"computed"` for that node). `params?` must match the plugin's declared parameters; an unknown or out-of-range param is rejected naming the valid choices, never silently defaulted. `name?` overrides the node's display name. With `await_result: true` a run that finishes within `await_seconds` returns inline instead, same as `titer_run_analysis` (§5.2). A plugin analysis node re-run through `titer_rerun_analysis` refuses `params` overrides — run it again here for new params. |
 | `titer_rerun_analysis` **(1.7.4)** | `project_id?`, `analysis_id`, `params?` (overrides), `await_result?`, `await_seconds?` | `{ job_id, status: "queued", analysis_id, project_id }` — the same async shape as `titer_run_analysis`, but it runs an EXISTING analysis node: no new node is created. `params?` are overrides only, merged over the node's stored params and **saved on the node** (the next run and the UI see them); they are validated exactly like `titer_run_analysis` params — unknown/out-of-range keys are rejected naming the valid choices. A frozen analysis is refused ("unfreeze it with `titer_freeze_analysis`"); an orphaned analysis (its table was deleted) is refused — its params can't change. Same `await_result` / `await_seconds` semantics as `titer_run_analysis` (§5.2). This is the run path for method/wand-created analyses (see §11.3, now closed). |
 | `titer_freeze_analysis` | `project_id?`, `analysis_id`, `frozen` (boolean) | `{ project_id, analysis_id, frozen }`. A frozen result survives later data edits; unfreezing re-runs on next read. Undoable via `frozen: false` / `titer_undo`. |
 | `titer_set_result_cell_background` **(1.9, seq 325)** | `project_id?`, `analysis_id`, `section`, `row`, `col`, `color` (one of the 8 cell colors, or null to clear) | `{ project_id, analysis_id, section, row, col, color }`. Paints one cell of one results table with one of Prism's 8 cell colors (yellow, red, blue, green, purple, orange, tan, gray); `section` is the table's title ("Normality" or "Statistics" for the two untitled tables), `row`/`col` are 0-based within that table. Presentation only — never re-runs the analysis, never changes a value, survives a recompute while the table's shape holds. Undoable. |
@@ -602,7 +604,7 @@ is on, §6); everything else is `false`. `idempotent_hint` is per-tool (e.g. `ti
 `titer_rename_node`, `titer_reorder_nodes` are idempotent; create/undo/
 redo/run tools are not).
 
-The allowlist (§12) groups the 76 tools differently — by what the user
+The allowlist (§12) groups the 78 tools differently — by what the user
 turns on, not by what they do. The two groupings overlap (e.g. the
 `destructive` group holds the two tools that delete data or run
 scripts); §12 is the
@@ -616,10 +618,10 @@ The Phase 2 smoke runs against the **real server in a running Titer
 app** via a terminal CLI client (no Claude Desktop sign-in needed).
 It reads endpoint + token from `<app_data>/mcp/discovery.json`, speaks
 Streamable HTTP directly (initialize → tools/list → tools/call across
-all 76 tools), and prints a PASS/FAIL line per check; exit 0 only if
+all 78 tools), and prints a PASS/FAIL line per check; exit 0 only if
 every check passes. **Prerequisite:** in Titer, Settings → AI
 Connections, turn on every group under "What your AI can do" first —
-by default the server advertises only the 6 read tools (§12), and this
+by default the server advertises only the 7 read tools (§12), and this
 smoke drives all 70. It drives one deterministic flow on a fresh project
 it creates itself (no fixture ids — the ids it needs come from the
 tools' own outputs), plus the `tests/testdata/survival.pzfx` public
@@ -630,8 +632,8 @@ fixture for the Prism-import step:
    (default out dir: a fresh temp dir; exports/saves land there).
 3. `initialize` (`protocolVersion 2025-11-25`), then
    `notifications/initialized`, then `tools/list` — with every group on,
-   expect all 76 tools, nothing else (with only the default groups, §12
-   says 6).
+   expect all 78 tools, nothing else (with only the default groups, §12
+   says 7).
 4. Create a project → create an XY table → write data → summary with
    values → edit/rename/reorder/undo/redo/duplicate → simulate a
    second table.
@@ -692,7 +694,7 @@ are expected to differ until the `buildGraphFigure` follow-up (§10.1).
 The in-process Rust smoke (`mcp_smoke_job_plumbing_over_http` in
 `src-tauri/src/mcp.rs`) is the other half: with every group enabled via
 its fixture allowlist record, it asserts `tools/list` returns exactly
- 76 tools and drives the job plumbing + project/table/
+ 78 tools and drives the job plumbing + project/table/
 analysis/cloud/graph/composite/export tools over real HTTP with a
 completer task standing in for the frontend dispatcher. A second
 in-process smoke (`mcp_smoke_allowlist_default_over_http`) covers §12:
@@ -780,12 +782,12 @@ tool must assign it a group, or the suite fails).
 
 | Group | Tools | On by default |
 |---|---|---|
-| Read project data (`read`) | `titer_list_projects`, `titer_list_tables`, `titer_read_table_summary`, `titer_read_results`, `titer_read_graph` | yes |
+| Read project data (`read`) | `titer_list_projects`, `titer_list_tables`, `titer_read_table_summary`, `titer_read_results`, `titer_read_graph`, `titer_list_backups`, `titer_list_plugin_analyses` | yes |
 | Read more (`read_more`) | `titer_read_figure`, `titer_read_info_sheet`, `titer_read_activity`, `titer_send_feedback` | no |
 | Discover projects and params (`discovery`) | `titer_project_summary`, `titer_search`, `titer_get_analysis_params` | no |
 | Open and save projects (`project`) | `titer_create_project`, `titer_open_project`, `titer_save_project`, `titer_close_project`, `titer_import_prism`, `titer_import_data_file`, `titer_merge_project` | no |
 | Edit tables (`tables`) | `titer_create_table`, `titer_write_table`, `titer_edit_table`, `titer_freeze_table`, `titer_refresh_linked_data`, `titer_duplicate_table_family`, `titer_rename_node`, `titer_reorder_nodes`, `titer_undo`, `titer_redo` | no |
-| Run analyses (`analyses`) | `titer_run_analysis`, `titer_rerun_analysis`, `titer_freeze_analysis`, `titer_set_result_cell_background`, `titer_clone_analysis`, `titer_repoint_analysis`, `titer_simulate_data`, `titer_sample_size_power`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
+| Run analyses (`analyses`) | `titer_run_analysis`, `titer_rerun_analysis`, `titer_run_plugin_analysis`, `titer_freeze_analysis`, `titer_set_result_cell_background`, `titer_clone_analysis`, `titer_repoint_analysis`, `titer_simulate_data`, `titer_sample_size_power`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
 | Build graphs and figures (`graphs`) | `titer_build_graph`, `titer_update_graph`, `titer_clone_graph`, `titer_clone_figure`, `titer_freeze_graph`, `titer_freeze_figure`, `titer_add_drawing_object`, `titer_update_drawing_object`, `titer_delete_drawing_object`, `titer_arrange_drawing_objects`, `titer_create_figure`, `titer_update_figure`, `titer_create_info_sheet`, `titer_update_info_sheet`, `titer_list_regenerable_graphs`, `titer_regenerate_graphs` | no |
 | Export (`export`) | `titer_export_graph`, `titer_export_figure`, `titer_export_office`, `titer_export_table_data`, `titer_export_all_graphs`, `titer_copy_graph_image` | no |
 | Cloud (Box) (`cloud`) | `titer_cloud_status`, `titer_cloud_list`, `titer_cloud_metadata`, `titer_cloud_revisions`, `titer_cloud_download`, `titer_cloud_upload`, `titer_cloud_upload_new`, `titer_cloud_create_folder`, `titer_cloud_move` | no |
@@ -835,9 +837,9 @@ the same human-only boundary as enable/token (D4).
   and naturally advertises only what the server advertises.
 - Antigravity's `mcp_config.json` is untouched: it keeps its 5-tool
   `enabledTools` (the one-click entry still allowlists exactly the five
-  Phase 1 tools, by design). The server-side default is now six read
-  tools — the five plus `titer_list_backups` — and Antigravity follows
-  what the server advertises, so it shows six. The config file format
+  Phase 1 tools, by design). The server-side default is now seven read
+  tools — the six plus `titer_list_plugin_analyses` — and Antigravity follows
+  what the server advertises, so it shows seven. The config file format
   does not change.
-- The server still *has* 76 tools. The allowlist decides which subset
+- The server still *has* 78 tools. The allowlist decides which subset
   a given client sees — it does not remove tools from the server.

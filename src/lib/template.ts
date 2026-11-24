@@ -5,6 +5,7 @@
 // checks.ts pins it without a window.
 
 import { analysisOptionsForTable, META_ANALYSES } from "../views/analyses";
+import { parsePluginAnalysisId } from "../plugins";
 import { GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 import { TABLES } from "../views/tables";
 import type { AnalysisParams, AnalysisType } from "../stats/types";
@@ -146,10 +147,14 @@ export interface MethodApplication {
 // mapping via analysisTypesOfferedForTable (BUG-14).
 
 /** The analysis types the Analysis menu offers for a table (its picker
- *  values, with the meta entries expanded to the tests they resolve to). */
+ *  values, with the meta entries expanded to the tests they resolve to).
+ *  Plugin ids are not first-party types and a method file cannot carry
+ *  one yet, so they stay out of this set. */
 const offeredAnalyses = (tableType: TableType, data?: TableData): Set<string> =>
   new Set(
-    analysisOptionsForTable(tableType, data).flatMap((o) => META_ANALYSES[o.value] ?? [o.value]),
+    analysisOptionsForTable(tableType, data).flatMap((o) =>
+      parsePluginAnalysisId(o.value) ? [] : (META_ANALYSES[o.value] ?? [o.value]),
+    ),
   );
 
 /** Params whose values name the table's columns: a name, names, a name or

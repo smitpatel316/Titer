@@ -2,15 +2,27 @@
 // The tests themselves (name, needs, computation) are in stats/index.ts.
 
 import { ANALYSES } from "../../stats";
-import type { AnalysisPickerValue, AnalysisType } from "../../stats/types";
+import type { AnalysisPickerValue, AnalysisResult, AnalysisType } from "../../stats/types";
 import type { TableData, TableType } from "../../store/types";
 import type { SelectorOption } from "../../components/universal-modal";
 import { groupsOf, readTable } from "../../lib/dataset";
 import { titleCase } from "../../lib/format";
+import {
+  isPluginAnalysisId,
+  parsePluginAnalysisId,
+  pluginAnalysesForTable,
+  resolveAnalysis,
+  type PluginAnalysisResult,
+} from "../../plugins";
 
 /** A test as the picker, the Analysis menu and its wizard name it. */
-export const analysisLabel = (value: AnalysisPickerValue) =>
-  titleCase(
+export const analysisLabel = (value: AnalysisPickerValue) => {
+  if (isPluginAnalysisId(value)) {
+    // A plugin analysis names its label; an unregistered one (its plugin
+    // disabled since the name was recorded) falls back to its analysis id.
+    return resolveAnalysis(value)?.label ?? titleCase(parsePluginAnalysisId(value)!.analysisId.replace(/-/g, " "));
+  }
+  return titleCase(
     value === "compare-many-groups"
       ? "Compare more than two groups"
       : value === "interpolate"
@@ -19,6 +31,28 @@ export const analysisLabel = (value: AnalysisPickerValue) =>
           ? "Transform or normalize"
           : ANALYSES[value].label,
   );
+};
+
+/** Any analysis result the results view renders: a first-party result, or
+ *  a plugin one (its `testType` is the namespaced id string, not an
+ *  `AnalysisType`). The view renders both the same way — the statistics,
+ *  groups and notes — and only the first-party branches (its per-test
+ *  tables) are keyed on the test type. */
+export type AnyAnalysisResult = AnalysisResult | PluginAnalysisResult;
+
+/** Whether a result came from a plugin analysis. */
+export const isPluginAnalysisResult = (
+  result: AnyAnalysisResult,
+): result is PluginAnalysisResult => parsePluginAnalysisId(result.testType) !== null;
+
+/** The result's display name: the first-party test's label, or the plugin
+ *  analysis's label (its namespaced id when the plugin is gone). */
+export function analysisResultLabel(result: AnyAnalysisResult): string {
+  if (isPluginAnalysisResult(result)) {
+    return resolveAnalysis(result.testType)?.label ?? result.testType;
+  }
+  return ANALYSES[result.testType].label;
+}
 
 const optionsFor = (order: AnalysisPickerValue[]): SelectorOption<AnalysisPickerValue>[] =>
   order.map((value) => ({ value, label: analysisLabel(value) }));
@@ -115,20 +149,41 @@ export function hasRowGroups(data: TableData | undefined): boolean {
  *  Likewise the nested tests are offered only for their group count (t test
  *  for 2+ groups with data — the wizard asks which two when there are more,
  *  seq 246 — ANOVA for 3+) — the runners validate either way, so a stale
- *  entry point still gets a clear error. */
+ *  entry point still gets a clear error. Plugin analyses join the same
+ *  list, after the first-party entries: the ones whose table types include
+ *  this table's, under their namespaced ids (never shadowing a first-party
+ *  test). A disabled plugin's analyses are unregistered, so they vanish
+ *  from the picker the moment the plugin is disabled. */
 export function analysisOptionsForTable(tableType: TableType, data?: TableData): SelectorOption<AnalysisPickerValue>[] {
-  return ANALYSIS_OPTIONS_BY_TABLE[tableType].filter((o) => {
+  const firstParty = ANALYSIS_OPTIONS_BY_TABLE[tableType].filter((o) => {
     if (o.value === "three-way-anova") return hasRowGroups(data);
     if (o.value === "nested-t-test") return data === undefined || countDataGroups(data) >= 2;
     if (o.value === "nested-anova") return data === undefined || countDataGroups(data) >= 3;
     return true;
   });
+  return [...firstParty, ...pluginAnalysisOptionsForTable(tableType)];
+}
+
+/** The plugin analyses offered for a table type, as picker options — the
+ *  plugin source of the listing above, kept separate so callers that only
+ *  want the plugin side (the MCP list tool) do not re-derive it. */
+export function pluginAnalysisOptionsForTable(tableType: TableType): SelectorOption<AnalysisPickerValue>[] {
+  return pluginAnalysesForTable(tableType).map((e) => ({
+    value: e.id as AnalysisPickerValue,
+    label: `${e.spec.label} (plugin: ${e.pluginId})`,
+  }));
 }
 
 /** Whether a picker value is offered for this table — the Recently used
  *  section lists runs from every table type, so a tap on one that doesn't
  *  fit this table gets the not-applicable note instead of its wizard (seq 298). */
 export function isAnalysisOffered(value: AnalysisPickerValue, tableType: TableType, data?: TableData): boolean {
+  const plugin = parsePluginAnalysisId(value);
+  if (plugin) {
+    // A plugin analysis is offered when it is registered and its table
+    // types include this table's — the same table-type gate as above.
+    return pluginAnalysesForTable(tableType).some((e) => e.id === value);
+  }
   return analysisOptionsForTable(tableType, data).some((o) => o.value === value);
 }
 
@@ -153,7 +208,9 @@ export const META_ANALYSES: Record<string, AnalysisType[]> = {
 export function analysisTypesOfferedForTable(tableType: TableType, data?: TableData): AnalysisType[] {
   return analysisOptionsForTable(tableType, data).flatMap((o) =>
     // "transform" makes a computed table, not an analysis: it never reaches the MCP gate.
-    o.value === "transform" ? [] : (META_ANALYSES[o.value] ?? [o.value as AnalysisType]),
+    // A plugin id is not an AnalysisType either: the plugin tools gate on
+    // the plugin registry, not this list.
+    o.value === "transform" || parsePluginAnalysisId(o.value) ? [] : (META_ANALYSES[o.value] ?? [o.value as AnalysisType]),
   );
 }
 

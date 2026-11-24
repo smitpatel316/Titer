@@ -3,6 +3,8 @@
 // same run) and re-runs it when the table or the params change.
 import * as React from "react";
 import { runAnalysis } from "../../stats";
+import { runPluginAnalysisOnTable } from "../../plugins";
+import type { PluginAnalysisOutcome, PluginParamValues } from "../../plugins";
 import type { AnalysisOutcome, AnalysisParams, AnalysisType } from "../../stats/types";
 import type { TableData } from "../../store/types";
 import { useProjectStore } from "../../store/use-project-store";
@@ -89,6 +91,35 @@ export function useAnalysis(
       current = false;
     };
   }, [type, data, key, retryKey]);
+
+  return done && done.key === key && done.data === data ? done.outcome : null;
+}
+
+/** The plugin side of `useAnalysis`: runs a plugin analysis on a table
+ *  through the cached plugin runner (`runPluginAnalysisOnTable` shares one
+ *  result per table version, exactly as `runAnalysis` does) and re-runs it
+ *  when the table or the params change. Plugin params carry no info-sheet
+ *  hooks, so there is nothing to resolve before the run. null while
+ *  running, or when there is nothing to run. */
+export function usePluginAnalysis(
+  id: string | undefined,
+  data: TableData | undefined,
+  params?: PluginParamValues,
+  opts?: { retryKey?: unknown },
+): PluginAnalysisOutcome | null {
+  const key = `${id} ${JSON.stringify(params ?? null)}`;
+  const retryKey = opts?.retryKey;
+  const [done, setDone] = React.useState<{ key: string; data: TableData; outcome: PluginAnalysisOutcome } | null>(null);
+
+  React.useEffect(() => {
+    if (!id || !data) return;
+    let current = true;
+    setDone(null);
+    void runPluginAnalysisOnTable(id, data, params).then((outcome) => current && setDone({ key, data, outcome }));
+    return () => {
+      current = false;
+    };
+  }, [id, data, key, retryKey]);
 
   return done && done.key === key && done.data === data ? done.outcome : null;
 }

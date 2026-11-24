@@ -52,6 +52,7 @@ import {
   resolveGraphOptions,
 } from "../../lib/info-sheets";
 import { runAnalysis } from "../../stats";
+import { isPluginAnalysisResult } from "../analyses";
 import type {
   AnalysisOutcome,
   AnalysisParams,
@@ -310,7 +311,11 @@ async function resolveOutcome(
       error: `“${node.name}” is a ${node.analysisType}, not a ${expectedType}.`,
     };
   if (!node.analysisType) return noOutcome;
-  if ((node.frozen || node.orphaned) && node.cachedResult)
+  // A frozen or orphaned plugin analysis keeps its stored result on the
+  // node, but the overlays only draw first-party outcomes — a plugin
+  // result is not one, so it resolves to no outcome here (the sheet
+  // itself still shows it).
+  if ((node.frozen || node.orphaned) && node.cachedResult && !isPluginAnalysisResult(node.cachedResult))
     return { outcome: node.cachedResult, source: "cached" };
   const resolved = resolveAnalysisParams(node.analysisParams, node.analysisType, sheets);
   if ("error" in resolved) return { outcome: { error: resolved.error }, source: "live", error: resolved.error };

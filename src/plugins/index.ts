@@ -60,7 +60,10 @@ export {
 } from "./analysis-spec";
 export {
   clearPluginRegistry,
+  clearPluginVersion,
   getPluginAnalysis,
+  getPluginVersion,
+  isPluginAnalysisId,
   listPluginAnalyses,
   parsePluginAnalysisId,
   pluginAnalysesForTable,
@@ -69,6 +72,8 @@ export {
   registerPluginAnalysesFromManifest,
   resolveAnalysis,
   runPluginAnalysis,
+  runPluginAnalysisOnTable,
+  setPluginVersion,
   unregisterPlugin,
   unregisterPluginAnalysis,
   type PluginAnalysisEntry,
@@ -90,6 +95,13 @@ export {
   type PluginRecord,
   type PluginStatus,
 } from "./loader";
+export {
+  checkPluginDependency,
+  pluginDependencyNotice,
+  satisfiesPluginVersionRange,
+  type PluginDependency,
+  type PluginDependencyCheck,
+} from "./workflow-dependency";
 export {
   HELLO_MEAN_ID,
   HELLO_PLUGIN_ID,
