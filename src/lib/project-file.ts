@@ -262,6 +262,7 @@ const OPTIONAL_OPTIONS = {
   yMinConstant: "text", yMaxConstant: "text", xMinConstant: "text", xMaxConstant: "text",
   sigAnalysisId: "text", sigAnalysisIds: "texts", sigPairs: "texts", regAnalysisId: "text", demingAnalysisId: "text", coxAnalysisId: "text", ttestAnalysisId: "text", poissonAnalysisId: "text", smoothAnalysisId: "text", pcaAnalysisId: "text", kmeansAnalysisId: "text", hclustAnalysisId: "text", monteCarloAnalysisId: "text", xVariable: "text", yVariable: "text", bubbleSizeVariable: "text", bubbleColorVariable: "text",
   volcanoX: "text", volcanoY: "text", volcanoLabel: "text", volcanoGroupA: "text", volcanoGroupB: "text", rightYDataset: "text", y2Label: "text",
+  flowSampleId: "text", flowXParam: "text", flowYParam: "text", flowBins: "number", flowDownsampleCap: "number",
   palette: "palette", series: "styles", points: "pointStyles", outlineColor: "color", pointOutlineColor: "color", errorColor: "color",
   legend: "place", note: "place", refLines: "refLines", sets: "texts",
   xNumberFormat: "numberFormat", yNumberFormat: "numberFormat", y2NumberFormat: "numberFormat",
