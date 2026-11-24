@@ -14,7 +14,7 @@ import type { CellBackgroundColor } from "../../lib/cell-colors";
 import { tableErrorFormat } from "../../store/types";
 import { isXColumnFormat, sameConversion, type XColumnFormat, type XConversion } from "../../lib/date-time";
 import { renameCalculatedReferences } from "../../lib/calcvars";
-import { normalizeDecimalInput, type DecimalSeparator } from "../../lib/decimal-format";
+import { normalizeDecimalInput, setDecimalPlaces, type DecimalSeparator } from "../../lib/decimal-format";
 import { parseCell } from "../../lib/numeric";
 import { seriesKeyOf, groupRuns } from "../../lib/columns";
 import { isGrouped, isNested } from "../../lib/dataset";
@@ -1201,4 +1201,96 @@ export function parseTSV(text: string): Cell[][] {
 export function transposeBlock(block: Cell[][]): Cell[][] {
   const width = block.reduce((w, row) => Math.max(w, row.length), 0);
   return Array.from({ length: width }, (_, c) => block.map((row) => row[c] ?? null));
+}
+
+// ── Paste Special options (seq 428) ─────────────────────────────────────
+// Prism's Import and Paste Special Choices dialog, Source tab (walk2/07),
+// offers two checkboxes Titer's Paste Special (seq 230: Values / Transpose
+// only) never had. Per the Prism 11 guide ("Options when pasting data from
+// Excel") and FAQ 1534: Excel copies in two formats, plain text and HTML.
+// Prism pastes the HTML one by default — the values as shown in Excel —
+// the older text one pastes the full values, and the HTML copy from older
+// Excel carries each number twice: shown, and full-precision in the cell's
+// x:num attribute, which the many-digits option selects. (The guide notes
+// the dual copy is not written by Excel 2007 or later; x:num is still read
+// whenever it is there.)
+/** The two Source-tab checkboxes (seq 428), both off by default as in Prism. */
+export interface PasteSpecialOptions {
+  /** Prism: "Paste older text-based clipboard format. Not recommended." —
+   *  parse the plain-text clipboard format instead of the HTML one. */
+  olderTextFormat: boolean;
+  /** Prism: "Paste as many digits as possible. If Excel rounds to 1.23
+   *  paste 1.23456." — prefer the full-precision x:num values Excel's HTML
+   *  clipboard carries over the displayed text. */
+  manyDigits: boolean;
+}
+
+/** The entities an HTML clipboard table can carry, decoded in an order that
+ *  keeps `&amp;lt;` as the literal "&lt;" rather than "<". */
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;|&#39;/gi, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&amp;/gi, "&");
+}
+
+/** One HTML table cell as a stored cell: inner tags stripped (`<br>` keeps a
+ *  line break, as parseTSV's quoted cells do), entities decoded, blank → null. */
+function htmlCellText(inner: string): string | null {
+  const text = decodeHtmlEntities(inner.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]*>/g, "")).trim();
+  return text === "" ? null : text;
+}
+
+/** Parses an HTML `<table>` — Excel's HTML clipboard format — into a cell
+ *  block, with no DOM (the suite runs in plain node). A cell's value is its
+ *  shown text, unless `manyDigits` and the cell carries an `x:num` attribute,
+ *  in which case the full-precision value wins. No `<table>` → no block. */
+export function parseClipboardHTML(html: string, manyDigits: boolean): Cell[][] {
+  const table = /<table\b[^>]*>([\s\S]*?)<\/table\s*>/i.exec(html);
+  if (!table) return [];
+  const rows: Cell[][] = [];
+  const rowRe = /<tr\b[^>]*>([\s\S]*?)<\/tr\s*>/gi;
+  let rowMatch: RegExpExecArray | null;
+  while ((rowMatch = rowRe.exec(table[1])) !== null) {
+    const row: Cell[] = [];
+    const cellRe = /<(?:td|th)\b([^>]*)>([\s\S]*?)<\/(?:td|th)\s*>/gi;
+    let cellMatch: RegExpExecArray | null;
+    while ((cellMatch = cellRe.exec(rowMatch[1])) !== null) {
+      const full = /x:num\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(cellMatch[1]);
+      const shown = htmlCellText(cellMatch[2]);
+      const raw = manyDigits && full ? (full[1] ?? full[2] ?? "") : shown;
+      const value = raw === null ? null : raw.trim();
+      row.push(value === null || value === "" ? null : value);
+    }
+    if (row.length) rows.push(row);
+  }
+  return rows;
+}
+
+/** The pasted block from the clipboard's two formats: the older text format
+ *  parses the plain text; otherwise the HTML table wins when there is one,
+ *  falling back to the text when the HTML carries no table. */
+export function pasteSpecialBlock(html: string | null, text: string, opts: PasteSpecialOptions): Cell[][] {
+  if (opts.olderTextFormat || html === null) return parseTSV(text);
+  const fromHtml = parseClipboardHTML(html, opts.manyDigits);
+  return fromHtml.length ? fromHtml : parseTSV(text);
+}
+
+/** Clears the decimal-places display setting on the `count` columns from
+ *  `c0` (back to full precision) — the "paste as many digits as possible"
+ *  half: the extra digits must be visible, not rounded away by a column's
+ *  display setting. Column 0 (titles / X) never takes a setting, so it is
+ *  skipped. Columns outside the range keep theirs. */
+export function clearDecimalsForRange(data: TableData, c0: number, count: number): TableData {
+  let next = data;
+  for (let c = Math.max(c0, 1); c < Math.min(c0 + count, data.columns.length); c++) {
+    const name = data.columns[c];
+    if (name !== undefined && next.decimals?.[name] !== undefined) next = setDecimalPlaces(next, name, undefined);
+  }
+  return next;
 }

@@ -40,12 +40,14 @@ import {
   refreshLinkedFromFile,
 } from "./linked-data";
 import {
+  clearDecimalsForRange,
   columnsBeyond,
   dataEdge,
   fillRange,
   findCells,
   freshColumnNames,
   parseTSV,
+  pasteSpecialBlock,
   renameColumn,
   renameGroup,
   renameSubgroup,
@@ -624,9 +626,19 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
     reveal(m);
   };
 
-  // ── Paste Special (seq 230) ────────────────────────────────────────────
-  // The clipboard text the bar is offering, with its transpose choice.
-  const [pasteOffer, setPasteOffer] = React.useState<{ text: string; transpose: boolean } | null>(null);
+  // ── Paste Special (seq 230, options seq 428) ─────────────────────────────
+  // The clipboard the bar is offering, with its transpose choice and the two
+  // Prism Source-tab options (walk2/07): the older text-based format, and as
+  // many digits as possible. Plain Ctrl+V keeps pasting the text format, as
+  // before — that already behaves like Prism's older-text option (full
+  // values); the format choice lives in this dialog, as in Prism.
+  const [pasteOffer, setPasteOffer] = React.useState<{
+    text: string;
+    html: string | null;
+    transpose: boolean;
+    olderTextFormat: boolean;
+    manyDigits: boolean;
+  } | null>(null);
 
   /** The clipboard's text, or null when it can't be read (no permission, or
    *  nothing copied) — the menu has no clipboard event to fall back on. */
@@ -639,11 +651,36 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
     }
   };
 
+  /** Both clipboard formats (seq 428): Excel copies plain text and an HTML
+   *  table; `navigator.clipboard.read()` gives both, readText() only the
+   *  text. Falls back to text-only when read() is unavailable. */
+  const readClipboardFormats = async (): Promise<{ text: string; html: string | null } | null> => {
+    try {
+      const items = await navigator.clipboard.read();
+      let text: string | null = null;
+      let html: string | null = null;
+      for (const item of items) {
+        if (text === null && item.types.includes("text/plain"))
+          text = await (await item.getType("text/plain")).text();
+        if (html === null && item.types.includes("text/html")) html = await (await item.getType("text/html")).text();
+      }
+      if (text === null && html === null) return null;
+      return { text: text ?? "", html };
+    } catch {
+      const text = await readClipboardText();
+      return text === null ? null : { text, html: null };
+    }
+  };
+
   /** Writes `block` at the selection's top-left, as Paste does (growing the
-   *  table, warning about columns that don't fit), and selects what landed. */
-  const pasteBlock = (block: (string | null)[][], label: string) => {
+   *  table, warning about columns that don't fit), and selects what landed.
+   *  With `manyDigits` (seq 428) the pasted columns also lose their
+   *  decimal-places display setting, so the extra digits show. */
+  const pasteBlock = (block: (string | null)[][], label: string, opts?: { manyDigits?: boolean }) => {
     if (!block.length || !block[0].length) return;
-    write(range.r0, range.c0, block, label);
+    let next = writeBlock(data, range.r0, range.c0, block, type, separator);
+    if (opts?.manyDigits) next = clearDecimalsForRange(next, range.c0, block[0].length);
+    update(next, label);
     const beyond = columnsBeyond(data, range.c0, block);
     if (beyond)
       void alert(
@@ -666,21 +703,29 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
     pasteBlock(transposeBlock(parseTSV(text)), "Paste Transposed");
   };
 
-  /** Edit ▸ Paste Special…: offers the clipboard with Values / Transpose. */
+  /** Edit ▸ Paste Special…: offers the clipboard with Values / Transpose,
+   *  plus the two Prism Source-tab options (seq 428). */
   const openPasteSpecial = async () => {
-    const text = await readClipboardText();
-    if (text === null) {
+    const clip = await readClipboardFormats();
+    if (clip === null) {
       void alert("Nothing to Paste", "The clipboard is empty or couldn't be read. Copy some cells first, then try again.");
       return;
     }
-    setPasteOffer({ text, transpose: false });
+    setPasteOffer({ text: clip.text, html: clip.html, transpose: false, olderTextFormat: false, manyDigits: false });
     focusGrid();
   };
 
   const confirmPasteSpecial = () => {
     if (!pasteOffer) return;
-    const block = parseTSV(pasteOffer.text);
-    pasteBlock(pasteOffer.transpose ? transposeBlock(block) : block, pasteOffer.transpose ? "Paste Transposed" : "Paste");
+    const block = pasteSpecialBlock(pasteOffer.html, pasteOffer.text, {
+      olderTextFormat: pasteOffer.olderTextFormat,
+      manyDigits: pasteOffer.manyDigits,
+    });
+    pasteBlock(
+      pasteOffer.transpose ? transposeBlock(block) : block,
+      pasteOffer.transpose ? "Paste Transposed" : "Paste",
+      { manyDigits: pasteOffer.manyDigits },
+    );
     setPasteOffer(null);
   };
 
@@ -1147,32 +1192,50 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
       )}
 
       {pasteOffer !== null && (
-        <div className="absolute top-1 right-3 z-30 flex items-center gap-3 rounded-lg bg-surface px-2 py-1 shadow-md ring-1 ring-separator">
-          <span className="text-regular font-medium">Paste Special</span>
+        <div className="absolute top-1 right-3 z-30 flex flex-col gap-1 rounded-lg bg-surface px-2 py-1 shadow-md ring-1 ring-separator">
+          <div className="flex items-center gap-3">
+            <span className="text-regular font-medium">Paste Special</span>
+            <label className="flex items-center gap-1 text-regular">
+              <input
+                type="radio"
+                name="paste-special"
+                checked={!pasteOffer.transpose}
+                onChange={() => setPasteOffer({ ...pasteOffer, transpose: false })}
+              />
+              Values
+            </label>
+            <label className="flex items-center gap-1 text-regular">
+              <input
+                type="radio"
+                name="paste-special"
+                checked={pasteOffer.transpose}
+                onChange={() => setPasteOffer({ ...pasteOffer, transpose: true })}
+              />
+              Transpose
+            </label>
+            <Button variant="accent" size="small" onClick={confirmPasteSpecial}>
+              Paste
+            </Button>
+            <IconButton aria-label="Close Paste Special" onClick={() => setPasteOffer(null)}>
+              <XIcon />
+            </IconButton>
+          </div>
           <label className="flex items-center gap-1 text-regular">
             <input
-              type="radio"
-              name="paste-special"
-              checked={!pasteOffer.transpose}
-              onChange={() => setPasteOffer({ ...pasteOffer, transpose: false })}
+              type="checkbox"
+              checked={pasteOffer.manyDigits}
+              onChange={(e) => setPasteOffer({ ...pasteOffer, manyDigits: e.target.checked })}
             />
-            Values
+            Paste as many digits as possible. If Excel rounds to 1.23 paste 1.23456.
           </label>
           <label className="flex items-center gap-1 text-regular">
             <input
-              type="radio"
-              name="paste-special"
-              checked={pasteOffer.transpose}
-              onChange={() => setPasteOffer({ ...pasteOffer, transpose: true })}
+              type="checkbox"
+              checked={pasteOffer.olderTextFormat}
+              onChange={(e) => setPasteOffer({ ...pasteOffer, olderTextFormat: e.target.checked })}
             />
-            Transpose
+            Paste older text-based clipboard format. Not recommended.
           </label>
-          <Button variant="accent" size="small" onClick={confirmPasteSpecial}>
-            Paste
-          </Button>
-          <IconButton aria-label="Close Paste Special" onClick={() => setPasteOffer(null)}>
-            <XIcon />
-          </IconButton>
         </div>
       )}
       <CreateSeriesDialog open={series !== null} target={seriesTarget} onClose={() => setSeries(null)} onGenerate={runSeries} />
