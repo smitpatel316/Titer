@@ -7,8 +7,9 @@ import type { SummaryFormat } from "../lib/summary-format";
 import type { CellBackgroundColor } from "../lib/cell-colors";
 import type { PluginParamValues } from "../plugins/parameters";
 import type { PluginAnalysisResult } from "../plugins/registry";
+import type { FlowSampleRef } from "../flow/sample";
 
-export type NodeType = "table" | "analysis" | "graph" | "figure" | "info";
+export type NodeType = "table" | "analysis" | "graph" | "figure" | "info" | "sample";
 /** What an item is, as menus name it ("Delete Graph…"). */
 export const NODE_NAMES: Record<NodeType, string> = {
   table: "Table",
@@ -16,6 +17,7 @@ export const NODE_NAMES: Record<NodeType, string> = {
   graph: "Graph",
   figure: "Figure",
   info: "Info Sheet",
+  sample: "Sample",
 };
 export type TableType = "column" | "xy" | "grouped" | "nested" | "multiple" | "contingency" | "survival" | "parts-of-whole";
 /** Tables whose first data column is X (a Survival table's is the time). */
@@ -1096,6 +1098,17 @@ export interface ProjectNode {
   dpi?: Resolution;
   /** Info sheet nodes only: its constants, notes, and linked table. */
   info?: InfoSheetData;
+  /** Flow sample nodes only (seq 441): the sample's reference — the FCS
+   *  file path, parameter metadata, and placeholders for compensation,
+   *  transforms and gating. Event data NEVER lives here (see
+   *  `src/flow/sample.ts`); the events live in the columnar store.
+   *  Omitted on every other kind. */
+  flowSample?: FlowSampleRef;
+  /** Flow-derived nodes only (seq 441): the sample ids a summary table or
+   *  population-stats analysis was derived from, so the link back to the
+   *  event store stays explicit. Omitted when the node derives from no
+   *  sample. */
+  flowSourceSampleIds?: string[];
 }
 
 /** One panel of a multi-panel figure: a reference to an existing graph node,

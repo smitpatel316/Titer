@@ -19,6 +19,9 @@ import {
   type RQueueSnapshot,
 } from "../src/stats/r-queue";
 import { PARAM_KEYS_BY_ANALYSIS, parseProjectFile, parseProjectText, readPalette, serializeProjectFile, validateAnalysisParams, type ProjectFilePayload } from "../src/lib/project-file";
+import { createSampleNode, isSampleNode, readFlowSample, type FlowSampleRef } from "../src/flow/sample";
+import { InMemoryFlowStore, createFlowStore, isFlowEnabled } from "../src/flow/store";
+import { buildExperimentSummaryTable, buildSampleSummaryTable, createSummaryTableNode } from "../src/flow/summary";
 import {
   canRevertToSaved,
   diskChangedExternally,
@@ -311,7 +314,7 @@ import { FLOW_FIXTURE_PARAMS, FLOW_FIXTURE_SAMPLE_ID, generateFixtureSample, loa
 import { bin2D, downsampleIndices, FLOW_SCATTER_CAP, histogram1D, pointDensities, smoothGrid } from "../src/flow/density";
 import { getColumn, listSamples, sampleStats, unloadSample } from "../src/flow/store";
 import { buildFlowContourPlot, buildFlowDensityPlot, buildFlowDotPlot, buildFlowHistogram, buildFlowPseudocolorPlot } from "../src/flow/viewer";
-import { isFlowEnabled } from "../src/flow/feature-flag";
+import { isFlowEnabled as isFlowPickerEnabled } from "../src/flow/feature-flag";
 import { evaluate as evaluateFittedCurve } from "../src/views/graphs/fitted-curve";
 import { addSchildPlot, schildPlotPoints } from "../src/views/graphs/schild-plot";
 import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay";
@@ -40900,7 +40903,7 @@ check("flow-f1b: density-plot viewer (dot / density / contour / pseudocolor / hi
   for (const t of ["flow-dot-plot", "flow-density-plot", "flow-contour-plot", "flow-pseudocolor-plot", "flow-histogram"] as const) {
     ok(t in GRAPHS, `${t} is registered`);
   }
-  ok(!isFlowEnabled(), "flow is off by default");
+  ok(!isFlowPickerEnabled(), "flow is off by default");
   for (const list of Object.values(GRAPH_OPTIONS_BY_TABLE)) {
     ok(!list.some((o) => o.value.startsWith("flow-")), "no picker offers a flow graph while flow is off");
   }
@@ -40918,6 +40921,169 @@ check("flow-f1b: density-plot viewer (dot / density / contour / pseudocolor / hi
   ok(!/from "\.\.\//.test(viewerSrc), "viewer.ts imports nothing outside src/flow");
   ok(!/\b(TableData|readTable)\b/.test(viewerSrc), "viewer.ts never touches the table grid");
   loadFixtureSample(20000, 42);
+});
+
+
+check("flow-f1a: columnar event store loads synthetic FCS-like data, stats + summary bridge round-trip, and events never reach the .hlx JSON", async () => {
+  // Synthetic FCS-like dataset: 3 parameters, 5 events. One column carries
+  // a sentinel value (987654.321) that must never appear in a saved file.
+  const store = new InMemoryFlowStore({ budgetBytes: 1024 * 1024 });
+  const info = await store.loadSample(
+    "s1",
+    [
+      Float32Array.from([100, 200, 300, 400, 987654.321]),
+      Float32Array.from([10, 20, 30, 40, 50]),
+      Float32Array.from([0.5, 1.5, 2.5, 3.5, 4.5]),
+    ],
+    ["FSC-A", "SSC-A", "CD4"],
+    { name: "Sample 1", sourcePath: "sample1.fcs" },
+  );
+  strictEqual(info.eventCount, 5);
+  strictEqual(info.parameterCount, 3);
+  strictEqual(info.sampleId, "s1");
+  // Columns read back verbatim; unknown sample / parameter reads as null.
+  deepStrictEqual(Array.from((await store.getColumn("s1", "CD4"))!), [0.5, 1.5, 2.5, 3.5, 4.5]);
+  strictEqual(await store.getColumn("s1", "Nope"), null);
+  strictEqual(await store.getColumn("missing", "CD4"), null);
+  // Stats: event count + per-parameter min/max/mean over the finite values.
+  const stats = (await store.sampleStats("s1"))!;
+  strictEqual(stats.eventCount, 5);
+  strictEqual(stats.params[0].name, "FSC-A");
+  strictEqual(stats.params[0].min, 100);
+  ok(Math.abs((stats.params[0].max ?? 0) - 987654.3125) < 0.01, "f32 sentinel reads back as f32");
+  strictEqual(stats.params[1].min, 10);
+  strictEqual(stats.params[1].max, 50);
+  strictEqual(stats.params[1].mean, 30);
+  strictEqual(stats.params[2].min, 0.5);
+  strictEqual(stats.params[2].max, 4.5);
+  strictEqual(stats.params[2].mean, 2.5);
+  // Mismatched column lengths and duplicate parameter names are refused.
+  await rejects(store.loadSample("bad", [Float32Array.from([1, 2]), Float32Array.from([1])], ["A", "B"]));
+  await rejects(store.loadSample("bad", [Float32Array.from([1]), Float32Array.from([1])], ["A", "A"]));
+  // LRU: a tiny budget evicts the least-recently-used sample, never the one just loaded.
+  const tiny = new InMemoryFlowStore({ budgetBytes: 80 });
+  await tiny.loadSample("a", [Float32Array.from([1, 2, 3, 4, 5])], ["FSC-A"]); // 20 B
+  await tiny.loadSample("b", [Float32Array.from([1, 2, 3, 4, 5])], ["FSC-A"]); // 20 B
+  await tiny.loadSample("c", [Float32Array.from([1, 2, 3, 4, 5])], ["FSC-A"]); // 20 B
+  await tiny.loadSample("d", [Float32Array.from([1, 2, 3, 4, 5])], ["FSC-A"]); // 20 B → 80 B, fits
+  await tiny.loadSample("e", [Float32Array.from([1, 2, 3, 4, 5])], ["FSC-A"]); // 100 B → evicts "a"
+  deepStrictEqual(
+    (await tiny.listSamples()).map((s) => s.sampleId),
+    ["b", "c", "d", "e"],
+  );
+  strictEqual(await tiny.sampleStats("a"), null);
+  strictEqual(await tiny.unloadSample("b"), true);
+  strictEqual(await tiny.unloadSample("b"), false);
+  strictEqual((await tiny.listSamples()).length, 3);
+  // The summary bridge turns store stats into an ordinary table shape.
+  const ref: FlowSampleRef = {
+    sampleId: "s1",
+    sourcePath: "sample1.fcs",
+    sourceKind: "fcs",
+    name: "Sample 1",
+    eventCount: 5,
+    parameters: [{ name: "FSC-A" }, { name: "SSC-A" }, { name: "CD4" }],
+  };
+  const table = buildSampleSummaryTable(ref, stats);
+  deepStrictEqual(table.columns, [
+    "Sample",
+    "Events",
+    "FSC-A min",
+    "FSC-A max",
+    "FSC-A mean",
+    "SSC-A min",
+    "SSC-A max",
+    "SSC-A mean",
+    "CD4 min",
+    "CD4 max",
+    "CD4 mean",
+  ]);
+  strictEqual(table.rows.length, 1);
+  strictEqual(table.rows[0][0], "Sample 1");
+  strictEqual(table.rows[0][1], "5");
+  strictEqual(table.rows[0][2], "100");
+  strictEqual(table.rows[0][5], "10");
+  strictEqual(table.rows[0][8], "0.5");
+  // A multi-sample table unions the parameters; a sample without one reads null there.
+  const ref2: FlowSampleRef = {
+    sampleId: "s2",
+    sourcePath: "sample2.fcs",
+    sourceKind: "fcs",
+    name: "Sample 2",
+    eventCount: 2,
+    parameters: [{ name: "FSC-A" }, { name: "CD8" }],
+  };
+  const stats2 = { sampleId: "s2", eventCount: 2, params: [
+    { name: "FSC-A", count: 2, min: 1, max: 3, mean: 2 },
+    { name: "CD8", count: 2, min: 7, max: 9, mean: 8 },
+  ] };
+  const experiment = buildExperimentSummaryTable([
+    { ref, stats },
+    { ref: ref2, stats: stats2 },
+  ]);
+  strictEqual(experiment.rows.length, 2);
+  ok(experiment.columns.includes("CD8 min"), "union keeps a parameter only one sample has");
+  strictEqual(experiment.rows[0][experiment.columns.indexOf("CD8 min")], null);
+  strictEqual(experiment.rows[1][experiment.columns.indexOf("CD8 min")], "7");
+  const summaryNode = createSummaryTableNode("t1", "Flow summary", table, ["s1"]);
+  strictEqual(summaryNode.type, "table");
+  strictEqual(summaryNode.tableType, "column");
+  deepStrictEqual(summaryNode.flowSourceSampleIds, ["s1"]);
+  deepStrictEqual(summaryNode.data, table);
+  // The .hlx round-trip: the sample node serializes with its metadata, the
+  // events never reach the file, and the node reads back as a sample. The
+  // node id and the sample id are the same by convention (seq 441), so the
+  // node takes the sample's id.
+  const node = createSampleNode("s1", "Sample 1", ref);
+  ok(isSampleNode(node));
+  strictEqual(node.parentId, null);
+  const payload: ProjectFilePayload = {
+    nodes: { s1: node },
+    rootOrder: ["s1"],
+    childOrder: {},
+    activeNodeId: "s1",
+  };
+  const text = serializeProjectFile(payload);
+  ok(text.includes("flowSample"), "metadata is in the file");
+  ok(text.includes("FSC-A"), "parameter names are in the file");
+  ok(!text.includes("987654"), "no event value reaches the .hlx JSON");
+  const back = parseProjectFile(JSON.parse(text));
+  if ("error" in back) throw new Error(back.error);
+  const backNode = back.project.nodes.s1;
+  ok(isSampleNode(backNode), "a sample node reads back as a sample");
+  deepStrictEqual(backNode.flowSample, ref);
+  strictEqual("data" in backNode, false, "a sample node carries no table data");
+  // Forgiving reads: wrong types fall back, bad parameters are dropped, and
+  // fields this version doesn't know survive the round-trip.
+  const forgiving = readFlowSample({
+    sampleId: "x",
+    sourcePath: 42,
+    sourceKind: "weird",
+    eventCount: "many",
+    parameters: [{ name: "FSC-A", bits: "16" }, { name: 7 }, "junk"],
+    extraFutureField: "keep me",
+  });
+  ok(forgiving);
+  strictEqual(forgiving!.sourcePath, "");
+  strictEqual(forgiving!.sourceKind, "fcs");
+  strictEqual(forgiving!.eventCount, 0);
+  deepStrictEqual(forgiving!.parameters, [{ name: "FSC-A" }]);
+  strictEqual((forgiving as unknown as Record<string, unknown>).extraFutureField, "keep me");
+  strictEqual(readFlowSample({ parameters: [] }), null, "a sample with no parameters is dropped");
+  strictEqual(readFlowSample("junk"), null);
+  // The committed sidecar fixture parses as the documented TFCS format.
+  const fixture = readFileSync("tests/testdata/flow-sample-1.tfcs");
+  strictEqual(fixture.subarray(0, 4).toString("ascii"), "TFCS");
+  strictEqual(fixture.readUInt32LE(4), 3, "3 parameters");
+  strictEqual(fixture.readUInt32LE(8), 8, "8 events");
+  strictEqual(fixture.length, 12 + 3 * 8 * 4);
+  // The flow module is off by default, and the factory falls back to the
+  // in-memory store outside the Tauri shell (tests, web dev).
+  strictEqual(isFlowEnabled(), false);
+  const fallback = createFlowStore();
+  ok(fallback instanceof InMemoryFlowStore, "no Tauri shell → in-memory store");
+  await fallback.loadSample("w", [Float32Array.from([1, 2])], ["FSC-A"]);
+  strictEqual((await fallback.sampleStats("w"))!.eventCount, 2);
 });
 
 
