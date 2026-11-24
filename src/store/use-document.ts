@@ -1289,6 +1289,11 @@ export function useDocument() {
         }
         return;
       }
+      // The offer is a plain overlay (seq 397), not a top-layer <dialog> —
+      // a Welcome dialog open over it would hide it, so the offer closes
+      // Welcome first. A file window never auto-shows Welcome, but the
+      // 500 ms auto-show can race a slow CLI/MCP opening and leave it open.
+      setWelcomeOpen(false);
       setBackupRecovery({ identity: backupId, entry });
     })();
   }, [backupId, openingSettled]);
