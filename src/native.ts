@@ -198,6 +198,20 @@ export async function copyPngToClipboard(png: Uint8Array): Promise<void> {
   await invoke<void>("copy_png_to_clipboard", { pngPath });
 }
 
+/** Reads the clipboard's text and HTML forms natively on macOS (seq 439):
+ *  `pbpaste` for the plain text, `pbpaste -Prefer html` for the HTML table
+ *  (`read_clipboard_formats` in main.rs). Paste Special's menu-bar entry
+ *  carries no page activation, so the webview's `navigator.clipboard.read()`
+ *  can never succeed from it — the shell read is the only path that works
+ *  there. Returns null when the clipboard holds neither form. Throws on
+ *  non-macOS, where the caller falls back to the webview read. */
+export async function readClipboardFormats(): Promise<{ text: string; html: string | null } | null> {
+  if (!isMacOs()) throw new Error("Reading the clipboard this way needs macOS.");
+  const clip = await invoke<{ text: string | null; html: string | null }>("read_clipboard_formats");
+  if (clip.text === null && clip.html === null) return null;
+  return { text: clip.text ?? "", html: clip.html };
+}
+
 /** My Palettes' file in Titer's data folder: its text ("" before the first), and a new one. */
 export const readMyPalettes = () => invoke<string>("read_my_palettes");
 export const writeMyPalettes = (text: string) => invoke("write_my_palettes", { text });

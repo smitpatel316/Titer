@@ -822,6 +822,64 @@ fn copy_png_to_clipboard_blocking(png_path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The clipboard's text and HTML forms, for Paste Special (seq 439).
+/// `html` is the HTML-table flavour Excel writes (its `x:num` attributes
+/// carry the full-precision values); `None` when the clipboard holds no
+/// HTML. Both `None` means the clipboard holds neither — nothing to paste.
+#[derive(Serialize)]
+struct ClipboardFormats {
+    text: Option<String>,
+    html: Option<String>,
+}
+
+/// Read the clipboard's text and HTML forms (seq 439): the menu-bar entry
+/// to Paste Special carries no page activation, so the webview's
+/// `navigator.clipboard.read()` can never succeed from it — for real
+/// users as well as synthetic input. The shell reads the pasteboard
+/// directly instead, mirroring the seq 296 write workaround
+/// (`copy_png_to_clipboard`): on macOS `pbpaste` gives the plain text and
+/// `pbpaste -Prefer html` the HTML flavour. A flavour that isn't there is
+/// `None`, not an error — only a clipboard with neither form is
+/// "nothing to paste", which the page reports as such. Async, on the
+/// blocking pool: process spawn can block. macOS only — anywhere else
+/// this refuses outright, before touching anything, and the page falls
+/// back to the webview read.
+#[tauri::command]
+async fn read_clipboard_formats() -> Result<ClipboardFormats, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        return Err("Reading the clipboard this way needs macOS — this build cannot read the system clipboard.".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        tokio::task::spawn_blocking(read_clipboard_formats_blocking)
+            .await
+            .map_err(|e| e.to_string())?
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn read_clipboard_formats_blocking() -> Result<ClipboardFormats, String> {
+    /// One pasteboard flavour via pbpaste; a flavour that isn't there
+    /// (non-zero exit, or empty output) is None, not an error.
+    fn flavour(args: &[&str]) -> Option<String> {
+        let out = std::process::Command::new("pbpaste").args(args).output().ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
+        }
+    }
+    Ok(ClipboardFormats {
+        text: flavour(&[]),
+        html: flavour(&["-Prefer", "html"]),
+    })
+}
+
 // ── My Palettes ──────────────────────────────────────────────────────────
 // The palettes made on this Mac, for every project and window: JSON in Titer's data
 // folder, read and checked by the page (src/store/my-palettes.ts).
@@ -1764,6 +1822,7 @@ fn main() {
             move_file,
             send_to_keynote,
             copy_png_to_clipboard,
+            read_clipboard_formats,
             read_my_palettes,
             write_my_palettes,
             backup_write,
