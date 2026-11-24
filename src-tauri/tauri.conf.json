@@ -50,11 +50,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": ["app", "dmg", "nsis"],
     "externalBin": ["binaries/titer-stdio-bridge"],
     "category": "Education",
     "copyright": "© 2026 mickaphd",
-    "icon": ["icons/icon.png", "icons/icon.icns"],
+    "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"],
     "resources": {
       "../samples/Titer Sample.hlx": "Titer Sample.hlx",
       "../LICENSE": "LICENSE",

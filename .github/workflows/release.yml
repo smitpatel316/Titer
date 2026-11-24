@@ -1,13 +1,20 @@
 # Verifies a release tag builds: pushing a version tag (v1.1.0) runs the
-# checks, then builds the two DMGs (Apple Silicon, Intel) on GitHub's Macs.
-# This is a BUILD CHECK ONLY — it creates no release and uploads no assets.
-# Releases ship from the Mac: build-mac-dmg.sh builds the DMGs, and
-# publish-v1.2.py publishes them to the update channel (R2) and GitHub.
+# checks, then builds the two DMGs (Apple Silicon, Intel) on GitHub's Macs
+# and the Windows NSIS installer on GitHub's Windows runner.
+# This is a BUILD CHECK ONLY — it creates no release and uploads no assets
+# to any release. The Windows installer is kept as a workflow artifact;
+# the release coordinator downloads it and uploads it to the GitHub
+# release (see helix-release/github-upload.py). Releases ship from the
+# Mac: build-mac-dmg.sh builds the DMGs, and publish-v1.2.py publishes
+# them to the update channel (R2) and GitHub.
 # The in-app updater is hand-rolled (src-tauri/src/updater.rs: it verifies
 # the download's sha256 against the channel manifest), NOT the Tauri updater
 # plugin — so there is no plugins.updater config and no Tauri signing key.
 # (An earlier version of this file asked Tauri to create updater artifacts,
 # which failed every build because the updater plugin config doesn't exist.)
+# Windows is download-only (Smit, Nov 23): no Windows testing or proof
+# gate, and a Windows build failure never gates a Mac release — the Mac
+# jobs run independently of the windows job.
 name: Release
 
 on:
@@ -67,3 +74,75 @@ jobs:
         with:
           tauriScript: npx tauri
           args: --target ${{ matrix.target }}
+
+  windows:
+    # Windows NSIS installer, download-only (Smit, Nov 23): no Windows
+    # testing or proof gate. Builds after the Mac check job passes, on
+    # GitHub's Windows runner — Tauri Windows builds need Windows.
+    # The installer is kept as a workflow artifact; the release
+    # coordinator downloads it and uploads it to the GitHub release
+    # (helix-release/github-upload.py). No signing: the NSIS installer
+    # ships unsigned, same as the DMGs. Runs independently of the Mac
+    # build job, so a Windows failure never gates a Mac release.
+    needs: check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      # build-webr-repo.sh calls `python3`; the Windows runner image
+      # normally provides it, but fail fast with a clear message (and
+      # shim it from python) instead of dying deep inside the script.
+      - name: Ensure python3 on PATH
+        shell: bash
+        run: |
+          if ! command -v python3 >/dev/null 2>&1; then
+            PY="$(command -v python)"
+            cp "$PY" "$(dirname "$PY")/python3.exe"
+          fi
+          python3 --version
+      # PACKAGES.rds needs real R on Windows: the .mjs generator runs R in
+      # WASM via webR, and webR 0.6.0 cannot initialise under Node on
+      # Windows (its worker dynamic-imports a bare drive-letter path and
+      # Node's ESM loader rejects it: "Received protocol 'd:'").
+      # The repo-build step below prefers Rscript when it is on PATH.
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+      # Same as the Mac build job: the vendored repo is gitignored, so
+      # build it before tauri-action (whose beforeBuildCommand is
+      # `vite build`, which copies webr-repo/ into dist/ only when it
+      # exists). Git Bash on the runner provides curl/gzip/md5sum.
+      - name: Build vendored webR repo
+        shell: bash
+        run: ./scripts/build-webr-repo.sh
+      # stdio-bridge sidecar: Tauri's externalBin bundles whatever binary
+      # sits in src-tauri/binaries/ — rebuild from current source before
+      # every tauri build, and fail hard if staging is missing.
+      - name: Build stdio-bridge for Windows
+        shell: bash
+        run: |
+          ./scripts/build-stdio-bridge.sh --target x86_64-pc-windows-msvc
+          [ -f "src-tauri/binaries/titer-stdio-bridge-x86_64-pc-windows-msvc.exe" ] || { echo "ERROR: stdio-bridge for Windows not staged" >&2; exit 1; }
+      # Build only — no release is created here (see the header comment).
+      # NO signing in CI. The NSIS installer downloads the WebView2
+      # runtime at install time if the machine lacks it.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: npx tauri
+          args: --target x86_64-pc-windows-msvc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: titer-windows-installer
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: error

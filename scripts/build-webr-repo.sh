@@ -30,15 +30,31 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-MANIFEST_JSON="$ROOT/scripts/webr-repo-manifest.json"
 OUT="$ROOT/webr-repo"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-R_VERSION="$(python3 -c "import json;print(json.load(open('$MANIFEST_JSON'))['r'])")"
+# Windows (Git Bash on the CI runner): python3 and node are Windows-native
+# and cannot open MSYS POSIX paths (/d/...) when the path is embedded in
+# code (python -c) or passed through stdin — MSYS only converts direct
+# argv paths. Convert once for every python/node invocation; bash, curl
+# and gzip keep using the POSIX form. Forward slashes throughout: a
+# backslash path embedded in a python string literal would eat escapes
+# (D:\a\... reads \a as BEL) — Windows accepts forward slashes everywhere.
+if command -v cygpath >/dev/null 2>&1; then
+  PYROOT="$(cygpath -w "$ROOT" | tr '\\' '/')"
+  PYTMP="$(cygpath -w "$TMP" | tr '\\' '/')"
+else
+  PYROOT="$ROOT"
+  PYTMP="$TMP"
+fi
+PYMANIFEST="$PYROOT/scripts/webr-repo-manifest.json"
+PYOUT="$PYROOT/webr-repo"
+
+R_VERSION="$(python3 -c "import json;print(json.load(open('$PYMANIFEST'))['r'])")"
 # The repo layout uses major.minor (4.6), not the full R version (4.6.0).
 R_MAJOR_MINOR="${R_VERSION%.*}"
-REPO_URL="$(python3 -c "import json;print(json.load(open('$MANIFEST_JSON'))['repo'])")"
+REPO_URL="$(python3 -c "import json;print(json.load(open('$PYMANIFEST'))['repo'])")"
 echo "repo: $REPO_URL (R $R_VERSION)"
 
 mkdir -p "$OUT"
@@ -51,7 +67,8 @@ echo "index: $(wc -c < "$TMP/PACKAGES.full") bytes"
 # and MANIFEST.json. The Python step is the whole index operation: DCF
 # parsing, closure over Depends/Imports/LinkingTo (base R packages excluded
 # — they ship inside R.wasm), MD5 verification, trimmed PACKAGES.
-python3 - "$MANIFEST_JSON" "$TMP/PACKAGES.full" "$REPO_URL" "$CONTRIB" "$OUT" <<'PYEOF'
+PYCONTRIB="$PYOUT/bin/emscripten/contrib/$R_MAJOR_MINOR"
+python3 - "$PYMANIFEST" "$PYTMP/PACKAGES.full" "$REPO_URL" "$PYCONTRIB" "$PYOUT" <<'PYEOF'
 import gzip, hashlib, json, os, re, subprocess, sys, urllib.request
 
 manifest_path, index_path, repo_url, out_dir, repo_root = sys.argv[1:6]
@@ -179,7 +196,21 @@ echo "... ($(ls "$OUT" | wc -l) files)"
 # fails, so a repo without it wastes a failed fetch — plus a warning — on
 # the first install of every session. The upstream repo ships a PACKAGES.rds
 # but it indexes the whole repo (~20k packages); ours must index exactly the
-# vendored closure, so scripts/build-webr-repo-rds.mjs generates it from the
-# .tgz files with tools::write_PACKAGES (run in webR — Hatch has no desktop
-# R) and verifies it round-trips. Needs node + the repo's node_modules.
-node "$ROOT/scripts/build-webr-repo-rds.mjs" "$CONTRIB"
+# vendored closure, so it is generated here from the .tgz files with
+# tools::write_PACKAGES and verified to round-trip. Prefer real R when it is
+# installed (Rscript on PATH); otherwise R runs in WASM via webR
+# (scripts/build-webr-repo-rds.mjs, needs node + the repo's node_modules).
+# Real R is REQUIRED on Windows: webR 0.6.0 cannot initialise under Node
+# there — its worker loads R.js via import(path.resolve(baseUrl + "R.js"))
+# and Node's ESM loader rejects a bare Windows drive-letter path
+# ("Received protocol 'd:'"). No baseUrl spelling fixes it: path.resolve
+# always returns a bare drive-letter path, and a file:// baseUrl breaks
+# both Node's Worker constructor (ERR_WORKER_PATH) and webR's path.resolve
+# call. The Windows CI job installs R (r-lib/actions/setup-r) so this
+# branch takes the Rscript path; Hatch and Mac have no desktop R, so they
+# keep the .mjs path.
+if command -v Rscript >/dev/null 2>&1; then
+  Rscript "$PYROOT/scripts/build-webr-repo-rds.R" "$PYCONTRIB"
+else
+  node "$PYROOT/scripts/build-webr-repo-rds.mjs" "$PYCONTRIB"
+fi
