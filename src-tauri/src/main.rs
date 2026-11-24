@@ -282,7 +282,7 @@ fn choose_prism_file(app: AppHandle, window: WebviewWindow) {
 }
 
 /// File ▸ Import Data File…: the Open panel for a data file (`.csv`,
-/// `.tsv`, `.txt` or `.xlsx`).
+/// `.tsv`, `.txt`, `.dat`, `.prn` or `.xlsx`).
 /// Non-blocking, like choose_prism_file (a blocking picker deadlocked the
 /// app Nov 9): the event carries the path, or null on Cancel, so the page
 /// can unsubscribe either way.
@@ -292,7 +292,7 @@ fn choose_data_file(app: AppHandle, window: WebviewWindow) {
     app.dialog()
         .file()
         .set_title("Import Data File")
-        .add_filter("Data File", &["csv", "tsv", "txt", "xlsx"])
+        .add_filter("Data File", &["csv", "tsv", "txt", "dat", "prn", "xlsx"])
         .pick_file(move |file| {
             let picked = file.and_then(|file| file.into_path().ok()).map(|path| path.to_string_lossy().into_owned());
             let _ = app.emit_to(label.as_str(), "data-file-picked", picked);
@@ -591,13 +591,13 @@ async fn read_prism_bytes(path: String) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
-/// A data file's (`.csv`, `.tsv`, `.txt`) text, for import. Only those —
+/// A data file's (`.csv`, `.tsv`, `.txt`, `.dat`, `.prn`) text, for import. Only those —
 /// `.xlsx` goes through `read_data_bytes` (a ZIP, so text won't do), and
 /// project files (`.hlx`, `.pzt`, `.pzm`) through `read_text`. Async, like
 /// `read_text` (seq 248): a TCC-blocked read must never park the main thread.
 #[tauri::command]
 async fn read_data_text(path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || read_text_with_bom(path, &["csv", "tsv", "txt"]))
+    tokio::task::spawn_blocking(move || read_text_with_bom(path, &["csv", "tsv", "txt", "dat", "prn"]))
         .await
         .map_err(|e| e.to_string())?
 }

@@ -1336,7 +1336,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
     }
     case "import-data-file": {
       // seq 155 MCP coverage: import a data file (.csv / .tsv / .txt /
-      // .xlsx) as a NEW table in this project — the same parsers as
+      // .dat / .prn / .xlsx) as a NEW table in this project — the same parsers as
       // File ▸ Import Data File…, minus the dialog. Unlike the UI, it
       // never appends to the active table: MCP never prompts, so the
       // append choice can't be asked — the import always makes a table.
@@ -1345,10 +1345,10 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       const name = argOptString(job, job.args, "name");
       if (name !== undefined && !name.trim()) throw jobErr(job, "needs a non-empty name.");
       const ext = path.split(/[\\/]/).pop()?.split(".").pop()?.toLowerCase() ?? "";
-      if (ext !== "csv" && ext !== "tsv" && ext !== "txt" && ext !== "xlsx") {
+      if (ext !== "csv" && ext !== "tsv" && ext !== "txt" && ext !== "dat" && ext !== "prn" && ext !== "xlsx") {
         throw jobErr(
           job,
-          `“${fileName(path)}” is not a data file — import a .csv, .tsv, .txt or .xlsx file.`,
+          `“${fileName(path)}” is not a data file — import a .csv, .tsv, .txt, .dat, .prn or .xlsx file.`,
         );
       }
       const io = deps.io ?? defaultDocumentIo;

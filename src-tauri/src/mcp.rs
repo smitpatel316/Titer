@@ -2255,8 +2255,8 @@ fn data_file_format(path: &str) -> Result<(), String> {
         .map(str::to_ascii_lowercase)
         .unwrap_or_default();
     match ext.as_str() {
-        "csv" | "tsv" | "txt" | "xlsx" => Ok(()),
-        _ => Err(format!("“{path}” is not a data file — import a .csv, .tsv, .txt or .xlsx file.")),
+        "csv" | "tsv" | "txt" | "dat" | "prn" | "xlsx" => Ok(()),
+        _ => Err(format!("“{path}” is not a data file — import a .csv, .tsv, .txt, .dat, .prn or .xlsx file.")),
     }
 }
 
@@ -2759,14 +2759,14 @@ pub struct OpenProjectArgs {
     pub path: String,
 }
 
-/// A local data file to import as a table (.csv, .tsv, .txt or .xlsx).
+/// A local data file to import as a table (.csv, .tsv, .txt, .dat, .prn or .xlsx).
 /// Never a URL.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ImportDataFileArgs {
     /// Window label of the project ("project-1"); omit for the front project.
     #[serde(default)]
     pub project_id: Option<String>,
-    /// A local file path (.csv, .tsv, .txt or .xlsx). Never a URL.
+    /// A local file path (.csv, .tsv, .txt, .dat, .prn or .xlsx). Never a URL.
     pub path: String,
     /// The new table's name. Omit to name it for the file.
     #[serde(default)]
@@ -5718,7 +5718,7 @@ impl TiterMcpServer {
         }
     }
 
-    /// Import a data file (`.csv` / `.tsv` / `.txt` / `.xlsx`) as a new
+    /// Import a data file (`.csv` / `.tsv` / `.txt` / `.dat` / `.prn` / `.xlsx`) as a new
     /// table in the open project — the same parsers as File ▸ Import Data
     /// File…, minus the dialog. Always makes a new table, never appends
     /// to the active table (MCP never prompts, so the append choice can't
@@ -5727,7 +5727,7 @@ impl TiterMcpServer {
     /// assumptions (header row, row titles, skipped sheets).
     #[tool(
         name = "titer_import_data_file",
-        description = "Import a data file (.csv, .tsv, .txt or .xlsx) as a new table in the open project — the same parsers as File ▸ Import Data File…, minus the dialog. Always makes a new table, never appends to the active table (MCP never prompts, so the append choice can't be asked). The table is named for the file (or name), numbered when a table already has it. notes carries the importer's assumptions (header row, row titles, skipped sheets).",
+        description = "Import a data file (.csv, .tsv, .txt, .dat, .prn or .xlsx) as a new table in the open project — the same parsers as File ▸ Import Data File…, minus the dialog. Always makes a new table, never appends to the active table (MCP never prompts, so the append choice can't be asked). The table is named for the file (or name), numbered when a table already has it. notes carries the importer's assumptions (header row, row titles, skipped sheets).",
         annotations(
             title = "Import data file",
             read_only_hint = false,

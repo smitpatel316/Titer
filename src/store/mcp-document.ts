@@ -60,7 +60,7 @@ export interface DocumentIo {
   readText: (path: string) => Promise<string>;
   readPrismText: (path: string) => Promise<string>;
   readPrismBytes: (path: string) => Promise<Uint8Array>;
-  /** A data file's (`.csv`, `.tsv`, `.txt`) text, for import. */
+  /** A data file's (`.csv`, `.tsv`, `.txt`, `.dat`, `.prn`) text, for import. */
   readDataText: (path: string) => Promise<string>;
   /** A data file's (`.xlsx`) bytes, for import — a ZIP, so text won't do. */
   readDataBytes: (path: string) => Promise<Uint8Array>;
