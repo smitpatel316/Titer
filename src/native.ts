@@ -807,7 +807,7 @@ export async function onPrismFilePicked(handler: (path: string | null) => void) 
 }
 
 /** File ▸ Import Data File…: the Open panel for a data file (`.csv`,
- *  `.tsv`, `.txt` or `.xlsx`). Non-blocking: the invoke returns at once,
+ *  `.tsv`, `.txt`, `.dat`, `.prn` or `.xlsx`). Non-blocking: the invoke returns at once,
  *  and the shell emits "data-file-picked" with the path, or null on Cancel,
  *  once the user picks. A blocking picker here deadlocked the app (Nov 9,
  *  macOS + Linux): it parked the main thread while the panel needed that
@@ -822,7 +822,7 @@ export async function onDataFilePicked(handler: (path: string | null) => void) {
   return getCurrentWebviewWindow().listen<string | null>("data-file-picked", ({ payload }) => handler(payload));
 }
 
-/** A data file's (`.csv`, `.tsv`, `.txt`) text, for import. */
+/** A data file's (`.csv`, `.tsv`, `.txt`, `.dat`, `.prn`) text, for import. */
 export const readDataText = (path: string) => invoke<string>("read_data_text", { path });
 
 /** A data file's (`.xlsx`) bytes, for import — an `.xlsx` file is a ZIP, so

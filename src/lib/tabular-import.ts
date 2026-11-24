@@ -1,11 +1,14 @@
-// Import delimited text (CSV / TXT) and Excel (.xlsx) files into Titer tables
+// Import delimited text (CSV / TXT / DAT / PRN) and Excel (.xlsx) files into Titer tables
 // (seq 155). Labs live in Excel/CSV; until now Titer could only take data by
 // typing or pasting, which is an onboarding wall.
 //
 // What maps where:
-//   CSV / TXT (delimited) → parsed with the same quoting rules Prism's
+//   CSV / TXT / DAT / PRN (delimited) → parsed with the same quoting rules Prism's
 //     data.csv reader uses (quoted fields, embedded commas, CRLF/LF), with
 //     the delimiter detected from the file (comma, tab, semicolon, pipe).
+//     A .prn export from Prism is tab-delimited; a .dat file is a text
+//     table the same shape. Neither carries a delimiter in its name, so
+//     tab is preferred for both and detection still finds the rest.
 //   XLSX → read with JSZip + a small targeted scan of the sheet XML (no
 //     dependency, so it runs in the app and in the tests alike): the first
 //     sheet only, shared strings, inline strings, booleans, numbers, and
@@ -26,7 +29,7 @@ import { parseCell } from "./numeric";
 import type { TableData, TableType } from "../store/types";
 
 /** The data-file extensions Titer imports (File ▸ Import Data File…, or a drop). */
-export const DATA_FILE_EXTENSIONS = ["csv", "tsv", "txt", "xlsx"] as const;
+export const DATA_FILE_EXTENSIONS = ["csv", "tsv", "txt", "dat", "prn", "xlsx"] as const;
 
 /** Whether `path` names a data file Titer imports. */
 export const isDataFilePath = (path: string): boolean => {
@@ -479,7 +482,7 @@ export function mergeIntoTable(existing: TableData, existingType: TableType, imp
 // ── One entry point ──────────────────────────────────────────────────────
 
 /** A file's contents as a table. `name` is the file's name (its extension
- *  picks the parser); `content` is its text (CSV/TXT) or bytes (.xlsx).
+ *  picks the parser); `content` is its text (CSV/TXT/DAT/PRN) or bytes (.xlsx).
  *  Throws a user-facing message when the file can't be read or holds no data. */
 export async function importTabularFile(name: string, content: string | Uint8Array): Promise<TabularTable> {
   const ext = name.toLowerCase().split(".").pop() ?? "";
@@ -501,7 +504,11 @@ export async function importTabularFile(name: string, content: string | Uint8Arr
   if (typeof content !== "string") throw new Error(`“${name}” couldn't be read as a text file.`);
   // The delimiter is detected even for .csv: a semicolon file (Excel in a
   // comma-decimal locale) still ends in .csv, and a comma file detects as
-  // comma anyway. Tab is preferred for .txt/.tsv, comma otherwise.
-  const delimiter = detectDelimiter(content, ext === "tsv" || ext === "txt" ? "\t" : ",");
+  // comma anyway. Tab is preferred for .txt/.tsv — and for .dat/.prn, which
+  // are the same text-table shape (a Prism .prn export is tab-delimited).
+  const delimiter = detectDelimiter(
+    content,
+    ext === "tsv" || ext === "txt" || ext === "dat" || ext === "prn" ? "\t" : ",",
+  );
   return rowsToTable(parseDelimited(content, delimiter), name);
 }

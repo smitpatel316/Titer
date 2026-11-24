@@ -35145,6 +35145,36 @@ check("import-155: the menu, picker, reader and drop route the new file types", 
   ok(!isDataFilePath("lab.pzfx") && !isDataFilePath("lab.hlx"), "extension match takes a non-data file");
 });
 
+// Seq 427 — .dat/.prn text data files (Prism guide "Importing text and
+// Excel files directly": .TXT/.DAT/.CSV/.PRN). A Prism .prn export is a
+// tab-delimited text table; a .dat file is the same shape (tab- or
+// space-delimited). Both go through the delimited-text parser, never the
+// .xlsx one.
+check("import-427: .dat and .prn files import as delimited text tables", async () => {
+  ok(isDataFilePath("assay.dat") && isDataFilePath("assay.PRN"), ".dat/.prn not recognised as data files");
+  const dat = await importTabularFile(
+    "assay.dat",
+    "Sample\tControl\tTreated\nS1\t1.5\t2.5\nS2\t1.7\t2.9\n",
+  );
+  strictEqual(dat.tableType, "column");
+  deepStrictEqual(dat.data.columns, ["Title", "Control", "Treated"]);
+  deepStrictEqual(dat.data.rows, [
+    ["S1", "1.5", "2.5"],
+    ["S2", "1.7", "2.9"],
+  ]);
+  const prn = await importTabularFile("assay.prn", "X\tResponse\n0\t1.1\n1\t2.2\n");
+  strictEqual(prn.tableType, "xy");
+  deepStrictEqual(prn.data.columns, ["Title", "X", "Response"]);
+  // The whole import path names the new types: web picker, native panel
+  // + text reader, and the MCP import gate.
+  const document = readFileSync("src/store/use-document.ts", "utf8");
+  ok(document.includes(".dat") && document.includes(".prn"), "web picker accept list misses .dat/.prn");
+  const shell = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(shell.includes('"dat"') && shell.includes('"prn"'), "native panel / text reader misses .dat/.prn");
+  const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
+  ok(dispatch.includes('ext !== "dat"') && dispatch.includes('ext !== "prn"'), "MCP import gate misses .dat/.prn");
+});
+
 // ── 1.8 seq 226: automatic backup ────────────────────────────────────────
 // Prism (FAQ 1520 + Prism 11 user guide, "Automatic back up of Prism
 // files"): backups are SEPARATE copies — written on a timer and/or on

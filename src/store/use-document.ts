@@ -2287,8 +2287,8 @@ export function useDocument() {
     return importDataContent(path, text);
   };
 
-  /** File ▸ Import Data File…: pick a data file (`.csv`, `.tsv`, `.txt`
-   *  or `.xlsx`) and import it as a table. In the web build (no native
+  /** File ▸ Import Data File…: pick a data file (`.csv`, `.tsv`, `.txt`,
+   *  `.dat`, `.prn` or `.xlsx`) and import it as a table. In the web build (no native
    *  shell) the pick is a file input instead. */
   const importData = async () => {
     if (native.isNative) {
@@ -2304,7 +2304,7 @@ export function useDocument() {
     const picked = await new Promise<{ name: string; data: ArrayBuffer | string } | null>((resolve) => {
       const input = document.createElement("input");
       input.type = "file";
-      input.accept = ".csv,.tsv,.txt,.xlsx";
+      input.accept = ".csv,.tsv,.txt,.dat,.prn,.xlsx";
       input.onchange = () => {
         const file = input.files?.[0];
         if (!file) return resolve(null);
@@ -2482,7 +2482,7 @@ export function useDocument() {
     if (paths.length > projects.length + methods.length + prism.length + data.length) {
       void native.alert(
         "Can't Open File",
-        "Titer can only open .hlx project files and .pzt templates, apply .pzm method files, and import .pzfx / .prism / .pzf Prism files and .csv / .tsv / .txt / .xlsx data files. To convert a Prism file without opening it, use File ▸ Convert….",
+        "Titer can only open .hlx project files and .pzt templates, apply .pzm method files, and import .pzfx / .prism / .pzf Prism files and .csv / .tsv / .txt / .dat / .prn / .xlsx data files. To convert a Prism file without opening it, use File ▸ Convert….",
       );
     }
     if (projects.length) openProjectsOrSay(projects);
