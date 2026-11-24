@@ -17,6 +17,7 @@ import { NODE_NAMES, type DrawingObjectKind, type GraphType, type NodeType, type
 import { TABLE_TYPE_OPTIONS } from "./views/tables";
 import { TABLE_DATA_EXPORT_FORMATS, exportTableData } from "./views/tables/table-data-export";
 import { analysisOptionsForTable, analysisOptionsKey } from "./views/analyses";
+import { pluginHasQuestions } from "./views/analyses/plugin-wizard";
 import { GRAPH_OPTIONS_BY_TABLE } from "./views/graphs";
 import { useStartAnalysis } from "./views/analyses/use-analysis-launcher";
 import { SECTIONS } from "./views/graphs/format-panel";
@@ -606,7 +607,10 @@ export function useAppMenu(doc: DocumentActions) {
             : []
           ).map((o) => ({
             // A test with questions asks before running: "…".
-            text: o.value === "transform" || WIZARDS[o.value] ? `${o.label}…` : o.label,
+            text:
+              o.value === "transform" || WIZARDS[o.value] || pluginHasQuestions(o.value)
+                ? `${o.label}…`
+                : o.label,
             action: run((l, id) => l.startAnalysis(id, o.value)),
           })),
           sep,

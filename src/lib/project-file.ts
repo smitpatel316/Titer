@@ -109,6 +109,7 @@ import { readInfoConstants } from "./info-sheets";
 import { TABLES } from "../views/tables";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 import { ANALYSES } from "../stats";
+import { parsePluginAnalysisId, type PluginParamValues } from "../plugins";
 import { isGrouped, isNested } from "./dataset";
 import { isSummaryFormatValue, summarySubcolumns } from "./summary-format";
 import { isDateUnit, isoDateOf, parseDateCell, type XColumnFormat, type XConversion } from "./date-time";
@@ -239,7 +240,7 @@ const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "proje
 // prettier-ignore
 const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1, transform: 1, notes: 1, tags: 1,
-  analysisType: 1, analysisParams: 1, cachedResult: 1, resultCellBackgrounds: 1, frozen: 1, orphaned: 1, sourceTableName: 1, orphanedDataSet: 1, graphType: 1, graphOptions: 1,
+  analysisType: 1, analysisParams: 1, pluginAnalysisId: 1, pluginAnalysisParams: 1, cachedResult: 1, resultCellBackgrounds: 1, frozen: 1, orphaned: 1, sourceTableName: 1, orphanedDataSet: 1, graphType: 1, graphOptions: 1,
   sourceTableIds: 1,
   frozenData: 1, frozenDataByGraph: 1, drawingObjects: 1,
   panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, figureBackground: 1, dpi: 1,
@@ -1449,6 +1450,24 @@ export function validateAnalysisParams(
   return { errors: [], params: (Object.keys(out).length ? out : undefined) as unknown as AnalysisParams | undefined };
 }
 
+/** A saved plugin analysis's params, shape-checked only: each value a
+ *  string, a finite number, a boolean, or a list of strings (the
+ *  PluginParamValue shapes). The plugin's own spec re-checks ranges and
+ *  options at run time — the file reader only refuses values no param
+ *  could hold. Nothing usable survives as nothing at all. */
+function readPluginAnalysisParams(raw: unknown): PluginParamValues | undefined {
+  if (!isObj(raw)) return undefined;
+  const out: PluginParamValues = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v === "string" || typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v))) {
+      out[k] = v;
+    } else if (Array.isArray(v) && v.every((d) => typeof d === "string")) {
+      out[k] = [...v];
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** A saved result is only trusted when it looks like one — an object whose
  *  `testType` is this analysis, with the stats, groups and notes a result
  *  always carries. Anything else is a hand edit or a newer file's shape,
@@ -1982,10 +2001,32 @@ function readNode(
       node.tableType = "column";
     }
   } else if (type === "analysis") {
-    node.analysisType = lower(n.analysisType) as ProjectNode["analysisType"];
-    node.analysisParams = readParams(n.analysisParams, node.analysisType as string, node.name, issues);
-    if (!isIn(ANALYSES, node.analysisType)) {
-      issues.push({ severity: "error", message: `Analysis “${node.name}” uses a test this version doesn't know.` });
+    // A plugin analysis node carries its namespaced id + params instead of
+    // an AnalysisType: it reads as a plugin node (its saved result is
+    // checked against the plugin id), never as an unknown first-party test.
+    // Whether the plugin is installed is not decided here — the file may
+    // predate the install, and the view reports the missing plugin at run
+    // time instead of the file refusing to open.
+    const pluginId =
+      typeof n.pluginAnalysisId === "string" && parsePluginAnalysisId(n.pluginAnalysisId)
+        ? n.pluginAnalysisId
+        : undefined;
+    if (pluginId) {
+      node.pluginAnalysisId = pluginId;
+      node.pluginAnalysisParams = readPluginAnalysisParams(n.pluginAnalysisParams);
+      if (!node.pluginAnalysisParams) delete node.pluginAnalysisParams;
+      delete node.analysisType;
+      delete node.analysisParams;
+    } else {
+      // A malformed plugin id is a hand edit, not a plugin node: drop it
+      // (and its params) rather than carrying a node that is both kinds.
+      delete node.pluginAnalysisId;
+      delete node.pluginAnalysisParams;
+      node.analysisType = lower(n.analysisType) as ProjectNode["analysisType"];
+      node.analysisParams = readParams(n.analysisParams, node.analysisType as string, node.name, issues);
+      if (!isIn(ANALYSES, node.analysisType)) {
+        issues.push({ severity: "error", message: `Analysis “${node.name}” uses a test this version doesn't know.` });
+      }
     }
     // Frozen / orphaned results (v2 item 5): the flags only ever mean anything
     // as `true`, the source name only as a string, and a saved result only when
@@ -1996,7 +2037,12 @@ function readNode(
     if (typeof node.sourceTableName !== "string") delete node.sourceTableName;
     // The removed set (seq 309) only means anything on an orphaned sheet.
     if (node.orphaned !== true || typeof node.orphanedDataSet !== "string") delete node.orphanedDataSet;
-    const cached = readCachedResult(node.cachedResult, node.analysisType as string, node.name, issues);
+    const cached = readCachedResult(
+      node.cachedResult,
+      node.pluginAnalysisId ?? (node.analysisType as string),
+      node.name,
+      issues,
+    );
     if (cached) node.cachedResult = cached;
     else delete node.cachedResult;
     // Results-cell background colors (seq 325): only well-formed

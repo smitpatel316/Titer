@@ -33,7 +33,7 @@ import {
   type PluginPermission,
 } from "./manifest";
 import { validatePluginAnalysisSpec, type PluginAnalysisSpecJson } from "./analysis-spec";
-import { registerPluginAnalysesFromManifest, unregisterPlugin } from "./registry";
+import { registerPluginAnalysesFromManifest, setPluginVersion, unregisterPlugin } from "./registry";
 
 /** Install lifecycle state. */
 export type PluginStatus = "disabled" | "pending-review" | "enabled" | "incompatible";
@@ -212,6 +212,9 @@ export function confirmEnable(
   const registered = registerPluginAnalysesFromManifest(record.manifest.id, record.analyses);
   if ("errors" in registered)
     throw new Error(`Could not enable plugin “${record.manifest.id}”: ${registered.errors.join(" ")}`);
+  // The installed version is recorded for the workflow dependency check
+  // (registry.ts): a range is testable against live state from here on.
+  setPluginVersion(record.manifest.id, record.manifest.version);
   return { ...record, status: "enabled", grantedPermissions: [...granted], incompatibility: undefined };
 }
 

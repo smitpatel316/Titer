@@ -40,7 +40,8 @@
 // titer_regenerate_graphs; 74 since seq 296, 1.8.3, which adds
 // titer_copy_graph_image; 75 since seq 207, 1.8.3, which adds
 // titer_sample_size_power; 76 since seq 325, 1.9, which adds
-// titer_set_result_cell_background),
+// titer_set_result_cell_background; 78 since seq 436, marketplace M4,
+// which adds titer_list_plugin_analyses + titer_run_plugin_analysis),
 // 61 AnalysisType variants / schema keys / runner keys (was 54; 60 since
 // seq 177 select-transform; 61 since #46 compare-slopes).
 // ONE correction vs the audit stands: row 178 said GAP, but Compact
@@ -257,7 +258,7 @@ const scopeText = (scope: string): string => {
   }
 };
 
-const EXPECTED_TOOL_COUNT = 76;
+const EXPECTED_TOOL_COUNT = 78;
 const EXPECTED_ANALYSIS_TYPES = 61;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
@@ -776,7 +777,7 @@ const ROWS: Row[] = [
     item: "1.7.4 allowlist",
     title: "1.7.4 allowlist groups",
     status: "covered",
-    note: "10 groups covering all 70 tools exactly once; default = read group only.",
+    note: "10 groups covering all 78 tools exactly once; default = read group only.",
     checks: [{ kind: "invariant", name: "allowlist" }],
   },
   {
@@ -1017,6 +1018,18 @@ const ROWS: Row[] = [
     checks: [
       { kind: "tool", tool: "titer_list_backups" },
       { kind: "toolGroup", group: "read", tool: "titer_list_backups" },
+    ],
+  },
+  {
+    item: "436",
+    title: "Marketplace M4 plugin analyses",
+    status: "covered",
+    note: "titer_list_plugin_analyses (read-only list of installed plugin analyses, with table applicability) in the read allowlist group; titer_run_plugin_analysis (create + run a plugin analysis on a table, same async shape as titer_run_analysis) in the analyses allowlist group.",
+    checks: [
+      { kind: "tool", tool: "titer_list_plugin_analyses" },
+      { kind: "toolGroup", group: "read", tool: "titer_list_plugin_analyses" },
+      { kind: "tool", tool: "titer_run_plugin_analysis" },
+      { kind: "toolGroup", group: "analyses", tool: "titer_run_plugin_analysis" },
     ],
   },
   {

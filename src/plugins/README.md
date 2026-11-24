@@ -10,8 +10,10 @@ Branch `v3/plugin-api`. Groundwork only — no marketplace.
 | Parameters | `parameters.ts` | Parameter kinds reusing the app's existing kinds: choice (same shape as TAILS / CORRELATION_METHODS option lists), number (range + default, ROUT_Q-style), boolean, text, names, column. Defaults, range/option re-checks (the runner re-checks, as first-party wizards do). |
 | Capabilities | `capabilities.ts` | Closed `titer.*` command catalogue (8 commands), one permission per command, fail-closed check. Only permissions granted at the enable review step count — a declared permission grants nothing until granted. |
 | Analysis spec | `analysis-spec.ts` | Table types, parameters, serialisable wizard questions (choice/number/names/text; `"columns"` options resolve at ask time) + adapter to the wizard's own `Question` type. R compute contract: groups as `g0`, `g1`, … ending in a `c(name=value, …)` named vector (the `ColumnTestSpec` contract); packages only via the vendored repo; load-time denylist scan as a tripwire. JSON specs are R-only; TypeScript compute registers in code. |
-| Registry | `registry.ts` | Plugin analyses under namespaced ids (`plugin:<plugin-id>:<analysis-id>`) so they can never collide with or shadow first-party analyses. `resolveAnalysis` covers both sources in one call. `runPluginAnalysis` mirrors `runAnalysis`: params resolve + re-check, packages install first via `ensurePackages`, R via `evalNamedVector`, pure-TS via `lib/summary`, failures as error outcomes. |
+| Registry | `registry.ts` | Plugin analyses under namespaced ids (`plugin:<plugin-id>:<analysis-id>`) so they can never collide with or shadow first-party analyses. `resolveAnalysis` covers both sources in one call. `runPluginAnalysis` mirrors `runAnalysis`: params resolve + re-check, packages install first via `ensurePackages`, R via `evalNamedVector`, pure-TS via `lib/summary`, failures as error outcomes. `runPluginAnalysisOnTable` (M4) is the cached entry point: same-keyed as first-party `runAnalysis` — one `WeakMap<TableData, Map<string, Promise<…>>>` per table version, errors not cached. The registry also tracks each plugin's installed version (`setPluginVersion` / `getPluginVersion`, set by the loader on enable) for the workflow-dependency check. |
 | Loader | `loader.ts` | Folder/zip loading (JSZip, text files only). Install DISABLED by default → `requestEnable` (pending-review) → `confirmEnable` (granted subset) → enabled; disable unregisters at once; app-update recheck disables incompatibles with the clear message and never auto-enables. |
+| Workflow dependency | `workflow-dependency.ts` | M4: a step declares its plugin dependency (`{ pluginId, versionRange? }`); `checkPluginDependency` reports a missing/disabled plugin as a "needs plugin X — install it?" notice (and a version mismatch as an update notice) instead of failing. The workflow engine does not exist yet — this is the utility it will call. |
+| Product wiring | — | M4: the picker offers plugin analyses for the table types they apply to (`src/views/analyses/index.ts`, `pluginAnalysisOptionsForTable`), the wizard asks their parameters through the same Steps dialog (`plugin-wizard.ts` → `toWizardQuestions` + `answersToParams`), plugin analyses get persistent nodes (`pluginAnalysisId` / `pluginAnalysisParams` on `ProjectNode`), the results view accepts `PluginAnalysisResult`, and the MCP tools `titer_list_plugin_analyses` + `titer_run_plugin_analysis` (contract `docs/mcp-server-contract.md`) expose them to agents the same way the UI runs them. |
 | Fixture | `examples/hello-analysis/` | `plugin.json` + `index.ts`: `hello-mean` (R, through the install path) and `hello-scaled-mean` (pure-TS, choice + ranged-number params, in code). `verifyHelloPlugin()` runs both on synthetic columns and checks the numbers. |
 
 ## What is deliberately NOT here
@@ -21,13 +23,11 @@ Branch `v3/plugin-api`. Groundwork only — no marketplace.
   the roadmap explicitly does not borrow.
 - No marketplace UI/server, listing/review flow, delayed auto-updates,
   safety scorecards, publisher verification, paid-plugin handling.
-- No wizard-picker or results-view wiring for plugin analyses. The seam
-  is `resolveAnalysis` / `runPluginAnalysis`; the picker must offer
-  plugin ids, the wizard must call `toWizardQuestions` +
-  `answersToParams`, and the results view must accept
-  `PluginAnalysisResult` (its `testType` is the namespaced id string).
-- No plugin cache in `runPluginAnalysis` (first-party `runAnalysis`
-  caches per table version; same-keyed plugin caching is Phase 4).
+- Graph significance overlays do not read plugin results yet (a plugin
+  node's cached result is not a first-party outcome — see
+  `src/views/graphs/graph-figure.ts`); Change Parameters is not offered
+  for plugin nodes, and MCP param overrides on a plugin node are refused
+  (run it again with `titer_run_plugin_analysis` for new params).
 
 ## Blocked — assumed nothing
 
@@ -56,4 +56,10 @@ security proof.
   lifecycle check), whose runner boots the webR engine — M1 salvage,
   Nov 24, 2026. The manifest, registry-namespacing and loader-lifecycle
   pins live in the same file ("plugin-sdk manifest/registry/loader").
-- No Rust touched.
+  The M4 product + MCP wiring is pinned in the same file ("plugin-m4
+  picker/wizard/results-view/cache/mcp/workflow"), Nov 24, 2026.
+- Rust touched (M4): two MCP tools in `src-tauri/src/mcp.rs`
+  (`titer_list_plugin_analyses`, `titer_run_plugin_analysis`; 76 → 78
+  tools, read/analyses allowlist groups) — the first Rust in this
+  plugin work; the count pins in `mcp.rs` + `tests/mcp-coverage-180.ts`
+  cover them.

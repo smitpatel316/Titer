@@ -5,6 +5,8 @@ import type { AnalysisParams, AnalysisResult, AnalysisType, SimulationSpec } fro
 import type { XColumnFormat, XConversion } from "../lib/date-time";
 import type { SummaryFormat } from "../lib/summary-format";
 import type { CellBackgroundColor } from "../lib/cell-colors";
+import type { PluginParamValues } from "../plugins/parameters";
+import type { PluginAnalysisResult } from "../plugins/registry";
 
 export type NodeType = "table" | "analysis" | "graph" | "figure" | "info";
 /** What an item is, as menus name it ("Delete Graph…"). */
@@ -1003,12 +1005,22 @@ export interface ProjectNode {
   analysisType?: AnalysisType;
   /** Analysis nodes only: wizard-chosen params for the test, when it has any. */
   analysisParams?: AnalysisParams;
+  /** Analysis nodes only: a plugin analysis this node runs, by its
+   *  namespaced id (`plugin:<plugin-id>:<analysis-id>`) — set instead of
+   *  `analysisType` for plugin analyses, whose ids are not `AnalysisType`s.
+   *  A node whose plugin is disabled or uninstalled keeps the id and shows
+   *  the run's "unknown plugin analysis" error until it is re-enabled. */
+  pluginAnalysisId?: string;
+  /** Analysis nodes only: the plugin analysis's parameter values, as the
+   *  wizard answered them (see plugins/parameters.ts). */
+  pluginAnalysisParams?: PluginParamValues;
   /** Analysis nodes only: the last successfully computed result, kept so a
    *  frozen or orphaned sheet can show it without re-running (a frozen sheet
    *  never re-runs; an orphaned one has no source table left to run on).
    *  Written to the `.hlx` file with the node, so the results survive a
-   *  save and reload. */
-  cachedResult?: AnalysisResult;
+   *  save and reload. A plugin result carries its namespaced id as
+   *  `testType`. */
+  cachedResult?: AnalysisResult | PluginAnalysisResult;
   /** Analysis nodes only: per-cell background colors of the results tables
    *  (seq 325), keyed `"section|row|col"` — the section is the results
    *  table's title (or an explicit key for untitled tables), row/col are

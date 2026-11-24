@@ -35,7 +35,18 @@ import { extractMethod, methodForTable, remapGraphOptions } from "../lib/templat
 import { TEMPLATES, planTemplateApply, templateById } from "../lib/templates";
 import { runScript } from "../lib/prism-script";
 import type { WandReport } from "../lib/wand";
-import { analysisOptionsForTable, analysisTypesOfferedForTable, countDataGroups, hasRowGroups } from "../views/analyses";
+import { analysisOptionsForTable, analysisTypesOfferedForTable, countDataGroups, hasRowGroups, isAnalysisOffered } from "../views/analyses";
+import {
+  getPluginAnalysis,
+  isPluginAnalysisId,
+  listPluginAnalyses,
+  resolveAnalysis,
+  resolvePluginParamValues,
+  runPluginAnalysisOnTable,
+  type PluginAnalysisOutcome,
+  type PluginAnalysisResult,
+  type PluginParamValues,
+} from "../plugins";
 import {
   defaultDocumentIo,
   executeCloseProject,
@@ -173,13 +184,17 @@ export interface JobDeps {
    *  the live state (store.get) already carries them. */
   getState: () => DocumentState & { past?: { label: string }[]; future?: { label: string }[] };
   /** Keep a successful live run on its analysis node, as the analysis view does. */
-  cacheAnalysisResult: (id: string, result: AnalysisResult) => void;
+  cacheAnalysisResult: (id: string, result: AnalysisResult | PluginAnalysisResult) => void;
   /** Publish an analysis outcome for `titer_read_results` (default: the real one). */
   publishResult?: (analysisId: string, outcome: unknown) => void;
   /** Run an analysis (default: the real `runAnalysis`). */
   run?: typeof runAnalysis;
+  /** Run a plugin analysis on a table (default: the cached `runPluginAnalysisOnTable`). */
+  runPluginAnalysis?: (id: string, data: TableData, params?: PluginParamValues) => Promise<PluginAnalysisOutcome>;
   /** Create an analysis node on a table (default: the real store action). */
   createAnalysis?: (parentId: string, analysisType: AnalysisType, analysisParams?: AnalysisParams) => string;
+  /** Create a plugin analysis node on a table (default: the real store action). */
+  createPluginAnalysis?: (parentId: string, pluginId: string, params?: PluginParamValues) => string;
   /** Rename any node (default: the real store action). */
   renameNode?: (id: string, name: string) => void;
   /** Freeze or unfreeze an analysis node (default: the real store action). */
@@ -929,6 +944,102 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
     case "noop":
       // The L0 stub: proves the Rust→frontend→Rust round-trip end to end.
       return { result: { ok: true } };
+    case "list-plugin-analyses": {
+      // M4: the installed plugin analyses, with their table applicability —
+      // the discovery call before `titer_run_plugin_analysis`. Read-only
+      // (no project state is touched), but it still runs as a job: the
+      // registry lives in this webview, and jobs are the only bridge to it.
+      return {
+        result: {
+          plugin_analyses: listPluginAnalyses().map((e) => ({
+            id: e.id,
+            plugin_id: e.pluginId,
+            label: e.spec.label,
+            ...(e.spec.description ? { description: e.spec.description } : {}),
+            table_types: [...e.spec.tableTypes],
+            min_columns: e.spec.minColumns,
+          })),
+        },
+      };
+    }
+    case "create-plugin-analysis": {
+      // M4: create the plugin analysis node (`titer_run_plugin_analysis`
+      // awaits this job — creation is synchronous store work, so param
+      // errors surface as tool errors — then enqueues `run-analysis`
+      // separately, the same two-step shape as `titer_run_analysis`).
+      const args = (job.args ?? {}) as {
+        table_id?: unknown;
+        analysis_id?: unknown;
+        params?: unknown;
+        name?: unknown;
+      };
+      const tableId = reqString(args.table_id, "table_id");
+      const pluginId = reqString(args.analysis_id, "analysis_id");
+      if (!isPluginAnalysisId(pluginId)) {
+        throw new Error(
+          `“${pluginId}” is not a plugin analysis id — pass a namespaced id (plugin:<plugin-id>:<analysis-id>). Ask titer_list_plugin_analyses for the installed ones.`,
+        );
+      }
+      const resolved = resolveAnalysis(pluginId);
+      if (!resolved || resolved.source !== "plugin") {
+        throw new Error(
+          `Unknown plugin analysis “${pluginId}”. Ask titer_list_plugin_analyses for the installed plugin analyses.`,
+        );
+      }
+      const state = deps.getState();
+      const table = state.nodes[tableId];
+      if (!table || table.type !== "table") {
+        throw new Error(`No table with id “${tableId}” in this project.`);
+      }
+      const data = table.data;
+      const tableType = table.tableType;
+      if (tableType === undefined) {
+        throw new Error(`Table “${tableId}” has no table type recorded.`);
+      }
+      // The picker offers each test only for the table types it makes sense
+      // on — the same gate, so an agent gets the valid list instead of a
+      // runner error on data it cannot use.
+      if (!isAnalysisOffered(pluginId, tableType, data)) {
+        const pickerOffered = analysisOptionsForTable(tableType, data).map((o) => o.value);
+        throw new Error(
+          `“${pluginId}” is not offered for ${tableType} tables. ${tableType} tables offer: ${pickerOffered.join(", ")}.`,
+        );
+      }
+      const entry = getPluginAnalysis(pluginId);
+      if (!entry) {
+        throw new Error(
+          `Unknown plugin analysis “${pluginId}”. Ask titer_list_plugin_analyses for the installed plugin analyses.`,
+        );
+      }
+      if (args.params !== undefined && (typeof args.params !== "object" || args.params === null || Array.isArray(args.params))) {
+        throw new Error(`Job argument “params” must be an object of named parameters.`);
+      }
+      const resolvedParams = resolvePluginParamValues(
+        entry.spec.parameters,
+        (args.params ?? {}) as PluginParamValues,
+      );
+      if ("errors" in resolvedParams) throw new Error(resolvedParams.errors.join(" "));
+      const create =
+        deps.createPluginAnalysis ??
+        (() => {
+          throw new Error("This window can't create plugin analyses (no createPluginAnalysis).");
+        });
+      const id = create(tableId, pluginId, resolvedParams.values);
+      const name = optString(args.name, "name");
+      if (name !== undefined) {
+        if (name === "") throw new Error(`Job argument “name” must not be empty.`);
+        const rename =
+          deps.renameNode ??
+          (() => {
+            throw new Error("This window can't rename nodes (no renameNode).");
+          });
+        rename(id, name);
+      }
+      return {
+        result: { analysis_id: id, analysis_type: pluginId, table_id: tableId },
+        created: { analysis_id: id, analysis_type: pluginId },
+      };
+    }
     case "create-analysis": {
       // L4: create the analysis node (the `titer_run_analysis` tool awaits
       // this job — creation is synchronous store work, so param errors
@@ -943,6 +1054,11 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       };
       const tableId = reqString(args.table_id, "table_id");
       const analysisType = reqString(args.analysis_type, "analysis_type");
+      if (isPluginAnalysisId(analysisType)) {
+        throw new Error(
+          `“${analysisType}” is a plugin analysis — run it with titer_run_plugin_analysis, not titer_run_analysis.`,
+        );
+      }
       if (analysisType === "compare-many-groups") {
         throw new Error(
           "“compare-many-groups” is the picker's wizard value, not an analysis — pass a concrete type: \"anova\", \"kruskal-wallis\", \"rm-anova\" or \"friedman\".",
@@ -1078,6 +1194,31 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       // key this version doesn't know (FF-F12), which the runners ignore.
       let storedParams = node.analysisParams;
       const type = node.analysisType;
+      // M4: a plugin node runs its plugin analysis (cached per table
+      // version, as the first-party run is), not `runAnalysis`. Param
+      // overrides are refused here — a plugin node's params change in the
+      // app, not through a rerun; run it again with
+      // `titer_run_plugin_analysis` for new params.
+      if (node.pluginAnalysisId) {
+        if (args.params !== undefined) {
+          throw new Error(
+            `Analysis “${node.name}” is a plugin analysis — its parameters can't be overridden here. Change them in the app, or run it again with titer_run_plugin_analysis.`,
+          );
+        }
+        const pluginParent = node.parentId ? state.nodes[node.parentId] : undefined;
+        const pluginData = pluginParent?.type === "table" ? pluginParent.data : undefined;
+        if (!pluginData) {
+          throw new Error(`Analysis “${node.name}” has no table to run on.`);
+        }
+        const pluginOutcome = await (deps.runPluginAnalysis ?? runPluginAnalysisOnTable)(
+          node.pluginAnalysisId,
+          pluginData,
+          node.pluginAnalysisParams,
+        );
+        await (deps.publishResult ?? publishAnalysisResult)(analysisId, pluginOutcome);
+        if (!("error" in pluginOutcome)) deps.cacheAnalysisResult(analysisId, pluginOutcome);
+        return { result: pluginOutcome, created: { analysis_id: analysisId } };
+      }
       if (args.params !== undefined) {
         if (node.orphaned) {
           throw new Error(
@@ -2690,6 +2831,7 @@ export function useMcpJobDispatcher() {
   const getState = store.get;
   const cacheAnalysisResult = actions.cacheAnalysisResult;
   const createAnalysis = actions.createAnalysis;
+  const createPluginAnalysis = actions.createPluginAnalysis;
   const renameNode = actions.renameNode;
   const setAnalysisFrozen = actions.setAnalysisFrozen;
   const setResultCellBackground = actions.setResultCellBackground;
@@ -2768,6 +2910,7 @@ export function useMcpJobDispatcher() {
                 getState,
                 cacheAnalysisResult,
                 createAnalysis,
+                createPluginAnalysis,
                 renameNode,
                 setAnalysisFrozen,
                 setResultCellBackground,

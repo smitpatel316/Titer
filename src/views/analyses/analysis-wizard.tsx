@@ -10,7 +10,9 @@ import type { TableData, TableType } from "../../store/types";
 import { useProjectActions, useProjectStore } from "../../store/use-project-store";
 import { alert } from "../../native";
 import { checkNormality } from "./normality-check";
-import { useAnalysisLauncher } from "./use-analysis-launcher";
+import { useAnalysisLauncher, usePluginAnalysisLauncher } from "./use-analysis-launcher";
+import { pluginWizardFinish, pluginWizardQuestions } from "./plugin-wizard";
+import { getPluginAnalysis, parsePluginAnalysisId } from "../../plugins";
 import { recordRecentAnalysis } from "../../store/recent-analyses";
 import { analysisLabel } from ".";
 import { packageGate, titleAfterApply } from "../../stats";
@@ -36,6 +38,7 @@ export function AnalysisWizard() {
   const { nodes, selector, closeSelector } = useProjectStore();
   const { createTransformed, setAnalysisParams } = useProjectActions();
   const launch = useAnalysisLauncher();
+  const pluginLaunch = usePluginAnalysisLauncher();
   // Change Parameters (seq 373): the same wizard, pre-filled from the stored
   // params, applying in place instead of creating a node. The entry points
   // gate on canEditAnalysisParams, so this only ever sees a live node — the
@@ -117,6 +120,30 @@ export function AnalysisWizard() {
         }}
       />
     );
+  // A plugin analysis asks its own questions through the same Steps dialog:
+  // the SDK's `toWizardQuestions` (via pluginWizardQuestions) asks them,
+  // and the answers become the run's params (via pluginWizardFinish). No
+  // `finish` is passed, so there is no package gate here — a plugin's
+  // required packages install at run time, and a failed install surfaces
+  // as the run's error, as it does for a direct run.
+  if (parsePluginAnalysisId(selector.testType)) {
+    if (!getPluginAnalysis(selector.testType)) return null;
+    const columnNames = table.numeric.map((c) => c.name);
+    return (
+      <Steps
+        {...steps}
+        wizard={{ questions: () => pluginWizardQuestions(selector.testType, columnNames) }}
+        initial={{}}
+        done="Run"
+        onDone={(a) => {
+          pluginLaunch(selector.tableId, selector.testType, pluginWizardFinish(selector.testType, a), selector.forGraph);
+          // Wizard completion is a run: the picked test joins Recently used (seq 298).
+          recordRecentAnalysis(selector.testType);
+          closeSelector();
+        }}
+      />
+    );
+  }
   const wizard = WIZARDS[selector.testType];
   if (!wizard) return null;
   return (

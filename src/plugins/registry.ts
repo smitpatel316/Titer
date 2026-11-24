@@ -21,16 +21,18 @@
 // analysis builds on — with the data groups declared as `g0`, `g1`, … and
 // packages installed first via `ensurePackages` from the vendored repo.
 // A pure-TypeScript analysis never touches R: its descriptives come from
-// `../lib/summary`. Runs are not cached here (first-party `runAnalysis`
-// caches per table version; a plugin cache keyed the same way is Phase 4).
+// `../lib/summary`. Runs on a table are cached per table version in
+// `runPluginAnalysisOnTable` below (same-keyed as first-party `runAnalysis`);
+// the bare `runPluginAnalysis` (columns, no table) is not cached.
 
 import { ANALYSES } from "../stats/index";
 import { ensurePackages, evalNamedVector, packageErrorMessage } from "../stats/webr";
 import { dataGroups, declareGroups, describe } from "../stats/column/base";
 import { mean, median, sd, sem } from "../lib/summary";
+import { readTable } from "../lib/dataset";
 import type { AnalysisResult, AnalysisType, GroupDescriptives, StatRow } from "../stats/types";
 import type { Column } from "../lib/dataset";
-import type { TableType } from "../store/types";
+import type { TableData, TableType } from "../store/types";
 import { isValidPluginId } from "./manifest";
 import {
   jsonSpecToCodeSpec,
@@ -50,6 +52,12 @@ export function pluginAnalysisId(pluginId: string, analysisId: string): string {
 export function parsePluginAnalysisId(id: string): { pluginId: string; analysisId: string } | null {
   const m = /^plugin:([^:]+):([^:]+)$/.exec(id);
   return m ? { pluginId: m[1], analysisId: m[2] } : null;
+}
+
+/** Whether an id is a plugin analysis id — the narrowing guard for
+ *  `AnalysisPickerValue`, which carries plugin ids as a template literal. */
+export function isPluginAnalysisId(id: string): id is `plugin:${string}:${string}` {
+  return parsePluginAnalysisId(id) !== null;
 }
 
 /** One registered plugin analysis: its spec, under its namespaced id. */
@@ -72,6 +80,29 @@ export type PluginAnalysisResult = Omit<AnalysisResult, "testType"> & {
 export type PluginAnalysisOutcome = PluginAnalysisResult | { error: string };
 
 const entries = new Map<string, PluginAnalysisEntry>();
+
+/** An enabled plugin's installed version, by plugin id — recorded by the
+ *  loader when a plugin enables (it holds the manifest), so the workflow
+ *  dependency check (workflow-dependency.ts) can test a version range
+ *  against live state. A plugin registered in code has no recorded
+ *  version: its range check reports "version unknown" instead of guessing.
+ *  (M4 addition to the M1 SDK — the registry never tracked versions.) */
+const pluginVersions = new Map<string, string>();
+
+/** Record an enabled plugin's installed version (loader: confirmEnable). */
+export function setPluginVersion(pluginId: string, version: string): void {
+  pluginVersions.set(pluginId, version);
+}
+
+/** An enabled plugin's installed version, if one was recorded. */
+export function getPluginVersion(pluginId: string): string | undefined {
+  return pluginVersions.get(pluginId);
+}
+
+/** Forget a plugin's recorded version (disable / uninstall). */
+export function clearPluginVersion(pluginId: string): void {
+  pluginVersions.delete(pluginId);
+}
 
 /**
  * Register a plugin analysis (code form — JSON specs go through
@@ -128,7 +159,14 @@ export function pluginAnalysesForTable(tableType: TableType): PluginAnalysisEntr
 
 /** Remove one analysis from the registry (plugin disabled / uninstalled). */
 export function unregisterPluginAnalysis(id: string): boolean {
-  return entries.delete(id);
+  const removed = entries.delete(id);
+  if (removed) {
+    const parsed = parsePluginAnalysisId(id);
+    if (parsed && !listPluginAnalyses().some((e) => e.pluginId === parsed.pluginId)) {
+      clearPluginVersion(parsed.pluginId);
+    }
+  }
+  return removed;
 }
 
 /** Remove every analysis of one plugin; returns the removed ids. */
@@ -140,12 +178,14 @@ export function unregisterPlugin(pluginId: string): string[] {
       removed.push(id);
     }
   }
+  clearPluginVersion(pluginId);
   return removed;
 }
 
 /** Empty the plugin registry (development / test reset only). */
 export function clearPluginRegistry(): void {
   entries.clear();
+  pluginVersions.clear();
 }
 
 /** Either side of the one registry: a first-party analysis, or a plugin one. */
@@ -178,6 +218,43 @@ export function resolveAnalysis(id: string): ResolvedAnalysis | undefined {
     minColumns: entry.spec.minColumns,
     tableTypes: entry.spec.tableTypes,
   };
+}
+
+// ── Caching (M4) ─────────────────────────────────────────────────────────
+
+// One result per table version, test and params, shared by everyone who asks:
+// the same keying as first-party `runAnalysis` (stats/index.ts) — the
+// TableData object's identity is the version (an edit makes a new TableData),
+// and the key is the namespaced id plus the params. A failed run is not
+// cached, so asking again runs it for real instead of replaying the error.
+const pluginResults = new WeakMap<TableData, Map<string, Promise<PluginAnalysisOutcome>>>();
+
+/**
+ * Run a registered plugin analysis on a table — the cached plugin side of
+ * `runAnalysis`. The columns are the table's own (a plugin takes no `sets`
+ * param); params resolve over their defaults and are re-checked by
+ * `runPluginAnalysis` before anything runs.
+ */
+export function runPluginAnalysisOnTable(
+  id: string,
+  data: TableData,
+  params?: PluginParamValues,
+): Promise<PluginAnalysisOutcome> {
+  const byTest = pluginResults.get(data) ?? new Map<string, Promise<PluginAnalysisOutcome>>();
+  pluginResults.set(data, byTest);
+  const key = `${id} ${JSON.stringify(params ?? null)}`;
+  let result = byTest.get(key);
+  if (!result) {
+    const columns = readTable(data).columns;
+    result = runPluginAnalysis(id, columns, params).then((outcome) => {
+      // A failed run is not cached — whether the runner refused the params
+      // or returned an error outcome: asking again runs it for real.
+      if ("error" in outcome) byTest.delete(key);
+      return outcome;
+    });
+    byTest.set(key, result);
+  }
+  return result;
 }
 
 // ── Running a plugin analysis ─────────────────────────────────────────────

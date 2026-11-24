@@ -39615,6 +39615,293 @@ check("M2-index: the default index URL is a GitHub raw URL (Q8: no hosted server
 });
 
 
+// ── M4: plugin analyses in the product + MCP (seq 436) ───────────────────
+// The pins run before the wiring lands (FAIL) and after (PASS); each names
+// the seam it pins so a failure points at the missing piece, not the suite.
+check("plugin-m4 picker: offers a plugin analysis for an applicable table and not for an inapplicable one", async () => {
+  const { clearPluginRegistry, registerHelloPlugin } = await import("../src/plugins/index");
+  const { analysisOptionsForTable, isAnalysisOffered } = await import("../src/views/analyses");
+  clearPluginRegistry();
+  const registered = registerHelloPlugin();
+  ok(!("errors" in registered), `hello plugin must register: ${"errors" in registered ? registered.errors.join(" ") : ""}`);
+  const columnValues = analysisOptionsForTable("column").map((o) => o.value);
+  ok(
+    columnValues.includes("plugin:example.hello-analysis:hello-mean" as never),
+    "the picker offers hello-mean on a Column table",
+  );
+  ok(
+    columnValues.includes("plugin:example.hello-analysis:hello-scaled-mean" as never),
+    "the picker offers hello-scaled-mean on a Column table",
+  );
+  const xyValues = analysisOptionsForTable("xy").map((o) => o.value);
+  ok(
+    !xyValues.includes("plugin:example.hello-analysis:hello-mean" as never),
+    "the picker does not offer hello-mean on an XY table (it applies to Column tables only)",
+  );
+  ok(
+    !xyValues.includes("plugin:example.hello-analysis:hello-scaled-mean" as never),
+    "the picker does not offer hello-scaled-mean on an XY table",
+  );
+  ok(
+    isAnalysisOffered("plugin:example.hello-analysis:hello-mean" as never, "column"),
+    "hello-mean is offered on a Column table",
+  );
+  ok(
+    !isAnalysisOffered("plugin:example.hello-analysis:hello-mean" as never, "xy"),
+    "hello-mean is not offered on an XY table",
+  );
+  clearPluginRegistry();
+  ok(
+    !analysisOptionsForTable("column").some((o) => o.value.startsWith("plugin:")),
+    "with no plugin registered, the picker offers no plugin analyses",
+  );
+});
+
+check("plugin-m4 wizard: plugin questions round-trip to the expected params", async () => {
+  const { answersToParams, clearPluginRegistry, getPluginAnalysis, registerHelloPlugin, toWizardQuestions } =
+    await import("../src/plugins/index");
+  const { pluginWizardFinish, pluginWizardQuestions } = await import("../src/views/analyses/plugin-wizard");
+  clearPluginRegistry();
+  registerHelloPlugin();
+  const entry = getPluginAnalysis("plugin:example.hello-analysis:hello-scaled-mean");
+  ok(entry, "hello-scaled-mean must be registered");
+  const questions = toWizardQuestions(entry!.spec, ["Control"]);
+  strictEqual(questions.length, 2, "hello-scaled-mean asks two questions");
+  // The helper the wizard component uses asks the same questions.
+  const asked = pluginWizardQuestions("plugin:example.hello-analysis:hello-scaled-mean", ["Control"]);
+  deepStrictEqual(
+    asked.map((q) => q.id),
+    ["statistic", "multiplier"],
+    "the wizard asks the statistic, then the multiplier",
+  );
+  deepStrictEqual(
+    pluginWizardFinish("plugin:example.hello-analysis:hello-scaled-mean", { statistic: "median", multiplier: 2 }),
+    { statistic: "median", multiplier: 2 },
+    "answered questions become the run's params",
+  );
+  // Unanswered params keep their defaults.
+  deepStrictEqual(
+    pluginWizardFinish("plugin:example.hello-analysis:hello-scaled-mean", {}),
+    { statistic: "mean", multiplier: 1 },
+    "no answers still runs on the defaults",
+  );
+  // The SDK functions underneath agree.
+  deepStrictEqual(
+    answersToParams(entry!.spec, { statistic: "median", multiplier: 2 }),
+    { statistic: "median", multiplier: 2 },
+    "answersToParams files each answer under its parameter key",
+  );
+  clearPluginRegistry();
+});
+
+check("plugin-m4 results view: accepts a PluginAnalysisResult", async () => {
+  const { clearPluginRegistry, helloColumn, registerHelloPlugin, runPluginAnalysis } =
+    await import("../src/plugins/index");
+  const { analysisResultLabel } = await import("../src/views/analyses");
+  const { AnalysisResultsView } = await import("../src/views/analyses/analysis-results-view");
+  const React = await import("react");
+  clearPluginRegistry();
+  registerHelloPlugin();
+  const outcome = await runPluginAnalysis(
+    "plugin:example.hello-analysis:hello-scaled-mean",
+    [helloColumn("Control", [2, 4, 9])],
+    { statistic: "mean", multiplier: 2 },
+  );
+  ok(!("error" in outcome), `hello-scaled-mean must run: ${"error" in outcome ? outcome.error : ""}`);
+  strictEqual(analysisResultLabel(outcome), "Hello scaled mean", "a plugin result is labelled by its analysis");
+  // A first-party result keeps its own label.
+  strictEqual(
+    analysisResultLabel({ testType: "descriptive-statistics", stats: [], groups: [], notes: "" }),
+    "Descriptive statistics",
+    "a first-party result is labelled by its test",
+  );
+  // The view itself takes the plugin result as its `result` prop.
+  const el = React.createElement(AnalysisResultsView, { result: outcome });
+  ok(el, "the results view element builds from a plugin result");
+  clearPluginRegistry();
+});
+
+check("plugin-m4 cache: plugin results cache per table version", async () => {
+  const { clearPluginRegistry, registerPluginAnalysis, runPluginAnalysisOnTable } =
+    await import("../src/plugins/index");
+  clearPluginRegistry();
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-m4-cache-table", "create-table", {
+    table_type: "column",
+    columns: ["", "Control"],
+    rows: [
+      ["r1", 2],
+      ["r2", 4],
+      ["r3", 9],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  const data = harness.state().nodes[tableId]!.data!;
+  let runs = 0;
+  const registered = registerPluginAnalysis("example.cache-count", {
+    id: "count-mean",
+    label: "Count mean",
+    tableTypes: ["column"],
+    minColumns: 1,
+    parameters: [{ kind: "number", key: "multiplier", label: "Multiplier", default: 1, min: 0.1, max: 10 }],
+    questions: [],
+    compute: {
+      kind: "typescript",
+      run: (input: { groups: { values: number[] }[]; params: { multiplier?: unknown } }) => {
+        runs++;
+        const values = input.groups[0]?.values ?? [];
+        const mean = values.reduce((a, b) => a + b, 0) / values.length;
+        const multiplier = typeof input.params.multiplier === "number" ? input.params.multiplier : 1;
+        return { stats: [{ label: "Scaled mean", value: mean * multiplier }] };
+      },
+    },
+  });
+  ok(!("errors" in registered), `counting plugin must register: ${"errors" in registered ? registered.errors.join(" ") : ""}`);
+  const id = "plugin:example.cache-count:count-mean";
+  const first = runPluginAnalysisOnTable(id, data);
+  const second = runPluginAnalysisOnTable(id, data);
+  strictEqual(first, second, "the same table version reuses the same run");
+  const out = await first;
+  strictEqual(runs, 1, "the compute ran once for two asks");
+  ok(!("error" in out) && out.stats[0]?.value === 5, "the cached result is the mean of [2, 4, 9]");
+  // A new table version (same numbers, new TableData) misses the cache.
+  const made2 = await harness.run("job-m4-cache-table2", "create-table", {
+    table_type: "column",
+    columns: ["", "Control"],
+    rows: [
+      ["r1", 2],
+      ["r2", 4],
+      ["r3", 9],
+    ],
+  });
+  harness.sync();
+  const data2 = harness.state().nodes[(made2.result as { table_id: string }).table_id]!.data!;
+  const third = runPluginAnalysisOnTable(id, data2);
+  ok(third !== first, "a new table version runs again");
+  await third;
+  strictEqual(runs, 2, "the new version computed once");
+  // A failed run is not cached: an ask after the error resolved runs
+  // again (it fails validation before the compute, so `runs` stays 2).
+  // Two asks made at once still share the one in-flight run, as
+  // first-party `runAnalysis` does — the eviction happens on resolution.
+  const bad1 = runPluginAnalysisOnTable(id, data, { multiplier: 99 });
+  ok("error" in (await bad1), "the first ask reports the range error");
+  const bad2 = runPluginAnalysisOnTable(id, data, { multiplier: 99 });
+  ok(bad1 !== bad2, "an error outcome is not cached");
+  ok("error" in (await bad2), "the second ask reports the range error too");
+  strictEqual(runs, 2, "the failed runs never reached the compute");
+  clearPluginRegistry();
+});
+
+check("plugin-m4 mcp: list and run plugin analyses against the hello plugin", async () => {
+  const { clearPluginRegistry, registerHelloPlugin } = await import("../src/plugins/index");
+  clearPluginRegistry();
+  registerHelloPlugin();
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-m4-mcp-table", "create-table", {
+    table_type: "column",
+    columns: ["", "Control"],
+    rows: [
+      ["r1", 2],
+      ["r2", 4],
+      ["r3", 9],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  const listed = await harness.run("job-m4-mcp-list", "list-plugin-analyses", {});
+  const analyses = (
+    listed.result as { plugin_analyses: { id: string; plugin_id: string; table_types: string[] }[] }
+  ).plugin_analyses;
+  ok(
+    analyses.some(
+      (a) => a.id === "plugin:example.hello-analysis:hello-mean" && a.table_types.includes("column"),
+    ),
+    "the list names hello-mean with its Column applicability",
+  );
+  ok(
+    analyses.some((a) => a.id === "plugin:example.hello-analysis:hello-scaled-mean"),
+    "the list names hello-scaled-mean",
+  );
+  // Create + run the pure-TS hello analysis through the jobs, as
+  // titer_run_plugin_analysis does (create-plugin-analysis, then run-analysis).
+  const created: string[] = [];
+  harness.deps.createPluginAnalysis = (parentId, pluginId, params) => {
+    created.push(pluginId);
+    harness.dispatch({
+      type: "create",
+      node: {
+        id: `analysis_${pluginId}`,
+        type: "analysis",
+        name: "Hello",
+        parentId,
+        pluginAnalysisId: pluginId,
+        pluginAnalysisParams: params,
+      },
+    });
+    return `analysis_${pluginId}`;
+  };
+  const runOne = async (jobPrefix: string, pluginId: string, params: unknown, label: string) => {
+    const done = await harness.run(`${jobPrefix}-create`, "create-plugin-analysis", {
+      table_id: tableId,
+      analysis_id: pluginId,
+      params,
+    });
+    const analysisId = (done.result as { analysis_id: string }).analysis_id;
+    harness.sync();
+    const run = await harness.run(`${jobPrefix}-run`, "run-analysis", { analysis_id: analysisId });
+    const outcome = run.result as { stats?: { label: string; value: number | null }[]; error?: string };
+    ok(!outcome.error, `${label} must run: ${outcome.error ?? ""}`);
+    return outcome.stats?.find((s) => s.label === label)?.value;
+  };
+  strictEqual(
+    await runOne("job-m4-mcp-ts", "plugin:example.hello-analysis:hello-scaled-mean", { statistic: "mean", multiplier: 2 }, "Scaled mean"),
+    10,
+    "hello-scaled-mean: mean 5 × 2 is 10",
+  );
+  strictEqual(
+    await runOne("job-m4-mcp-r", "plugin:example.hello-analysis:hello-mean", undefined, "Mean value"),
+    5,
+    "hello-mean (R): mean of [2, 4, 9] is 5",
+  );
+  deepStrictEqual(created, [
+    "plugin:example.hello-analysis:hello-scaled-mean",
+    "plugin:example.hello-analysis:hello-mean",
+  ]);
+  clearPluginRegistry();
+});
+
+check("plugin-m4 workflow: a missing or disabled plugin reports a needs-plugin notice", async () => {
+  const { checkPluginDependency, clearPluginRegistry, registerHelloPlugin, unregisterPlugin } =
+    await import("../src/plugins/index");
+  clearPluginRegistry();
+  const missing = checkPluginDependency({ pluginId: "example.hello-analysis" });
+  strictEqual(missing.ok, false, "an uninstalled plugin is not ok");
+  ok(missing.notice.includes("needs plugin"), "the notice names the missing plugin");
+  ok(missing.notice.includes("install it?"), "the notice asks to install it instead of failing");
+  registerHelloPlugin();
+  strictEqual(
+    checkPluginDependency({ pluginId: "example.hello-analysis" }).ok,
+    true,
+    "an enabled plugin passes",
+  );
+  strictEqual(
+    checkPluginDependency({ pluginId: "example.hello-analysis", versionRange: "^1.0.0" }).ok,
+    true,
+    "a satisfied version range passes",
+  );
+  const mismatch = checkPluginDependency({ pluginId: "example.hello-analysis", versionRange: ">=99.0.0" });
+  strictEqual(mismatch.ok, false, "an unsatisfied version range is not ok");
+  ok(mismatch.notice.includes("1.0.0"), "the version notice names the installed version");
+  unregisterPlugin("example.hello-analysis");
+  const disabled = checkPluginDependency({ pluginId: "example.hello-analysis" });
+  strictEqual(disabled.ok, false, "a disabled plugin is not ok");
+  ok(disabled.notice.includes("install it?"), "a disabled plugin gets the install notice too");
+  clearPluginRegistry();
+});
+
+
 // ── Run ──────────────────────────────────────────────────────────────────
 
 // Descriptives are computed by R since the v1.0.7 rebase, so checks that run

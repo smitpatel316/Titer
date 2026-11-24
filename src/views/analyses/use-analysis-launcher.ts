@@ -6,10 +6,12 @@ import { alert } from "../../native";
 import { useProjectActions, type ForGraph } from "../../store/use-project-store";
 import type { GraphOptions } from "../../store/types";
 import { ANALYSES } from "../../stats";
+import { isPluginAnalysisId, resolveAnalysis, type PluginParamValues } from "../../plugins";
 import type { AnalysisParams, AnalysisPickerValue, AnalysisType } from "../../stats/types";
 import { countDataColumns, countDataGroups, hasRowGroups } from ".";
 import { recordRecentAnalysis } from "../../store/recent-analyses";
 import { WIZARDS } from "./wizards";
+import { pluginWizardFinish, pluginWizardQuestions } from "./plugin-wizard";
 import { levelsOf, readTable } from "../../lib/dataset";
 import { REPLICATE_TESTS, summaryTableProblem } from "../../lib/summary-format";
 
@@ -103,6 +105,26 @@ function useAnalysisPrecheck() {
   };
 }
 
+/** Links a new analysis to the graph it was made for (its pairs to tick):
+ *  a graph already drawing from several analyses gains this one (its pairs
+ *  start unticked); a single-source graph switches to it, as before. */
+function linkForGraph(
+  get: ReturnType<typeof useProjectActions>["get"],
+  updateGraph: ReturnType<typeof useProjectActions>["updateGraph"],
+  setActiveNode: ReturnType<typeof useProjectActions>["setActiveNode"],
+  id: string,
+  forGraph?: ForGraph,
+): void {
+  const graph = forGraph && get().nodes[forGraph.id];
+  if (!graph?.graphOptions) return;
+  const list = graph.graphOptions.sigAnalysisIds;
+  const patch: Partial<GraphOptions> = { sigAnalysisId: id };
+  if (list?.length) patch.sigAnalysisIds = [...new Set([...list, id])];
+  else patch.sigPairs = [];
+  updateGraph(graph.id, { ...graph.graphOptions, ...patch });
+  setActiveNode(graph.id);
+}
+
 /** Creates the analysis node once its params are known (wizards call this). */
 export function useAnalysisLauncher() {
   const { createAnalysis, get, updateGraph, setActiveNode } = useProjectActions();
@@ -111,17 +133,26 @@ export function useAnalysisLauncher() {
     if (!precheck(tableId, testType)) return;
     const id = createAnalysis(tableId, testType, params);
     // Made for a graph's stars: chosen for it, which stays in front (its pairs to tick).
-    const graph = forGraph && get().nodes[forGraph.id];
-    if (graph?.graphOptions) {
-      // A graph already drawing from several analyses gains this one (its
-      // pairs start unticked); a single-source graph switches to it, as before.
-      const list = graph.graphOptions.sigAnalysisIds;
-      const patch: Partial<GraphOptions> = { sigAnalysisId: id };
-      if (list?.length) patch.sigAnalysisIds = [...new Set([...list, id])];
-      else patch.sigPairs = [];
-      updateGraph(graph.id, { ...graph.graphOptions, ...patch });
-      setActiveNode(graph.id);
-    }
+    linkForGraph(get, updateGraph, setActiveNode, id, forGraph);
+  };
+}
+
+/** Creates the plugin analysis node once its params are known (the plugin
+ *  wizard calls this) — the plugin side of `useAnalysisLauncher`. The
+ *  precheck is the plugin's own floor (`minColumns`); the runner re-checks
+ *  the params before running. */
+export function usePluginAnalysisLauncher() {
+  const { createPluginAnalysis, get, updateGraph, setActiveNode } = useProjectActions();
+  const columnsPrecheck = useColumnsPrecheck();
+  return (tableId: string, pluginId: string, params?: PluginParamValues, forGraph?: ForGraph) => {
+    const resolved = resolveAnalysis(pluginId);
+    if (!resolved || resolved.source !== "plugin") return;
+    if (!columnsPrecheck(tableId, resolved.minColumns, resolved.label)) return;
+    const id = createPluginAnalysis(tableId, pluginId, params);
+    // Made for a graph's stars, as a first-party analysis is. (A graph's
+    // significance overlays do not read plugin results yet — that is a
+    // follow-up seam, not this lane's: the node itself runs and renders.)
+    linkForGraph(get, updateGraph, setActiveNode, id, forGraph);
   };
 }
 
@@ -130,9 +161,30 @@ export function useAnalysisLauncher() {
 export function useStartAnalysis() {
   const { get, openSelector } = useProjectActions();
   const launch = useAnalysisLauncher();
+  const pluginLaunch = usePluginAnalysisLauncher();
   const columnsPrecheck = useColumnsPrecheck();
   const precheck = useAnalysisPrecheck();
   return (tableId: string, picked: AnalysisPickerValue, forGraph?: ForGraph): boolean => {
+    // A plugin analysis prechecks on its own floor (its `minColumns`) and
+    // label — the first-party precheck reads `ANALYSES[picked]`, which has
+    // no entry for a plugin id. An unregistered pick (a stale recent, its
+    // plugin disabled since) starts nothing.
+    if (isPluginAnalysisId(picked)) {
+      const resolved = resolveAnalysis(picked);
+      if (!resolved || resolved.source !== "plugin") return false;
+      if (!columnsPrecheck(tableId, resolved.minColumns, resolved.label)) return false;
+      const { data } = get().nodes[tableId]!;
+      const table = readTable(data!);
+      const questions = pluginWizardQuestions(picked, table.numeric.map((c) => c.name));
+      if (!questions.length) {
+        pluginLaunch(tableId, picked, pluginWizardFinish(picked, {}), forGraph);
+        // A direct run is a run: the picker value joins Recently used (seq 298).
+        recordRecentAnalysis(picked);
+        return false;
+      }
+      openSelector({ kind: "analysis-params", tableId, testType: picked, forGraph });
+      return true;
+    }
     const ready =
       picked === "compare-many-groups"
         ? columnsPrecheck(tableId, ANALYSES.anova.minColumns, "Compare more than two groups")
