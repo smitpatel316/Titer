@@ -30,15 +30,29 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-MANIFEST_JSON="$ROOT/scripts/webr-repo-manifest.json"
 OUT="$ROOT/webr-repo"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-R_VERSION="$(python3 -c "import json;print(json.load(open('$MANIFEST_JSON'))['r'])")"
+# Windows (Git Bash on the CI runner): python3 and node are Windows-native
+# and cannot open MSYS POSIX paths (/d/...) when the path is embedded in
+# code (python -c) or passed through stdin — MSYS only converts direct
+# argv paths. Convert once for every python/node invocation; bash, curl
+# and gzip keep using the POSIX form.
+if command -v cygpath >/dev/null 2>&1; then
+  PYROOT="$(cygpath -w "$ROOT")"
+  PYTMP="$(cygpath -w "$TMP")"
+else
+  PYROOT="$ROOT"
+  PYTMP="$TMP"
+fi
+PYMANIFEST="$PYROOT/scripts/webr-repo-manifest.json"
+PYOUT="$PYROOT/webr-repo"
+
+R_VERSION="$(python3 -c "import json;print(json.load(open('$PYMANIFEST'))['r'])")"
 # The repo layout uses major.minor (4.6), not the full R version (4.6.0).
 R_MAJOR_MINOR="${R_VERSION%.*}"
-REPO_URL="$(python3 -c "import json;print(json.load(open('$MANIFEST_JSON'))['repo'])")"
+REPO_URL="$(python3 -c "import json;print(json.load(open('$PYMANIFEST'))['repo'])")"
 echo "repo: $REPO_URL (R $R_VERSION)"
 
 mkdir -p "$OUT"
@@ -51,7 +65,8 @@ echo "index: $(wc -c < "$TMP/PACKAGES.full") bytes"
 # and MANIFEST.json. The Python step is the whole index operation: DCF
 # parsing, closure over Depends/Imports/LinkingTo (base R packages excluded
 # — they ship inside R.wasm), MD5 verification, trimmed PACKAGES.
-python3 - "$MANIFEST_JSON" "$TMP/PACKAGES.full" "$REPO_URL" "$CONTRIB" "$OUT" <<'PYEOF'
+PYCONTRIB="$PYOUT/bin/emscripten/contrib/$R_MAJOR_MINOR"
+python3 - "$PYMANIFEST" "$PYTMP/PACKAGES.full" "$REPO_URL" "$PYCONTRIB" "$PYOUT" <<'PYEOF'
 import gzip, hashlib, json, os, re, subprocess, sys, urllib.request
 
 manifest_path, index_path, repo_url, out_dir, repo_root = sys.argv[1:6]
@@ -182,4 +197,4 @@ echo "... ($(ls "$OUT" | wc -l) files)"
 # vendored closure, so scripts/build-webr-repo-rds.mjs generates it from the
 # .tgz files with tools::write_PACKAGES (run in webR — Hatch has no desktop
 # R) and verifies it round-trips. Needs node + the repo's node_modules.
-node "$ROOT/scripts/build-webr-repo-rds.mjs" "$CONTRIB"
+node "$PYROOT/scripts/build-webr-repo-rds.mjs" "$PYCONTRIB"
