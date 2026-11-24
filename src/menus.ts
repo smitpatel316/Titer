@@ -6,6 +6,7 @@ import {
   chooseProject,
   installMenuBar,
   newProject,
+  openGithubIssue,
   openLink,
   openProjects,
   openSample,
@@ -43,6 +44,38 @@ const ABOUT = {
   websiteLabel: "Buy Me a Coffee",
   copyright: "© 2026 mickaphd\nFree and open source. No warranty.",
 };
+
+/** A few things worth knowing, in-app (Help ▸ Titer Tips, seq 432): Prism's
+ *  Tips open a tips page; Titer has no tips page, so the tips live here. */
+const showTips = () =>
+  alert(
+    "Titer Tips",
+    [
+      "F1 opens the User Guide.",
+      "Titer autosaves 10 seconds after you stop editing, and when you switch sheets or quit.",
+      "Change a value and every analysis and graph on it updates at once.",
+      "Paste straight from Excel or Numbers into a table.",
+      "Settings → AI Connections lets an AI assistant drive Titer through MCP.",
+    ].join("\n"),
+    "info",
+  );
+
+/** How to cite the app (Help ▸ How to Cite Titer, seq 432): Prism's entry
+ *  shows its citation; Titer's shows its own — version, address, licence. */
+const showCitation = () =>
+  alert(
+    "How to Cite Titer",
+    `Titer ${version} (https://github.com/smitpatel316/Titer). Titer is free and open-source software under GPL-3.0, a modified fork of Helix by mickaphd. Cite the version you used and the address above.`,
+    "info",
+  );
+
+/** A pre-filled support issue (Help ▸ Personal Support…, seq 432): the
+ *  shell only opens the fixed issues/new address, so the title and body
+ *  are the only free text — the same shape as the feedback issue. */
+const supportIssueUrl = () =>
+  `https://github.com/smitpatel316/Titer/issues/new?title=${encodeURIComponent("Support request")}&body=${encodeURIComponent(
+    "Titer version:\nOperating system:\n\nWhat happened?\n\n\nWhat did you expect?\n\n\nSteps to reproduce:\n",
+  )}`;
 
 /** Says a project file is gone (moved or deleted since). */
 export const sayGone = (path: string) =>
@@ -108,11 +141,30 @@ export function setMenuBar(menus: MenuItems) {
     [titer, ...menus],
     [{ item: "Minimize" }, { item: "Maximize" }, separator, { item: "BringAllToFront" }],
     [
+      // Prism's Help order (menus row K5, seq 432): Resources, User Guide,
+      // Curve Fitting Guide, Statistics Guide, Tips, then How to Cite,
+      // then the support entries, then the vendor site. Manage License is
+      // N/A — open source, no licence — and is deliberately absent. The two
+      // Prism guides are GraphPad's own documentation, labelled as Prism's;
+      // Titer has no equivalent of its own to point at. Check for Updates
+      // already lives in the Titer menu, and Free Web QuickCalcs has no
+      // Titer equivalent, so neither is repeated here.
+      { text: "Titer on GitHub", action: () => openLink("github") },
       // The user guide lives in the repo's README (Help ▸ Titer User Guide,
       // seq 241): the same fixed address as the GitHub link, opened the
       // same way — the shell only ever opens fixed addresses.
       { text: "Titer User Guide", accelerator: "F1", action: () => openLink("guide") },
-      { text: "Titer on GitHub", action: () => openLink("github") },
+      { text: "Prism Curve Fitting Guide", action: () => openLink("curve-fitting") },
+      { text: "Prism Statistics Guide", action: () => openLink("statistics") },
+      { text: "Titer Tips", action: () => void showTips() },
+      separator,
+      { text: "How to Cite Titer", action: () => void showCitation() },
+      separator,
+      { text: "Support Web Site", action: () => openLink("support") },
+      { text: "Personal Support…", action: () => void openGithubIssue(supportIssueUrl()) },
+      { text: "Support Policies", action: () => openLink("support-policies") },
+      separator,
+      { text: "Go to titer.smitpatel.net", action: () => openLink("site") },
       { text: "Buy Me a Coffee", action: () => openLink("coffee") },
       separator,
       { text: "Sample Project", action: () => void openSample() },
