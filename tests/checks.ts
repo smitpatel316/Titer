@@ -724,6 +724,62 @@ check("paste-428: Paste Special offers Prism's digit + legacy-format options", (
   );
 });
 
+check("paste-439: Paste Special reads the clipboard natively, not via the webview", () => {
+  // The Mac proof batch (post-1.9.0, tip 5e40885) showed Edit > Paste
+  // Special… always alerts "Nothing to Paste": navigator.clipboard.read()
+  // needs transient user activation in the page, and a native menu-bar
+  // action never gives the page any — so the read can never succeed from
+  // that entry point, for real users as well as synthetic input. The fix
+  // is a Rust-side read (seq 439), mirroring the seq 296 write workaround.
+  const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(mainRs.includes("read_clipboard_formats"), "main.rs must define the read_clipboard_formats command");
+  ok(
+    mainRs.includes("fn read_clipboard_formats") && mainRs.includes("#[tauri::command]"),
+    "read_clipboard_formats must be a Tauri command",
+  );
+  ok(
+    mainRs.includes("read_clipboard_formats,") || mainRs.includes("\n            read_clipboard_formats"),
+    "read_clipboard_formats must be registered in the invoke handler",
+  );
+  // The native read must return both formats Paste Special needs: the
+  // plain text and the HTML table (Excel's x:num digits live in the HTML).
+  ok(
+    mainRs.includes("pbpaste") && mainRs.includes('"-Prefer", "html"'),
+    "the native read must use pbpaste, with -Prefer html for the HTML flavour",
+  );
+  ok(
+    mainRs.includes("text:") && mainRs.includes("html:"),
+    "the native read must return both a text and an html form",
+  );
+
+  // The page reaches it through native.ts, like the seq 296 write.
+  const native = readFileSync("src/native.ts", "utf8");
+  ok(native.includes("export async function readClipboardFormats"), "native.ts must export readClipboardFormats");
+  ok(
+    native.includes('invoke<') && native.includes('"read_clipboard_formats"'),
+    "readClipboardFormats must invoke the read_clipboard_formats command",
+  );
+
+  // The grid tries the native read FIRST, before the webview read — the
+  // menu-triggered flow must no longer depend solely on
+  // navigator.clipboard.read(), which can never succeed from a menu bar.
+  const grid439 = readFileSync("src/views/tables/grid.tsx", "utf8");
+  ok(
+    grid439.includes("readClipboardFormatsNative()"),
+    "grid.tsx must call the native clipboard read (readClipboardFormatsNative)",
+  );
+  const nativeCall = grid439.indexOf("readClipboardFormatsNative()");
+  const webviewRead = grid439.indexOf("navigator.clipboard.read()");
+  ok(
+    nativeCall !== -1 && webviewRead !== -1 && nativeCall < webviewRead,
+    "the native read must be attempted before the webview read in grid.tsx",
+  );
+  ok(
+    grid439.indexOf("readClipboardText") !== -1,
+    "readClipboardText must still exist as the text fallback",
+  );
+});
+
 // ── Gallery (seq 229) ────────────────────────────────────────────────────
 
 check("the gallery lists every graph in sidebar order, with its chart and table", () => {

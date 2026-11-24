@@ -27,7 +27,7 @@ import { levelSuggestions } from "../../lib/variable-types";
 import { fileName } from "../../lib/paths";
 import { seriesKeyOf } from "../../lib/columns";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
-import { alert, askPasteLink, popupMenu } from "../../native";
+import { alert, askPasteLink, popupMenu, readClipboardFormats as readClipboardFormatsNative } from "../../native";
 import { XIcon } from "@phosphor-icons/react";
 import { cn, Button, IconButton } from "../../ui/controls";
 import { CreateSeriesDialog, type CreateSeriesTarget } from "../../components/create-series-dialog";
@@ -672,6 +672,17 @@ export function Grid({
   /** The clipboard's text, or null when it can't be read (no permission, or
    *  nothing copied) — the menu has no clipboard event to fall back on. */
   const readClipboardText = async (): Promise<string | null> => {
+    // Native first (seq 439): a menu-bar entry carries no page activation,
+    // so the webview read can never succeed from it. A null native result
+    // means the clipboard is genuinely empty — no fallback needed.
+    try {
+      const clip = await readClipboardFormatsNative();
+      if (clip !== null) return clip.text;
+      return null;
+    } catch {
+      // Not macOS, or the native read is unavailable — fall through to the
+      // webview read.
+    }
     try {
       const text = await navigator.clipboard.readText();
       return text ? text : null;
@@ -684,6 +695,17 @@ export function Grid({
    *  table; `navigator.clipboard.read()` gives both, readText() only the
    *  text. Falls back to text-only when read() is unavailable. */
   const readClipboardFormats = async (): Promise<{ text: string; html: string | null } | null> => {
+    // Native first (seq 439): a menu-bar entry carries no page activation,
+    // so the webview read can never succeed from it. A null native result
+    // means the clipboard is genuinely empty — no fallback needed.
+    try {
+      const clip = await readClipboardFormatsNative();
+      if (clip !== null) return clip;
+      return null;
+    } catch {
+      // Not macOS, or the native read is unavailable — fall through to the
+      // webview read.
+    }
     try {
       const items = await navigator.clipboard.read();
       let text: string | null = null;
