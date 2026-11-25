@@ -65,6 +65,7 @@ const SIDECAR_HEADER_LEN: usize = 12;
 /// the finite count; min/max/mean are null when the parameter has no finite
 /// value.
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct FlowParamStats {
     pub name: String,
     pub count: usize,
@@ -75,6 +76,7 @@ pub struct FlowParamStats {
 
 /// A sample's stats: its event count plus one entry per parameter.
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct FlowSampleStats {
     pub sample_id: String,
     pub event_count: usize,
@@ -83,6 +85,7 @@ pub struct FlowSampleStats {
 
 /// A loaded sample, as the store reports it: identity + metadata only.
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct FlowSampleInfo {
     pub sample_id: String,
     pub name: String,
@@ -94,6 +97,7 @@ pub struct FlowSampleInfo {
 
 /// Store-wide memory state.
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct FlowStoreStatus {
     pub samples: usize,
     pub bytes: u64,
@@ -143,7 +147,9 @@ impl FlowStore {
 
     /// Insert (or replace) a sample's columns, evicting least-recently-used
     /// samples until the store fits its budget — never the sample just loaded.
-    fn insert(
+    /// `pub(crate)`: the FCS reader lane (`flow.rs`) loads parsed columns
+    /// through this, the same call the `flow_load_sample` command makes.
+    pub(crate) fn insert(
         &self,
         sample_id: &str,
         name: Option<String>,
@@ -473,5 +479,22 @@ mod tests {
         truncated.truncate(truncated.len() - 4);
         assert!(parse_sidecar(&truncated, 3).is_err());
         assert!(parse_sidecar(include_bytes!("../../tests/testdata/flow-sample-1.tfcs"), 2).is_err());
+    }
+
+    #[test]
+    fn store_info_serialises_camel_case_for_the_ts_contract() {
+        // Seq 443 (F1c): the TS store interface reads `sampleId` /
+        // `eventCount` / `parameterCount` / `sourcePath` — the wire
+        // format must be camelCase, not serde's snake_case default.
+        let store = FlowStore::with_budget(1024 * 1024);
+        let info = load_test_sample(&store);
+        let value = serde_json::to_value(&info).expect("info serialises");
+        assert_eq!(value["sampleId"], "s1");
+        assert_eq!(value["eventCount"], 5);
+        assert_eq!(value["parameterCount"], 3);
+        assert_eq!(value["sourcePath"], "sample1.fcs");
+        assert!(value.get("sample_id").is_none(), "no snake_case keys leak: {value}");
+        let status = FlowStoreStatus { samples: 1, bytes: 60, budget_bytes: 1024 * 1024 };
+        assert_eq!(serde_json::to_value(&status).unwrap()["budgetBytes"], 1024 * 1024);
     }
 }
