@@ -12,6 +12,7 @@ import type {
 } from "../types";
 import { describe, pRow, rVec } from "../column/base";
 import {
+  alignedGroups,
   categoricalPredictorsNote,
   droppedNoCompleteNote,
   droppedPredictorsNote,
@@ -27,7 +28,7 @@ export async function runMultipleRegression(
 ): Promise<AnalysisOutcome> {
   const sel = selectPredictors(columns, params);
   if (sel.error) return { error: sel.error };
-  const { dep, predictors, design, dropped } = sel;
+  const { dep, design, dropped } = sel;
   if (!dep || design.length < 1) {
     return { error: "Multiple regression needs a dependent variable and at least one other variable with data." };
   }
@@ -73,18 +74,23 @@ export async function runMultipleRegression(
   const aliasAssigns = Array.from({ length: p }, (_, i) => `al${i}=as.numeric(na[${i + 2}])`);
   // Diagnostics (seq 198): the ANOVA table's sums of squares, AIC/AICc
   // (k = coefficients + residual variance; AICc undefined when n − k − 1 ≤
-  // 0), one VIF per predictor (1/(1 − R²ⱼ), predictor j regressed on the
-  // others — R² is translation-invariant, so the auxiliary regression is
+  // 0), one VIF per design column (1/(1 − R²ⱼ), design column j regressed on
+  // the others — R² is translation-invariant, so the auxiliary regression is
   // centered the same way as the main fit; uncentered it returns R² = 0 at
-  // 1e13 scale and every VIF reads 1 — a single predictor has VIF 1 by
+  // 1e13 scale and every VIF reads 1 — a single design column has VIF 1 by
   // definition), and the coefficients' covariance matrix on the uncentered
   // scale (J·vcov(m)·J′, J the centering back-transform — the same transform
   // the intercept's SE above uses, extended to the whole matrix; verified
-  // against the direct uncentered vcov in Python).
+  // against the direct uncentered vcov in Python). The VIFs iterate over
+  // `design`, not `predictors`: a text predictor expands to several dummy
+  // columns, so iterating the (numeric-only) predictors leaves vifAssigns
+  // empty when only categorical predictors are present (an R syntax error,
+  // "argument 7 is empty") and indexes the wrong X columns — a dummy —
+  // when a text predictor precedes a numeric one (R2-41).
   const vifAssigns =
     p === 1
       ? "vf0=1"
-      : predictors
+      : design
           .map(
             (_, j) =>
               `vf${j}=1/(1-summary(lm(I(X[,${j + 1}]-mean(X[,${j + 1}]))~sweep(X[,-${j + 1},drop=FALSE],2,colMeans(X[,-${j + 1},drop=FALSE]))))$r.squared)`,
@@ -141,7 +147,7 @@ export async function runMultipleRegression(
     t: v[`t${t}`] ?? null,
     p: v[`pv${t}`] ?? null,
   }));
-  const vif: VifRow[] = predictors.map((c, j) => ({ term: c.name, vif: v[`vf${j}`] ?? null }));
+  const vif: VifRow[] = design.map((d, j) => ({ term: d.term, vif: v[`vf${j}`] ?? null }));
   const anovaTable: AnovaRow[] = [
     { source: "Regression", df: p, ss: v.ssr ?? null, ms: v.ssr != null ? v.ssr / p : null, f: v.fstat ?? null, p: v.fp ?? null },
     {
@@ -158,7 +164,12 @@ export async function runMultipleRegression(
     values: terms.map((_, i) => terms.map((_, j) => v[`cv${i}_${j}`] ?? null)),
   };
   const highVif = vif.filter((row) => (row.vif ?? 0) > 10).map((row) => `“${row.term}”`);
-  const { groups: described } = await describe([dep, ...predictors]);
+  // Descriptives on the aligned complete-case values (the dependent plus
+  // the numeric design columns), not the raw columns: a raw column still
+  // holds rows the fit dropped, so its n/mean would describe rows the
+  // regression never saw (R2-41). Same shape as the logistic/Poisson
+  // runners (alignedGroups in ./predictors).
+  const { groups: described } = await describe(alignedGroups(dep, sel.depValues, design));
   return {
     testType: "multiple-regression",
     subtitle: "Multiple linear regression",

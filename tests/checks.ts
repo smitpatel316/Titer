@@ -22735,6 +22735,85 @@ check("seq 224: a text predictor is dummy-coded in multiple regression (first le
   ok(close224(out.stats.find((s) => s.label === "R squared")?.value, ref.r2!), JSON.stringify(out.stats));
 });
 
+// R2-41 (BUG-REPORT #41): the VIFs were computed over `predictors` — the
+// numeric-only source columns — while the design matrix holds the expanded
+// dummy columns, and the descriptives were computed on the raw unaligned
+// columns. With only categorical predictors vifAssigns was "" (R:
+// "argument 7 is empty"); with a text predictor before a numeric one,
+// X[, j+1] indexed a dummy column and the wrong VIF was attached to the
+// numeric predictor's name; and a row the fit dropped (blank Y) still
+// leaked into the descriptives' n/mean.
+check("R2-41: multiple-regression VIFs are per design column and descriptives use complete cases", async () => {
+  const data: TableData = {
+    columns: ["Title", "Y", "X", "Trt"],
+    rows: [
+      ["", "12", "1", "Control"],
+      ["", "15", "2", "Control"],
+      ["", "13", "3", "Drug"],
+      ["", "18", "4", "Drug"],
+      ["", "22", "5", "Placebo"],
+      ["", "20", "6", "Placebo"],
+      ["", "25", "7", "Control"],
+      ["", "23", "8", "Drug"],
+      ["", "27", "9", "Placebo"],
+      ["", "30", "10", "Control"],
+      ["", "28", "11", "Drug"],
+      ["", "33", "12", "Placebo"],
+    ],
+  };
+  const drug = [0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0];
+  const placebo = [0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1];
+  const x = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+  // (a) Only categorical predictors: the fit must run (pre-fix R died with
+  // "argument 7 is empty") with one VIF per dummy column.
+  const onlyCat = await runAnalysis("multiple-regression", data, { dependent: "Y", predictors: ["Trt"] });
+  if ("error" in onlyCat) throw new Error(onlyCat.error);
+  deepStrictEqual(
+    (onlyCat.coefficients ?? []).map((c) => c.term),
+    ["Intercept", "Trt[Drug]", "Trt[Placebo]"],
+  );
+  deepStrictEqual(
+    (onlyCat.vif ?? []).map((row) => row.term),
+    ["Trt[Drug]", "Trt[Placebo]"],
+  );
+  const refA = await evalNamedVector(
+    `d1<-${rVec(drug)};d2<-${rVec(placebo)};` +
+      `c(vd=1/(1-summary(lm(d1~d2))$r.squared),vp=1/(1-summary(lm(d2~d1))$r.squared))`,
+  );
+  const vifA = (term: string) => onlyCat.vif?.find((row) => row.term === term)?.vif;
+  ok(close224(vifA("Trt[Drug]"), refA.vd!, 1e-6), JSON.stringify(onlyCat.vif));
+  ok(close224(vifA("Trt[Placebo]"), refA.vp!, 1e-6), JSON.stringify(onlyCat.vif));
+  // (b) A text predictor before a numeric one, plus a row the fit drops
+  // (blank Y, X = 100): the VIFs must attach to the right design terms,
+  // and the descriptives must describe the 12 complete rows only — not
+  // the raw columns (pre-fix X came back n = 13, mean ≈ 13.69).
+  const gapped: TableData = { ...data, rows: [...data.rows, ["", "", "100", "Control"]] };
+  const out = await runAnalysis("multiple-regression", gapped, { dependent: "Y", predictors: ["Trt", "X"] });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(
+    (out.vif ?? []).map((row) => row.term),
+    ["Trt[Drug]", "Trt[Placebo]", "X"],
+  );
+  const refB = await evalNamedVector(
+    `X<-cbind(${rVec(drug)},${rVec(placebo)},${rVec(x)});` +
+      `c(vd=1/(1-summary(lm(X[,1]~X[,-1]))$r.squared),` +
+      `vp=1/(1-summary(lm(X[,2]~X[,-2]))$r.squared),` +
+      `vx=1/(1-summary(lm(X[,3]~X[,-3]))$r.squared))`,
+  );
+  const vifB = (term: string) => out.vif?.find((row) => row.term === term)?.vif;
+  ok(close224(vifB("Trt[Drug]"), refB.vd!, 1e-6), JSON.stringify(out.vif));
+  ok(close224(vifB("Trt[Placebo]"), refB.vp!, 1e-6), JSON.stringify(out.vif));
+  ok(close224(vifB("X"), refB.vx!, 1e-6), JSON.stringify(out.vif));
+  deepStrictEqual(
+    (out.groups ?? []).map((g) => g.name),
+    ["Y", "X"],
+  );
+  const xGroup = out.groups?.find((g) => g.name === "X");
+  strictEqual(xGroup?.n, 12, `X descriptives should cover the 12 complete rows, got ${JSON.stringify(xGroup)}`);
+  ok(close224(xGroup?.mean, 6.5, 1e-9), `X mean should be the complete-case mean 6.5, got ${JSON.stringify(xGroup)}`);
+  strictEqual(out.groups?.find((g) => g.name === "Y")?.n, 12);
+});
+
 check("seq 224: a text predictor is dummy-coded in multiple logistic regression", async () => {
   const data: TableData = {
     columns: ["Title", "Y", "X", "Trt"],
