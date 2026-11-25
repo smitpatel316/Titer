@@ -126,6 +126,7 @@ pub struct FcsImportSummary {
 }
 
 /// A parsed FCS file, columns extracted and ready to load into the store.
+#[derive(Debug)]
 struct ReadFcsSample {
     version: String,
     name: String,
@@ -248,6 +249,19 @@ fn parse_text(
     }
     let seg = &bytes[start..=end];
     let delim = seg[0];
+    // TEXT end offsets are inclusive per spec, but some writers emit
+    // exclusive ends (coulter.lmd's TEXT end points one byte past its
+    // closing delimiter, at a space; its DATA end is off by one the same
+    // way). Tolerate exactly one trailing byte when the segment does not
+    // end with its delimiter — never more, so DATA bytes are never
+    // swallowed into TEXT.
+    let seg = if seg[seg.len() - 1] == delim {
+        seg
+    } else if seg.len() >= 2 && seg[seg.len() - 2] == delim {
+        &seg[..seg.len() - 1]
+    } else {
+        return Err("Malformed TEXT segment: it must start and end with its delimiter".to_string());
+    };
     let mut tokens: Vec<Vec<u8>> = Vec::new();
     let mut cur: Vec<u8> = Vec::new();
     let mut i = 1;
@@ -266,10 +280,14 @@ fn parse_text(
         }
     }
     tokens.push(cur);
-    if tokens.len() < 3 || tokens.first().map(|t| !t.is_empty()).unwrap_or(true) {
+    // The tokenizer starts after the opening delimiter, so the tokens
+    // are [key, value, key, value, …, ""] — the trailing empty token is
+    // the text after the closing delimiter. A well-formed segment has at
+    // least one pair and ends with its delimiter (trailing token empty).
+    if tokens.len() < 3 || tokens.last().map(|t| !t.is_empty()).unwrap_or(true) {
         return Err("Malformed TEXT segment: it must start and end with its delimiter".to_string());
     }
-    let body = &tokens[1..tokens.len() - 1];
+    let body = &tokens[..tokens.len() - 1];
     if body.len() % 2 != 0 {
         return Err(format!(
             "Malformed TEXT segment: {} keyword/value tokens is odd — a keyword has no value",
@@ -372,7 +390,7 @@ fn check_offsets(header: &HeaderView, pairs: &[(String, String)], index: usize) 
 fn check_datatype(pairs: &[(String, String)], index: usize) -> Result<(), String> {
     if lookup(pairs, "$MODE") == Some("C") {
         return Err(format!(
-            "Dataset {index} is histogram-mode ($MODE C), which Titer does not read yet — list-mode ($MODE L) only"
+            "Dataset {index} is histogram-mode ($MODE C), which is unsupported — list-mode ($MODE L) only"
         ));
     }
     let Some(datatype) = lookup(pairs, "$DATATYPE") else {
@@ -380,7 +398,7 @@ fn check_datatype(pairs: &[(String, String)], index: usize) -> Result<(), String
     };
     if datatype == "A" {
         return Err(format!(
-            "Dataset {index} uses ASCII data ($DATATYPE A), which Titer does not read — integer, float and double data only"
+            "Dataset {index} uses ASCII data ($DATATYPE A), which is unsupported — integer, float and double data only"
         ));
     }
     if !matches!(datatype, "I" | "F" | "D") {
@@ -993,7 +1011,7 @@ mod tests {
         }
         candidates.push(PathBuf::from("/home/hatch"));
         for home in candidates {
-            let path = home.join(".helix-flowjo").join("corpus").join(name);
+            let path = home.join("workspace").join(".helix-flowjo").join("corpus").join(name);
             if path.is_file() {
                 return Some(path.to_string_lossy().into_owned());
             }
@@ -1092,10 +1110,14 @@ mod tests {
         assert_eq!(summary.store.bytes, 10 * 6 * 4);
         assert_eq!(summary.sample_id, "fcs-int-10_events_6_parameters");
         // The decoded columns match the independent Python decode of the
-        // same fixture bytes (first event 10, 20, 30, 40, 50, 60).
+        // same fixture bytes (first event 10, 20, 30, 40, 50, 60; DATA is
+        // interleaved per event, so the AS column strides by 6).
         let sample = read_fcs_sample(&fixture("int-10_events_6_parameters.fcs"))
             .expect("the smoke fixture must read");
-        assert_eq!(sample.columns[0], vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0]);
+        assert_eq!(
+            sample.columns[0],
+            vec![10.0, 70.0, 130.0, 190.0, 250.0, 310.0, 370.0, 430.0, 490.0, 550.0]
+        );
         assert_eq!(sample.columns[5][0], 60.0);
     }
 
