@@ -360,6 +360,14 @@ class Parser {
         }
         const aggName = normalizeAggregate(upper);
         if (AGGREGATES.includes(aggName) && args.length === 1) {
+          // A one-argument aggregate reads one whole variable, not an
+          // expression: MEAN(A + B) used to parse and then silently blank
+          // the column, while MIN(A + B) / MAX(A + B) returned each row's
+          // own A + B — so a non-variable argument is an error, not a
+          // formula. (MIN / MAX with two or more arguments still compare
+          // row by row, through ELEMENTWISE below.)
+          if (args[0].kind !== "var")
+            throw new Error(`“${t.name}” takes one variable, e.g. “${upper}(E)”.`);
           return { kind: "call", name: aggName, args };
         }
         const condBase = CONDITIONAL_AGGREGATES[upper];
@@ -739,13 +747,17 @@ function computeWindow(node: WindowExpr, h: WindowHelpers): (number | null)[] {
         const s = values.length < 2 ? null : sd(values);
         out[r] = own == null || s == null || s === 0 ? null : (own - mean(values)) / s;
       } else if (node.name === "RANK") {
-        if (own == null) {
+        // A row whose own value is not among the ranked values has no
+        // rank: excluded by WHERE, or outside its ROWS frame — with
+        // equal === 0, `1 + less + (equal - 1) / 2` gave 0.5 (or
+        // less + 0.5) instead of blank.
+        const less = own == null ? 0 : values.filter((v) => v < own).length;
+        const equal = own == null ? 0 : values.filter((v) => v === own).length;
+        if (own == null || !matches[r] || values.length === 0 || equal === 0) {
           out[r] = null;
         } else {
           // Ascending, smallest is 1; ties share the average of the
           // positions they occupy; blanks are left out.
-          const less = values.filter((v) => v < own).length;
-          const equal = values.filter((v) => v === own).length;
           out[r] = 1 + less + (equal - 1) / 2;
         }
       } else if (node.name === "COUNT") {
@@ -1038,6 +1050,16 @@ export function recomputeCalculated(data: TableData): TableData {
       if (done) return done[j] ?? null;
       return byName.get(dep)?.byRow[j] ?? null;
     };
+    // A calculated input's raw text is its computed value, not the stale
+    // snapshot readTable took before any formula ran: without this,
+    // COUNTA(B) over B = A * 2 kept counting B's pre-edit text after an
+    // edit blanked a row of B. Computed values are numbers, so the cell
+    // text is the formatted number — or null when the row is blank.
+    const readRawTextAt = (dep: string, j: number): string | null => {
+      const done = computed.get(dep);
+      if (done) return cell(done[j] ?? null);
+      return byName.get(dep)?.cells[j] ?? null;
+    };
     const makeRowCtx = (r: number): EvalContext => ({
       value: (dep) => readValueAt(dep, r),
       values: (dep) => {
@@ -1046,7 +1068,7 @@ export function recomputeCalculated(data: TableData): TableData {
         return byName.get(dep)?.values ?? [];
       },
       valueAt: readValueAt,
-      rawTextAt: (dep, j) => byName.get(dep)?.cells[j] ?? null,
+      rawTextAt: readRawTextAt,
       rowCount: data.rows.length,
       row: r,
       windowColumn: (node) => ensureWindow(node),
@@ -1062,7 +1084,7 @@ export function recomputeCalculated(data: TableData): TableData {
       const values = computeWindow(node as WindowExpr, {
         rowCount: data.rows.length,
         valueAt: readValueAt,
-        rawTextAt: (dep, j) => byName.get(dep)?.cells[j] ?? null,
+        rawTextAt: readRawTextAt,
         evalAt: (expr, j) => evalExpr(expr, makeRowCtx(j)),
       });
       windowColumns.set(node, values);

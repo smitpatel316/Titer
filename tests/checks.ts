@@ -33138,6 +33138,74 @@ check("calcvars: COUNTA counts text values, not just numbers (seq 377)", () => {
   deepStrictEqual(add(excluded, "CountX", "COUNT(A)"), [null, null, null, "1", null, null]);
 });
 
+check("calcvars: chained COUNTA reads computed values, expression aggregates are rejected, RANK blanks excluded rows (bug-report issue 22, seq 480)", () => {
+  // 1. A chained COUNTA reads the computed column, not the stale snapshot
+  // readTable took before any formula ran: clearing A[0] blanks B[0], so
+  // COUNTA(B) drops from 2 to 1 — it used to stay 2.
+  const chained = mvTable(["Title", "A"], [
+    [null, "1"],
+    [null, "2"],
+  ]);
+  const b = addCalculatedVariable(chained, "B", "A * 2");
+  if ("error" in b) throw new Error(b.error);
+  const c = addCalculatedVariable(b.data, "C", "COUNTA(B)");
+  if ("error" in c) throw new Error(c.error);
+  deepStrictEqual(calcValues(c.data, "C"), ["2", "2"]);
+  const cleared: TableData = {
+    ...c.data,
+    rows: c.data.rows.map((row, i) => (i === 0 ? [row[0], null, row[2], row[3]] : row)),
+  };
+  const after = recomputeCalculated(cleared);
+  deepStrictEqual(calcValues(after, "B"), [null, "4"]);
+  deepStrictEqual(calcValues(after, "C"), ["1", "1"]);
+  // The windowed form reads computed values the same way.
+  const grouped = mvTable(["Title", "A", "G"], [
+    [null, "1", "x"],
+    [null, "2", "x"],
+    [null, "3", "y"],
+  ]);
+  const gb = addCalculatedVariable(grouped, "B", "A * 2");
+  if ("error" in gb) throw new Error(gb.error);
+  const gd = addCalculatedVariable(gb.data, "D", "COUNTA(B) OVER G");
+  if ("error" in gd) throw new Error(gd.error);
+  deepStrictEqual(calcValues(gd.data, "D"), ["2", "2", "1"]);
+  const gCleared: TableData = {
+    ...gd.data,
+    rows: gd.data.rows.map((row, i) => (i === 0 ? [row[0], null, row[2], row[3], row[4]] : row)),
+  };
+  deepStrictEqual(calcValues(recomputeCalculated(gCleared), "D"), ["1", "1", "1"]);
+  // 2. A one-argument aggregate takes one variable, not an expression:
+  // MEAN(A + B) used to parse and blank the whole column, MIN(A + B)
+  // used to return each row's own A + B. Both are now a formula error.
+  const expr = mvTable(["Title", "A", "B"], [
+    [null, "1", "10"],
+    [null, "2", "20"],
+    [null, "3", "30"],
+  ]);
+  const badMin = addCalculatedVariable(expr, "M1", "MIN(A + B)");
+  ok("error" in badMin && badMin.error.includes("takes one variable"), JSON.stringify(badMin));
+  const badMean = addCalculatedVariable(expr, "M2", "MEAN(A + B)");
+  ok("error" in badMean && badMean.error.includes("takes one variable"), JSON.stringify(badMean));
+  // The legitimate forms are unchanged: a whole-variable aggregate, and
+  // MIN / MAX with two or more arguments comparing row by row.
+  const goodMean = addCalculatedVariable(expr, "M3", "MEAN(A)");
+  if ("error" in goodMean) throw new Error(goodMean.error);
+  deepStrictEqual(calcValues(goodMean.data, "M3"), ["2", "2", "2"]);
+  const goodMin = addCalculatedVariable(expr, "M4", "MIN(A, B)");
+  if ("error" in goodMin) throw new Error(goodMin.error);
+  deepStrictEqual(calcValues(goodMin.data, "M4"), ["1", "2", "3"]);
+  // 3. RANK on a row excluded by WHERE has no rank: its own value is not
+  // among the ranked values, so it blanks instead of returning 0.5.
+  const ranked = mvTable(["Title", "X", "C"], [
+    [null, "10", "0"],
+    [null, "20", "1"],
+    [null, "30", "1"],
+  ]);
+  const r = addCalculatedVariable(ranked, "R", "RANK(X) WHERE C > 0");
+  if ("error" in r) throw new Error(r.error);
+  deepStrictEqual(calcValues(r.data, "R"), [null, "1", "2"]);
+});
+
 // ── Simulate data + Monte Carlo (plan 22) ───────────────────────────────
 
 check("simulationRCode draws each distribution from the right R call", () => {
