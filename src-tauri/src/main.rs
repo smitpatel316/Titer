@@ -1020,6 +1020,14 @@ fn copy_pdf_to_clipboard_blocking(pdf_path: &str, png_path: &str) -> Result<(), 
     // `public.png` — and `writeObjects` puts both on the board at once.
     // A failed read or write throws, so osascript exits non-zero and the
     // caller reports it instead of silently leaving a stale clipboard.
+    // JXA quirk (Mac proof batch #4, Nov 2026): zero-argument ObjC
+    // methods must be read as bare properties — `pb.clearContents`,
+    // `$.NSPasteboardItem.alloc.init` — never called with parens.
+    // On this Mac's JXA, `pb.clearContents()` throws
+    // `TypeError: Object is not a function`, so the whole native write
+    // failed and the app silently fell back to PNG-only web copy.
+    // Methods WITH arguments (`dataWithContentsOfFile`, `setDataForType`,
+    // `writeObjects`) keep their parens.
     let script = format!(
         "ObjC.import('AppKit');\n\
         var pdfData = $.NSData.dataWithContentsOfFile({pdf_json});\n\
@@ -1027,11 +1035,11 @@ fn copy_pdf_to_clipboard_blocking(pdf_path: &str, png_path: &str) -> Result<(), 
         var pngData = $.NSData.dataWithContentsOfFile({png_json});\n\
         if (!pngData) throw new Error('Could not read the PNG file for the clipboard');\n\
         var pb = $.NSPasteboard.generalPasteboard;\n\
-        pb.clearContents();\n\
-        var pdfItem = $.NSPasteboardItem.alloc.init();\n\
+        pb.clearContents;\n\
+        var pdfItem = $.NSPasteboardItem.alloc.init;\n\
         pdfItem.setDataForType(pdfData, 'com.adobe.pdf');\n\
         pdfItem.setDataForType(pdfData, 'public.pdf');\n\
-        var pngItem = $.NSPasteboardItem.alloc.init();\n\
+        var pngItem = $.NSPasteboardItem.alloc.init;\n\
         pngItem.setDataForType(pngData, 'public.png');\n\
         if (!pb.writeObjects($([pdfItem, pngItem]))) throw new Error('Could not write the PDF and PNG to the clipboard');\n"
     );
