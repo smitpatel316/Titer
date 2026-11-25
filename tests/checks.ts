@@ -48748,9 +48748,9 @@ check("flow-f2c: per-population stats match the independent Python reference on 
   let revision = 1;
   const getState = () =>
     ({ nodes, rootOrder: [FLOW_FIXTURE_SAMPLE_ID], childOrder: {}, activeNodeId: FLOW_FIXTURE_SAMPLE_ID, revision, projectName: "flow-f2c pin" }) as unknown as DocumentState;
-  let created: { table: TableData; name: string; sampleIds: readonly string[] } | null = null;
+  let created: { table: TableData; name: string; sampleIds: readonly string[] }[] = [];
   const createFlowStatsTable = (t: TableData, name: string, sampleIds: readonly string[]) => {
-    created = { table: t, name, sampleIds };
+    created.push({ table: t, name, sampleIds });
     const id = "stats-table-1";
     nodes[id] = createSummaryTableNode(id, name, t, sampleIds);
     revision++;
@@ -48769,9 +48769,9 @@ check("flow-f2c: per-population stats match the independent Python reference on 
     strictEqual(result.table_id, "stats-table-1");
     deepStrictEqual(result.populations.map((p) => p.count), [20000, 6000, 14000, 6000, 0]);
     strictEqual(out.created?.table_id, "stats-table-1");
-    ok(created, "the executor must create the stats table through the store action");
-    strictEqual(created!.table.rows.length, 5);
-    deepStrictEqual(created!.sampleIds, [FLOW_FIXTURE_SAMPLE_ID]);
+    strictEqual(created.length, 1, "the executor must create the stats table through the store action");
+    strictEqual(created[0].table.rows.length, 5);
+    deepStrictEqual(created[0].sampleIds, [FLOW_FIXTURE_SAMPLE_ID]);
     ok(nodes["stats-table-1"].type === "table" && nodes["stats-table-1"].tableType === "column", "the stats table must be an ordinary Column table");
     // Ad-hoc populations replace the sample's gating tree.
     const adhoc = await flowMod.executePopulationStats(

@@ -55,13 +55,30 @@ export interface FlowTransformRef {
   params: Record<string, number>;
 }
 
+/** A 1-D range gate on one parameter (seq 449, F2c): half-open [min, max)
+ *  — the lower bound is inclusive, the upper exclusive — so a pair of
+ *  gates at the same cut partitions the events with no overlap and no gap.
+ *  Phase 3 adds gate geometry as new `kind`s; the forgiving reader drops
+ *  an unknown kind, never trusts it. */
+export interface FlowPopulationPredicate {
+  kind: "range";
+  param: string;
+  min?: number;
+  max?: number;
+}
+
 /** One gated population. F1a only carries the tree shape: gate geometry
- *  (rect / polygon / ellipse / quadrant) is the gating lane's job (F3). */
+ *  (rect / polygon / ellipse / quadrant) is the gating lane's job (F3).
+ *  F2c adds the 1-D range predicate — enough to select a population for
+ *  statistics before geometry exists. */
 export interface FlowPopulationRef {
   id: string;
   name: string;
   /** The parent population's id, or null for the root (all events). */
   parentId: string | null;
+  /** The gate selecting this population from its parent, when it has one.
+   *  A population without a predicate is its parent's events. */
+  predicate?: FlowPopulationPredicate;
 }
 
 /** The gating tree of one sample: populations in tree order. */
@@ -162,6 +179,17 @@ function readTransforms(raw: unknown): FlowTransformRef[] | undefined {
   return out.length ? out : undefined;
 }
 
+function readPredicate(raw: unknown): FlowPopulationPredicate | undefined {
+  if (!isObj(raw)) return undefined;
+  if (raw.kind !== "range") return undefined;
+  const param = nonEmptyString(raw.param);
+  if (!param) return undefined;
+  const min = isFiniteNumber(raw.min) ? (raw.min as number) : undefined;
+  const max = isFiniteNumber(raw.max) ? (raw.max as number) : undefined;
+  if (min !== undefined && max !== undefined && min > max) return undefined;
+  return defined({ kind: "range" as const, param, min, max });
+}
+
 function readGating(raw: unknown): FlowGatingRef | undefined {
   if (!isObj(raw) || !Array.isArray(raw.populations)) return undefined;
   const populations: FlowPopulationRef[] = [];
@@ -170,11 +198,14 @@ function readGating(raw: unknown): FlowGatingRef | undefined {
     const id = nonEmptyString(p.id);
     const name = nonEmptyString(p.name);
     if (!id || !name) continue;
-    populations.push({
+    const population: FlowPopulationRef = {
       id,
       name,
       parentId: p.parentId === null || typeof p.parentId === "string" ? (p.parentId as string | null) : null,
-    });
+    };
+    const predicate = readPredicate(p.predicate);
+    if (predicate) population.predicate = predicate;
+    populations.push(population);
   }
   return populations.length ? { populations } : undefined;
 }

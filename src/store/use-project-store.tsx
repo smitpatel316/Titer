@@ -37,6 +37,7 @@ import { applyWand as planWand, type WandReport } from "../lib/wand";
 import type { CellBackgroundColor } from "../lib/cell-colors";
 import { cloneGraphPlan, type CloneOptions, type ClonePlan } from "../lib/clone-graph";
 import { createSampleNode, type FlowCompensationRef, type FlowSampleRef } from "../flow/sample";
+import { createSummaryTableNode } from "../flow/summary";
 import { DEFAULT_FIGURE_DPI, DEFAULT_FIGURE_SIZE, DEFAULT_LABEL_STYLE, newFigurePanels } from "../lib/figure";
 import { clearRegenPlans } from "../lib/prism-graph-regen";
 import type { FigureGrid, FigureLabelStyle, FigurePanel, FigureSize, Resolution, SharedLegend } from "./types";
@@ -1613,6 +1614,10 @@ interface ProjectActions {
    *  matrix applied to its stored events + whether it is applied. The
    *  events themselves live in the store, never on this node. */
   updateFlowSampleCompensation: (sampleId: string, compensation: FlowCompensationRef) => void;
+  /** Create a population-stats table node from a computed stats table
+   *  (seq 449): an ordinary Column table at the project root, naming the
+   *  samples it summarizes. Returns the node id. */
+  createFlowStatsTable: (table: TableData, name: string, sampleIds: readonly string[]) => string;
   /** A plugin analysis node on a table: named for the plugin analysis, and
    *  carrying its namespaced id + params instead of an `AnalysisType`. */
   createPluginAnalysis: (parentId: string, pluginId: string, pluginParams?: PluginParamValues) => string;
@@ -1921,6 +1926,17 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       // applied flag on the sample node.
       updateFlowSampleCompensation: (sampleId, compensation) => {
         dispatch({ type: "updateFlowSampleCompensation", id: sampleId, compensation, at: Date.now() });
+      },
+      // A population-stats table from seq 449: an ordinary Column table
+      // at the project root, naming the samples it summarizes — the same
+      // bridge node the summary lane builds (src/flow/summary.ts).
+      createFlowStatsTable: (table, name, sampleIds) => {
+        const id = genId("table");
+        dispatch({
+          type: "create",
+          node: createSummaryTableNode(id, name, table, sampleIds),
+        });
+        return id;
       },
       // Named for the plugin analysis it runs (an unregistered plugin
       // keeps its id as the name until it is re-enabled).
