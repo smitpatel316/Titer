@@ -67,12 +67,16 @@ const TEST_NAME: Record<NormalityTest, string> = {
 
 const TESTS: NormalityTest[] = ["shapiro-wilk", "dagostino-pearson", "anderson-darling", "kolmogorov-smirnov"];
 
-/** The params resolved: an unknown `test` falls back to Shapiro–Wilk, and
- *  a missing `lognormal` to false (old saved analyses have no params). */
-export const resolveNormalityParams = (params: ShapiroWilkParams | undefined): Required<ShapiroWilkParams> => ({
-  test: params && TESTS.includes(params.test) ? params.test : "shapiro-wilk",
-  lognormal: params?.lognormal ?? false,
-});
+/** The params resolved: a missing `test` is Shapiro–Wilk (old saved analyses
+ *  have no params); a test this analysis doesn't offer is refused, never
+ *  silently run as Shapiro–Wilk. */
+export const resolveNormalityParams = (params: ShapiroWilkParams | undefined): Required<ShapiroWilkParams> => {
+  if (params?.test !== undefined && !TESTS.includes(params.test))
+    throw new Error(
+      `“${params.test}” is not a normality test — choose Shapiro–Wilk, D'Agostino–Pearson, Anderson–Darling or Kolmogorov–Smirnov.`,
+    );
+  return { test: params?.test ?? "shapiro-wilk", lognormal: params?.lognormal ?? false };
+};
 
 /** Whether this test can take these values. */
 export const testable = (test: NormalityTest, { values }: Group) =>

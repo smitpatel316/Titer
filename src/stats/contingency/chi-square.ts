@@ -5,7 +5,7 @@
 // and equally spaced. Each data column holding counts is a group; each row is a
 // category. The count matrix is built from complete rows (every group column
 // filled) and the whole test is one WebR round-trip returning a flat named vector.
-import type { AnalysisOutcome, ChiSquareParams, Column, StatRow } from "../types";
+import { CONTINGENCY_TESTS, type AnalysisOutcome, type ChiSquareParams, type Column, type StatRow } from "../types";
 import { buildContingencyMatrix } from "./common";
 import { pairedGroups, R_EFFECT_CI } from "../column/base";
 import { evalNamedVector } from "../webr";
@@ -20,6 +20,10 @@ const SUBTITLES: Record<Test, string> = {
   trend: "Chi-square test for trend",
 };
 
+/** The subtitle for a validated test — `test` passed the check in
+ *  runChiSquare below, so this is never undefined for a cross-family value. */
+const subtitleOf = (t: Test): string => SUBTITLES[t];
+
 /** R: `wil(x, n)`, the Wilson score 95% CI of the proportion x / n. */
 const R_WILSON =
   "wil<-function(x,n){z<-qnorm(0.975);p<-x/n;c0<-(p+z^2/(2*n))/(1+z^2/n);h<-z*sqrt(p*(1-p)/n+z^2/(4*n^2))/(1+z^2/n);c(c0-h,c0+h)}";
@@ -31,9 +35,15 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
   const groups = pairedGroups(columns);
   const flat = matrix.flat();
   const is2x2 = rows === 2 && cols === 2;
-  const test: Test = params?.test ?? (is2x2 ? "fisher" : "chi-square");
+  // A test this analysis doesn't offer is refused, never silently run —
+  // `test !== "chi-square"` below would otherwise force Yates' correction.
+  if (params?.test !== undefined && !(CONTINGENCY_TESTS as readonly string[]).includes(params.test))
+    return {
+      error: `“${params.test}” is not a chi-square test — choose Fisher's exact, Yates' corrected chi-square, Pearson's chi-square or the chi-square test for trend.`,
+    };
+  const test = params?.test ?? (is2x2 ? "fisher" : "chi-square");
   if ((test === "fisher" || test === "yates") && !is2x2)
-    return { error: `${SUBTITLES[test]} is for a 2 × 2 table; this one is ${rows} × ${cols}.` };
+    return { error: `${subtitleOf(test)} is for a 2 × 2 table; this one is ${rows} × ${cols}.` };
   // Fisher's exact test sums the probability of every table with these margins: beyond
   // ten million subjects, more than R can hold. (fisher.test runs for the odds ratio
   // even when the chi-square is the chosen P source, so the cap applies either way.)
@@ -185,7 +195,7 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
   const first = groups[0].name;
   const lowExpected = test !== "fisher" && v.minexp != null && v.minexp < 5;
   const notes =
-    `Contingency table ${rows}×${cols}, N = ${num(v.n ?? null)}. ${is2x2 ? SUBTITLES[test] : "Pearson's chi-square test"}. ` +
+    `Contingency table ${rows}×${cols}, N = ${num(v.n ?? null)}. ${is2x2 ? subtitleOf(test) : "Pearson's chi-square test"}. ` +
     (is2x2
       ? `The odds ratio is for the table as entered (rows × columns): Fisher's conditional estimate, close to ` +
         `but not a·d / b·c. The relative risk and the difference of risks compare the first row's share of ` +
@@ -207,7 +217,7 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
 
   return {
     testType: "chi-square",
-    subtitle: is2x2 ? SUBTITLES[test] : "Pearson's chi-square test",
+    subtitle: is2x2 ? subtitleOf(test) : "Pearson's chi-square test",
     stats,
     groups: [],
     notes,

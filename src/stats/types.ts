@@ -80,7 +80,7 @@ export type AnalysisPickerValue =
 // The choices of the params, one list each: wizards ask among them, the types come from
 // them, and a file's value outside them is left out (the test takes its default).
 export const TAILS = ["two-sided", "less", "greater"] as const;
-const POSTHOCS = ["none", "tukey", "bonferroni", "sidak", "holm-sidak", "lsd"] as const;
+export const POSTHOCS = ["none", "tukey", "bonferroni", "sidak", "holm-sidak", "lsd"] as const;
 /** The corrections that compare chosen pairs, each pair's own P adjusted for them alone.
  *  Upstream Helix calls the uncorrected one `fisher`; Titer's existing name is `lsd`.
  *  `fdr` is the False Discovery Rate (Benjamini-Hochberg): the P values are the
