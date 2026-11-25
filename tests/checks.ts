@@ -27470,6 +27470,112 @@ check(".pzfx import records a summary table's error format from its YFormat", ()
   strictEqual(importedTable("x_y_rep").table.data!.errorFormat, undefined);
 });
 
+// Issue 55: the .pzfx XML parser scrambled mixed-content titles, dropped
+// <Font>-wrapped Info text, double-decoded CDATA, and failed the whole
+// import on an out-of-range numeric character reference.
+check(".pzfx import keeps mixed-content title order (Issue 55)", () => {
+  // Before the fix the reader merged all direct text first and appended
+  // the formatting children after it, so `H<Sub>2</Sub>O` imported as
+  // "HO2". The text now reads back in document order.
+  const imported = parsePzfx(
+    `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">` +
+      `<Table ID="Table0" XFormat="none" TableType="OneWay">` +
+      `<Title>H<Sub>2</Sub>O</Title>` +
+      `<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>A<Sup>2</Sup>B</Title><Subcolumn><d>1.</d></Subcolumn></YColumn>` +
+      `</Table></GraphPadPrismFile>`,
+  );
+  ok(!imported.issues.some((i) => i.severity === "error"), "no errors");
+  const node = imported.project.nodes[imported.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("no table node");
+  strictEqual(node.name, "H2O");
+  deepStrictEqual(node.data!.columns, ["Title", "A2B"]);
+});
+
+check(".pzfx import keeps a <Font>-wrapped Info title (Issue 55)", () => {
+  // Before the fix the Info title read `.text` directly, which holds only
+  // the text outside the formatting children — `<Font>My</Font> Project`
+  // imported as " Project".
+  const imported = parsePzfx(
+    `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">` +
+      `<Info ID="Info0"><Title><Font face="Arial">My</Font> Project</Title><Notes>Plain notes</Notes></Info>` +
+      `<Table ID="Table0" XFormat="none" TableType="OneWay">` +
+      `<Title>Data 1</Title>` +
+      `<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>A</Title><Subcolumn><d>1.</d></Subcolumn></YColumn>` +
+      `</Table></GraphPadPrismFile>`,
+  );
+  ok(!imported.issues.some((i) => i.severity === "error"), "no errors");
+  deepStrictEqual(imported.infoSheets, ["My Project"]);
+  const info = imported.project.rootOrder.map((id) => imported.project.nodes[id]).find((n) => n?.type === "info");
+  strictEqual(info?.name, "My Project");
+  strictEqual(info?.info?.notes, "Plain notes");
+});
+
+check(".pzfx import never double-decodes CDATA (Issue 55)", () => {
+  // CDATA is literal: `<![CDATA[A &amp; B]]>` stays "A &amp; B". Before the
+  // fix the CDATA content was entity-decoded on close, so it imported as
+  // "A & B" — while the same text outside CDATA must still decode.
+  const imported = parsePzfx(
+    `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">` +
+      `<Table ID="Table0" XFormat="none" TableType="OneWay">` +
+      `<Title>Data 1</Title>` +
+      `<YColumn Width="89" Decimals="0" Subcolumns="1"><Title><![CDATA[A &amp; B]]></Title><Subcolumn><d>1.</d></Subcolumn></YColumn>` +
+      `<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>A &amp; B</Title><Subcolumn><d>2.</d></Subcolumn></YColumn>` +
+      `</Table></GraphPadPrismFile>`,
+  );
+  ok(!imported.issues.some((i) => i.severity === "error"), "no errors");
+  const node = imported.project.nodes[imported.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("no table node");
+  deepStrictEqual(node.data!.columns, ["Title", "A &amp; B", "A & B"]);
+});
+
+check(".pzfx import survives an out-of-range numeric character reference (Issue 55)", () => {
+  // `&#x110000;` is above U+10FFFF: before the fix String.fromCodePoint
+  // threw and the whole import failed with "Invalid code point 1114112".
+  // It now becomes the replacement character and the import succeeds.
+  const imported = parsePzfx(
+    `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">` +
+      `<Table ID="Table0" XFormat="none" TableType="OneWay">` +
+      `<Title>Bad &#x110000; point</Title>` +
+      `<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>A</Title><Subcolumn><d>1.</d></Subcolumn></YColumn>` +
+      `</Table></GraphPadPrismFile>`,
+  );
+  ok(!imported.issues.some((i) => i.severity === "error"), "no errors");
+  strictEqual(imported.tables.length, 1, "table still imports");
+  const node = imported.project.nodes[imported.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("no table node");
+  strictEqual(node.name, "Bad \uFFFD point");
+  // The decimal form and a lone surrogate behave the same way.
+  const decimal = parsePzfx(
+    `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">` +
+      `<Table ID="Table0" XFormat="none" TableType="OneWay"><Title>Bad &#1114112; point</Title>` +
+      `<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>A</Title><Subcolumn><d>1.</d></Subcolumn></YColumn>` +
+      `</Table></GraphPadPrismFile>`,
+  );
+  ok(!decimal.issues.some((i) => i.severity === "error"), "decimal form: no errors");
+  const surrogate = parsePzfx(
+    `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">` +
+      `<Table ID="Table0" XFormat="none" TableType="OneWay"><Title>Bad &#xD800; point</Title>` +
+      `<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>A</Title><Subcolumn><d>1.</d></Subcolumn></YColumn>` +
+      `</Table></GraphPadPrismFile>`,
+  );
+  ok(!surrogate.issues.some((i) => i.severity === "error"), "lone surrogate: no errors");
+});
+
+check(".pzfx import does not close an element on a longer tag's prefix (Issue 55)", () => {
+  // `</TableSequence>` inside a `<Table>` is not that table's close: the
+  // old prefix match swallowed the rest of the table and imported it
+  // silently. The file is malformed here, so the import errors instead.
+  const imported = parsePzfx(
+    `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">` +
+      `<Table ID="Table0" XFormat="none" TableType="OneWay">` +
+      `<Title>Data 1</Title>` +
+      `<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>A</Title><Subcolumn><d>1.</d></Subcolumn></YColumn>` +
+      `</TableSequence></GraphPadPrismFile>`,
+  );
+  strictEqual(imported.tables.length, 0, "no table imports from the malformed file");
+  ok(imported.issues.some((i) => i.severity === "error"), "reports an error");
+});
+
 check(".pzfx import never assumes an empty YFormat means replicates (FF-F7)", () => {
   // twoway_empty_yformat.pzfx is the column_sdn.pzfx table (TwoWay, 3
   // mean/SD/N-shaped subcolumns per group) with YFormat blanked. Before the

@@ -85,17 +85,27 @@ interface XmlNode {
   children: XmlNode[];
   /** Text directly inside this element (formatting children aside). */
   text: string;
+  /** The element's content in document order: decoded text segments
+   *  (CDATA kept verbatim, never entity-decoded) interleaved with child
+   *  elements. Mixed content must read back in order — `H<Sub>2</Sub>O`
+   *  is "H2O", not "HO2" (Issue 55) — so the reader keeps the order here
+   *  instead of merging all direct text into `text` first. */
+  segments: (string | XmlNode)[];
 }
 
 function decodeEntities(s: string): string {
-  return s.replace(/&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g, (m, body: string) => {
+  return s.replace(/&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g, (_m, body: string) => {
     if (body === "amp") return "&";
     if (body === "lt") return "<";
     if (body === "gt") return ">";
     if (body === "quot") return '"';
     if (body === "apos") return "'";
     const code = body.startsWith("#x") ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-    return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+    // An out-of-range code point (above U+10FFFF, or a lone surrogate)
+    // must not fail the whole import: String.fromCodePoint throws on it,
+    // so it becomes the replacement character instead (Issue 55).
+    if (!Number.isFinite(code) || code < 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return "\uFFFD";
+    return String.fromCodePoint(code);
   });
 }
 
@@ -135,7 +145,7 @@ function parseXml(text: string): XmlNode {
       while (i < n && /\s/.test(text[i])) i++;
       if (text.startsWith("/>", i)) {
         i += 2;
-        return { tag, attrs, children: [], text: "" };
+        return { tag, attrs, children: [], text: "", segments: [] };
       }
       if (text[i] === ">") {
         i++;
@@ -161,14 +171,21 @@ function parseXml(text: string): XmlNode {
       attrs[name] = value;
     }
     const children: XmlNode[] = [];
+    const segments: (string | XmlNode)[] = [];
     let textParts = "";
     for (;;) {
       if (i >= n) fail(`unclosed <${tag}>`);
       if (text.startsWith(`</${tag}`, i)) {
+        // The close must be exactly `</tag>` (or `</tag ...>`): a longer
+        // tag sharing the prefix (`</TableSequence>` inside a `<Table>`)
+        // is not this element's close, and silently treating it as one
+        // would swallow the rest of the element.
+        const after = text[i + tag.length + 2];
+        if (after !== ">" && after !== undefined && !/\s/.test(after)) fail(`unclosed <${tag}>`);
         const end = text.indexOf(">", i);
         if (end < 0) fail("unclosed closing tag");
         i = end + 1;
-        return { tag, attrs, children, text: decodeEntities(textParts) };
+        return { tag, attrs, children, text: textParts, segments };
       }
       if (text.startsWith("<!--", i)) {
         const end = text.indexOf("-->", i + 4);
@@ -177,13 +194,23 @@ function parseXml(text: string): XmlNode {
       } else if (text.startsWith("<![CDATA[", i)) {
         const end = text.indexOf("]]>", i + 9);
         if (end < 0) fail("unclosed CDATA section");
-        textParts += text.slice(i + 9, end);
+        // CDATA is literal: its content is kept verbatim and is never
+        // entity-decoded (Issue 55 — `<![CDATA[A &amp; B]]>` stays
+        // "A &amp; B"). Regular text is decoded as it is read, so the
+        // return below must not decode again.
+        const cdata = text.slice(i + 9, end);
+        textParts += cdata;
+        segments.push(cdata);
         i = end + 3;
       } else if (text[i] === "<") {
-        children.push(parseElement());
+        const child = parseElement();
+        children.push(child);
+        segments.push(child);
       } else {
         const next = text.indexOf("<", i);
-        textParts += text.slice(i, next < 0 ? n : next);
+        const chunk = decodeEntities(text.slice(i, next < 0 ? n : next));
+        textParts += chunk;
+        segments.push(chunk);
         i = next < 0 ? n : next;
       }
     }
@@ -202,10 +229,12 @@ function parseXml(text: string): XmlNode {
  *  .pzfx round-trip that renames them changes analysis labels and hashes.
  *  Data `<d>` values keep the trimmed read below: the number normalizer's
  *  anchored regexes need clean values, and only the RowTitlesColumn's `<d>`
- *  values are titles. */
+ *  values are titles. The text reads back in document order through the
+ *  element's segments, so inline formatting (`H<Sub>2</Sub>O`) keeps its
+ *  order (Issue 55) instead of putting all direct text before the children. */
 const rawChildText = (node: XmlNode): string => {
-  let out = node.text;
-  for (const child of node.children) out += rawChildText(child);
+  let out = "";
+  for (const seg of node.segments) out += typeof seg === "string" ? seg : rawChildText(seg);
   return out;
 };
 
@@ -230,6 +259,12 @@ const childText = (node: XmlNode): string => rawChildText(node).trim();
 
 const childrenNamed = (node: XmlNode, tag: string) => node.children.filter((c) => c.tag === tag);
 const firstChild = (node: XmlNode, tag: string) => childrenNamed(node, tag)[0];
+
+/** A named child's full text (formatting children included), "" when absent. */
+const childTextOf = (node: XmlNode, tag: string): string => {
+  const child = firstChild(node, tag);
+  return child ? rawChildText(child) : "";
+};
 
 // ── Subcolumns ───────────────────────────────────────────────────────────
 
@@ -716,23 +751,26 @@ export function parsePzfx(text: string): PzfxImport {
   // project info.
   const infoSheets: string[] = [];
   for (const infoNode of root.children.filter((c) => c.tag === "Info")) {
-    const childText = (tag: string) => infoNode.children.find((c) => c.tag === tag)?.text ?? "";
+    // Titles, notes and constants read through rawChildText, not `.text`:
+    // an Info <Title> may wrap its text in a <Font> (Issue 55), and `.text`
+    // holds only the direct text — the wrapped part would be dropped.
+    // The title goes through the same cleanTitle rule as table titles.
     const constants = readInfoConstants(
       infoNode.children
         .filter((c) => c.tag === "Constant")
         .map((c) => ({
           id: newConstantId(),
-          name: c.children.find((x) => x.tag === "Name")?.text ?? "",
-          value: c.children.find((x) => x.tag === "Value")?.text ?? "",
+          name: childTextOf(c, "Name"),
+          value: childTextOf(c, "Value"),
         })),
     );
-    const title = childText("Title");
+    const title = cleanTitle(childTextOf(infoNode, "Title"));
     const node: ProjectNode = {
       id: genId("info"),
       type: "info",
       name: title === "" ? "Project info" : title,
       parentId: null,
-      info: { constants, notes: childText("Notes"), linkedTableId: null },
+      info: { constants, notes: childTextOf(infoNode, "Notes"), linkedTableId: null },
     };
     nodes[node.id] = node;
     rootOrder.push(node.id);
