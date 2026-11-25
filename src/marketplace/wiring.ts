@@ -32,6 +32,7 @@ async function createMarketplaceStore(): Promise<MarketplaceStore> {
     requestEnable: loaderModule.requestEnable,
     confirmEnable: loaderModule.confirmEnable,
     disablePlugin: loaderModule.disablePlugin,
+    rehydrateEnabledPlugin: loaderModule.rehydrateEnabledPlugin,
     pluginReviewLines: loaderModule.pluginReviewLines,
   };
   const store = new MarketplaceStore({
