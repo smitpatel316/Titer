@@ -2,8 +2,8 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 79 tools: 21 read-only (list/read/job/
-// activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list + refresh-linked-data + the plugin list)
+// Settings → AI connections. 80 tools: 22 read-only (list/read/job/
+// activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list + refresh-linked-data + the plugin list + the 2.0 error-log read)
 // and 58 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool + the 1.9 cell-background tool + the plugin run tool + the seq 450 convert-to-nested tool), via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 //
@@ -43,7 +43,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 79 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 80 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -95,6 +95,37 @@ const FEEDBACK_FILE: &str = "feedback.jsonl";
 /// until the user explicitly opts in (first-run prompt, or the Settings
 /// toggle). Same 0700 directory as the token, so only this user reads it.
 const FEEDBACK_CONSENT_FILE: &str = "feedback-consent.json";
+
+/// The local error log (seq 452): `<app_data>/mcp/error-log.jsonl`, one
+/// JSON object per captured error. Same 0700 directory as the feedback
+/// file. Entries are scrubbed before they are written — no paths, no user
+/// data — so the file is safe to show in Settings and to send.
+const ERROR_LOG_FILE: &str = "error-log.jsonl";
+
+/// The user's error-report-sharing choice: `{"sharing": true|false,
+/// "ts": …}`. A SEPARATE record from the feedback consent: sharing
+/// feedback does not imply sharing error reports, and either toggle can
+/// change without the other. Missing, unreadable, or malformed means
+/// "no" — sharing stays off until the user explicitly opts in (first-run
+/// prompt alongside feedback, or the Settings toggle).
+const ERROR_LOG_CONSENT_FILE: &str = "error-log-consent.json";
+
+/// The local error log never grows without bound: keep the newest entries.
+const MAX_ERROR_LOG_ENTRIES: usize = 200;
+
+/// A repeated identical error is sent at most once per window, so a crash
+/// loop cannot file a hundred Plane issues.
+const ERROR_LOG_DEDUP_WINDOW_SECS: u64 = 3600;
+
+/// Unsent entries sent per startup flush — a crash loop's backlog goes
+/// out a few at a time, never all at once.
+const ERROR_LOG_FLUSH_BATCH: usize = 5;
+
+/// Caps on one stored error entry, so a pathological stack cannot grow
+/// the log file without bound (the feedback caps are 200/4000 chars).
+const MAX_ERROR_MESSAGE_CHARS: usize = 4000;
+const MAX_ERROR_STACK_CHARS: usize = 8000;
+const MAX_ERROR_FIELD_CHARS: usize = 200;
 
 /// The persisted MCP opt-in record: `{"enabled": bool, "ts": <unix seconds>}`.
 /// Written by `mcp_set_enabled` every time the user flips the toggle, read
@@ -1248,6 +1279,394 @@ pub fn mcp_set_feedback_consent(app: AppHandle, state: State<McpState>, sharing:
     Ok(Some(sharing))
 }
 
+// ── Anonymous error logging (seq 452) ──────────────────────────────────
+// Opt-in only, same consent model as feedback (default off, first-run
+// prompt alongside feedback, Settings toggle) but a separate record.
+// Capture writes a scrubbed entry to a local rotating log, always; the
+// feedback channel only ever sees it when the user opted in.
+
+/// A path token ends at whitespace, a quote, a closing bracket, a comma,
+/// a semicolon, or a colon (the `:12:3` of a stack location survives —
+/// line numbers carry no user data). Mirrors `scrubErrorText` in
+/// src/lib/error-log.ts; the two must stay in agreement.
+fn error_token_end(text: &[char], mut i: usize) -> usize {
+    while i < text.len() {
+        match text[i] {
+            ' ' | '\t' | '\n' | '\r' | '"' | '\'' | ')' | ']' | ',' | ';' | ':' => break,
+            _ => i += 1,
+        }
+    }
+    i
+}
+
+/// A path only starts at a token boundary (start of text, whitespace, or
+/// punctuation) — the `/` in a relative path like `src/lib/foo.ts` is a
+/// separator mid-word, not an absolute path, and must survive.
+fn error_token_start(text: &[char], i: usize) -> bool {
+    if i == 0 {
+        return true;
+    }
+    matches!(
+        text[i - 1],
+        ' ' | '\t' | '\n' | '\r' | '"' | '\'' | '(' | '[' | '{' | ',' | ';' | ':' | '='
+    )
+}
+
+/// Strip user-identifying paths from error text before it is stored or
+/// sent. Home directories (`/Users/<name>/`, `/home/<name>/`,
+/// `C:\Users\<name>\`), `file://` URLs, and any other absolute path
+/// become `[path]`; relative paths (`src/lib/foo.ts:12:3`) survive — they
+/// name app code, not the user.
+fn scrub_error_text(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let rest: String = chars[i..].iter().collect();
+        if rest.starts_with("file://") && error_token_start(&chars, i) {
+            out.push_str("[path]");
+            i = error_token_end(&chars, i + "file://".len());
+            continue;
+        }
+        if (rest.starts_with("/Users/")
+            || rest.starts_with("/home/")
+            || rest.starts_with("C:\\Users\\")
+            || rest.starts_with("C:/Users/"))
+            && error_token_start(&chars, i)
+        {
+            out.push_str("[path]");
+            // A Windows path starts with a drive letter (`C:`) — the
+            // token skip must start past that colon, or it stops there
+            // and leaks the rest of the path (`\Users\smit\...`). The
+            // `:line` suffix still ends the token, so it survives.
+            let after_drive = if chars.get(i + 1) == Some(&':') { i + 2 } else { i };
+            i = error_token_end(&chars, after_drive);
+            continue;
+        }
+        if chars[i].is_ascii_alphabetic()
+            && chars.get(i + 1) == Some(&':')
+            && (chars.get(i + 2) == Some(&'\\') || chars.get(i + 2) == Some(&'/'))
+            && error_token_start(&chars, i)
+        {
+            out.push_str("[path]");
+            i = error_token_end(&chars, i + 2);
+            continue;
+        }
+        if chars[i] == '/' && error_token_start(&chars, i) {
+            let end = error_token_end(&chars, i);
+            if chars[i + 1..end].contains(&'/') {
+                out.push_str("[path]");
+                i = end;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    truncate_chars(&out, MAX_ERROR_MESSAGE_CHARS)
+}
+
+/// Cap a string at `max` characters (never split a char), appending a
+/// marker when truncated. The message cap doubles as the whole-text cap
+/// for the scrubber, whose input is already short.
+fn truncate_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max).collect();
+    out.push_str("… [truncated]");
+    out
+}
+
+/// One captured error, as stored in `error-log.jsonl` and shown in
+/// Settings (newest first). `sent` says whether it went to the Titer
+/// team through the feedback channel.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ErrorLogEntry {
+    pub error_id: String,
+    pub ts: u64,
+    pub kind: String,
+    pub error_type: String,
+    pub message: String,
+    pub stack: String,
+    pub action: String,
+    pub app_version: String,
+    pub os: String,
+    pub sent: bool,
+}
+
+/// An error entry's id: "err-" + unix time + 4 random bytes as hex.
+/// Same shape as `new_feedback_id` so two errors in the same second
+/// never collide.
+fn new_error_id() -> String {
+    let mut bytes = [0u8; 4];
+    let random = fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes)).is_ok();
+    if random {
+        format!("err-{}-{}", now_ts(), bytes.iter().map(|b| format!("{b:02x}")).collect::<String>())
+    } else {
+        format!("err-{}-00000000", now_ts())
+    }
+}
+
+/// The stored error-log entries, oldest first (file order). Malformed
+/// lines are skipped, not surfaced — a hand-edited file must not break
+/// the dialog or the flush.
+fn error_log_entries(dir: &std::path::Path) -> Vec<ErrorLogEntry> {
+    let text = fs::read_to_string(dir.join(ERROR_LOG_FILE)).unwrap_or_default();
+    text.lines().filter_map(|line| serde_json::from_str::<ErrorLogEntry>(line).ok()).collect()
+}
+
+/// Rewrite the whole error log (used by the flush, which updates `sent`
+/// flags, and by the trim below). The file is owner-only (0600) like
+/// its neighbours.
+fn write_error_log_entries(dir: &std::path::Path, entries: &[ErrorLogEntry]) -> Result<(), String> {
+    let mut text = String::new();
+    for entry in entries {
+        let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
+        text.push_str(&line);
+        text.push('\n');
+    }
+    fs::write(dir.join(ERROR_LOG_FILE), text).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(dir.join(ERROR_LOG_FILE), fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// Append one entry to the local log, trimming to the newest
+/// `MAX_ERROR_LOG_ENTRIES` so the file never grows without bound.
+/// Creates the directory when it does not exist yet (the panic hook
+/// runs before any command has called `ensure_dir`).
+fn append_error_log_entry(dir: &std::path::Path, entry: &ErrorLogEntry) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let mut entries = error_log_entries(dir);
+    entries.push(entry.clone());
+    if entries.len() > MAX_ERROR_LOG_ENTRIES {
+        let skip = entries.len() - MAX_ERROR_LOG_ENTRIES;
+        entries.drain(..skip);
+    }
+    write_error_log_entries(dir, &entries)
+}
+
+/// Whether the user has opted in to sharing anonymous error reports.
+/// Missing, unreadable, or malformed record means "no" — sharing is off
+/// until the user explicitly says Share (first-run prompt, or the
+/// Settings toggle). Default-off is the whole point: nothing leaves the
+/// machine on a guess.
+fn error_log_sharing_enabled(dir: &std::path::Path) -> bool {
+    let Ok(text) = fs::read_to_string(dir.join(ERROR_LOG_CONSENT_FILE)) else {
+        return false;
+    };
+    serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|v| v.get("sharing")?.as_bool())
+        .unwrap_or(false)
+}
+
+/// The user's error-report-sharing choice, if they have made one:
+/// `Some(true)` Share, `Some(false)` Don't share, `None` never asked.
+/// A malformed record reads as never asked, so the prompt shows again
+/// rather than erroring.
+#[tauri::command]
+pub fn mcp_error_log_consent(app: AppHandle, state: State<McpState>) -> Result<Option<bool>, String> {
+    let dir = state.ensure_dir(&app)?;
+    let Ok(text) = fs::read_to_string(dir.join(ERROR_LOG_CONSENT_FILE)) else {
+        return Ok(None);
+    };
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|v| v.get("sharing")?.as_bool()))
+}
+
+/// Records the user's error-report-sharing choice (first-run prompt, or
+/// the Settings toggle). Overwrites any earlier record; the file is
+/// owner-only (0600) like the token. Returns the choice now in effect.
+#[tauri::command]
+pub fn mcp_set_error_log_consent(app: AppHandle, state: State<McpState>, sharing: bool) -> Result<Option<bool>, String> {
+    let dir = state.ensure_dir(&app)?;
+    let record = serde_json::json!({ "sharing": sharing, "ts": now_ts() });
+    let text = serde_json::to_string(&record).map_err(|e| e.to_string())?;
+    fs::write(dir.join(ERROR_LOG_CONSENT_FILE), text).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(dir.join(ERROR_LOG_CONSENT_FILE), fs::Permissions::from_mode(0o600));
+    }
+    Ok(Some(sharing))
+}
+
+/// The saved error-log entries (newest first), for Settings to show.
+/// Malformed lines are skipped, not surfaced.
+#[tauri::command]
+pub fn mcp_error_log(app: AppHandle, state: State<McpState>) -> Result<Vec<ErrorLogEntry>, String> {
+    let dir = state.ensure_dir(&app)?;
+    let mut entries = error_log_entries(&dir);
+    entries.sort_by(|a, b| b.ts.cmp(&a.ts));
+    Ok(entries)
+}
+
+/// One error entry as a feedback-server entry (seq 452). The feedback
+/// endpoint needs no new shape: kind "bug", a one-line summary, scrubbed
+/// details, and scalar-only context — the server's validation admits all
+/// of it, so the report lands as a `[feedback]` Plane issue like any
+/// other. The summary carries the error type so triage can group by it.
+fn error_feedback_entry(entry: &ErrorLogEntry) -> serde_json::Value {
+    let first_line = entry.message.lines().next().unwrap_or("error");
+    let summary = truncate_chars(
+        &format!("[error] {}: {}", entry.error_type, first_line),
+        MAX_FEEDBACK_SUMMARY_CHARS,
+    );
+    let details = truncate_chars(
+        &format!(
+            "{}\n\nStack (paths scrubbed):\n{}\n\nAction: {}",
+            entry.message, entry.stack, entry.action
+        ),
+        MAX_FEEDBACK_DETAILS_CHARS,
+    );
+    serde_json::json!({
+        "feedback_id": entry.error_id,
+        "ts": entry.ts,
+        "kind": "bug",
+        "summary": summary,
+        "details": details,
+        "context": {
+            "app_version": entry.app_version,
+            "os": entry.os,
+            "source": "error-log",
+            "action": entry.action,
+        },
+    })
+}
+
+/// Attempt to send one entry through the feedback channel; true when
+/// the server took it. Sharing off — or an identical error already sent
+/// within the hour — means no POST at all. The entry still stays in the
+/// local log either way: the server is a courtesy copy, never the record.
+async fn try_send_error_entry(dir: &std::path::Path, entry: &ErrorLogEntry) -> bool {
+    if !error_log_sharing_enabled(dir) {
+        return false;
+    }
+    let already_sent = error_log_entries(dir).iter().any(|e| {
+        e.sent
+            && e.error_type == entry.error_type
+            && e.message == entry.message
+            && entry.ts.saturating_sub(e.ts) < ERROR_LOG_DEDUP_WINDOW_SECS
+    });
+    if already_sent {
+        return false;
+    }
+    let error_entry = error_feedback_entry(entry);
+    let out = feedback_share_result(dir, &feedback_server_url(), &error_entry).await;
+    out.get("sent").and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
+/// Report one captured error: scrubbed, appended to the local rotating
+/// log, and — only when error-report sharing is on — sent through the
+/// feedback channel. The answer says what happened to it; a failed send
+/// never fails the call (the entry is saved locally and retried by the
+/// next flush).
+#[tauri::command]
+pub async fn mcp_log_error(
+    app: AppHandle,
+    state: State<'_, McpState>,
+    kind: String,
+    error_type: String,
+    message: String,
+    stack: String,
+    action: String,
+) -> Result<serde_json::Value, String> {
+    let dir = state.ensure_dir(&app)?;
+    let entry = ErrorLogEntry {
+        error_id: new_error_id(),
+        ts: now_ts(),
+        kind: truncate_chars(kind.trim(), MAX_ERROR_FIELD_CHARS),
+        error_type: truncate_chars(&scrub_error_text(error_type.trim()), MAX_ERROR_FIELD_CHARS),
+        message: truncate_chars(&scrub_error_text(message.trim()), MAX_ERROR_MESSAGE_CHARS),
+        stack: truncate_chars(&scrub_error_text(stack.trim()), MAX_ERROR_STACK_CHARS),
+        action: truncate_chars(&scrub_error_text(action.trim()), MAX_ERROR_FIELD_CHARS),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        os: std::env::consts::OS.to_string(),
+        sent: false,
+    };
+    let mut entry = entry;
+    entry.sent = try_send_error_entry(&dir, &entry).await;
+    append_error_log_entry(&dir, &entry)?;
+    Ok(serde_json::json!({
+        "error_id": entry.error_id,
+        "received": true,
+        "sent": entry.sent,
+        "sharing": if error_log_sharing_enabled(&dir) { "enabled" } else { "disabled" },
+    }))
+}
+
+/// Send unsent error-log entries (e.g. from a previous run's crash) now
+/// that the app is up — only when error-report sharing is on, a few at a
+/// time. Returns how many were considered and sent.
+#[tauri::command]
+pub async fn mcp_flush_error_log(app: AppHandle, state: State<'_, McpState>) -> Result<serde_json::Value, String> {
+    let dir = state.ensure_dir(&app)?;
+    if !error_log_sharing_enabled(&dir) {
+        return Ok(serde_json::json!({ "flushed": 0, "sent": 0, "sharing": "disabled" }));
+    }
+    let mut entries = error_log_entries(&dir);
+    let mut sent_this_flush: Vec<(String, String)> = Vec::new();
+    let mut sent_count = 0;
+    let mut flushed_count = 0;
+    for entry in entries.iter_mut().filter(|e| !e.sent).take(ERROR_LOG_FLUSH_BATCH) {
+        flushed_count += 1;
+        if sent_this_flush.iter().any(|(t, m)| *t == entry.error_type && *m == entry.message) {
+            continue;
+        }
+        if try_send_error_entry(&dir, entry).await {
+            entry.sent = true;
+            sent_count += 1;
+            sent_this_flush.push((entry.error_type.clone(), entry.message.clone()));
+        }
+    }
+    write_error_log_entries(&dir, &entries)?;
+    Ok(serde_json::json!({ "flushed": flushed_count, "sent": sent_count, "sharing": "enabled" }))
+}
+
+/// Append a Rust panic to the local error log (seq 452). Called from the
+/// panic hook installed in main.rs: best-effort only — every failure is
+/// swallowed, because a hook must never panic itself. Local only; the
+/// entry is sent on the next launch by `mcp_flush_error_log`, if the
+/// user opted in to error-report sharing.
+pub(crate) fn record_rust_panic(dir: &std::path::Path, info: &std::panic::PanicHookInfo<'_>) {
+    let _ = (|| -> Result<(), ()> {
+        let message = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "panic (no message)".to_string()
+        };
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_default();
+        let entry = ErrorLogEntry {
+            error_id: new_error_id(),
+            ts: now_ts(),
+            kind: "rust-panic".to_string(),
+            error_type: "panic".to_string(),
+            message: truncate_chars(&scrub_error_text(&message), MAX_ERROR_MESSAGE_CHARS),
+            stack: truncate_chars(&scrub_error_text(&location), MAX_ERROR_STACK_CHARS),
+            action: String::new(),
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            os: std::env::consts::OS.to_string(),
+            sent: false,
+        };
+        append_error_log_entry(dir, &entry).map_err(|_| ())?;
+        Ok(())
+    })();
+}
+
 /// The persisted MCP opt-in record: `<app_data>/mcp/mcp-opt-in.json`,
 /// `{"enabled": bool, "ts": <unix seconds>}`. The same shape as the
 /// feedback-consent record beside it (a boolean needs no secrecy, but the
@@ -1355,8 +1774,8 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "read_more",
         label: "Read more",
-        description: "Figures, info sheets, the activity log, job status and feedback.",
-        tools: &["titer_read_figure", "titer_read_info_sheet", "titer_read_activity", "titer_send_feedback"],
+        description: "Figures, info sheets, the activity and error logs, job status and feedback.",
+        tools: &["titer_read_figure", "titer_read_info_sheet", "titer_read_activity", "titer_read_error_log", "titer_send_feedback"],
     },
     AllowlistGroup {
         id: "discovery",
@@ -2201,7 +2620,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 79 tools. Returns the new header value, or `None` when the type is
+/// 80 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -4487,6 +4906,44 @@ impl TiterMcpServer {
         let lines = self.state.dir().map(|dir| activity_lines(&dir, limit as usize)).unwrap_or_default();
         self.state.log_call("titer_read_activity", serde_json::json!({ "limit": limit }), true, None);
         Ok(Json(serde_json::json!({ "lines": lines })))
+    }
+
+    /// The local error log (seq 452): captured uncaught exceptions,
+    /// unhandled rejections and Rust panics — scrubbed of paths and user
+    /// data before they were stored, newest first. Local only: reading
+    /// it never sends anything (sending is a separate, consent-gated
+    /// step the shell does on capture and on startup flush).
+    #[tool(
+        name = "titer_read_error_log",
+        description = "Read the local error log (captured uncaught exceptions, unhandled rejections and Rust panics — scrubbed of paths and user data, newest first). Local only: it never sends anything. Limit defaults to 50, at most 500.",
+        annotations(
+            title = "Read error log",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn read_error_log(
+        &self,
+        Parameters(args): Parameters<ActivityArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let limit = args.limit.unwrap_or(DEFAULT_ACTIVITY_LIMIT).clamp(1, MAX_ACTIVITY_LIMIT);
+        let entries = self
+            .state
+            .dir()
+            .map(|dir| {
+                let mut entries = error_log_entries(&dir);
+                entries.sort_by(|a, b| b.ts.cmp(&a.ts));
+                entries
+                    .into_iter()
+                    .take(limit as usize)
+                    .map(|e| serde_json::to_value(e).unwrap_or(serde_json::Value::Null))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        self.state.log_call("titer_read_error_log", serde_json::json!({ "limit": limit }), true, None);
+        Ok(Json(serde_json::json!({ "entries": entries })))
     }
 
     /// The automatic backups (seq 226): the separate `.hlx` snapshots the
@@ -9356,7 +9813,7 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 79 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 80 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 6 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
                 21 of the 79 are read-only and 58 change the open project. \
@@ -11704,7 +12161,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 79 tools, so it enables every group first.
+        // this test drives all 80 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -11757,8 +12214,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            79,
-            "seven read tools + four read-more tools + three discovery tools + seven project tools + eleven table tools + fourteen analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools: {names:?}"
+            80,
+            "seven read tools + five read-more tools + three discovery tools + seven project tools + eleven table tools + fourteen analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools: {names:?}"
         );
         for name in ["titer_list_backups"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -12977,7 +13434,7 @@ mod tests {
         // the part that actually catches it.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 79, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 80, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -13103,7 +13560,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 79, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 80, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema
@@ -13343,6 +13800,29 @@ mod tests {
         );
         assert_eq!(seen.lock().expect("seen lock").len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scrub_error_text_strips_user_paths_but_keeps_relative_ones() {
+        // macOS / Linux home paths and any absolute path become [path];
+        // relative source paths survive — they name app code, not the user.
+        assert_eq!(
+            scrub_error_text("Cannot read /Users/smitpatel316/Documents/foo.prism: boom"),
+            "Cannot read [path]: boom"
+        );
+        assert_eq!(scrub_error_text("ENOENT /home/smit/work/data.csv"), "ENOENT [path]");
+        assert_eq!(
+            scrub_error_text("TypeError: x is not a function at src/lib/foo.ts:12:3"),
+            "TypeError: x is not a function at src/lib/foo.ts:12:3"
+        );
+        // A Windows home path: the token skip must start past the drive
+        // letter's colon, or it stops there and leaks `\Users\smit\...`
+        // (the `:line` suffix still survives).
+        assert_eq!(
+            scrub_error_text("failed at C:\\Users\\smit\\AppData\\x.js:1"),
+            "failed at [path]:1"
+        );
+        assert!(!scrub_error_text("at /Users/smitpatel316/x.ts").contains("smitpatel316"));
     }
 
     #[test]

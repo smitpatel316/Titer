@@ -13,11 +13,15 @@
 import * as React from "react";
 import { Dialog } from "../ui/dialog";
 import { Button } from "../ui/controls";
-import { isNative, mcpFeedbackConsent, mcpSetFeedbackConsent } from "../native";
+import { isNative, mcpFeedbackConsent, mcpSetErrorLogConsent, mcpSetFeedbackConsent } from "../native";
 
 export function FeedbackConsentDialog() {
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  // Anonymous error reports (seq 452): offered here alongside feedback
+  // sharing, same default-off model, separate record — sharing feedback
+  // does not imply sharing error reports.
+  const [shareErrors, setShareErrors] = React.useState(false);
 
   // Show once, only when no consent record exists yet.
   React.useEffect(() => {
@@ -57,6 +61,15 @@ export function FeedbackConsentDialog() {
     } catch {
       // The record didn't stick — the prompt shows again next launch
       // (no record means never answered), so the choice isn't lost.
+    }
+    try {
+      // The error-reports choice rides on the same prompt, not a second
+      // one — but it is a separate record, so the user can change it
+      // independently in Settings → AI Connections.
+      await mcpSetErrorLogConsent(shareErrors);
+    } catch {
+      // Unrecorded means off (the default) — the Settings toggle can
+      // still turn it on later.
     } finally {
       setBusy(false);
       setOpen(false);
@@ -87,6 +100,19 @@ export function FeedbackConsentDialog() {
         <p className="text-regular text-primary">
           What is not shared: no project data, no file contents, no personal information.
         </p>
+        <label className="flex items-start gap-2 text-regular text-primary">
+          <input
+            type="checkbox"
+            checked={shareErrors}
+            disabled={busy}
+            onChange={(event) => setShareErrors(event.target.checked)}
+          />
+          <span>
+            Also send anonymous error reports when Titer hits an error or crashes — only the error type, a
+            scrubbed message and stack, the app version, and what was open. No file paths, no file contents, no
+            personal information. You can turn this off anytime in Settings → AI Connections.
+          </span>
+        </label>
         <p className="text-regular text-secondary">
           Sharing is off until you choose Share. You can change this anytime in Settings → AI Connections.
         </p>

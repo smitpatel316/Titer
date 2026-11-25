@@ -11,16 +11,20 @@ import {
   mcpAllowlist,
   mcpClaudeCodeCommand,
   mcpConnectAntigravity,
+  mcpErrorLog,
+  mcpErrorLogConsent,
   mcpFeedback,
   mcpFeedbackConsent,
   mcpOpenAntigravity,
   mcpRegenerateToken,
   mcpSetAllowlist,
   mcpSetEnabled,
+  mcpSetErrorLogConsent,
   mcpSetFeedbackConsent,
   mcpStatus,
   mcpToken,
   openGithubIssue,
+  type ErrorLogEntry,
   type FeedbackEntry,
   type McpAllowlistGroup,
   type McpStatus,
@@ -92,6 +96,8 @@ export function AiConnectionsDialog() {
   const [activity, setActivity] = React.useState<string[]>([]);
   const [feedback, setFeedback] = React.useState<FeedbackEntry[]>([]);
   const [feedbackSharing, setFeedbackSharing] = React.useState<boolean | null>(null);
+  const [errorLog, setErrorLog] = React.useState<ErrorLogEntry[]>([]);
+  const [errorLogSharing, setErrorLogSharing] = React.useState<boolean | null>(null);
   const [allowlist, setAllowlist] = React.useState<McpAllowlistGroup[] | null>(null);
   const [copiedFeedback, setCopiedFeedback] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -117,6 +123,8 @@ export function AiConnectionsDialog() {
       setActivity(await mcpActivity(10));
       setFeedback(await mcpFeedback());
       setFeedbackSharing(await mcpFeedbackConsent());
+      setErrorLog(await mcpErrorLog());
+      setErrorLogSharing(await mcpErrorLogConsent());
       setAllowlist(await mcpAllowlist());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -172,6 +180,21 @@ export function AiConnectionsDialog() {
     setBusy(true);
     try {
       setFeedbackSharing(await mcpSetFeedbackConsent(sharing));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** The error-report-sharing choice (first-run prompt, or this toggle):
+   *  what happens to a captured error once it is saved to the local log.
+   *  Separate from feedback sharing — turning one on never turns on the
+   *  other. */
+  const toggleErrorLogSharing = async (sharing: boolean) => {
+    setBusy(true);
+    try {
+      setErrorLogSharing(await mcpSetErrorLogConsent(sharing));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -479,10 +502,41 @@ export function AiConnectionsDialog() {
             </p>
           </Section>
 
+          <Section label="Anonymous error reports">
+            <div className="flex items-center gap-3">
+              <Switch checked={errorLogSharing ?? false} disabled={busy} onChange={(v) => void toggleErrorLogSharing(v)} />
+              <span className="text-regular text-secondary">
+                {errorLogSharing === null
+                  ? "Not asked yet — errors are logged on this Mac only until you choose."
+                  : errorLogSharing
+                    ? "On — captured errors are also sent to the Titer team through the feedback channel."
+                    : "Off — errors are logged on this Mac only."}
+              </span>
+            </div>
+            <p className="text-small text-secondary">
+              Only the error type, a scrubbed message and stack, the app version, and what was open are ever
+              shared — no file paths, no file contents, no personal information. The log itself is always kept on
+              this Mac (newest 200 entries) whether sharing is on or off.
+            </p>
+            {errorLog.length === 0 ? (
+              <p className="text-regular text-secondary">No errors logged yet.</p>
+            ) : (
+              <div className="flex flex-col gap-1 font-mono text-small">
+                {errorLog.slice(0, 5).map((entry) => (
+                  <p key={entry.error_id}>
+                    {new Date(entry.ts * 1000).toLocaleString()} [{entry.kind}] {entry.error_type}:{" "}
+                    {entry.message}
+                    {entry.sent ? " — sent" : ""}
+                  </p>
+                ))}
+              </div>
+            )}
+          </Section>
+
           <p className="text-small text-secondary">
             Local only: the server binds 127.0.0.1, needs the token above, and never sends data anywhere — except
             feedback reports, and only when you turn sharing on above. By default your AI can only read your
-            project (6 read tools). The groups above unlock more — up to 73 tools, 20 read-only and 53 that
+            project (7 read tools). The groups above unlock more — up to 80 tools, 22 read-only and 58 that
             change your project: run an analysis, build a graph, export, save or delete. Only switch groups on
             for an app you trust. It cannot change these settings.
           </p>

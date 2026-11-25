@@ -40,9 +40,10 @@
 // titer_regenerate_graphs; 74 since seq 296, 1.8.3, which adds
 // titer_copy_graph_image; 75 since seq 207, 1.8.3, which adds
 // titer_sample_size_power; 76 since seq 325, 1.9, which adds
-// titer_set_result_cell_background; 79 since seq 450, which adds
-// titer_convert_to_nested; 78 since seq 436, marketplace M4,
-// which adds titer_list_plugin_analyses + titer_run_plugin_analysis),
+// titer_set_result_cell_background; 78 since seq 436, marketplace M4,
+// which adds titer_list_plugin_analyses + titer_run_plugin_analysis; 79
+// since seq 450, which adds titer_convert_to_nested; 80 since seq 452,
+// 2.0, which adds titer_read_error_log),
 // 61 AnalysisType variants / schema keys / runner keys (was 54; 60 since
 // seq 177 select-transform; 61 since #46 compare-slopes).
 // ONE correction vs the audit stands: row 178 said GAP, but Compact
@@ -259,7 +260,7 @@ const scopeText = (scope: string): string => {
   }
 };
 
-const EXPECTED_TOOL_COUNT = 79;
+const EXPECTED_TOOL_COUNT = 80;
 const EXPECTED_ANALYSIS_TYPES = 61;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
@@ -778,7 +779,7 @@ const ROWS: Row[] = [
     item: "1.7.4 allowlist",
     title: "1.7.4 allowlist groups",
     status: "covered",
-    note: "10 groups covering all 79 tools exactly once; default = read group only.",
+    note: "10 groups covering all 80 tools exactly once; default = read group only.",
     checks: [{ kind: "invariant", name: "allowlist" }],
   },
   {

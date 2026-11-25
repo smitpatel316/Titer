@@ -19498,6 +19498,76 @@ check("copy-446: graph/figure copy writes the vector PDF natively on macOS", asy
   );
 });
 
+check("error-log-452: opt-in anonymous error logging via the feedback channel", async () => {
+  const { scrubErrorText } = await import("../src/lib/error-log");
+  // The scrubber strips home-directory paths (the username leak) and
+  // absolute paths, but keeps the message itself and relative paths.
+  strictEqual(
+    scrubErrorText("Cannot read /Users/smitpatel316/Documents/foo.prism: boom"),
+    "Cannot read [path]: boom",
+    "a macOS home path is scrubbed",
+  );
+  strictEqual(
+    scrubErrorText("failed at C:\\Users\\smit\\AppData\\x.js:1"),
+    "failed at [path]:1",
+    "a Windows home path is scrubbed",
+  );
+  strictEqual(
+    scrubErrorText("ENOENT /home/smit/work/data.csv"),
+    "ENOENT [path]",
+    "a Linux home path is scrubbed",
+  );
+  strictEqual(
+    scrubErrorText("TypeError: x is not a function at src/lib/foo.ts:12:3"),
+    "TypeError: x is not a function at src/lib/foo.ts:12:3",
+    "relative source paths survive — they carry no user data",
+  );
+  ok(!scrubErrorText("at /Users/smitpatel316/x.ts").includes("smitpatel316"), "no username survives the scrub");
+  // The capture is installed at startup and reports through the shell.
+  const mainSrc = readFileSync("src/main.tsx", "utf8");
+  ok(mainSrc.includes("installErrorCapture"), "main.tsx installs the global error capture");
+  ok(mainSrc.includes("mcpFlushErrorLog"), "main.tsx flushes unsent error entries on startup");
+  const logSrc = readFileSync("src/lib/error-log.ts", "utf8");
+  ok(logSrc.includes('addEventListener("error"'), "uncaught exceptions are captured");
+  ok(logSrc.includes('addEventListener("unhandledrejection"'), "unhandled rejections are captured");
+  ok(logSrc.includes("mcpLogError"), "reports go through the mcpLogError bridge");
+  const nativeSrc = readFileSync("src/native.ts", "utf8");
+  ok(nativeSrc.includes('"mcp_log_error"'), "the bridge invokes the mcp_log_error command");
+  // The shell: scrub + local rotating log + consent-gated send through the
+  // existing feedback endpoint, plus the MCP read tool.
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes("ERROR_LOG_FILE"), "the shell owns an error-log file");
+  ok(mcp.includes("fn scrub_error_text"), "the shell scrubs again before storing or sending");
+  ok(mcp.includes("fn error_log_sharing_enabled"), "sending is gated on the error-log consent");
+  ok(mcp.includes("feedback_share_result(dir, &feedback_server_url(), &error_entry)"), "error reports reuse the feedback share path");
+  ok(mcp.includes('name = "titer_read_error_log"'), "the MCP server exposes titer_read_error_log");
+  ok(mcp.includes('"titer_read_error_log",'), "the error-log tool is in an allowlist group");
+  ok(mcp.includes("mcp_error_log_consent"), "the shell exposes the error-log consent read");
+  ok(mcp.includes("mcp_set_error_log_consent"), "the shell exposes the error-log consent write");
+  ok(mcp.includes("mcp_log_error"), "the shell exposes the log-error command");
+  ok(mcp.includes("mcp_flush_error_log"), "the shell exposes the flush command");
+  ok(mcp.includes("mcp_error_log"), "the shell exposes the error-log read for Settings");
+  // Consent: default off, offered at first run alongside feedback, and a
+  // Settings toggle — same model as feedback, separate record.
+  const consentSrc = readFileSync("src/components/feedback-consent-dialog.tsx", "utf8");
+  ok(consentSrc.includes("error"), "the first-run dialog offers error-report sharing");
+  ok(consentSrc.includes("mcpSetErrorLogConsent"), "the first-run choice records the error-log consent");
+  const settingsSrc = readFileSync("src/components/ai-connections-dialog.tsx", "utf8");
+  ok(settingsSrc.includes("mcpErrorLogConsent") || settingsSrc.includes("errorLogSharing"), "Settings shows the error-log sharing toggle");
+  // Rust-side panics are caught by a hook installed at startup.
+  const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(mainRs.includes("set_hook"), "main.rs installs a panic hook");
+  ok(mainRs.includes("mcp_log_error,"), "main.rs registers mcp_log_error");
+  ok(mainRs.includes("mcp_flush_error_log,"), "main.rs registers mcp_flush_error_log");
+  ok(mainRs.includes("mcp_error_log,"), "main.rs registers mcp_error_log");
+  ok(mainRs.includes("mcp_error_log_consent,"), "main.rs registers mcp_error_log_consent");
+  ok(mainRs.includes("mcp_set_error_log_consent,"), "main.rs registers mcp_set_error_log_consent");
+  // Nothing leaves the machine while opted out: the send path is inside
+  // the consent check, and the hook only writes locally.
+  ok(/if !error_log_sharing_enabled\(dir\) \{\s*return false;/.test(mcp), "send is refused before any POST when sharing is off");
+  ok(!/set_hook[\s\S]{0,800}post_feedback_entry/.test(mainRs), "the panic hook never posts — it only writes locally");
+});
+
 check("seq 216: BMP is 24-bit bottom-up BGR with DPI in the header", () => {
   const bmp = bmpEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200);
   strictEqual(String.fromCharCode(bmp[0]!, bmp[1]!), "BM");
