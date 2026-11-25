@@ -39920,7 +39920,7 @@ import { sha256Hex, verifySha256 } from "../src/marketplace/hash";
 import { availableUpdateFor, isUpdateOfferable, UPDATE_OFFER_DELAY_MS } from "../src/marketplace/updates";
 import { clearPin, loadPins, pinnedVersion, savePin } from "../src/marketplace/pins";
 import { createMemoryStorage } from "../src/marketplace/storage";
-import { checkPluginDependency, dependencyNotice } from "../src/marketplace/dependencies";
+import { checkPluginDependency, pluginDependencyNotice } from "../src/plugins/workflow-dependency";
 import { MARKETPLACE_INSTALLED_KEY, MarketplaceStore, type MarketplaceStoreDeps } from "../src/marketplace/store";
 import type {
   PluginAnalysisSpecJson,
@@ -40344,27 +40344,53 @@ check("M2-review: enable requires the review step, and grants cannot exceed the 
 });
 
 check("M2-dependency: a missing plugin degrades to an install notice, never a break", () => {
+  // Seq 438: the check is the single version-aware one — the (dep, state)
+  // shape is gone. The install state is expressed as the lookup the
+  // keeper takes, exactly as isolation.ts passes it.
   const dep = { pluginId: "example.hello-analysis", pluginName: "Hello Analysis" };
-  const missing = checkPluginDependency(dep, { installed: false, enabled: false });
+  const lookupFor = (state: { installed: boolean; enabled: boolean }) => (_id: string) =>
+    state.installed ? { enabled: state.enabled } : undefined;
+  const missing = checkPluginDependency(dep, lookupFor({ installed: false, enabled: false }));
   strictEqual(missing.ok, false);
   if (!missing.ok) {
-    strictEqual(missing.action, "install");
+    strictEqual(missing.reason, "missing");
     ok(/needs plugin “Hello Analysis” — install it\?/.test(missing.notice), `notice must name the plugin and offer install (got: ${missing.notice})`);
   }
-  const notice = dependencyNotice(dep, { installed: false, enabled: false });
-  ok(notice !== null && /needs plugin “Hello Analysis” — install it\?/.test(notice), "dependencyNotice must return the same notice");
-  const disabled = checkPluginDependency(dep, { installed: true, enabled: false });
+  const notice = pluginDependencyNotice(checkPluginDependency(dep, lookupFor({ installed: false, enabled: false })));
+  ok(/needs plugin “Hello Analysis” — install it\?/.test(notice), "pluginDependencyNotice must return the same notice");
+  const disabled = checkPluginDependency(dep, lookupFor({ installed: true, enabled: false }));
   strictEqual(disabled.ok, false);
   if (!disabled.ok) {
-    strictEqual(disabled.action, "enable");
-    ok(/installed but disabled — enable it/.test(disabled.notice), `disabled notice must offer enable (got: ${disabled.notice})`);
+    strictEqual(disabled.reason, "disabled");
+    ok(disabled.notice.includes("install it?"), `disabled notice must offer install (got: ${disabled.notice})`);
   }
-  ok(dependencyNotice(dep, { installed: true, enabled: false })?.includes("enable it"), "disabled notice must mention enabling");
-  strictEqual(checkPluginDependency(dep, { installed: true, enabled: true }).ok, true);
-  strictEqual(dependencyNotice(dep, { installed: true, enabled: true }), null);
+  ok(
+    pluginDependencyNotice(checkPluginDependency(dep, lookupFor({ installed: true, enabled: false }))).includes("install it?"),
+    "disabled notice must mention installing",
+  );
+  strictEqual(checkPluginDependency(dep, lookupFor({ installed: true, enabled: true })).ok, true);
+  strictEqual(pluginDependencyNotice(checkPluginDependency(dep, lookupFor({ installed: true, enabled: true }))), "");
   // Without a friendly name the id is used.
-  const byId = checkPluginDependency({ pluginId: "example.hello-analysis" }, { installed: false, enabled: false });
+  const byId = checkPluginDependency({ pluginId: "example.hello-analysis" }, lookupFor({ installed: false, enabled: false }));
   if (!byId.ok) ok(byId.notice.includes("example.hello-analysis"), "notice must fall back to the plugin id");
+});
+
+check("seq-438: a single checkPluginDependency remains — the version-aware one", () => {
+  ok(!existsSync("src/marketplace/dependencies.ts"), "the M2 copy of checkPluginDependency must be deleted");
+  const keeper = readFileSync("src/plugins/workflow-dependency.ts", "utf8");
+  ok(/export function checkPluginDependency/.test(keeper), "the keeper must still export checkPluginDependency");
+  ok(/satisfiesPluginVersionRange/.test(keeper), "the keeper must still be the version-aware implementation");
+  ok(/export function pluginDependencyNotice/.test(keeper), "the keeper must still export pluginDependencyNotice");
+  const dupes: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const p = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) walk(p);
+      else if (/\.tsx?$/.test(entry.name) && readFileSync(p, "utf8").includes("export function checkPluginDependency")) dupes.push(p);
+    }
+  };
+  walk("src");
+  deepStrictEqual(dupes, ["src/plugins/workflow-dependency.ts"], `exactly one checkPluginDependency definition must remain (found: ${dupes.join(", ")})`);
 });
 
 check("M2-wiring: Marketplace dialog, menu entry and selector kind exist", () => {

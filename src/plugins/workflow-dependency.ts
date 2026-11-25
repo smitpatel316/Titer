@@ -25,6 +25,8 @@ import { parseSemver, type Semver } from "./manifest";
 export interface PluginDependency {
   pluginId: string;
   versionRange?: string;
+  /** Friendly name for the notice; falls back to the id. */
+  pluginName?: string;
 }
 
 /** One installed plugin, as a lookup reports it. */
@@ -47,8 +49,8 @@ export type PluginDependencyCheck =
     };
 
 /** The "needs plugin X — install it?" notice for a missing/disabled plugin. */
-function needsNotice(pluginId: string): string {
-  return `This step needs plugin “${pluginId}” — install it?`;
+function needsNotice(name: string): string {
+  return `This step needs plugin “${name}” — install it?`;
 }
 
 /** The live-registry lookup: enabled while any analysis is registered. */
@@ -119,12 +121,13 @@ export function checkPluginDependency(
   dep: PluginDependency,
   installed: (pluginId: string) => InstalledPlugin | undefined = defaultInstalled,
 ): PluginDependencyCheck {
+  const name = dep.pluginName ?? dep.pluginId;
   const found = installed(dep.pluginId);
   if (!found) {
-    return { ok: false, pluginId: dep.pluginId, reason: "missing", notice: needsNotice(dep.pluginId) };
+    return { ok: false, pluginId: dep.pluginId, reason: "missing", notice: needsNotice(name) };
   }
   if (!found.enabled) {
-    return { ok: false, pluginId: dep.pluginId, reason: "disabled", notice: needsNotice(dep.pluginId) };
+    return { ok: false, pluginId: dep.pluginId, reason: "disabled", notice: needsNotice(name) };
   }
   if (!dep.versionRange) {
     return { ok: true, pluginId: dep.pluginId, version: found.version };
@@ -135,7 +138,7 @@ export function checkPluginDependency(
       pluginId: dep.pluginId,
       reason: "version-unknown",
       notice:
-        `This step needs plugin “${dep.pluginId}” version ${dep.versionRange}, ` +
+        `This step needs plugin “${name}” version ${dep.versionRange}, ` +
         `but the installed version couldn't be verified — check the installed version.`,
     };
   }
@@ -146,7 +149,7 @@ export function checkPluginDependency(
       reason: "version-mismatch",
       installedVersion: found.version,
       notice:
-        `This step needs plugin “${dep.pluginId}” version ${dep.versionRange}, ` +
+        `This step needs plugin “${name}” version ${dep.versionRange}, ` +
         `but ${found.version} is installed — update it?`,
     };
   }
