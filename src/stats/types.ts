@@ -1413,7 +1413,7 @@ export interface McNemarParams {
 export const GOF_EXPECTED_MODES = ["equal", "counts", "percent"] as const;
 export type GofExpectedMode = (typeof GOF_EXPECTED_MODES)[number];
 
-/** Params for "chi-square-gof" (Column table): the observed counts live in
+/** Params for "chi-square-gof" (Column / Parts-of-whole table): the observed counts live in
  *  one data set (`sets`, the wizard's choice — omitted: the table's only
  *  data column), and the expected distribution is either equal for every
  *  category or given per category, in row order, as counts or percentages. */
@@ -1424,7 +1424,7 @@ export interface ChiSquareGofParams {
   expectedValues?: number[];
 }
 
-/** Params for "binomial-test" (Column table): the observed counts live in
+/** Params for "binomial-test" (Column / Parts-of-whole table): the observed counts live in
  *  one data set (`sets` — omitted: the table's only data column), two rows
  *  only, and the first row's expected proportion under the null. */
 export interface BinomialTestParams {

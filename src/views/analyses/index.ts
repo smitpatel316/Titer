@@ -134,9 +134,11 @@ export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<Analysi
   // Normalize..." group, Fraction of Total included. "Compare observed
   // distribution with expected" — the chi-square goodness-of-fit test, or
   // the binomial test for two categories — is Prism's "Parts of whole
-  // analyses" entry and belongs here too, but it is seq 195's analysis to
-  // build: when it lands, its entry goes in this list.
-  "parts-of-whole": optionsFor(["fraction-of-total", "transform", "plot-function"]),
+  // analyses" entry (seq 195): the runners already read one data set of
+  // observed counts with the row titles as the categories, so they run
+  // unchanged on this table type — the wizard asks which set holds the
+  // observed counts when there is more than one.
+  "parts-of-whole": optionsFor(["fraction-of-total", "chi-square-gof", "binomial-test", "transform", "plot-function"]),
 };
 
 /** Whether the table has the ≥ 2 row bands a three-way ANOVA needs. */
