@@ -36,6 +36,22 @@
 //   flow_unload_sample(sample_id) -> bool
 //   flow_sample_stats(sample_id) -> FlowSampleStats | null
 //   flow_store_status() -> FlowStoreStatus
+//   flow_apply_compensation(sample_id, fluorochromes, matrix, source)
+//     -> FlowCompensationState  (F2a, seq 447)
+//   flow_get_compensation(sample_id) -> FlowCompensationState | null
+//   flow_clear_compensation(sample_id) -> bool
+//
+// ── Compensation (F2a, seq 447) ──────────────────────────────────────────
+// Compensation is the inverse of the spillover matrix, multiplied per
+// event: compensated = S^-1 x observed (column vector). The raw columns
+// are never mutated: applying materialises a compensated copy of the
+// fluorochrome columns only, so re-applying with an edited matrix
+// recomputes from raw (never double compensation) and clearing drops the
+// copy. Channels outside the fluorochrome list pass through unchanged
+// (FCS 3.1 sparse-matrix guidance: height vs area). The inverse is f64
+// Gauss-Jordan with partial pivoting — the same algorithm as
+// `src/flow/compensation.ts`, so the two sides agree to f32 rounding.
+// `FlowSampleInfo.bytes` counts the compensated copy on top of the raw.
 
 use serde::Serialize;
 use std::collections::HashMap;
@@ -104,13 +120,55 @@ pub struct FlowStoreStatus {
     pub budget_bytes: u64,
 }
 
+/// A sample's compensation state, as the store reports it (F2a, seq 447).
+/// `spillover` is the matrix as applied (the editable source of truth);
+/// `inverse` is the matrix actually multiplied. After clearing, the last
+/// matrix is kept with `applied: false`.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowCompensationState {
+    pub fluorochromes: Vec<String>,
+    pub spillover: Vec<Vec<f64>>,
+    pub inverse: Vec<Vec<f64>>,
+    pub source: String,
+    pub applied: bool,
+}
+
+/// The unapplied state for a sample that never had compensation.
+fn unapplied_compensation_state() -> FlowCompensationState {
+    FlowCompensationState { fluorochromes: vec![], spillover: vec![], inverse: vec![], source: "file".to_string(), applied: false }
+}
+
+/// The compensated fluorochrome columns: one `Vec<f32>` per fluorochrome,
+/// in `fluorochromes` order, materialised from the raw columns on apply.
+#[derive(Debug)]
+struct Compensated {
+    fluorochromes: Vec<String>,
+    columns: Vec<Vec<f32>>,
+}
+
 /// One loaded sample: its columns, in `param_names` order.
 #[derive(Debug)]
 struct LoadedSample {
     info: FlowSampleInfo,
     param_names: Vec<String>,
     columns: Vec<Vec<f32>>,
+    compensated: Option<Compensated>,
+    compensation: FlowCompensationState,
     last_used: Instant,
+}
+
+impl LoadedSample {
+    /// The column a reader sees: the compensated copy for a compensated
+    /// fluorochrome, the raw column for everything else.
+    fn readable_column(&self, index: usize) -> &[f32] {
+        if let Some(compensated) = &self.compensated {
+            if let Some(at) = compensated.fluorochromes.iter().position(|f| f == &self.param_names[index]) {
+                return &compensated.columns[at];
+            }
+        }
+        &self.columns[index]
+    }
 }
 
 /// The event store: all loaded samples + their byte budget. Held in Tauri
@@ -192,7 +250,14 @@ impl FlowStore {
         };
         inner.samples.insert(
             sample_id.to_string(),
-            LoadedSample { info: info.clone(), param_names, columns, last_used: Instant::now() },
+            LoadedSample {
+                info: info.clone(),
+                param_names,
+                columns,
+                compensated: None,
+                compensation: unapplied_compensation_state(),
+                last_used: Instant::now(),
+            },
         );
         inner.bytes += bytes;
         // Evict least-recently-used samples until the store fits its budget.
@@ -223,6 +288,194 @@ impl FlowStore {
             }
         }
     }
+
+    /// Apply a spillover matrix to a loaded sample (F2a, seq 447):
+    /// materialise the compensated fluorochrome columns from the RAW
+    /// columns (never from an already-compensated copy), charge their
+    /// bytes, and record the state. Re-applying with an edited matrix
+    /// recomputes from raw. `source` is "file" | "csv" | "manual".
+    pub(crate) fn apply_compensation(
+        &self,
+        sample_id: &str,
+        fluorochromes: Vec<String>,
+        matrix: Vec<Vec<f64>>,
+        source: String,
+    ) -> Result<FlowCompensationState, String> {
+        let mut inner = self.samples.lock().map_err(|_| "Flow store lock is poisoned.".to_string())?;
+        let Some(sample) = inner.samples.get_mut(sample_id) else {
+            return Err(format!("flow store: sample “{sample_id}” is not loaded"));
+        };
+        validate_spillover(&fluorochromes, &matrix, &sample.param_names)?;
+        let inverse = invert_matrix(&matrix)?;
+        let compensated_columns = compensate_fluorochrome_columns(&sample.columns, &sample.param_names, &fluorochromes, &inverse)?;
+        if let Some(old) = &sample.compensated {
+            let old_bytes = sample.info.event_count as u64 * old.fluorochromes.len() as u64 * BYTES_PER_VALUE;
+            inner.bytes -= old_bytes;
+            sample.info.bytes -= old_bytes;
+        }
+        let new_bytes = sample.info.event_count as u64 * fluorochromes.len() as u64 * BYTES_PER_VALUE;
+        sample.compensated = Some(Compensated { fluorochromes: fluorochromes.clone(), columns: compensated_columns });
+        sample.compensation = FlowCompensationState {
+            fluorochromes,
+            spillover: matrix,
+            inverse,
+            source,
+            applied: true,
+        };
+        sample.info.bytes += new_bytes;
+        inner.bytes += new_bytes;
+        sample.last_used = Instant::now();
+        Ok(sample.compensation.clone())
+    }
+
+    /// A sample's compensation state, or None when it isn't loaded.
+    pub(crate) fn get_compensation(&self, sample_id: &str) -> Result<Option<FlowCompensationState>, String> {
+        let inner = self.samples.lock().map_err(|_| "Flow store lock is poisoned.".to_string())?;
+        Ok(inner.samples.get(sample_id).map(|s| s.compensation.clone()))
+    }
+
+    /// Drop a sample's compensated copy (readable columns revert to raw)
+    /// and keep the last matrix in the state with `applied: false`.
+    /// False when the sample isn't loaded.
+    pub(crate) fn clear_compensation(&self, sample_id: &str) -> Result<bool, String> {
+        let mut inner = self.samples.lock().map_err(|_| "Flow store lock is poisoned.".to_string())?;
+        let Some(sample) = inner.samples.get_mut(sample_id) else {
+            return Ok(false);
+        };
+        if let Some(old) = sample.compensated.take() {
+            let old_bytes = sample.info.event_count as u64 * old.fluorochromes.len() as u64 * BYTES_PER_VALUE;
+            inner.bytes -= old_bytes;
+            sample.info.bytes -= old_bytes;
+        }
+        sample.compensation.applied = false;
+        sample.last_used = Instant::now();
+        Ok(true)
+    }
+}
+
+/// Invert a square matrix (f64 Gauss-Jordan with partial pivoting — the
+/// same algorithm as `src/flow/compensation.ts`). Refuses non-square,
+/// non-finite and singular matrices.
+fn invert_matrix(matrix: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, String> {
+    let n = matrix.len();
+    if n == 0 {
+        return Err("A compensation matrix must not be empty.".to_string());
+    }
+    for row in matrix {
+        if row.len() != n {
+            return Err(format!("A compensation matrix must be square: got a {n}x{} matrix.", row.len()));
+        }
+        if row.iter().any(|v| !v.is_finite()) {
+            return Err("A compensation matrix must hold only finite numbers.".to_string());
+        }
+    }
+    // Augment with the identity; row-reduce to the inverse.
+    let mut aug: Vec<Vec<f64>> = matrix
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let mut r = row.clone();
+            r.extend((0..n).map(|j| if i == j { 1.0 } else { 0.0 }));
+            r
+        })
+        .collect();
+    for col in 0..n {
+        let mut pivot = col;
+        for r in col + 1..n {
+            if aug[r][col].abs() > aug[pivot][col].abs() {
+                pivot = r;
+            }
+        }
+        if aug[pivot][col].abs() < 1e-12 {
+            return Err("A compensation matrix must not be singular: it has no inverse.".to_string());
+        }
+        if pivot != col {
+            aug.swap(col, pivot);
+        }
+        let divisor = aug[col][col];
+        for j in 0..2 * n {
+            aug[col][j] /= divisor;
+        }
+        for r in 0..n {
+            if r == col {
+                continue;
+            }
+            let factor = aug[r][col];
+            if factor == 0.0 {
+                continue;
+            }
+            for j in 0..2 * n {
+                aug[r][j] -= factor * aug[col][j];
+            }
+        }
+    }
+    Ok(aug.iter().map(|row| row[n..].to_vec()).collect())
+}
+
+/// Validate a spillover matrix against a sample's parameters: the
+/// fluorochrome list must be non-empty and duplicate-free, the matrix
+/// square over it, every fluorochrome a parameter of the sample, and
+/// every entry finite.
+fn validate_spillover(
+    fluorochromes: &[String],
+    matrix: &[Vec<f64>],
+    param_names: &[String],
+) -> Result<(), String> {
+    if fluorochromes.is_empty() {
+        return Err("A compensation matrix needs at least one fluorochrome.".to_string());
+    }
+    if fluorochromes.iter().collect::<std::collections::HashSet<_>>().len() != fluorochromes.len() {
+        return Err("A compensation matrix must not repeat a fluorochrome.".to_string());
+    }
+    if matrix.len() != fluorochromes.len() {
+        return Err(format!(
+            "A compensation matrix must be square over its {} fluorochromes: got {} rows.",
+            fluorochromes.len(),
+            matrix.len()
+        ));
+    }
+    for fluor in fluorochromes {
+        if !param_names.iter().any(|p| p == fluor) {
+            return Err(format!("Fluorochrome “{fluor}” is not a parameter of this sample."));
+        }
+    }
+    // invert_matrix refuses non-square rows, non-finite entries and
+    // singular matrices.
+    invert_matrix(matrix)?;
+    Ok(())
+}
+
+/// Compensate ONLY the fluorochrome columns: one `Vec<f32>` per
+/// fluorochrome, in `fluorochromes` order, from the RAW columns (f64
+/// accumulation, stored f32). `inverse` is the precomputed inverse of
+/// the spillover matrix.
+fn compensate_fluorochrome_columns(
+    columns: &[Vec<f32>],
+    param_names: &[String],
+    fluorochromes: &[String],
+    inverse: &[Vec<f64>],
+) -> Result<Vec<Vec<f32>>, String> {
+    let event_count = columns.first().map(|c| c.len()).unwrap_or(0);
+    let raw_index: Vec<usize> = fluorochromes
+        .iter()
+        .map(|f| {
+            param_names
+                .iter()
+                .position(|p| p == f)
+                .ok_or_else(|| format!("Fluorochrome “{f}” is not a parameter of this sample."))
+        })
+        .collect::<Result<_, _>>()?;
+    let mut out: Vec<Vec<f32>> = fluorochromes.iter().map(|_| vec![0.0; event_count]).collect();
+    for e in 0..event_count {
+        for (i, _) in fluorochromes.iter().enumerate() {
+            let mut sum = 0.0f64;
+            for (j, _) in fluorochromes.iter().enumerate() {
+                sum += inverse[i][j] * columns[raw_index[j]][e] as f64;
+            }
+            out[i][e] = sum as f32;
+        }
+    }
+    Ok(out)
 }
 
 /// The budget override: `TITER_FLOW_STORE_BUDGET_MB`, in MiB. Unset or
@@ -327,6 +580,8 @@ fn parse_sidecar(bytes: &[u8], param_count: usize) -> Result<Vec<Vec<f32>>, Stri
 
 /// One parameter's events, or null when the sample or the parameter is
 /// unknown. The returned column is a copy — the store keeps its own.
+/// After compensation the COMPENSATED column is returned for a
+/// compensated fluorochrome, the raw column otherwise.
 #[tauri::command]
 pub fn flow_get_column(
     state: tauri::State<'_, FlowStore>,
@@ -341,7 +596,7 @@ pub fn flow_get_column(
         let Some(index) = sample.param_names.iter().position(|n| n == &param) else {
             return Ok(None);
         };
-        sample.columns[index].clone()
+        sample.readable_column(index).to_vec()
     };
     state.touch(&sample_id);
     Ok(Some(column))
@@ -370,7 +625,8 @@ pub fn flow_unload_sample(state: tauri::State<'_, FlowStore>, sample_id: String)
 }
 
 /// A sample's stats: its event count plus each parameter's min/max/mean;
-/// null when the sample isn't loaded.
+/// null when the sample isn't loaded. Stats run over the READABLE
+/// columns, so after compensation they describe the compensated data.
 #[tauri::command]
 pub fn flow_sample_stats(
     state: tauri::State<'_, FlowStore>,
@@ -387,13 +643,46 @@ pub fn flow_sample_stats(
             params: sample
                 .param_names
                 .iter()
-                .zip(sample.columns.iter())
-                .map(|(name, column)| param_stats(name, column))
+                .enumerate()
+                .map(|(i, name)| param_stats(name, sample.readable_column(i)))
                 .collect(),
         }
     };
     state.touch(&sample_id);
     Ok(Some(stats))
+}
+
+/// Apply a spillover matrix to a loaded sample (F2a, seq 447): the
+/// compensated fluorochrome columns are materialised from the RAW columns
+/// and become the readable columns. `source` is "file" | "csv" | "manual".
+#[tauri::command]
+pub fn flow_apply_compensation(
+    state: tauri::State<'_, FlowStore>,
+    sample_id: String,
+    fluorochromes: Vec<String>,
+    matrix: Vec<Vec<f64>>,
+    source: String,
+) -> Result<FlowCompensationState, String> {
+    state.apply_compensation(&sample_id, fluorochromes, matrix, source)
+}
+
+/// A sample's compensation state, or null when it isn't loaded.
+#[tauri::command]
+pub fn flow_get_compensation(
+    state: tauri::State<'_, FlowStore>,
+    sample_id: String,
+) -> Result<Option<FlowCompensationState>, String> {
+    state.get_compensation(&sample_id)
+}
+
+/// Drop a sample's compensated copy (readable columns revert to raw);
+/// true when the sample was loaded, false when it wasn't.
+#[tauri::command]
+pub fn flow_clear_compensation(
+    state: tauri::State<'_, FlowStore>,
+    sample_id: String,
+) -> Result<bool, String> {
+    state.clear_compensation(&sample_id)
 }
 
 /// Store-wide memory state.
@@ -496,5 +785,164 @@ mod tests {
         assert!(value.get("sample_id").is_none(), "no snake_case keys leak: {value}");
         let status = FlowStoreStatus { samples: 1, bytes: 60, budget_bytes: 1024 * 1024 };
         assert_eq!(serde_json::to_value(&status).unwrap()["budgetBytes"], 1024 * 1024);
+    }
+
+    // ── F2a (seq 447): compensation ─────────────────────────────────────
+
+    /// The synth-spill 3x3 and its columns, as the F0 harness verified.
+    fn spill_matrix() -> Vec<Vec<f64>> {
+        vec![
+            vec![1.0, 0.05, 0.01],
+            vec![0.02, 1.0, 0.03],
+            vec![0.0, 0.04, 1.0],
+        ]
+    }
+
+    fn spill_fluorochromes() -> Vec<String> {
+        vec!["FL1-A".to_string(), "FL2-A".to_string(), "FL3-A".to_string()]
+    }
+
+    fn load_spill_sample(store: &FlowStore) {
+        store
+            .insert(
+                "spill",
+                Some("synth-spill".to_string()),
+                Some("synth-spill.fcs".to_string()),
+                spill_fluorochromes(),
+                vec![
+                    vec![100.0, 200.0, 300.0, 400.0],
+                    vec![200.0, 400.0, 600.0, 800.0],
+                    vec![300.0, 600.0, 900.0, 1200.0],
+                ],
+            )
+            .expect("spill sample loads");
+    }
+
+    fn close(actual: f32, expected: f64, what: &str) {
+        assert!((actual as f64 - expected).abs() < 1e-3, "{what} must be ~{expected} (got {actual})");
+    }
+
+    #[test]
+    fn invert_matrix_matches_numpy_reference() {
+        // numpy inv(S): the F0 oracle's independent reference.
+        let inv = invert_matrix(&spill_matrix()).expect("spill matrix inverts");
+        assert!((inv[0][0] - 1.00099418).abs() < 1e-9);
+        assert!((inv[0][1] - -0.04970896).abs() < 1e-9);
+        assert!((inv[1][2] - -0.02986547).abs() < 1e-9);
+        assert!((inv[2][0] - 0.00080176).abs() < 1e-9);
+        // Refusals: singular, non-square, non-finite.
+        assert!(invert_matrix(&[vec![1.0, 1.0], vec![1.0, 1.0]]).is_err(), "singular must be refused");
+        assert!(invert_matrix(&[vec![1.0, 0.0], vec![0.0, 1.0, 0.0]]).is_err(), "non-square must be refused");
+        assert!(invert_matrix(&[vec![1.0, f64::NAN], vec![0.0, 1.0]]).is_err(), "non-finite must be refused");
+    }
+
+    #[test]
+    fn compensation_applies_the_file_matrix() {
+        let store = FlowStore::with_budget(1024 * 1024);
+        load_spill_sample(&store);
+        let state = store
+            .apply_compensation("spill", spill_fluorochromes(), spill_matrix(), "file".to_string())
+            .expect("apply succeeds");
+        assert!(state.applied);
+        assert_eq!(state.source, "file");
+        assert_eq!(state.fluorochromes, spill_fluorochromes());
+        // The F0 oracle: first compensated value 87.60202.
+        let inner = store.samples.lock().unwrap();
+        let sample = inner.samples.get("spill").unwrap();
+        close(sample.readable_column(0)[0], 87.60202, "compensated FL1-A event 0");
+        close(sample.readable_column(1)[0], 189.47533, "compensated FL2-A event 0");
+        close(sample.readable_column(2)[0], 292.42099, "compensated FL3-A event 0");
+        close(sample.readable_column(0)[3], 350.40809, "compensated FL1-A event 3");
+        // The raw columns are untouched.
+        assert_eq!(sample.columns[0], vec![100.0, 200.0, 300.0, 400.0]);
+        // The compensated copy is charged on top of the raw columns.
+        assert_eq!(sample.info.bytes, 4 * 3 * 4 + 4 * 3 * 4);
+        // The state serialises camelCase for the TS contract.
+        let value = serde_json::to_value(&state).expect("state serialises");
+        assert_eq!(value["applied"], true);
+        assert_eq!(value["source"], "file");
+        assert!(value.get("spillover").is_some() && value.get("inverse").is_some());
+        drop(inner);
+        // Re-applying with an edited matrix (identity) recomputes from
+        // RAW — it does not stack on the compensated values.
+        store
+            .apply_compensation(
+                "spill",
+                spill_fluorochromes(),
+                vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0], vec![0.0, 0.0, 1.0]],
+                "manual".to_string(),
+            )
+            .expect("re-apply succeeds");
+        let inner = store.samples.lock().unwrap();
+        let sample = inner.samples.get("spill").unwrap();
+        assert_eq!(sample.readable_column(0), &[100.0, 200.0, 300.0, 400.0]);
+        assert_eq!(sample.compensation.source, "manual");
+        drop(inner);
+        // Clear reverts to raw and reports unapplied, keeping the matrix.
+        assert!(store.clear_compensation("spill").expect("clear succeeds"));
+        let state = store.get_compensation("spill").expect("get succeeds").expect("sample loaded");
+        assert!(!state.applied);
+        assert_eq!(state.source, "manual");
+        let inner = store.samples.lock().unwrap();
+        let sample = inner.samples.get("spill").unwrap();
+        assert_eq!(sample.readable_column(1), &[200.0, 400.0, 600.0, 800.0]);
+        assert_eq!(sample.info.bytes, 4 * 3 * 4, "clear frees the compensated bytes");
+        assert!(!store.clear_compensation("missing").expect("clear of unknown is false"));
+    }
+
+    #[test]
+    fn compensation_is_sparse_across_measurement_types() {
+        // The real multi-type fixture, loaded through the FCS reader: its
+        // 3x3 $SPILLOVER covers the -A fluorochromes only, so the -H
+        // params and FSC-A/FSC-H must pass through bit-identical.
+        let store = FlowStore::with_budget(1024 * 1024);
+        let path = format!("{}/../tests/testdata/fcs/f2a-multi-type.fcs", env!("CARGO_MANIFEST_DIR"));
+        let summary = crate::flow::import_fcs_file(&path, Some("multi".to_string()), None, &store)
+            .expect("multi-type fixture imports");
+        assert_eq!(summary.event_count, 4);
+        let spill = summary.spillover.expect("fixture carries $SPILLOVER");
+        assert_eq!(spill.fluorochromes, spill_fluorochromes());
+        let matrix: Vec<Vec<f64>> = spill.matrix.iter().map(|row| row.iter().map(|v| *v as f64).collect()).collect();
+        store
+            .apply_compensation("multi", spill.fluorochromes, matrix, "file".to_string())
+            .expect("apply succeeds");
+        let inner = store.samples.lock().unwrap();
+        let sample = inner.samples.get("multi").unwrap();
+        // Param order: FSC-A, FSC-H, FL1-A, FL1-H, FL2-A, FL2-H, FL3-A, FL3-H.
+        assert_eq!(sample.readable_column(1), &[100.0, 200.0, 300.0, 400.0], "FSC-H passes through");
+        assert_eq!(sample.readable_column(3), &[10.0, 20.0, 30.0, 40.0], "FL1-H passes through");
+        assert_eq!(sample.readable_column(0), &[1000.0, 2000.0, 3000.0, 4000.0], "FSC-A passes through");
+        close(sample.readable_column(2)[0], 87.60202, "multi-type FL1-A event 0");
+        close(sample.readable_column(6)[3], 1169.68395, "multi-type FL3-A event 3");
+    }
+
+    #[test]
+    fn compensation_refusals() {
+        let store = FlowStore::with_budget(1024 * 1024);
+        load_spill_sample(&store);
+        // Unknown sample.
+        assert!(store.apply_compensation("missing", spill_fluorochromes(), spill_matrix(), "file".to_string()).is_err());
+        // Unknown fluorochrome.
+        assert!(store
+            .apply_compensation(
+                "spill",
+                vec!["FL1-A".to_string(), "NOPE".to_string()],
+                vec![vec![1.0, 0.0], vec![0.0, 1.0]],
+                "manual".to_string()
+            )
+            .is_err());
+        // Singular matrix.
+        assert!(store
+            .apply_compensation(
+                "spill",
+                vec!["FL1-A".to_string(), "FL2-A".to_string()],
+                vec![vec![1.0, 1.0], vec![1.0, 1.0]],
+                "manual".to_string()
+            )
+            .is_err());
+        // A never-compensated sample reports applied: false.
+        let state = store.get_compensation("spill").expect("get succeeds").expect("sample loaded");
+        assert!(!state.applied);
+        assert!(store.get_compensation("missing").expect("get succeeds").is_none());
     }
 }

@@ -1888,6 +1888,9 @@ fn main() {
             flow_store::flow_unload_sample,
             flow_store::flow_sample_stats,
             flow_store::flow_store_status,
+            flow_store::flow_apply_compensation,
+            flow_store::flow_get_compensation,
+            flow_store::flow_clear_compensation,
             flow::flow_import_fcs
         ])
         .build(tauri::generate_context!())

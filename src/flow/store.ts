@@ -38,8 +38,23 @@
 //      { sampleId, eventCount, params: [{ name, count, min, max, mean }] } —
 //      the event count plus each parameter's min/max (and mean) over its
 //      finite values; null when the sample isn't loaded.
+//    applyCompensation(sampleId, { fluorochromes, matrix, source })
+//      (F2a, seq 447) Apply a spillover matrix: the compensated
+//      fluorochrome columns are materialised from the RAW columns
+//      (compensated = S^-1 x observed per event) and become the readable
+//      columns; every other parameter passes through unchanged. Re-applying
+//      recomputes from raw, never stacks. Returns the compensation state.
+//      Throws when the sample is unknown or the matrix is refused.
+//    getCompensation(sampleId)
+//      The sample's compensation state, or null when it isn't loaded.
+//      A never-compensated sample reports `applied: false`.
+//    clearCompensation(sampleId)
+//      Drop the compensated copy and read raw again; true when the sample
+//      was loaded, false when it wasn't. The last matrix is kept in the
+//      state with `applied: false`.
 //    storeStatus() — extra, beyond the contract minimum: how many samples
-//      are loaded and how many bytes they hold against the budget.
+//      are loaded and how many bytes they hold against the budget
+//      (raw + compensated copies both count).
 //    Rust adds flow_load_sample_file(): the same load from a `.tfcs` sidecar
 //    file (see the format note in `flow_store.rs`).
 //
@@ -68,6 +83,14 @@
 //   module is off; no sidebar/menu/MCP surface exists in F1a either way.
 
 import type { FlowParameterMeta } from "./sample";
+import {
+  compensateFluorochromeColumns,
+  invertMatrix,
+  unappliedCompensationState,
+  validateSpillover,
+  type ApplyCompensationInput,
+  type FlowCompensationState,
+} from "./compensation";
 
 /** One parameter's stats: min/max/mean over its finite values. `count` is
  *  the finite count (events with a non-finite value in this parameter don't
@@ -127,6 +150,10 @@ export interface FlowEventStore {
   listSamples(): Promise<FlowSampleInfo[]>;
   unloadSample(sampleId: string): Promise<boolean>;
   sampleStats(sampleId: string): Promise<FlowSampleStats | null>;
+  /** Apply a spillover matrix (F2a, seq 447) — see the contract above. */
+  applyCompensation(sampleId: string, input: ApplyCompensationInput): Promise<FlowCompensationState>;
+  getCompensation(sampleId: string): Promise<FlowCompensationState | null>;
+  clearCompensation(sampleId: string): Promise<boolean>;
   storeStatus(): Promise<FlowStoreStatus>;
 }
 
@@ -134,6 +161,12 @@ interface LoadedSample {
   info: FlowSampleInfo;
   columns: Float32Array[];
   paramNames: string[];
+  /** The compensated fluorochrome columns, in `compensated.fluorochromes`
+   *  order — materialised from the RAW columns on apply, dropped on
+   *  clear. The raw `columns` above are never mutated, so re-applying
+   *  with an edited matrix recomputes from raw. */
+  compensated: { fluorochromes: string[]; columns: Float32Array[] } | null;
+  compensation: FlowCompensationState;
 }
 
 const BYTES_PER_VALUE = 4;
@@ -218,7 +251,13 @@ export class InMemoryFlowStore implements FlowEventStore {
       bytes: sampleBytes(eventCount, paramNames.length),
       sourcePath: meta?.sourcePath,
     };
-    this.samples.set(sampleId, { info, columns: arrays, paramNames: [...paramNames] });
+    this.samples.set(sampleId, {
+      info,
+      columns: arrays,
+      paramNames: [...paramNames],
+      compensated: null,
+      compensation: unappliedCompensationState(),
+    });
     this.bytes += info.bytes;
     // Evict least-recently-used samples until the store fits its budget —
     // never the sample just loaded.
@@ -240,18 +279,111 @@ export class InMemoryFlowStore implements FlowEventStore {
     return this.loadSampleSync(sampleId, columns, paramNames, meta);
   }
 
-  /** Synchronous column read — see loadSampleSync. */
+  /** Synchronous column read — see loadSampleSync. Reads the COMPENSATED
+   *  column for a compensated fluorochrome, the raw column otherwise. */
   getColumnSync(sampleId: string, param: string): Float32Array | null {
     const sample = this.samples.get(sampleId);
     if (!sample) return null;
     const index = sample.paramNames.indexOf(param);
     if (index < 0) return null;
     this.touch(sampleId);
-    return sample.columns[index];
+    return this.readableColumn(sample, index);
   }
 
   async getColumn(sampleId: string, param: string): Promise<Float32Array | null> {
     return this.getColumnSync(sampleId, param);
+  }
+
+  /** The column a reader sees: the compensated copy for a compensated
+   *  fluorochrome, the raw column for everything else. */
+  private readableColumn(sample: LoadedSample, index: number): Float32Array {
+    const compensated = sample.compensated;
+    if (compensated) {
+      const at = compensated.fluorochromes.indexOf(sample.paramNames[index]);
+      if (at >= 0) return compensated.columns[at];
+    }
+    return sample.columns[index];
+  }
+
+  /** Synchronous compensation apply — see loadSampleSync. Materialises
+   *  the compensated fluorochrome columns from the RAW columns (never
+   *  from an already-compensated copy), swaps the readable columns to
+   *  them, and records the state. `info.bytes` counts the compensated
+   *  copy on top of the raw columns. */
+  applyCompensationSync(sampleId: string, input: ApplyCompensationInput): FlowCompensationState {
+    const sample = this.samples.get(sampleId);
+    if (!sample) throw new Error(`flow store: sample "${sampleId}" is not loaded`);
+    validateSpillover(input.fluorochromes, input.matrix, sample.paramNames);
+    const inverse = invertMatrix(input.matrix);
+    const compensated = compensateFluorochromeColumns(sample.columns, sample.paramNames, input.fluorochromes, input.matrix);
+    // Free the previous compensated copy first; the new one is charged
+    // below. The raw columns are untouched throughout.
+    if (sample.compensated) {
+      const oldBytes = sampleBytes(sample.info.eventCount, sample.compensated.fluorochromes.length);
+      this.bytes -= oldBytes;
+      sample.info.bytes -= oldBytes;
+    }
+    const newBytes = sampleBytes(sample.info.eventCount, input.fluorochromes.length);
+    sample.compensated = { fluorochromes: [...input.fluorochromes], columns: compensated };
+    sample.compensation = {
+      fluorochromes: [...input.fluorochromes],
+      spillover: input.matrix.map((row) => [...row]),
+      inverse,
+      source: input.source,
+      applied: true,
+    };
+    sample.info.bytes += newBytes;
+    this.bytes += newBytes;
+    this.touch(sampleId);
+    return this.copyCompensationState(sample.compensation);
+  }
+
+  async applyCompensation(sampleId: string, input: ApplyCompensationInput): Promise<FlowCompensationState> {
+    return this.applyCompensationSync(sampleId, input);
+  }
+
+  /** Synchronous compensation state — see loadSampleSync. */
+  getCompensationSync(sampleId: string): FlowCompensationState | null {
+    const sample = this.samples.get(sampleId);
+    if (!sample) return null;
+    return this.copyCompensationState(sample.compensation);
+  }
+
+  async getCompensation(sampleId: string): Promise<FlowCompensationState | null> {
+    return this.getCompensationSync(sampleId);
+  }
+
+  /** Synchronous compensation clear — see loadSampleSync. Drops the
+   *  compensated copy (readable columns revert to raw) and keeps the
+   *  last matrix in the state with `applied: false`. */
+  clearCompensationSync(sampleId: string): boolean {
+    const sample = this.samples.get(sampleId);
+    if (!sample) return false;
+    if (sample.compensated) {
+      const oldBytes = sampleBytes(sample.info.eventCount, sample.compensated.fluorochromes.length);
+      this.bytes -= oldBytes;
+      sample.info.bytes -= oldBytes;
+      sample.compensated = null;
+    }
+    sample.compensation = { ...this.copyCompensationState(sample.compensation), applied: false };
+    this.touch(sampleId);
+    return true;
+  }
+
+  async clearCompensation(sampleId: string): Promise<boolean> {
+    return this.clearCompensationSync(sampleId);
+  }
+
+  /** A defensive copy of a compensation state: callers must not mutate
+   *  the store's own record. */
+  private copyCompensationState(state: FlowCompensationState): FlowCompensationState {
+    return {
+      fluorochromes: [...state.fluorochromes],
+      spillover: state.spillover.map((row) => [...row]),
+      inverse: state.inverse.map((row) => [...row]),
+      source: state.source,
+      applied: state.applied,
+    };
   }
 
   /** Synchronous sample list — see loadSampleSync. */
@@ -276,7 +408,8 @@ export class InMemoryFlowStore implements FlowEventStore {
     return this.unloadSampleSync(sampleId);
   }
 
-  /** Synchronous stats — see loadSampleSync. */
+  /** Synchronous stats — see loadSampleSync. Stats run over the READABLE
+   *  columns, so after compensation they describe the compensated data. */
   sampleStatsSync(sampleId: string): FlowSampleStats | null {
     const sample = this.samples.get(sampleId);
     if (!sample) return null;
@@ -284,7 +417,7 @@ export class InMemoryFlowStore implements FlowEventStore {
     return {
       sampleId,
       eventCount: sample.info.eventCount,
-      params: sample.paramNames.map((name, i) => statsFor(name, sample.columns[i])),
+      params: sample.paramNames.map((name, i) => statsFor(name, this.readableColumn(sample, i))),
     };
   }
 
@@ -355,6 +488,23 @@ export class TauriFlowStore implements FlowEventStore {
 
   async sampleStats(sampleId: string): Promise<FlowSampleStats | null> {
     return this.invoke<FlowSampleStats | null>("flow_sample_stats", { sample_id: sampleId });
+  }
+
+  async applyCompensation(sampleId: string, input: ApplyCompensationInput): Promise<FlowCompensationState> {
+    return this.invoke<FlowCompensationState>("flow_apply_compensation", {
+      sample_id: sampleId,
+      fluorochromes: [...input.fluorochromes],
+      matrix: input.matrix.map((row) => [...row]),
+      source: input.source,
+    });
+  }
+
+  async getCompensation(sampleId: string): Promise<FlowCompensationState | null> {
+    return this.invoke<FlowCompensationState | null>("flow_get_compensation", { sample_id: sampleId });
+  }
+
+  async clearCompensation(sampleId: string): Promise<boolean> {
+    return this.invoke<boolean>("flow_clear_compensation", { sample_id: sampleId });
   }
 
   async storeStatus(): Promise<FlowStoreStatus> {
@@ -503,4 +653,18 @@ export function sampleStats(id: string): FlowSyncSampleStats {
     eventCount: stats.eventCount,
     params: stats.params.map((p) => ({ name: p.name, min: p.min ?? 0, max: p.max ?? 0 })),
   };
+}
+
+/** Apply a spillover matrix to a sample (F2a, seq 447) — the sync
+ *  facade's skin over `InMemoryFlowStore.applyCompensationSync`. */
+export function applyCompensation(sampleId: string, input: ApplyCompensationInput): FlowCompensationState {
+  return viewerBackend.applyCompensationSync(sampleId, input);
+}
+
+export function getCompensation(sampleId: string): FlowCompensationState | null {
+  return viewerBackend.getCompensationSync(sampleId);
+}
+
+export function clearCompensation(sampleId: string): boolean {
+  return viewerBackend.clearCompensationSync(sampleId);
 }
