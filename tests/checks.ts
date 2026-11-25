@@ -33777,6 +33777,60 @@ check("linux-smoke boots webR from the filesystem path, and build-mac-dmg.sh rea
   );
 });
 
+// ── Citation entry (seq 549) ──────────────────────────────────────────────
+// Helix has a Zenodo DOI; Titer had none — no .zenodo.json, no CITATION.cff,
+// and the in-app Help ▸ How to Cite Titer cited only the GitHub URL. These
+// two files are the Phase 1 fix: .zenodo.json so Zenodo records the release
+// correctly once the GitHub integration is enabled, and CITATION.cff so
+// GitHub offers "Cite this repository". No DOI exists yet, so neither file
+// carries one — the DOI is added (here, and in showCitation in src/menus.ts)
+// once Zenodo mints it. The version in CITATION.cff must track package.json.
+check("citation entry: .zenodo.json and CITATION.cff exist, parse, name Titer under GPL-3.0, and track the package version (seq 549)", () => {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+    version: string;
+    license: string;
+  };
+  const zenodo = JSON.parse(readFileSync(join(root, ".zenodo.json"), "utf8")) as {
+    title?: string;
+    license?: string;
+    creators?: { name?: string }[];
+    description?: string;
+  };
+  strictEqual(zenodo.title, "Titer", ".zenodo.json title must be Titer");
+  ok(
+    zenodo.license?.includes("GPL-3.0"),
+    `.zenodo.json license must be GPL-3.0 (has: ${zenodo.license ?? "none"})`,
+  );
+  ok(
+    zenodo.creators?.some((c) => c.name?.includes("Patel")),
+    ".zenodo.json must name Smit Patel as a creator",
+  );
+  ok(zenodo.description?.includes("GraphPad Prism"), ".zenodo.json must describe Titer as a Prism alternative");
+  // CITATION.cff has no JSON parser in the tree — parse the flat
+  // key: value lines (authors are a nested list, checked by substring).
+  const cff = readFileSync(join(root, "CITATION.cff"), "utf8");
+  const field = (key: string) =>
+    cff
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.startsWith(`${key}:`))
+      ?.slice(key.length + 1)
+      .trim()
+      .replace(/^"(.*)"$/, "$1");
+  strictEqual(field("cff-version"), "1.2.0", "CITATION.cff must be cff-version 1.2.0");
+  strictEqual(field("title"), "Titer", "CITATION.cff title must be Titer");
+  strictEqual(field("version"), pkg.version, `CITATION.cff version must track package.json (${pkg.version})`);
+  strictEqual(field("license"), pkg.license, `CITATION.cff license must track package.json (${pkg.license})`);
+  ok(cff.includes("family-names: Patel"), "CITATION.cff must list Patel as an author");
+  ok(cff.includes("given-names: Smit"), "CITATION.cff must list Smit as an author");
+  ok(
+    cff.includes("https://github.com/smitpatel316/Titer"),
+    "CITATION.cff must point at the Titer repo",
+  );
+  ok(!cff.includes("doi:"), "CITATION.cff must not carry a DOI until Zenodo mints one");
+});
+
 // ── Replicate pooling (prism-format-work (b)/(g)) ─────────────────────────
 // An imported Prism analysis names its Y data set ("Control"), not a column
 // — the fit pools the data set's replicate columns, as Prism does.

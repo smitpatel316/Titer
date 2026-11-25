@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Titer"
+authors:
+  - family-names: Patel
+    given-names: Smit
+version: 1.9.0
+date-released: 2026-11-24
+url: "https://github.com/smitpatel316/Titer"
+license: GPL-3.0-or-later
