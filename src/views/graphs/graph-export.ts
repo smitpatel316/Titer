@@ -1,5 +1,6 @@
 // Saving a graph as an image file, or copying it to the clipboard.
-import { alert, handoffPngToKeynote, pickSavePath, writeFile } from "../../native";
+import { alert, copyPdfToClipboard, handoffPngToKeynote, isNative, pickSavePath, writeFile } from "../../native";
+import { isMacOs } from "../../lib/channel";
 import { buildOfficeDocument, officeDialogTitle, officeExtension, pngSize, type OfficeTarget } from "../../lib/office-export";
 import { loadPlotly } from "./plotly";
 import { withoutSelection } from "./selection";
@@ -235,27 +236,54 @@ export function vectorClipboardItem(
 
 /** Starts the clipboard write inside the click, with promised images, as
  *  WebKit requires. Vector PDF first (seq 431 — Prism copies a graph as
- *  vector PDF on Mac), PNG as the fallback for apps that take no PDF;
- *  when this webview reports no PDF support the copy is PNG-only, the
- *  old behaviour. A rejected vector write falls back to a PNG-only write,
+ *  vector PDF on Mac), PNG as the fallback for apps that take no PDF.
+ *  Native first on macOS (seq 446): the shell writes the PDF + PNG to
+ *  the pasteboard directly, because this webview reports no PDF support
+ *  (`ClipboardItem.supports("application/pdf")` is false on Mac WebKit)
+ *  and the web path would silently fall back to PNG-only. The PDF render
+ *  always runs now — the old `clipboardSupportsPdf()` gate on it is gone.
+ *  When the native write is unavailable or fails, the webview write runs
+ *  instead (PDF item where supports() says so, else PNG-only, the old
+ *  behaviour); a rejected vector write falls back to a PNG-only write,
  *  so a platform that takes the PDF type but refuses the write still
  *  leaves the PNG on the clipboard. Grayscale applies; CMYK falls back
  *  to colour (the clipboard has no CMYK). */
-export function copyGraphImage(el: HTMLElement, size: Size, dpi: Resolution, colorMode: ColorMode = "color") {
+export async function copyGraphImage(el: HTMLElement, size: Size, dpi: Resolution, colorMode: ColorMode = "color") {
   const why = tooLarge(size, dpi);
   if (why) return void alert("Couldn't Copy the Graph", why, "error");
   const mode = colorMode === "cmyk" ? "color" : colorMode;
-  // The PDF render only runs where the platform takes it (the raster
-  // fallback's size cap above still applies — the PNG is always drawn).
-  const pdf = clipboardSupportsPdf() ? toImage(el, size, "pdf", dpi, mode).then((out) => out.blob) : undefined;
+  // The PDF render always runs (seq 446): the native write takes it on
+  // macOS, the webview write where supports() says so — the raster
+  // fallback's size cap above still applies, the PNG is always drawn.
+  const pdf = toImage(el, size, "pdf", dpi, mode).then((out) => out.blob);
   const png = toImage(el, size, "png", dpi, mode).then((out) => out.blob);
+  if (await writeVectorToClipboard(pdf, png)) return;
   navigator.clipboard
-    .write([new ClipboardItem(vectorClipboardItem(pdf, png))])
+    .write([new ClipboardItem(clipboardSupportsPdf() ? vectorClipboardItem(pdf, png) : { "image/png": png })])
     .catch(() =>
       navigator.clipboard
         .write([new ClipboardItem({ "image/png": png })])
         .catch((err) => alert("Couldn't Copy the Graph", reason(err), "error")),
     );
+}
+
+/** The native-first vector copy (seq 446), shared by the graph and
+ *  figure copy paths: on the macOS app the shell writes the PDF + PNG
+ *  to the pasteboard directly (`copyPdfToClipboard` in native.ts), which
+ *  is the only path that puts a PDF on the clipboard there — the webview
+ *  reports no PDF support. Returns true when the native write took it.
+ *  False anywhere else (plain browser, tests, non-macOS) and when the
+ *  native write fails, so the caller falls through to the webview write;
+ *  the promised blobs are reusable after the await either way. */
+export async function writeVectorToClipboard(pdf: Promise<Blob>, png: Promise<Blob>): Promise<boolean> {
+  if (!isNative || !isMacOs()) return false;
+  try {
+    const [pdfBlob, pngBlob] = await Promise.all([pdf, png]);
+    await copyPdfToClipboard(new Uint8Array(await pdfBlob.arrayBuffer()), new Uint8Array(await pngBlob.arrayBuffer()));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** One-click Send to Word / PowerPoint / Keynote (v2 item 19, seq 217):

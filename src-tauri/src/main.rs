@@ -822,6 +822,75 @@ fn copy_png_to_clipboard_blocking(png_path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Copy a vector PDF plus its PNG fallback to the system clipboard
+/// (seq 446): the format panel's Copy button. The webview's
+/// `ClipboardItem.supports("application/pdf")` is false on Mac WebKit
+/// (proof batch #2 verified twice: the pasteboard holds PNG only, no
+/// PDF, no error), so the web path can never write the PDF item — the
+/// copy falls back to PNG-only "by design" and the vector PDF is lost.
+/// The shell writes both flavours directly instead, mirroring the
+/// seq 296 write workaround (`copy_png_to_clipboard`): osascript puts
+/// the PDF (`«class PDF »`) and the PNG (`«class PNGf»`) on the
+/// pasteboard as two items, so an app that takes PDF pastes the vector
+/// and one that doesn't pastes the bitmap. macOS only — anywhere else
+/// this refuses outright, before touching anything. Same temp-file
+/// pattern as `copy_png_to_clipboard`: the script goes in a temp file,
+/// not an `osascript -e` argument; the temp script and both temp files
+/// are deleted once osascript finishes, whatever it reports. Async, on
+/// the blocking pool: osascript can block on a macOS TCC consent prompt.
+#[tauri::command]
+async fn copy_pdf_to_clipboard(pdf_path: String, png_path: String) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (pdf_path, png_path);
+        return Err("Copying a vector PDF to the clipboard needs macOS — this build cannot write the system clipboard.".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        tokio::task::spawn_blocking(move || copy_pdf_to_clipboard_blocking(&pdf_path, &png_path))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn copy_pdf_to_clipboard_blocking(pdf_path: &str, png_path: &str) -> Result<(), String> {
+    use std::io::Write;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let script_path = std::env::temp_dir().join(format!("titer-clipboard-pdf-{stamp}.applescript"));
+    // Both paths are ones this app wrote to its own temp dir under
+    // generated names — no user text reaches the script — so embedding
+    // them in the `POSIX file` literals needs no escaping.
+    let script = format!(
+        "set the clipboard to {{(read POSIX file \"{pdf_path}\" as «class PDF »), (read POSIX file \"{png_path}\" as «class PNGf»)}}"
+    );
+    let out = (|| -> Result<std::process::Output, String> {
+        let mut script_file = std::fs::File::create(&script_path)
+            .map_err(|e| format!("Couldn't write the clipboard script: {e}"))?;
+        script_file
+            .write_all(script.as_bytes())
+            .and_then(|()| script_file.sync_all())
+            .map_err(|e| format!("Couldn't write the clipboard script: {e}"))?;
+        drop(script_file);
+        std::process::Command::new("osascript")
+            .arg(&script_path)
+            .output()
+            .map_err(|e| format!("Couldn't run osascript: {e}"))
+    })();
+    let _ = std::fs::remove_file(&script_path);
+    let _ = std::fs::remove_file(pdf_path);
+    let _ = std::fs::remove_file(png_path);
+    let out = out?;
+    if !out.status.success() {
+        let detail = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("Couldn't put the PDF on the clipboard: {}", detail.trim()));
+    }
+    Ok(())
+}
+
 /// The clipboard's text and HTML forms, for Paste Special (seq 439).
 /// `html` is the HTML-table flavour Excel writes (its `x:num` attributes
 /// carry the full-precision values); `None` when the clipboard holds no
@@ -1822,6 +1891,7 @@ fn main() {
             move_file,
             send_to_keynote,
             copy_png_to_clipboard,
+            copy_pdf_to_clipboard,
             read_clipboard_formats,
             read_my_palettes,
             write_my_palettes,
