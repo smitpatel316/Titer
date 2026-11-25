@@ -229,29 +229,35 @@ function Steps({
   // A choice with no options (M18): nothing to pick, so the step is blocked
   // with an explanation — Next stays disabled (value is null) and the user
   // goes back or adds data instead of the wizard throwing.
-  const emptyChoice = q.kind === "choice" && q.options.length === 0;
+  // No question at all (Issue 14: a wizard that asks nothing on this table,
+  // e.g. descriptive-statistics on a 1-column table): every read below is
+  // guarded, and the dialog renders nothing — the Change Parameters gate
+  // keeps this from opening, so this is the backstop, not the path.
+  const emptyChoice = q?.kind === "choice" && (q?.options.length ?? 0) === 0;
   const emptyMessage =
     "There's nothing to choose here — the table doesn't have the data this question needs. Go back and pick a different option, or add data to the table first.";
-  const [value, setValue] = React.useState<Answer | null>(() => initialAnswer(q, initial[q.id]));
+  const [value, setValue] = React.useState<Answer | null>(() => (q ? initialAnswer(q, initial[q.id]) : null));
   // The checklist for the test being built, following the answers so far
   // (the current step's answer counts too, so the checklist switches branch
   // as soon as the user picks parametric vs non-parametric).
-  const checklist = wizard.checklist?.({ ...answers, [q.id]: value ?? undefined }, table, tableType);
+  const checklist = wizard.checklist?.({ ...answers, ...(q ? { [q.id]: value ?? undefined } : {}) }, table, tableType);
 
   const go = (to: number, a: Answers) => {
     const next = asked(a)[to];
     setAnswers(a);
     setStep(to);
-    setValue(initialAnswer(next, a[next.id]));
+    setValue(next ? initialAnswer(next, a[next.id]) : null);
   };
-  const last = value !== NOT_SURE.value && asked({ ...answers, [q.id]: value ?? undefined }).length === step + 1;
+  const last =
+    value !== NOT_SURE.value &&
+    asked({ ...answers, ...(q ? { [q.id]: value ?? undefined } : {}) }).length === step + 1;
   // The test this wizard would create once the step is answered (finish is a
   // pure mapping), so a required package that already failed to install
   // blocks Run before it is pressed — with Retry. A package that merely
   // is not loaded yet does not block: the analysis installs it on first run.
   const finished =
     last && value !== null && finish
-      ? finish({ ...answers, [q.id]: value ?? undefined }, table, tableType)
+      ? finish({ ...answers, ...(q ? { [q.id]: value ?? undefined } : {}) }, table, tableType)
       : null;
   const gate = finished
     ? packageGate(finished.type, finished.params)
@@ -283,7 +289,7 @@ function Steps({
       if (gaussian == null) return;
       answer = gaussian ? "yes" : "no";
     }
-    const a = { ...answers, [q.id]: answer };
+    const a = { ...answers, ...(q ? { [q.id]: answer } : {}) };
     if (asked(a).length > step + 1) go(step + 1, a);
     else {
       if (finish) {
@@ -307,17 +313,18 @@ function Steps({
   // text must be comma-separated numbers (the standard-curve unknowns); its
   // error, when the user has typed something, replaces the question text.
   const parseText = (value: string): string | null =>
-    q.kind === "text" ? ((q.parse?.(value) ?? parseUnknowns(value)).error ?? null) : null;
-  const textError = q.kind === "text" && String(value ?? "").trim() !== "" ? parseText(String(value ?? "")) : null;
+    q?.kind === "text" ? ((q.parse?.(value) ?? parseUnknowns(value)).error ?? null) : null;
+  const textError = q?.kind === "text" && String(value ?? "").trim() !== "" ? parseText(String(value ?? "")) : null;
   // A number answer only counts once it passes its question's validation;
   // its error, like the free-text one, replaces the question text.
-  const numberError = q.kind === "number" && typeof value === "number" ? (q.validate?.(value) ?? null) : null;
+  const numberError = q?.kind === "number" && typeof value === "number" ? (q.validate?.(value) ?? null) : null;
   const ready =
     value !== null &&
-    !(Array.isArray(value) && value.length < (q.kind === "names" ? (q.min ?? 1) : 1)) &&
-    !(q.kind === "text" && parseText(String(value ?? ""))) &&
+    !(Array.isArray(value) && value.length < (q?.kind === "names" ? (q.min ?? 1) : 1)) &&
+    !(q?.kind === "text" && parseText(String(value ?? ""))) &&
     !numberError;
 
+  if (!q) return null;
   return (
     <Dialog
       open

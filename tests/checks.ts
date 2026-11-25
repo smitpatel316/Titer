@@ -5228,6 +5228,49 @@ check("seq 373: wizardForAnalysis maps types to wizards, and canEditAnalysisPara
   );
 });
 
+// Issue 14 (cycle 42): a wizard that asks nothing on its table must not be
+// editable — descriptive-statistics on a 1-column table asks 0 questions
+// (`someSets` needs more than 1 set), yet Change Parameters stayed enabled
+// and `Steps` read `q.kind` of `undefined`, crashing the React tree. The
+// gate counts the wizard's questions on the parent table (or, without one,
+// on the sets the stored params name), and `Steps` renders nothing when
+// there is no question for the step.
+check("Issue 14: Change Parameters stays disabled for a 0-question wizard", () => {
+  const oneCol = { columns: ["Title", "Only"], rows: [["r1", "1"], ["r2", "2"], ["r3", "3"]] };
+  const threeCol = {
+    columns: ["Title", "A", "B", "C"],
+    rows: [["r1", "1", "2", "3"], ["r2", "4", "5", "6"]],
+  };
+  const descr = (params: object) => ({
+    analysisType: "descriptive-statistics" as const,
+    analysisParams: params,
+    frozen: false,
+    orphaned: false,
+  });
+  // No table at hand: the stored sets stand in — one set asks nothing.
+  strictEqual(canEditAnalysisParams(descr({ sets: ["Only"] })).editable, false);
+  strictEqual(canEditAnalysisParams(descr({})).editable, false);
+  // With the parent table: 1 column gates off, 3 columns stay editable.
+  strictEqual(canEditAnalysisParams(descr({ sets: ["Only"] }), oneCol).editable, false);
+  strictEqual(canEditAnalysisParams(descr({ sets: ["A", "B", "C"] }), threeCol).editable, true);
+  // A wizard that always asks questions stays editable on a 1-column table.
+  strictEqual(
+    canEditAnalysisParams(
+      {
+        analysisType: "one-sample-t",
+        analysisParams: { sets: ["Only"], hypotheticalValue: 5, gaussian: true, tails: "two-sided" },
+        frozen: false,
+        orphaned: false,
+      },
+      oneCol,
+    ).editable,
+    true,
+  );
+  // The backstop: Steps renders nothing instead of reading `q.kind`.
+  const wizardSrc = readFileSync("src/views/analyses/analysis-wizard.tsx", "utf8");
+  ok(/if \(!q\) return null;/.test(wizardSrc), "Steps lacks the empty-list guard");
+});
+
 // seq 373 follow-up: Apply renames the analysis node to match the new params.
 // Before the fix the title stayed whatever creation gave it — Dunnett→Tukey
 // left "One-way ANOVA + Dunnett (vs. vehicle)" on Tukey results. One title

@@ -319,16 +319,23 @@ export function ProjectSidebar() {
     ],
   });
 
-  const childMenu = (child: OutlineNode) =>
-    void popupMenu([
+  const childMenu = (child: OutlineNode) => {
+    const state = get();
+    const childNode = state.nodes[child.id];
+    const parent = childNode?.parentId ? state.nodes[childNode.parentId] : undefined;
+    return void popupMenu([
       // Change Parameters (seq 373): re-opens the analysis in its wizard,
       // pre-filled from the stored params. The outline row carries no
-      // analysis params, so the full node is read for the live check.
+      // analysis params, so the full node is read for the live check — and
+      // its parent table, so a wizard asking nothing on it (Issue 14)
+      // stays disabled.
       ...(child.type === "analysis"
         ? [
             {
               text: "Change Parameters…",
-              enabled: canEditAnalysisParams(get().nodes[child.id]).editable,
+              enabled: childNode
+                ? canEditAnalysisParams(childNode, parent?.data, parent?.tableType).editable
+                : false,
               action: () => openSelector({ kind: "edit-analysis-params", nodeId: child.id }),
             },
           ]
@@ -344,6 +351,7 @@ export function ProjectSidebar() {
       highlightMenu(child),
       { text: `Delete ${NODE_NAMES[child.type]}…`, action: () => removeWithConfirm(child, removeNode) },
     ]);
+  };
 
   return (
     <SidePanel

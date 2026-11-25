@@ -13,7 +13,7 @@ import {
   plotFunctionParams,
   plotFunctionXRange,
 } from "../../stats/xy/plot-function";
-import { hasXColumn, type ProjectNode, type RowGroup, type TableType, type Transform } from "../../store/types";
+import { hasXColumn, type ProjectNode, type RowGroup, type TableData, type TableType, type Transform } from "../../store/types";
 import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
 import { isPolynomialModel, modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
@@ -75,7 +75,7 @@ import type {
 import { parseInhibitorConcentration } from "../../stats/xy/enzyme-inhibition";
 import { multifactorTerms } from "../../stats/multiple/multifactor-anova";
 import { columnFactorName } from "../../stats/mixed/mixed-effects";
-import { levelsOf, splitXY, type Dataset } from "../../lib/dataset";
+import { levelsOf, readTable, splitXY, type Dataset } from "../../lib/dataset";
 import { pairKey } from "../../lib/columns";
 import { constantRefName, isConstantRef } from "../../lib/info-sheets";
 
@@ -625,9 +625,14 @@ export function wizardForAnalysis(
 
 /** Whether the Change Parameters entry is live for this analysis node, and
  *  why not when it isn't — the same reasons the engine refuses (frozen,
- *  orphaned) plus the types no wizard can re-open yet. */
+ *  orphaned) plus the types no wizard can re-open yet, plus the wizards
+ *  that ask nothing on this table (Issue 14). `tableData` is the parent
+ *  table when the caller has it; without one the stored params stand in
+ *  for it (see `wizardAsksNothing`). */
 export function canEditAnalysisParams(
   node: Pick<ProjectNode, "analysisType" | "analysisParams" | "frozen" | "orphaned">,
+  tableData?: TableData,
+  tableType?: TableType,
 ): { editable: boolean; reason?: string } {
   if (node.frozen)
     return { editable: false, reason: "This analysis is frozen — unfreeze it to change its parameters." };
@@ -640,6 +645,11 @@ export function canEditAnalysisParams(
     return {
       editable: false,
       reason: "This test's parameters can't be changed in the wizard yet — run it again from the Analysis menu instead.",
+    };
+  if (wizardAsksNothing(node.analysisType, node.analysisParams, tableData, tableType))
+    return {
+      editable: false,
+      reason: "This test asks no questions for this table, so there are no parameters to change.",
     };
   return { editable: true };
 }
@@ -688,6 +698,58 @@ const setAnswers = (p: StoredParams, mode: "some" | "two" | "one"): Answers => {
   if (mode === "two") return sets.length > 1 ? { set1: sets[0], set2: sets[1] } : { sets };
   return { sets };
 };
+
+/** A stand-in table with one numeric column per data set the stored params
+ *  name — enough for a wizard's questions to count the sets (`someSets`
+ *  asks only above its minimum) when the real parent table isn't at hand.
+ *  No stored sets means no sets at all, so the stand-in asks nothing. */
+function proxyTableData(params: AnalysisParams | undefined): TableData {
+  const p = (params ?? {}) as unknown as StoredParams;
+  const names: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v === "string" && v !== "" && !names.includes(v)) names.push(v);
+  };
+  (storedStrings(p, "sets") ?? []).forEach(push);
+  (storedStrings(p, "ys") ?? []).forEach(push);
+  (storedStrings(p, "datasets") ?? []).forEach(push);
+  push(storedString(p, "y"));
+  push(storedString(p, "set"));
+  push(storedString(p, "set1"));
+  push(storedString(p, "set2"));
+  return {
+    columns: ["Title", ...names],
+    rows: names.length === 0 ? [] : [["r1", ...names.map(() => "1")]],
+  };
+}
+
+/** Whether the wizard for this analysis asks anything for the stored params
+ *  on this table — the edit wizard would open on step 0 of an empty list
+ *  when it doesn't (Issue 14: descriptive-statistics on a 1-column table
+ *  asks nothing, yet Change Parameters stayed enabled and `Steps` read
+ *  `q.kind` of `undefined`). The parent table is used when the caller has
+ *  it; without one the stored params stand in for it (see `proxyTableData`),
+ *  so the gate still answers from what the analysis actually ran on. An
+ *  evaluation that throws can't prove a question exists, so it gates off
+ *  rather than opening a wizard that would throw. */
+function wizardAsksNothing(
+  type: AnalysisType | undefined,
+  params: AnalysisParams | undefined,
+  tableData?: TableData,
+  tableType?: TableType,
+): boolean {
+  if (!type) return false;
+  const key = wizardForAnalysis(type, params);
+  if (key === null) return false;
+  const wizard = WIZARDS[key];
+  if (!wizard) return false;
+  try {
+    const table = readTable(tableData ?? proxyTableData(params));
+    const initial = answersFromParams(type, params ?? {}, table, tableType) ?? {};
+    return wizard.questions(initial, table, tableType).filter((q) => q !== false).length === 0;
+  } catch {
+    return true;
+  }
+}
 
 /** The wizard answers a stored params object came from — the inverse of the
  *  wizard's `finish`, so reopening the wizard shows the current parameters
