@@ -945,7 +945,7 @@ mod tests {
         assert_eq!(v["method"], "initialize");
         assert_eq!(v["params"]["protocolVersion"], "2025-06-18");
         assert_eq!(v["id"], "titer-bridge-reinit");
-        assert_eq!(v["clientInfo"]["name"], "titer-stdio-bridge");
+        assert_eq!(v["params"]["clientInfo"]["name"], "titer-stdio-bridge");
         let v: Value = serde_json::from_str(&initialized_message()).unwrap();
         assert_eq!(v["method"], "notifications/initialized");
         assert!(v.get("id").is_none(), "a notification has no id");
@@ -1142,7 +1142,8 @@ mod tests {
     #[test]
     fn forward_does_not_recover_without_a_session() {
         // A 404 with no session id is not a dead session: no replay, one
-        // request, a plain JSON-RPC error.
+        // request, and the server's JSON-RPC error passed through
+        // verbatim (the bridge's standing rule for server-shaped errors).
         let (url, seen) = run_fake_server(vec![(
             404,
             vec![],
@@ -1163,7 +1164,19 @@ mod tests {
         })
         .to_string();
         let outcome = forward(&client, &mut cfg, &mut session_id, "2025-11-25", &line, &serde_json::json!(1), false);
-        assert!(matches!(outcome, ForwardOutcome::Failed(_)), "404 without a session is an error: {outcome:?}");
+        match outcome {
+            ForwardOutcome::Messages(messages) => {
+                assert_eq!(messages.len(), 1, "the 404 error is passed through once");
+                let v: Value =
+                    serde_json::from_str(&messages[0]).expect("passed-through error is JSON");
+                assert_eq!(v["error"]["code"], -32000, "server error code preserved");
+                assert!(v["error"]["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("Not found"));
+            }
+            other => panic!("expected the 404 error passed through, got {other:?}"),
+        }
         // Give the fake thread a moment to record, then check it saw one.
         std::thread::sleep(Duration::from_millis(200));
         assert_eq!(seen.lock().unwrap().len(), 1, "no replay without a session");
