@@ -32986,7 +32986,11 @@ check("seq 454: Help re-opens the startup guide, and it waits behind the Welcome
     "opening the guide does not close Welcome first",
   );
   const dialog = readFileSync("src/components/startup-guide-dialog.tsx", "utf8");
-  ok(!dialog.includes("showModal"), "the guide uses a native <dialog> — pointer events fail on Mac WebKit (seq 397)");
+  // Strip comments first: the header comment itself names <dialog> (seq
+  // 397), so a raw substring check would trip on its own documentation.
+  const dialogCode = dialog.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  ok(!/<dialog[\s>]/.test(dialogCode), "the guide uses a native <dialog> element — pointer events fail on Mac WebKit (seq 397)");
+  ok(!dialogCode.includes(".showModal("), "the guide calls showModal() — pointer events fail on Mac WebKit (seq 397)");
   ok(dialog.includes("fixed inset-0"), "the guide is not a plain fixed overlay");
   ok(dialog.includes("Skip tour"), "the guide has no Skip control");
 });
