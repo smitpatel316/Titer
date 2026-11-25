@@ -18013,6 +18013,13 @@ check("the Keynote script launches Keynote, places the PNG at its size and saves
   ok(script.includes("set imgW to 576") && script.includes("set imgH to 288"), script);
   ok(script.includes("make new image with properties {file: pngFile}"), script);
   ok(script.includes("save doc in outFile"), script);
+  // Keynote rejects `set size` as a {width, height} pair on text items and
+  // images (-10006, seq 516) — width and height must be set separately.
+  ok(script.includes("set width of titleBox to slideW - 72"), script);
+  ok(script.includes("set height of titleBox to 36"), script);
+  ok(script.includes("set width of newImage to imgW"), script);
+  ok(script.includes("set height of newImage to imgH"), script);
+  ok(!script.includes("set size of"), script);
   // Never a disguised Office file: Keynote is a live handoff, not a .pptx renamed .key.
   ok(!script.includes("pptx") && !script.includes("docx"), script);
 });
