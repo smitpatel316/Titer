@@ -4,8 +4,9 @@ import { ProjectProvider } from "./store/use-project-store";
 import { LayoutProvider } from "./store/use-layout";
 import { AppShell } from "./components/app-shell";
 import { connectR } from "./stats/webr";
-import { accentColor, cancelR, evalR, isNative, onEngineReset, onFocusChange, setSpinner } from "./native";
+import { accentColor, cancelR, evalR, isNative, mcpFlushErrorLog, onEngineReset, onFocusChange, setSpinner } from "./native";
 import { checkForUpdatesDaily } from "./updates";
+import { installErrorCapture } from "./lib/error-log";
 import "./styles.css";
 
 // Highlights take the accent color chosen in System Settings, read again whenever
@@ -27,6 +28,17 @@ if (isNative) setSpinner(null);
 
 // Whether a newer Titer is out, at most once a day.
 checkForUpdatesDaily();
+
+// Opt-in anonymous error logging (seq 452): capture uncaught exceptions
+// and unhandled rejections from here on, and send any unsent entries from
+// a previous run (e.g. a crash) — only when the user opted in to
+// error-report sharing; otherwise everything stays on this Mac.
+if (isNative) {
+  installErrorCapture();
+  void mcpFlushErrorLog().catch(() => {
+    // A failed flush is not itself an error to report.
+  });
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

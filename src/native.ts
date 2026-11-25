@@ -352,6 +352,55 @@ export const mcpFeedbackConsent = () => invoke<boolean | null>("mcp_feedback_con
 export const mcpSetFeedbackConsent = (sharing: boolean) =>
   invoke<boolean | null>("mcp_set_feedback_consent", { sharing });
 
+/** One captured error, as stored in the local error log (seq 452) and
+ *  shown in Settings. `sent` says whether it went to the Titer team
+ *  through the feedback channel (only when error-report sharing is on). */
+export interface ErrorLogEntry {
+  error_id: string;
+  ts: number;
+  kind: string;
+  error_type: string;
+  message: string;
+  stack: string;
+  action: string;
+  app_version?: string;
+  os?: string;
+  sent: boolean;
+}
+
+/** The saved error-log entries (newest first). */
+export const mcpErrorLog = () => invoke<ErrorLogEntry[]>("mcp_error_log");
+
+/** The user's error-report-sharing choice, if they have made one: `true`
+ *  Share, `false` Don't share, `null` never asked. Separate record from
+ *  feedback sharing — sharing feedback does not imply sharing error
+ *  reports. Lives in the app-data `mcp/` folder beside the feedback
+ *  consent record. */
+export const mcpErrorLogConsent = () => invoke<boolean | null>("mcp_error_log_consent");
+
+/** Records the user's error-report-sharing choice (first-run prompt, or
+ *  the Settings toggle). Returns the choice now in effect. */
+export const mcpSetErrorLogConsent = (sharing: boolean) =>
+  invoke<boolean | null>("mcp_set_error_log_consent", { sharing });
+
+/** Report one captured error to the shell: scrubbed, appended to the
+ *  local rotating log, and — only when error-report sharing is on — sent
+ *  through the feedback channel. Returns what happened to it. */
+export const mcpLogError = (entry: {
+  kind: string;
+  error_type: string;
+  message: string;
+  stack: string;
+  action: string;
+}) =>
+  invoke<{ error_id: string; received: boolean; sent: boolean; sharing: string }>("mcp_log_error", entry);
+
+/** Send unsent error-log entries (e.g. from a previous run's crash) now
+ *  that the app is up — only when error-report sharing is on, a few at a
+ *  time. Returns how many were considered and sent. */
+export const mcpFlushErrorLog = () =>
+  invoke<{ flushed: number; sent: number; sharing: string }>("mcp_flush_error_log");
+
 /** This window's project, for the MCP server to serve. Published on every
  *  revision change (debounced, see store/mcp-publish.ts). A no-op where
  *  there is no native shell (web preview, tests). */
