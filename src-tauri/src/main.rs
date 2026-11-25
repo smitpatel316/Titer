@@ -1464,8 +1464,9 @@ fn open_link(link: String) {
         "coffee" => c"https://www.buymeacoffee.com/smitpatel316",
         "curve-fitting" => c"https://www.graphpad.com/guides/prism/latest/curve-fitting/",
         "statistics" => c"https://www.graphpad.com/guides/prism/latest/statistics/",
-        "support" => c"https://github.com/smitpatel316/Titer/issues",
+        "support" => c"https://titer.smitpatel.net/support",
         "support-policies" => c"https://github.com/smitpatel316/Titer/blob/main/SUPPORT.md",
+        "discussions" => c"https://github.com/smitpatel316/Titer/discussions",
         "site" => c"https://titer.smitpatel.net/",
         _ => return,
     };
@@ -1477,24 +1478,20 @@ fn open_link(link: String) {
     }
 }
 
-/// A pre-filled GitHub issue for one saved feedback entry, in the
-/// default browser. The address is fixed (github.com/smitpatel316/Titer
-/// issues/new) — only the title/body query varies, and it is built by
-/// the dialog from the entry the user chose to send. Anything else is
-/// refused, so the page can't open an arbitrary URL.
+/// The support mailbox (seq 453): `mailto:smit@muse.ai`, in the default
+/// mail app, with the app version in the subject so a report can be
+/// triaged without asking. The address is fixed — the only free text is
+/// the version the app already knows.
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn open_github_issue(url: String) {
-    const PREFIX: &str = "https://github.com/smitpatel316/Titer/issues/new?";
-    if !url.starts_with(PREFIX) {
-        return;
-    }
+fn open_support_email() {
+    let url = format!("mailto:smit@muse.ai?subject=Titer%20{}%20support", env!("CARGO_PKG_VERSION"));
+    let Ok(text) = std::ffi::CString::new(url) else { return };
     unsafe {
-        let Ok(text) = std::ffi::CString::new(url) else { return };
-        let url_obj: *mut AnyObject = objc2::msg_send![objc2::class!(NSString), stringWithUTF8String: text.as_ptr()];
-        let url_obj: *mut AnyObject = objc2::msg_send![objc2::class!(NSURL), URLWithString: url_obj];
+        let text: *mut AnyObject = objc2::msg_send![objc2::class!(NSString), stringWithUTF8String: text.as_ptr()];
+        let url: *mut AnyObject = objc2::msg_send![objc2::class!(NSURL), URLWithString: text];
         let workspace: *mut AnyObject = objc2::msg_send![objc2::class!(NSWorkspace), sharedWorkspace];
-        let _: bool = objc2::msg_send![workspace, openURL: url_obj];
+        let _: bool = objc2::msg_send![workspace, openURL: url];
     }
 }
 
@@ -1640,23 +1637,20 @@ fn open_link(link: String) {
         "coffee" => "https://www.buymeacoffee.com/smitpatel316",
         "curve-fitting" => "https://www.graphpad.com/guides/prism/latest/curve-fitting/",
         "statistics" => "https://www.graphpad.com/guides/prism/latest/statistics/",
-        "support" => "https://github.com/smitpatel316/Titer/issues",
+        "support" => "https://titer.smitpatel.net/support",
         "support-policies" => "https://github.com/smitpatel316/Titer/blob/main/SUPPORT.md",
+        "discussions" => "https://github.com/smitpatel316/Titer/discussions",
         "site" => "https://titer.smitpatel.net/",
         _ => return,
     };
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
 }
 
-/// Linux: the same fixed GitHub-issue address as on macOS, opened with
-/// xdg-open. Only the title/body query varies; anything else is refused.
+/// Linux: the support mailbox (seq 453) — same fixed `mailto:` as macOS.
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
-fn open_github_issue(url: String) {
-    const PREFIX: &str = "https://github.com/smitpatel316/Titer/issues/new?";
-    if !url.starts_with(PREFIX) {
-        return;
-    }
+fn open_support_email() {
+    let url = format!("mailto:smit@muse.ai?subject=Titer%20{}%20support", env!("CARGO_PKG_VERSION"));
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
 }
 
@@ -1906,7 +1900,7 @@ fn main() {
             set_recent_documents,
             accent_color,
             open_link,
-            open_github_issue,
+            open_support_email,
             set_spinner,
             open_url,
             cloud_status,
@@ -1941,6 +1935,11 @@ fn main() {
             mcp::mcp_feedback,
             mcp::mcp_feedback_consent,
             mcp::mcp_set_feedback_consent,
+            mcp::mcp_send_feedback,
+            mcp::mcp_send_saved_feedback,
+            mcp::mcp_crash_report_pending,
+            mcp::mcp_send_crash_report,
+            mcp::mcp_dismiss_crash_report,
             mcp::mcp_allowlist,
             mcp::mcp_set_allowlist,
             mcp::mcp_publish_snapshot,
@@ -2024,6 +2023,12 @@ fn main() {
                 tauri::async_runtime::spawn(async move {
                     let _ = new_window(&app, None);
                 });
+            }
+            // A clean exit writes the clean-shutdown marker (seq 453): a
+            // later launch that finds no marker knows this run crashed,
+            // and the crash-report dialog may offer to send the log.
+            RunEvent::Exit => {
+                mcp::mark_clean_shutdown(app);
             }
             _ => {}
         });

@@ -96,6 +96,46 @@ const FEEDBACK_FILE: &str = "feedback.jsonl";
 /// toggle). Same 0700 directory as the token, so only this user reads it.
 const FEEDBACK_CONSENT_FILE: &str = "feedback-consent.json";
 
+/// The local error log (seq 452): `<app_data>/mcp/error-log.jsonl`, one
+/// JSON object per captured error. Same 0700 directory as the feedback
+/// file. Entries are scrubbed before they are written — no paths, no user
+/// data — so the file is safe to show in Settings and to send.
+const ERROR_LOG_FILE: &str = "error-log.jsonl";
+
+/// The user's error-report-sharing choice: `{"sharing": true|false,
+/// "ts": …}`. A SEPARATE record from the feedback consent: sharing
+/// feedback does not imply sharing error reports, and either toggle can
+/// change without the other. Missing, unreadable, or malformed means
+/// "no" — sharing stays off until the user explicitly opts in (first-run
+/// prompt alongside feedback, or the Settings toggle).
+const ERROR_LOG_CONSENT_FILE: &str = "error-log-consent.json";
+
+/// The local error log never grows without bound: keep the newest entries.
+const MAX_ERROR_LOG_ENTRIES: usize = 200;
+
+/// A repeated identical error is sent at most once per window, so a crash
+/// loop cannot file a hundred Plane issues.
+const ERROR_LOG_DEDUP_WINDOW_SECS: u64 = 3600;
+
+/// Unsent entries sent per startup flush — a crash loop's backlog goes
+/// out a few at a time, never all at once.
+const ERROR_LOG_FLUSH_BATCH: usize = 5;
+
+/// Caps on one stored error entry, so a pathological stack cannot grow
+/// the log file without bound (the feedback caps are 200/4000 chars).
+const MAX_ERROR_MESSAGE_CHARS: usize = 4000;
+const MAX_ERROR_STACK_CHARS: usize = 8000;
+const MAX_ERROR_FIELD_CHARS: usize = 200;
+
+/// The clean-shutdown marker (seq 453): `<app_data>/mcp/crash-marker`.
+/// Written on a clean exit (`RunEvent::Exit` → `mark_clean_shutdown`);
+/// removed on the next launch by `mcp_crash_report_pending`. A launch
+/// with no marker means the previous run did NOT exit cleanly — a crash
+/// (or a force-quit, or a power cut) — and the crash-report dialog may
+/// offer to send the log. The marker's presence is the whole signal; its
+/// contents are empty.
+pub(crate) const CRASH_MARKER_FILE: &str = "crash-marker";
+
 /// The persisted MCP opt-in record: `{"enabled": bool, "ts": <unix seconds>}`.
 /// Written by `mcp_set_enabled` every time the user flips the toggle, read
 /// once at launch by `mcp_autostart_if_opted_in`.
@@ -1246,6 +1286,380 @@ pub fn mcp_set_feedback_consent(app: AppHandle, state: State<McpState>, sharing:
         let _ = fs::set_permissions(dir.join(FEEDBACK_CONSENT_FILE), fs::Permissions::from_mode(0o600));
     }
     Ok(Some(sharing))
+}
+
+// ── Anonymous error logging (seq 452) ──────────────────────────────────
+// Opt-in only, same consent model as feedback (default off, first-run
+// prompt alongside feedback, Settings toggle) but a separate record.
+// Capture writes a scrubbed entry to a local rotating log, always; the
+// feedback channel only ever sees it when the user opted in.
+//
+// Seq 453 adds the crash path on top of this log: a clean-shutdown
+// marker (CRASH_MARKER_FILE) written on exit, and commands for the
+// crash-report dialog and the direct (non-AI) feedback send. The
+// scrubber, the log shape and the constants below are shared with seq
+// 452's lane — the two lanes converge on these exact names at merge,
+// so keep them identical here.
+
+/// A path token ends at whitespace, a quote, a closing bracket, a comma,
+/// a semicolon, or a colon (the `:12:3` of a stack location survives —
+/// line numbers carry no user data). Mirrors `scrubErrorText` in
+/// src/lib/error-log.ts; the two must stay in agreement.
+fn error_token_end(text: &[char], mut i: usize) -> usize {
+    while i < text.len() {
+        match text[i] {
+            ' ' | '\t' | '\n' | '\r' | '"' | '\'' | ')' | ']' | ',' | ';' | ':' => break,
+            _ => i += 1,
+        }
+    }
+    i
+}
+
+/// A path only starts at a token boundary (start of text, whitespace, or
+/// punctuation) — the `/` in a relative path like `src/lib/foo.ts` is a
+/// separator mid-word, not an absolute path, and must survive.
+fn error_token_start(text: &[char], i: usize) -> bool {
+    if i == 0 {
+        return true;
+    }
+    matches!(
+        text[i - 1],
+        ' ' | '\t' | '\n' | '\r' | '"' | '\'' | '(' | '[' | '{' | ',' | ';' | ':' | '='
+    )
+}
+
+/// Strip user-identifying paths from error text before it is stored or
+/// sent. Home directories (`/Users/<name>/`, `/home/<name>/`,
+/// `C:\Users\<name>\`), `file://` URLs, and any other absolute path
+/// become `[path]`; relative paths (`src/lib/foo.ts:12:3`) survive — they
+/// name app code, not the user.
+fn scrub_error_text(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let rest: String = chars[i..].iter().collect();
+        if rest.starts_with("file://") && error_token_start(&chars, i) {
+            out.push_str("[path]");
+            i = error_token_end(&chars, i + "file://".len());
+            continue;
+        }
+        if (rest.starts_with("/Users/")
+            || rest.starts_with("/home/")
+            || rest.starts_with("C:\\Users\\")
+            || rest.starts_with("C:/Users/"))
+            && error_token_start(&chars, i)
+        {
+            out.push_str("[path]");
+            // A Windows path starts with a drive letter (`C:`) — the
+            // token skip must start past that colon, or it stops there
+            // and leaks the rest of the path (`\Users\smit\...`). The
+            // `:line` suffix still ends the token, so it survives.
+            let after_drive = if chars.get(i + 1) == Some(&':') { i + 2 } else { i };
+            i = error_token_end(&chars, after_drive);
+            continue;
+        }
+        if chars[i].is_ascii_alphabetic()
+            && chars.get(i + 1) == Some(&':')
+            && (chars.get(i + 2) == Some(&'\\') || chars.get(i + 2) == Some(&'/'))
+            && error_token_start(&chars, i)
+        {
+            out.push_str("[path]");
+            i = error_token_end(&chars, i + 2);
+            continue;
+        }
+        if chars[i] == '/' && error_token_start(&chars, i) {
+            let end = error_token_end(&chars, i);
+            if chars[i + 1..end].contains(&'/') {
+                out.push_str("[path]");
+                i = end;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    truncate_chars(&out, MAX_ERROR_MESSAGE_CHARS)
+}
+
+/// Cap a string at `max` characters (never split a char), appending a
+/// marker when truncated. The message cap doubles as the whole-text cap
+/// for the scrubber, whose input is already short.
+fn truncate_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max).collect();
+    out.push_str("… [truncated]");
+    out
+}
+
+/// One captured error, as stored in `error-log.jsonl` and shown in
+/// Settings (newest first). `sent` says whether it went to the Titer
+/// team through the feedback channel.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ErrorLogEntry {
+    pub error_id: String,
+    pub ts: u64,
+    pub kind: String,
+    pub error_type: String,
+    pub message: String,
+    pub stack: String,
+    pub action: String,
+    pub app_version: String,
+    pub os: String,
+    pub sent: bool,
+}
+
+/// An error entry's id: "err-" + unix time + 4 random bytes as hex.
+/// Same shape as `new_feedback_id` so two errors in the same second
+/// never collide.
+fn new_error_id() -> String {
+    let mut bytes = [0u8; 4];
+    let random = fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes)).is_ok();
+    if random {
+        format!("err-{}-{}", now_ts(), bytes.iter().map(|b| format!("{b:02x}")).collect::<String>())
+    } else {
+        format!("err-{}-00000000", now_ts())
+    }
+}
+
+/// The stored error-log entries, oldest first (file order). Malformed
+/// lines are skipped, not surfaced — a hand-edited file must not break
+/// the dialog or the flush.
+fn error_log_entries(dir: &std::path::Path) -> Vec<ErrorLogEntry> {
+    let text = fs::read_to_string(dir.join(ERROR_LOG_FILE)).unwrap_or_default();
+    text.lines().filter_map(|line| serde_json::from_str::<ErrorLogEntry>(line).ok()).collect()
+}
+
+/// Rewrite the whole error log (used by the flush, which updates `sent`
+/// flags, and by the trim below). The file is owner-only (0600) like
+/// its neighbours.
+fn write_error_log_entries(dir: &std::path::Path, entries: &[ErrorLogEntry]) -> Result<(), String> {
+    let mut text = String::new();
+    for entry in entries {
+        let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
+        text.push_str(&line);
+        text.push('\n');
+    }
+    fs::write(dir.join(ERROR_LOG_FILE), text).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(dir.join(ERROR_LOG_FILE), fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// Write the clean-shutdown marker (seq 453): called from main.rs on
+/// `RunEvent::Exit`, so a launch that finds no marker knows the previous
+/// run did not exit cleanly. The marker's presence is the whole signal;
+/// its contents are empty. Best-effort — a failed write must never
+/// break quitting.
+pub(crate) fn mark_clean_shutdown(app: &AppHandle) {
+    let Ok(dir) = app.path().app_data_dir().map(|d| d.join("mcp")) else {
+        return;
+    };
+    if fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    if fs::write(dir.join(CRASH_MARKER_FILE), b"").is_err() {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(dir.join(CRASH_MARKER_FILE), fs::Permissions::from_mode(0o600));
+    }
+}
+
+/// Whether the last run crashed AND there is something to send (seq 453).
+/// A launch that finds the clean-shutdown marker removes it and reports
+/// no crash — the previous run exited cleanly. A launch with no marker
+/// means the previous run did not exit cleanly; the crash-report dialog
+/// opens only when the error log holds unsent entries (a crash with
+/// nothing captured has nothing to offer). Called once per launch from
+/// the crash-report dialog's mount; the removal makes the answer stable
+/// for the rest of the run.
+#[tauri::command]
+pub fn mcp_crash_report_pending(app: AppHandle, state: State<McpState>) -> Result<usize, String> {
+    let dir = state.ensure_dir(&app)?;
+    let marker = dir.join(CRASH_MARKER_FILE);
+    if marker.exists() {
+        let _ = fs::remove_file(&marker);
+        return Ok(0);
+    }
+    Ok(error_log_entries(&dir).iter().filter(|e| !e.sent).count())
+}
+
+/// Send the crash report (seq 453): the unsent error-log entries, as one
+/// feedback entry through the feedback channel. The dialog itself is the
+/// consent moment — the user just clicked Send — so this posts directly
+/// rather than through the feedback-sharing gate (which governs the
+/// automatic paths). The report is saved locally first, like every
+/// feedback entry; entries are marked sent only after the POST succeeds.
+/// Writing the clean-shutdown marker keeps the offer from reappearing.
+#[tauri::command]
+pub async fn mcp_send_crash_report(app: AppHandle, state: State<McpState>) -> Result<serde_json::Value, String> {
+    let dir = state.ensure_dir(&app)?;
+    let mut entries = error_log_entries(&dir);
+    let unsent: Vec<&ErrorLogEntry> = entries.iter().filter(|e| !e.sent).collect();
+    if unsent.is_empty() {
+        return Ok(serde_json::json!({ "feedback_id": "", "received": false, "sent": false, "note": "No unsent errors to report." }));
+    }
+    let mut details = String::new();
+    for e in &unsent {
+        details.push_str(&format!(
+            "[{}] {} {}: {}\n{}\n",
+            e.error_id,
+            e.kind,
+            scrub_error_text(&e.error_type),
+            scrub_error_text(&e.message),
+            scrub_error_text(&e.stack)
+        ));
+    }
+    let context = serde_json::json!({
+        "app_version": env!("CARGO_PKG_VERSION"),
+        "os": std::env::consts::OS,
+    });
+    let feedback_id = new_feedback_id();
+    let entry = serde_json::json!({
+        "feedback_id": feedback_id,
+        "ts": now_ts(),
+        "kind": "bug",
+        "summary": "Crash report — Titer quit unexpectedly",
+        "details": details,
+        "context": context,
+    });
+    append_feedback_entry(&dir, &entry)?;
+    let url = feedback_server_url();
+    match post_feedback_entry(&url, &entry).await {
+        Ok(issue_url) => {
+            for e in entries.iter_mut().filter(|e| !e.sent) {
+                e.sent = true;
+            }
+            let _ = write_error_log_entries(&dir, &entries);
+            let _ = fs::write(dir.join(CRASH_MARKER_FILE), b"");
+            Ok(serde_json::json!({ "feedback_id": feedback_id, "received": true, "sent": true, "issue_url": issue_url }))
+        }
+        Err(error) => Ok(serde_json::json!({ "feedback_id": feedback_id, "received": true, "sent": false, "sharing": "enabled", "error": error })),
+    }
+}
+
+/// Dismiss the crash report (seq 453): no report is sent, the log stays
+/// as it is, and the clean-shutdown marker is written so the offer does
+/// not reappear this run. A later crash still offers — a future crash
+/// never writes the marker.
+#[tauri::command]
+pub fn mcp_dismiss_crash_report(app: AppHandle, state: State<McpState>) -> Result<(), String> {
+    let dir = state.ensure_dir(&app)?;
+    let _ = fs::write(dir.join(CRASH_MARKER_FILE), b"");
+    Ok(())
+}
+
+/// Append one feedback entry to the local file (owner-only write is the
+/// caller's job on first creation; the file lives in the 0700 `mcp/`
+/// directory like its neighbours). Shared by the MCP tool and the direct
+/// UI send below, so both save exactly the same way.
+fn append_feedback_entry(dir: &std::path::Path, entry: &serde_json::Value) -> Result<(), String> {
+    let line = serde_json::to_string(entry).map_err(|e| format!("Couldn't record the feedback ({e})."))?;
+    {
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join(FEEDBACK_FILE))
+            .map_err(|e| format!("Couldn't save the feedback ({e})."))?;
+        writeln!(file, "{line}").map_err(|e| format!("Couldn't save the feedback ({e})."))?;
+    }
+    Ok(())
+}
+
+/// Send feedback straight from the UI (seq 453) — the Help ▸ Send
+/// Feedback dialog, no AI needed. Same validation, same local-first save
+/// and same context (kind + app version + OS, so the Scout/PM pipeline
+/// can triage it into a lane) as `titer_send_feedback`; the server copy
+/// goes through `feedback_share_result`, so it is consent-gated exactly
+/// like the tool's: sharing off means saved locally, nothing leaves the
+/// machine.
+#[tauri::command]
+pub async fn mcp_send_feedback(
+    app: AppHandle,
+    state: State<McpState>,
+    kind: String,
+    summary: String,
+    details: String,
+) -> Result<serde_json::Value, String> {
+    let kind = kind.trim();
+    if !matches!(kind, "bug" | "missing-feature" | "other") {
+        return Err("kind must be one of \"bug\", \"missing-feature\", \"other\".".into());
+    }
+    let summary = summary.trim();
+    if summary.is_empty() {
+        return Err("summary is required — one short line saying what is missing or broken.".into());
+    }
+    if summary.chars().count() > MAX_FEEDBACK_SUMMARY_CHARS {
+        return Err(format!(
+            "summary is too long ({0} characters) — keep it to {1} characters or fewer.",
+            summary.chars().count(),
+            MAX_FEEDBACK_SUMMARY_CHARS
+        ));
+    }
+    let details = details.trim();
+    if details.is_empty() {
+        return Err("details is required — say what was tried, what happened, and what was expected.".into());
+    }
+    if details.chars().count() > MAX_FEEDBACK_DETAILS_CHARS {
+        return Err(format!(
+            "details is too long ({0} characters) — keep it to {1} characters or fewer.",
+            details.chars().count(),
+            MAX_FEEDBACK_DETAILS_CHARS
+        ));
+    }
+    let dir = state.ensure_dir(&app)?;
+    let mut context = serde_json::json!({
+        "app_version": env!("CARGO_PKG_VERSION"),
+        "os": std::env::consts::OS,
+    });
+    if let Some(file) = state.front_project_file_name() {
+        context["project_file"] = serde_json::Value::String(file);
+    }
+    context["recent_activity"] = serde_json::Value::Array(recent_activity_context(&dir));
+    let feedback_id = new_feedback_id();
+    let entry = serde_json::json!({
+        "feedback_id": feedback_id,
+        "ts": now_ts(),
+        "kind": kind,
+        "summary": summary,
+        "details": details,
+        "context": context,
+    });
+    append_feedback_entry(&dir, &entry)?;
+    Ok(feedback_share_result(&dir, &feedback_server_url(), &entry).await)
+}
+
+/// Send one SAVED feedback entry to the team (seq 453): Settings → AI
+/// Connections lists saved reports, and this is the direct send that
+/// replaces the old pre-filled GitHub issue (Issues are off on the repo).
+/// No duplicate save — the entry is already in the file; the server copy
+/// goes through `feedback_share_result`, so it is consent-gated like
+/// every other send.
+#[tauri::command]
+pub async fn mcp_send_saved_feedback(
+    app: AppHandle,
+    state: State<McpState>,
+    feedback_id: String,
+) -> Result<serde_json::Value, String> {
+    let dir = state.ensure_dir(&app)?;
+    let text = fs::read_to_string(dir.join(FEEDBACK_FILE)).unwrap_or_default();
+    let entry = text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|v| v.get("feedback_id").and_then(|v| v.as_str()) == Some(feedback_id.as_str()));
+    let Some(entry) = entry else {
+        return Err("That feedback report is no longer saved on this Mac.".into());
+    };
+    Ok(feedback_share_result(&dir, &feedback_server_url(), &entry).await)
 }
 
 /// The persisted MCP opt-in record: `<app_data>/mcp/mcp-opt-in.json`,
@@ -4610,16 +5024,7 @@ impl TiterMcpServer {
             "details": details,
             "context": context,
         });
-        let line = serde_json::to_string(&entry).map_err(|e| format!("Couldn't record the feedback ({e})."))?;
-        {
-            use std::io::Write;
-            let mut file = fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(dir.join(FEEDBACK_FILE))
-                .map_err(|e| format!("Couldn't save the feedback ({e})."))?;
-            writeln!(file, "{line}").map_err(|e| format!("Couldn't save the feedback ({e})."))?;
-        }
+        append_feedback_entry(&dir, &entry)?;
         // Log kind + id only — the details are the agent's words, not a
         // summary, and may quote what it saw.
         self.state.log_call(
@@ -13038,6 +13443,39 @@ mod tests {
         assert_eq!(backups.len(), 1, "the written backup should be listed: {backups:?}");
         assert_eq!(backups[0]["display_name"], "Dose.hlx");
         let _ = std::fs::remove_dir_all(&app_data);
+    }
+
+    /// The scrubber's behaviour (seq 453): user paths become `[path]`,
+    /// relative app paths survive, and the token rules keep line numbers.
+    #[test]
+    fn scrub_error_text_scrubs_paths() {
+        // A home directory is gone, whatever follows it.
+        assert_eq!(
+            scrub_error_text("open /Users/smit/file.txt failed"),
+            "open [path] failed"
+        );
+        assert_eq!(
+            scrub_error_text("at C:\\Users\\smit\\app\\main.rs:12:3"),
+            "at [path]:12:3"
+        );
+        // A file:// URL is gone too.
+        assert_eq!(
+            scrub_error_text("see file:///Users/smit/x.txt for details"),
+            "see [path] for details"
+        );
+        // An absolute path with more than one segment is gone.
+        assert_eq!(
+            scrub_error_text("read /var/lib/titer/data.json failed"),
+            "read [path] failed"
+        );
+        // A relative app path survives — it names app code, not the user —
+        // and so do the line numbers after it.
+        assert_eq!(
+            scrub_error_text("panic at src/lib/foo.ts:12:3"),
+            "panic at src/lib/foo.ts:12:3"
+        );
+        // Plain text passes through untouched.
+        assert_eq!(scrub_error_text("boom"), "boom");
     }
 
     // ── Feedback sharing (server mode, seq 276) ─────────────────────────
