@@ -667,7 +667,7 @@ export function composeFigureSvg(
     });
   }
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${widthPt}" height="${heightPt + legendStrip + titleStrip}" viewBox="0 0 ${widthPt} ${heightPt + legendStrip + titleStrip}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${widthPt}pt" height="${heightPt + legendStrip + titleStrip}pt" viewBox="0 0 ${widthPt} ${heightPt + legendStrip + titleStrip}">` +
     `<rect x="0" y="0" width="${widthPt}" height="${heightPt + legendStrip + titleStrip}" fill="${escapeXml(figure.figureBackground ?? "#ffffff")}"/>` +
     parts.join("") +
     `</svg>`;

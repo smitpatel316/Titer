@@ -15,10 +15,14 @@
 //   wrong": a vector file that silently dropped content would be worse
 //   than no vector file.
 // - PDF is 1.4 with base-14 fonts (Helvetica/Times/Courier + Bold), so no
-//   font embedding: the SVG's point size is its px size × 72/96, applied
-//   by one CTM (`0.75 0 0 -0.75 0 H cm`); text re-flips inside `BT…ET`
+//   font embedding: text is WinAnsi-encoded (single-byte, /WinAnsiEncoding
+//   declared — never UTF-16BE or raw UTF-8 in a Type1 string). The SVG's
+//   point size is its px size × 72/96, applied by one CTM
+//   (`0.75 0 0 -0.75 0 H cm`); text re-flips inside `BT…ET`
 //   (`1 0 0 -1 x y Tm`) so glyphs stand upright. EPS uses the same flip
 //   (`0 H translate 0.75 -0.75 scale`) and `stringwidth` for anchoring.
+//   Width/height in `pt` (as composeFigureSvg emits) convert at 96 px/in
+//   first, so a 720 pt figure lands on a 720 pt page, not a 540 pt one.
 // - Colour: RGB is the native mode. Grayscale maps every colour to its
 //   luminance (0.299/0.587/0.114). CMYK is the naive print conversion
 //   (K = 1 − max, no ICC profile — documented in the tool text); it is
@@ -133,22 +137,32 @@ export function validateExportColorMode(format: string, colorMode: ColorMode): v
 }
 
 export function grayscaleFigure<T extends { data: unknown[]; layout: object }>(figure: T): T {
-  const map = (v: unknown): unknown => {
+  // Only colour-valued strings are grayscaled: a string under a key that
+  // names a colour ("color", "fillcolor", "paper_bgcolor", "colorscale"…)
+  // or an element of such an array. Series/category names and titles are
+  // text, even when they happen to spell a CSS colour name ("Red") —
+  // rewriting those corrupts the legend and the title.
+  const isColorKey = (key: string): boolean => {
+    const k = key.toLowerCase();
+    return k.includes("color") || k === "fill" || k === "stroke";
+  };
+  const map = (v: unknown, colorContext: boolean): unknown => {
     if (typeof v === "string") {
+      if (!colorContext) return v;
       const t = v.trim().toLowerCase();
       if (t === "none" || t === "transparent") return v;
       const c = parseColor(v);
       return c ? grayString(c) : v;
     }
-    if (Array.isArray(v)) return v.map(map);
+    if (Array.isArray(v)) return v.map((el) => map(el, colorContext));
     if (v && typeof v === "object") {
       const out: Record<string, unknown> = {};
-      for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = map(val);
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = map(val, isColorKey(k));
       return out;
     }
     return v;
   };
-  return { ...figure, data: figure.data.map((d) => map(d)), layout: map(figure.layout) as object };
+  return { ...figure, data: figure.data.map((d) => map(d, false)), layout: map(figure.layout, false) as object };
 }
 
 // ── Minimal SVG parsing ──────────────────────────────────────────────────
@@ -330,13 +344,41 @@ function parseStyle(style: string): Record<string, string> {
   return out;
 }
 
+/** A CSS length in SVG user units (96 CSS px per inch): unitless and `px`
+ *  are user units as-is; `pt`/`in`/`cm`/`mm`/`pc` convert. `%`, `em` and
+ *  anything unparseable is not a length here — null, so the caller falls
+ *  back instead of misreading "12px" as NaN (the old `Number(v)` did
+ *  exactly that, and every Plotly `px` value silently fell back). */
+function parseLength(v: string): number | null {
+  const m = /^(-?\d*\.?\d+(?:[eE][-+]?\d+)?)(px|pt|in|cm|mm|pc|%)?$/.exec(v.trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return null;
+  switch (m[2]) {
+    case "pt":
+      return (n * 96) / 72;
+    case "in":
+      return n * 96;
+    case "cm":
+      return (n * 96) / 2.54;
+    case "mm":
+      return (n * 96) / 25.4;
+    case "pc":
+      return n * 16;
+    case "%":
+      return null;
+    default:
+      return n;
+  }
+}
+
 function presentationOf(node: SvgNode, parent: Presentation): Presentation {
   const merged = { ...node.attrs };
   if (merged.style) Object.assign(merged, parseStyle(merged.style));
   const num = (v: string | undefined, fallback: number) => {
     if (v === undefined) return fallback;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : fallback;
+    const n = parseLength(v);
+    return n !== null && Number.isFinite(n) ? n : fallback;
   };
   const dash = merged["stroke-dasharray"];
   return {
@@ -345,10 +387,20 @@ function presentationOf(node: SvgNode, parent: Presentation): Presentation {
     stroke: merged.stroke !== undefined ? (merged.stroke === "none" ? undefined : merged.stroke) : parent.stroke,
     strokeWidth: num(merged["stroke-width"], parent.strokeWidth),
     strokeOpacity: num(merged["stroke-opacity"], parent.strokeOpacity),
-    opacity: num(merged.opacity, parent.opacity),
+    // Group opacity composes: a child's opacity multiplies the parent's,
+    // it does not replace it — a <g style="opacity: 0.4"> with a child at
+    // opacity 1 renders at 0.4, not 1.
+    opacity: merged.opacity !== undefined ? parent.opacity * num(merged.opacity, 1) : parent.opacity,
     fillRule: merged["fill-rule"] === "evenodd" ? "evenodd" : parent.fillRule,
     strokeDasharray:
-      dash === undefined ? parent.strokeDasharray : dash === "none" ? undefined : dash.split(/[\s,]+/).map(Number).filter((x) => Number.isFinite(x) && x >= 0),
+      dash === undefined
+        ? parent.strokeDasharray
+        : dash === "none"
+          ? undefined
+          : dash
+              .split(/[\s,]+/)
+              .map((s) => parseLength(s))
+              .filter((x): x is number => x !== null && Number.isFinite(x) && x >= 0),
     strokeLinecap: merged["stroke-linecap"] ?? parent.strokeLinecap,
     strokeLinejoin: merged["stroke-linejoin"] ?? parent.strokeLinejoin,
     // clip-path is NOT inherited (SVG 1.1): a <g>'s clip applies once, to
@@ -895,8 +947,8 @@ function walk(node: SvgNode, pres: Presentation, matrix: Matrix, state: WalkStat
       let extra = IDENTITY;
       if (node.tag === "svg") {
         const vb = (node.attrs.viewBox ?? "").trim().split(/[\s,]+/).filter(Boolean).map(Number);
-        const w = Number(node.attrs.width);
-        const h = Number(node.attrs.height);
+        const w = parseLength(node.attrs.width ?? "") ?? NaN;
+        const h = parseLength(node.attrs.height ?? "") ?? NaN;
         if (vb.length === 4 && vb.every(Number.isFinite) && Number.isFinite(w) && Number.isFinite(h) && vb[2]! > 0 && vb[3]! > 0) {
           extra = multiply(
             [w / vb[2]!, 0, 0, h / vb[3]!, Number(node.attrs.x ?? 0), Number(node.attrs.y ?? 0)],
@@ -976,6 +1028,48 @@ function textContent(node: SvgNode): string {
 
 // ── PDF backend ──────────────────────────────────────────────────────────
 
+// The base-14 Type1 fonts are single-byte with WinAnsiEncoding: text must
+// be encoded as WinAnsi (CP1252) bytes, never UTF-16BE (the old pdfEscape
+// wrote a <feff…> hex string, so a reader took every byte as a separate
+// character) and never raw UTF-8 (the old psEscape wrote multi-byte UTF-8
+// straight into a PostScript string). ASCII passes through unchanged;
+// the 0xA0–0xFF block is WinAnsi-identical; the 0x80–0x9F punctuation
+// block maps to its WinAnsi slots; U+2212 (minus) and friends map to their
+// lookalikes. Anything with no single-byte form (Greek, CJK, emoji…) has
+// no glyph in these fonts and falls back to "?" — a visible placeholder,
+// never silently corrupt bytes.
+const WIN_ANSI_EXTRA: Record<number, number> = {
+  0x20ac: 0x80, 0x201a: 0x82, 0x0192: 0x83, 0x201e: 0x84, 0x2026: 0x85,
+  0x2020: 0x86, 0x2021: 0x87, 0x02c6: 0x88, 0x2030: 0x89, 0x0160: 0x8a,
+  0x2039: 0x8b, 0x0152: 0x8c, 0x017d: 0x8e, 0x2018: 0x91, 0x2019: 0x92,
+  0x201c: 0x93, 0x201d: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97,
+  0x02dc: 0x98, 0x2122: 0x99, 0x0161: 0x9a, 0x203a: 0x9b, 0x0153: 0x9c,
+  0x017e: 0x9e, 0x0178: 0x9f, 0x2212: 0x2d, 0x00a0: 0x20,
+};
+
+function winAnsiByte(code: number): number {
+  if (code >= 0x20 && code <= 0x7e) return code;
+  if (code >= 0xa0 && code <= 0xff) return code;
+  return WIN_ANSI_EXTRA[code] ?? 0x3f; // "?"
+}
+
+/** A string as a single-byte literal `(…)` with WinAnsi bytes: `\`, `(`,
+ *  `)` backslash-escaped, every byte outside printable ASCII as an octal
+ *  escape, so the stream stays pure ASCII. Shared by the PDF and EPS
+ *  backends (both use base-14 Type1 fonts). */
+function winAnsiLiteral(text: string): string {
+  let out = "(";
+  for (const ch of text) {
+    const b = winAnsiByte(ch.codePointAt(0)!);
+    if (b === 0x5c) out += "\\\\";
+    else if (b === 0x28) out += "\\(";
+    else if (b === 0x29) out += "\\)";
+    else if (b < 0x20 || b >= 0x7f) out += `\\${b.toString(8).padStart(3, "0")}`;
+    else out += String.fromCharCode(b);
+  }
+  return `${out})`;
+}
+
 type PdfFontKey = "F1" | "F2" | "F3" | "F4" | "F5" | "F6";
 const PDF_FONTS: Record<PdfFontKey, string> = {
   F1: "Helvetica",
@@ -994,14 +1088,7 @@ function pdfFontKey(family: string, bold: boolean): PdfFontKey {
 }
 
 function pdfEscape(text: string): string {
-  if (/^[\x20-\x7e]*$/.test(text))
-    return `(${text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)")})`;
-  const bytes: number[] = [0xfe, 0xff];
-  for (const ch of text) {
-    const code = ch.codePointAt(0)!;
-    bytes.push((code >> 8) & 0xff, code & 0xff);
-  }
-  return `<${bytes.map((b) => b.toString(16).padStart(2, "0")).join("")}>`;
+  return winAnsiLiteral(text);
 }
 
 class PdfBackend implements Backend {
@@ -1089,7 +1176,7 @@ class PdfBackend implements Backend {
     return this.ops.join("\n");
   }
   resources(): string {
-    const fonts = [...this.fonts].map((k) => `/${k} << /Type /Font /Subtype /Type1 /BaseFont /${PDF_FONTS[k]} >>`).join(" ");
+    const fonts = [...this.fonts].map((k) => `/${k} << /Type /Font /Subtype /Type1 /BaseFont /${PDF_FONTS[k]} /Encoding /WinAnsiEncoding >>`).join(" ");
     const gs = this.gsStates
       .map((g, i) => `/GS${i} << /Type /ExtGState /ca ${fmt(g.fill)} /CA ${fmt(g.stroke)} >>`)
       .join(" ");
@@ -1098,9 +1185,13 @@ class PdfBackend implements Backend {
 }
 
 function svgSize(root: SvgNode): { width: number; height: number } {
-  const w = Number(root.attrs.width);
-  const h = Number(root.attrs.height);
-  if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) return { width: w, height: h };
+  // Width/height are CSS lengths, not bare numbers: a figure SVG sized in
+  // points ("720pt", as composeFigureSvg emits) is 960 user units, and the
+  // 72/96 px→pt factor in the emitters then lands it on a 720 pt page —
+  // reading the number raw and applying the factor shrank it to 540 pt.
+  const w = parseLength(root.attrs.width ?? "");
+  const h = parseLength(root.attrs.height ?? "");
+  if (w !== null && h !== null && w > 0 && h > 0) return { width: w, height: h };
   const vb = (root.attrs.viewBox ?? "").trim().split(/[\s,]+/).filter(Boolean).map(Number);
   if (vb.length === 4 && vb.every(Number.isFinite) && vb[2]! > 0 && vb[3]! > 0)
     return { width: vb[2]!, height: vb[3]! };
@@ -1170,7 +1261,7 @@ export function svgToPdf(svg: string, opts?: { colorMode?: ColorMode }): Uint8Ar
 // ── EPS backend ──────────────────────────────────────────────────────────
 
 function psEscape(text: string): string {
-  return `(${text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)")})`;
+  return winAnsiLiteral(text);
 }
 
 /** Opacity has no PostScript form: blend the paint toward white by it
@@ -1202,9 +1293,15 @@ class EpsBackend implements Backend {
   }
   clipPath(segs: PathSeg[]): void {
     this.emitPath(segs);
+    // "clip" consumes the path but leaves it current: clear it, or every
+    // shape drawn after the clip appends onto the clip rectangle.
     this.ops.push("clip");
+    this.ops.push("newpath");
   }
   private emitPath(segs: PathSeg[]): void {
+    // Every path starts clean: without newpath, a shape inside a clipped
+    // <g> would append its segments onto the clip path left behind.
+    this.ops.push("newpath");
     for (const s of segs) {
       if (s.kind === "M") this.ops.push(`${fmt(s.x)} ${fmt(s.y)} moveto`);
       else if (s.kind === "L") this.ops.push(`${fmt(s.x)} ${fmt(s.y)} lineto`);
@@ -1255,6 +1352,9 @@ class EpsBackend implements Backend {
     this.ops.push(this.colorOp(f));
     this.ops.push(`/${font} findfont ${fmt(size)} scalefont setfont`);
     this.ops.push(`${fmt(x)} ${fmt(y)} translate 1 -1 scale`);
+    // `show`/`rmoveto` need a current point: translate alone leaves none,
+    // and PostScript aborts with /nocurrentpoint.
+    this.ops.push("0 0 moveto");
     if (anchor === "middle") this.ops.push(`${psEscape(text)} dup stringwidth pop 2 div neg 0 rmoveto show`);
     else if (anchor === "end") this.ops.push(`${psEscape(text)} dup stringwidth pop neg 0 rmoveto show`);
     else this.ops.push(`${psEscape(text)} show`);
