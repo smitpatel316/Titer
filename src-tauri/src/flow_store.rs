@@ -302,7 +302,11 @@ impl FlowStore {
         source: String,
     ) -> Result<FlowCompensationState, String> {
         let mut inner = self.samples.lock().map_err(|_| "Flow store lock is poisoned.".to_string())?;
-        let Some(sample) = inner.samples.get_mut(sample_id) else {
+        // Split borrows: `sample` borrows `samples` while `bytes` is a
+        // separate borrow, so charging bytes alongside the sample edit
+        // is not a double mutable borrow of `inner` (E0499).
+        let FlowStoreInner { samples, bytes, .. } = &mut *inner;
+        let Some(sample) = samples.get_mut(sample_id) else {
             return Err(format!("flow store: sample “{sample_id}” is not loaded"));
         };
         validate_spillover(&fluorochromes, &matrix, &sample.param_names)?;
@@ -310,7 +314,7 @@ impl FlowStore {
         let compensated_columns = compensate_fluorochrome_columns(&sample.columns, &sample.param_names, &fluorochromes, &inverse)?;
         if let Some(old) = &sample.compensated {
             let old_bytes = sample.info.event_count as u64 * old.fluorochromes.len() as u64 * BYTES_PER_VALUE;
-            inner.bytes -= old_bytes;
+            *bytes -= old_bytes;
             sample.info.bytes -= old_bytes;
         }
         let new_bytes = sample.info.event_count as u64 * fluorochromes.len() as u64 * BYTES_PER_VALUE;
@@ -323,7 +327,7 @@ impl FlowStore {
             applied: true,
         };
         sample.info.bytes += new_bytes;
-        inner.bytes += new_bytes;
+        *bytes += new_bytes;
         sample.last_used = Instant::now();
         Ok(sample.compensation.clone())
     }
@@ -339,12 +343,15 @@ impl FlowStore {
     /// False when the sample isn't loaded.
     pub(crate) fn clear_compensation(&self, sample_id: &str) -> Result<bool, String> {
         let mut inner = self.samples.lock().map_err(|_| "Flow store lock is poisoned.".to_string())?;
-        let Some(sample) = inner.samples.get_mut(sample_id) else {
+        // Split borrows (see apply_compensation): `sample` borrows
+        // `samples` while `bytes` is a separate borrow (E0499).
+        let FlowStoreInner { samples, bytes, .. } = &mut *inner;
+        let Some(sample) = samples.get_mut(sample_id) else {
             return Ok(false);
         };
         if let Some(old) = sample.compensated.take() {
             let old_bytes = sample.info.event_count as u64 * old.fluorochromes.len() as u64 * BYTES_PER_VALUE;
-            inner.bytes -= old_bytes;
+            *bytes -= old_bytes;
             sample.info.bytes -= old_bytes;
         }
         sample.compensation.applied = false;
