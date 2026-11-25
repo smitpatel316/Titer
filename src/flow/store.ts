@@ -55,6 +55,13 @@
 //    storeStatus() — extra, beyond the contract minimum: how many samples
 //      are loaded and how many bytes they hold against the budget
 //      (raw + compensated copies both count).
+//    applyTransform(sampleId, param, transform) — seq 448 (F2b): rewrite
+//      one parameter's column in place through the transform (the data
+//      transform; the sample node records it in `flowSample.transforms`).
+//      Throws on an unknown sample / parameter. The caller — the MCP
+//      executor — refuses to transform an already-transformed parameter
+//      (reload the sample to start from raw values): the store keeps no
+//      raw copy, so a second application would compose silently.
 //    Rust adds flow_load_sample_file(): the same load from a `.tfcs` sidecar
 //    file (see the format note in `flow_store.rs`).
 //
@@ -82,7 +89,7 @@
 //   surfaces, not the store — lanes and tests can load samples while the
 //   module is off; no sidebar/menu/MCP surface exists in F1a either way.
 
-import type { FlowParameterMeta } from "./sample";
+import type { FlowParameterMeta, FlowTransformRef } from "./sample";
 import {
   compensateFluorochromeColumns,
   invertMatrix,
@@ -91,6 +98,7 @@ import {
   type ApplyCompensationInput,
   type FlowCompensationState,
 } from "./compensation";
+import { applyTransformToColumn, transformFromRef, type FlowTransformResult } from "./transforms";
 
 /** One parameter's stats: min/max/mean over its finite values. `count` is
  *  the finite count (events with a non-finite value in this parameter don't
@@ -155,6 +163,12 @@ export interface FlowEventStore {
   getCompensation(sampleId: string): Promise<FlowCompensationState | null>;
   clearCompensation(sampleId: string): Promise<boolean>;
   storeStatus(): Promise<FlowStoreStatus>;
+  /** Rewrite one parameter's column in place through the transform (seq
+   *  448, F2b): the data transform. Throws on an unknown sample /
+   *  parameter; the caller refuses a second application to the same
+   *  parameter (the store keeps no raw copy). Returns the before/after
+   *  stats of the parameter. */
+  applyTransform(sampleId: string, param: string, transform: FlowTransformRef): Promise<FlowTransformResult>;
 }
 
 interface LoadedSample {
@@ -434,6 +448,26 @@ export class InMemoryFlowStore implements FlowEventStore {
     return this.storeStatusSync();
   }
 
+  /** Synchronous transform — see loadSampleSync. Rewrites the column in
+   *  place (f64 math, stored as f32); the resolved transform is
+   *  canonical, so the caller's record of it matches what ran. */
+  applyTransformSync(sampleId: string, param: string, transform: FlowTransformRef): FlowTransformResult {
+    const resolved = transformFromRef(transform);
+    const sample = this.samples.get(sampleId);
+    if (!sample) throw new Error(`flow store: sample "${sampleId}" is not loaded`);
+    const index = sample.paramNames.indexOf(param);
+    if (index < 0) {
+      throw new Error(`flow store: sample "${sampleId}" has no parameter "${param}" (unknown parameter)`);
+    }
+    const { before, after } = applyTransformToColumn(resolved, sample.columns[index], param);
+    this.touch(sampleId);
+    return { sampleId, parameter: param, kind: resolved.kind, eventCount: sample.info.eventCount, before, after };
+  }
+
+  async applyTransform(sampleId: string, param: string, transform: FlowTransformRef): Promise<FlowTransformResult> {
+    return this.applyTransformSync(sampleId, param, transform);
+  }
+
   private touch(sampleId: string): void {
     const sample = this.samples.get(sampleId);
     if (!sample) return;
@@ -509,6 +543,18 @@ export class TauriFlowStore implements FlowEventStore {
 
   async storeStatus(): Promise<FlowStoreStatus> {
     return this.invoke<FlowStoreStatus>("flow_store_status");
+  }
+
+  async applyTransform(sampleId: string, param: string, transform: FlowTransformRef): Promise<FlowTransformResult> {
+    // The Rust side resolves the parameters again and validates, so the
+    // raw record crosses here; `applyFlowTransform` (transforms.ts) is
+    // the resolved-params entry point the MCP executor uses.
+    return this.invoke<FlowTransformResult>("flow_apply_transform", {
+      sample_id: sampleId,
+      parameter: param,
+      kind: transform.kind,
+      params: transform.params ?? {},
+    });
   }
 }
 
@@ -667,4 +713,12 @@ export function getCompensation(sampleId: string): FlowCompensationState | null 
 
 export function clearCompensation(sampleId: string): boolean {
   return viewerBackend.clearCompensationSync(sampleId);
+}
+
+/** Rewrite one parameter's column in place through the transform (seq
+ *  448, F2b) — the synchronous facade's sixth operation, same throw
+ *  behaviour as the rest of the facade (unknown sample / parameter
+ *  throws). Returns the before/after stats of the parameter. */
+export function applyTransform(sampleId: string, param: string, transform: FlowTransformRef): FlowTransformResult {
+  return viewerBackend.applyTransformSync(sampleId, param, transform);
 }

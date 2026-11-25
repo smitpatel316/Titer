@@ -47898,12 +47898,12 @@ check("flow-f2a: spillover-matrix compensation per sample (seq 447) — inverse 
   ok(mainRs.includes("flow_store::flow_clear_compensation"), "main.rs must register flow_clear_compensation");
 
   // 8. The MCP slice: titer_apply_flow_compensation + the flow group,
-  //    the TS executor + dispatch branch + node update, 82 tools.
+  //    the TS executor + dispatch branch + node update, 83 tools.
   const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
   ok(mcp.includes("titer_apply_flow_compensation"), "mcp.rs must define the titer_apply_flow_compensation tool");
   ok(mcp.includes("ApplyFlowCompensationArgs"), "mcp.rs must define the ApplyFlowCompensationArgs schema");
   ok(mcp.includes("apply-flow-compensation"), "mcp.rs must dispatch the apply-flow-compensation job action");
-  ok(mcp.includes("82 tools"), "mcp.rs header must count 82 tools after F2a");
+  ok(mcp.includes("83 tools"), "mcp.rs header must count 83 tools after F2a + F2b");
   const mcpFlow = readFileSync("src/store/mcp-flow.ts", "utf8");
   ok(mcpFlow.includes("executeApplyFlowCompensation"), "src/store/mcp-flow.ts must execute the apply-flow-compensation job");
   const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
@@ -47914,8 +47914,8 @@ check("flow-f2a: spillover-matrix compensation per sample (seq 447) — inverse 
     "the store must provide an updateFlowSampleCompensation action",
   );
   ok(
-    readFileSync("tests/mcp-coverage-180.ts", "utf8").includes("EXPECTED_TOOL_COUNT = 82"),
-    "mcp-coverage-180.ts must expect 82 tools after F2a",
+    readFileSync("tests/mcp-coverage-180.ts", "utf8").includes("EXPECTED_TOOL_COUNT = 83"),
+    "mcp-coverage-180.ts must expect 83 tools after F2a + F2b",
   );
 });
 
@@ -48657,17 +48657,28 @@ check("flow-f2b: real Parks logicle/biex + arcsinh + Hyperlog transforms, on the
   ok(Math.abs(applyTransformValue(logDefault, 0) - 0.5 / 4.5) < 1e-9, `logicle(0) must be x1 = (A+W)/(M+A) = ${0.5 / 4.5}`);
 
   // 4. Inverse round-trip: invert(forward(x)) recovers x (1e-9 relative),
-  // for every kind and param set — except log below the floor (x <= 0
-  // piles on the axis; the inverse of the floor is 0 by definition).
+  // for every kind and param set — except log at/below the pile-up
+  // threshold (forward(x) ≤ floor: every non-positive value, plus every
+  // positive value below the bottom decade, piles at the floor — the
+  // inverse of the floor is 0 by definition) and except the display
+  // clamp: an x outside the forward range (Hyperlog's linear negative
+  // tail puts EH(−2) near −1593 on the default set, so the grid's
+  // −100000 and −10000 clamp) pins at ±2, and the inverse of the edge
+  // is the edge's data value, not the out-of-range x.
   for (const [kind, bySet] of Object.entries(goldens.values)) {
     for (const setName of Object.keys(bySet)) {
       const p = goldens.param_sets[setName];
       const t = resolveTransform(kind as "log" | "logicle" | "arcsinh" | "hyperlog" | "linear", { T: p.T, W: p.W, M: p.M, A: p.A });
       for (const x of xs) {
-        if (kind === "log" && x <= 0) continue;
-        const back = invertTransformValue(t, applyTransformValue(t, x));
+        const y = applyTransformValue(t, x);
+        if (kind === "log" && y <= t.floor) continue;
+        const back = invertTransformValue(t, y);
         const d = Math.abs(back - x);
-        ok(d <= 1e-9 * Math.max(1, Math.abs(x)), `${kind}/${setName} round-trip at x=${x}: got ${back} (diff ${d})`);
+        if (d <= 1e-9 * Math.max(1, Math.abs(x))) continue;
+        ok(
+          Math.abs(Math.abs(y) - 2) < 1e-9,
+          `${kind}/${setName} round-trip at x=${x}: got ${back} (diff ${d}) — y=${y} is not the ±2 display clamp`,
+        );
       }
     }
   }
@@ -48725,19 +48736,19 @@ check("flow-f2b: real Parks logicle/biex + arcsinh + Hyperlog transforms, on the
 
   // 7. The MCP slice: titer_transform_flow_parameter + the flow allowlist
   // group, off by default (not in the default read set); the tool count
-  // moves 79 → 80 in the coverage pin.
+  // moves 82 → 83 in the coverage pin.
   const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
   ok(mcp.includes("titer_transform_flow_parameter"), "mcp.rs must define the titer_transform_flow_parameter tool");
   ok(mcp.includes("TransformFlowParameterArgs"), "mcp.rs must define the TransformFlowParameterArgs schema");
   ok(mcp.includes('"transform-flow-parameter"'), "mcp.rs must dispatch the transform-flow-parameter job action");
   ok(
-    mcp.includes('"titer_import_fcs", "titer_transform_flow_parameter"'),
-    "the flow allowlist group must hold both flow tools",
+    mcp.includes('"titer_import_fcs", "titer_apply_flow_compensation", "titer_transform_flow_parameter"'),
+    "the flow allowlist group must hold all three flow tools",
   );
   ok(!/ALLOWLIST_DEFAULT_GROUPS: &\[[^]]*"flow"/.test(mcp), "the flow group must not be in the default allowlist");
   ok(
-    readFileSync("tests/mcp-coverage-180.ts", "utf8").includes("const EXPECTED_TOOL_COUNT = 80;"),
-    "the MCP coverage pin must expect 80 tools",
+    readFileSync("tests/mcp-coverage-180.ts", "utf8").includes("const EXPECTED_TOOL_COUNT = 83;"),
+    "the MCP coverage pin must expect 83 tools",
   );
   ok(
     readFileSync("src-tauri/src/flow_transform.rs", "utf8").includes("transform-goldens.json"),

@@ -358,7 +358,7 @@ to a small server that runs only on your machine.
 
 **Good to know:** the server only listens on your own machine (`127.0.0.1`) and never sends your
 data anywhere. It uses a private token — keep it private, and if you regenerate it in Settings,
-reconnect your assistant. It offers 80 tools: 22 only read, 58 can change your project (run an
+reconnect your assistant. It offers 83 tools: 22 only read, 61 can change your project (run an
 analysis, build a graph, export, save, delete) — your AI tool's own approval settings decide
 when it asks first. Box cloud tools need a Box account connected in Settings → Connected
 Storage; without one they tell you to connect first.

@@ -36,7 +36,7 @@ import { dependentAnalyses } from "../lib/dataset-manager";
 import { applyWand as planWand, type WandReport } from "../lib/wand";
 import type { CellBackgroundColor } from "../lib/cell-colors";
 import { cloneGraphPlan, type CloneOptions, type ClonePlan } from "../lib/clone-graph";
-import { createSampleNode, type FlowCompensationRef, type FlowSampleRef } from "../flow/sample";
+import { createSampleNode, readFlowSample, type FlowCompensationRef, type FlowSampleRef, type FlowTransformRef } from "../flow/sample";
 import { DEFAULT_FIGURE_DPI, DEFAULT_FIGURE_SIZE, DEFAULT_LABEL_STYLE, newFigurePanels } from "../lib/figure";
 import { clearRegenPlans } from "../lib/prism-graph-regen";
 import type { FigureGrid, FigureLabelStyle, FigurePanel, FigureSize, Resolution, SharedLegend } from "./types";
@@ -157,6 +157,11 @@ type Action =
     }
   | { type: "setActive"; id: string | null }
   | { type: "rename"; id: string; name: string }
+  /** Record a transform on a flow sample node (seq 448, F2b): the
+   *  transform for the parameter replaces any earlier one for that
+   *  parameter (one per parameter — the store keeps no raw copy, so a
+   *  second application would compose). One undo step. */
+  | { type: "setFlowSampleTransform"; id: string; transform: FlowTransformRef }
   | { type: "remove"; id: string }
   /** The view's last successful live run, kept on the node so a frozen or
    *  orphaned sheet can show it. Not an Undo step (a snapshot, not an edit),
@@ -471,6 +476,21 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
           if (remapped) nodes[g.id] = { ...g, graphOptions: remapped };
         }
       }
+      return { ...state, nodes, isDirty: true };
+    }
+    case "setFlowSampleTransform": {
+      // Seq 448 (F2b): the MCP transform job records what the store just
+      // applied, so the `.hlx` file knows the parameter's transform.
+      // Refuses anything that isn't a readable sample node.
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "sample" || !node.flowSample) return state;
+      const ref = readFlowSample(node.flowSample);
+      if (!ref) return state;
+      const transforms = [...(ref.transforms ?? [])];
+      const at = transforms.findIndex((t) => t.parameter === action.transform.parameter);
+      if (at >= 0) transforms[at] = action.transform;
+      else transforms.push(action.transform);
+      const nodes = { ...state.nodes, [action.id]: { ...node, flowSample: { ...ref, transforms } } };
       return { ...state, nodes, isDirty: true };
     }
     case "remove": {
@@ -1613,6 +1633,11 @@ interface ProjectActions {
    *  matrix applied to its stored events + whether it is applied. The
    *  events themselves live in the store, never on this node. */
   updateFlowSampleCompensation: (sampleId: string, compensation: FlowCompensationRef) => void;
+  /** Record a transform on a flow sample node (seq 448): the transform
+   *  for the parameter replaces any earlier one for that parameter (one
+   *  per parameter). The MCP transform job calls this after the store
+   *  applies the transform, so the `.hlx` file records what ran. */
+  updateFlowSampleTransforms: (sampleId: string, transform: FlowTransformRef) => void;
   /** A plugin analysis node on a table: named for the plugin analysis, and
    *  carrying its namespaced id + params instead of an `AnalysisType`. */
   createPluginAnalysis: (parentId: string, pluginId: string, pluginParams?: PluginParamValues) => string;
@@ -1921,6 +1946,12 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       // applied flag on the sample node.
       updateFlowSampleCompensation: (sampleId, compensation) => {
         dispatch({ type: "updateFlowSampleCompensation", id: sampleId, compensation, at: Date.now() });
+      },
+
+      // Record a transform on a flow sample node (seq 448): one undo
+      // step, replacing any earlier transform for that parameter.
+      updateFlowSampleTransforms: (sampleId, transform) => {
+        dispatch({ type: "setFlowSampleTransform", id: sampleId, transform });
       },
       // Named for the plugin analysis it runs (an unregistered plugin
       // keeps its id as the name until it is re-enabled).
