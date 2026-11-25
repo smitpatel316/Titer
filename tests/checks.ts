@@ -37093,6 +37093,46 @@ check("48: remapping qualified options follows a table rename and nothing else",
   );
 });
 
+// BUG-REPORT.md Round 2 Issue 17 (High, cycle 43): freezing a graph did
+// not freeze it — `mergedGraphData` read the live parent table, so the
+// frozen snapshot was discarded wherever the merged dataset was drawn
+// (the graph view, figure panels, headless exports).
+check("bugreport-17: a frozen graph's merged data and figure panel draw its snapshot, not the live table", () => {
+  const t1: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Assay 1",
+    parentId: null,
+    tableType: "column",
+    data: colTable("Assay 1", { Control: [1, 2, 3] }).data,
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Plot",
+    parentId: "t1",
+    graphType: "mean-error",
+    graphOptions: newGraphOptions("mean-error"),
+    frozen: true,
+    frozenData: colTable("Assay 1", { Control: [10, 20, 30] }).data,
+  };
+  // The merged dataset reads the snapshot's values, not the live table's.
+  const merged = mergedGraphData(graph, { t1, g1: graph });
+  strictEqual(merged?.problem, undefined);
+  deepStrictEqual(
+    merged?.dataset.sets.map((s) => s.columns[0]?.values),
+    [[10, 20, 30]],
+  );
+  // The figure panel draws the snapshot too.
+  ok(buildPanelFigure(graph, { t1, g1: graph }) !== null, "a frozen graph with data still draws a panel figure");
+  // Unfrozen, the same graph follows the live table again.
+  const live = mergedGraphData({ ...graph, frozen: undefined, frozenData: undefined }, { t1, g1: graph });
+  deepStrictEqual(
+    live?.dataset.sets.map((s) => s.columns[0]?.values),
+    [[1, 2, 3]],
+  );
+});
+
 // Seq 164 — UI table-data export (CSV / XLSX / TXT): the File menu path
 // mirrors the MCP-only `titer_export_table_data` — same serializers, same
 // excluded-cells-empty rule — through the native save dialog.

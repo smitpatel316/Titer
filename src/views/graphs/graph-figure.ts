@@ -188,15 +188,18 @@ function figureInputs(
   if (graph.type !== "graph" || !graph.graphType || !Object.hasOwn(GRAPHS, graph.graphType)) return null;
   const parent = graph.parentId ? nodes[graph.parentId] : undefined;
   if (!parent?.data || !parent.tableType) return null;
+  // A frozen graph (seq 237) draws its snapshot, not the live table —
+  // the same snapshot its own view draws.
+  const data = graph.frozen && graph.frozenData ? graph.frozenData : parent.data;
   const type = graph.graphType as GraphType;
   const family = GRAPHS[type].family;
   const sheets = infoSheetsOf(nodes, rootOrder);
   const options = { ...DEFAULT_GRAPH_OPTIONS, ...graph.graphOptions };
-  const dataset = readTable(parent.data);
+  const dataset = readTable(data);
   const columns = plotColumns(dataset, type, options, parent.tableType);
   const choosable = choosableSets(type, dataset, parent.tableType);
   const shownSets = choosable.length ? options.sets : undefined;
-  const allSeries = graphSeries(type, parent.data, parent.tableType, options);
+  const allSeries = graphSeries(type, data, parent.tableType, options);
   const seriesNames = shownSets ? allSeries.filter((n) => shownSets.includes(n)) : allSeries;
   // A grouped volcano plots the DEGs Titer computes (per-row Welch t test +
   // BH FDR), not the table's own columns — the same columns the graph view
@@ -209,8 +212,8 @@ function figureInputs(
   let buildOptions = options;
   if (volcanoGroups) {
     const [a, b] = volcanoPair(volcanoGroups, options);
-    const deg = a && b && a !== b ? computeGroupedDEG(parent.data, a, b, options.volcanoEffect) : [];
-    const rows: (string | null)[][] = parent.data.rows.map(() => []);
+    const deg = a && b && a !== b ? computeGroupedDEG(data, a, b, options.volcanoEffect) : [];
+    const rows: (string | null)[][] = data.rows.map(() => []);
     for (const d of deg) rows[d.row] = [null, d.label, String(d.log2FC), String(d.p), String(d.padj)];
     volcanoColumns = readTable({ columns: ["Title", "Gene", "Log2 FC", "P", "FDR"], rows }).columns;
     buildOptions = {
@@ -354,7 +357,8 @@ export async function buildGraphFigure(
   const inputs = figureInputs(graph, nodes, rootOrder);
   if (!inputs) return { figure: null, overlays: [] };
   const { parent, dataset, columns, buildOptions, options, choosable, shownSets, allSeries, seriesNames } = inputs;
-  const data = parent.data!;
+  // A frozen graph's overlays run on its snapshot, like its base chart.
+  const data = graph.frozen && graph.frozenData ? graph.frozenData : parent.data!;
   const type = graph.graphType as GraphType;
   const family = GRAPHS[type].family;
   const analyses = Object.values(nodes).filter((n) => n.type === "analysis" && n.parentId === graph.parentId);
