@@ -199,12 +199,13 @@ export async function copyPngToClipboard(png: Uint8Array): Promise<void> {
 }
 
 /** Hands a vector PDF plus its PNG fallback to the system clipboard on
- *  macOS (seq 446): both go to temp files, and the shell puts them on
- *  the pasteboard via osascript (`copy_pdf_to_clipboard` in main.rs) —
- *  the webview's `ClipboardItem.supports("application/pdf")` is false on
- *  Mac WebKit, so the web path can never write the PDF item. The shell
- *  deletes both temp files and its script file once osascript finishes.
- *  Throws on non-macOS. */
+ *  macOS (seq 446, seq 457): both go to temp files, and the shell puts
+ *  them on the pasteboard as two top-level items via JavaScript for
+ *  Automation (`copy_pdf_to_clipboard` in main.rs) — the webview's
+ *  `ClipboardItem.supports("application/pdf")` is false on Mac WebKit,
+ *  so the web path can never write the PDF item. The shell deletes both
+ *  temp files and its script file once osascript finishes. Throws on
+ *  non-macOS. */
 export async function copyPdfToClipboard(pdf: Uint8Array, png: Uint8Array): Promise<void> {
   if (!isMacOs()) throw new Error("Copying a vector PDF to the clipboard needs macOS.");
   const tmp = await tempDir();

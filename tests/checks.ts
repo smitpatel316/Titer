@@ -19493,8 +19493,8 @@ check("copy-446: graph/figure copy writes the vector PDF natively on macOS", asy
   // The native command + wrapper exist (the pre-fix tree has neither).
   const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
   ok(mainRs.includes("copy_pdf_to_clipboard"), "the shell has a copy_pdf_to_clipboard command");
-  ok(mainRs.includes("«class PDF »"), "the shell writes the PDF flavour to the pasteboard");
-  ok(mainRs.includes("«class PNGf»"), "the shell writes the PNG fallback alongside it");
+  ok(mainRs.includes("com.adobe.pdf"), "the shell writes the PDF flavour to the pasteboard");
+  ok(mainRs.includes("public.png"), "the shell writes the PNG fallback alongside it");
   ok(/copy_pdf_to_clipboard,\n(\s+)read_clipboard_formats,/.test(mainRs), "the command is registered");
   const nativeSrc = readFileSync("src/native.ts", "utf8");
   ok(nativeSrc.includes("export async function copyPdfToClipboard"), "native.ts wraps the command");
@@ -19581,6 +19581,35 @@ check("error-log-452: opt-in anonymous error logging via the feedback channel", 
   // the consent check, and the hook only writes locally.
   ok(/if !error_log_sharing_enabled\(dir\) \{\s*return false;/.test(mcp), "send is refused before any POST when sharing is off");
   ok(!/set_hook[\s\S]{0,800}post_feedback_entry/.test(mainRs), "the panic hook never posts — it only writes locally");
+});
+
+// Seq 457 (proof batch #3): the seq 446 shell put real PDF + PNG bytes
+// on the pasteboard, but wrapped in ONE AppleScript list —
+// `set the clipboard to {pdf, png}` — so no other app could read them:
+// NSPasteboard.types showed only the list flavour, `pbpaste -Prefer pdf`
+// and `-Prefer png` returned 0 bytes, Preview's "New from Clipboard" was
+// disabled and TextEdit pasted nothing. The shell must write TWO
+// top-level pasteboard items (one NSPasteboardItem per flavour), never a
+// list. This pin binds to the blocking function so the seq 296 PNG-only
+// helper (a single item, correctly list-free) cannot satisfy it.
+check("copy-457: graph/figure copy writes two top-level pasteboard items, not an AppleScript list", () => {
+  const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
+  const start = mainRs.indexOf("fn copy_pdf_to_clipboard_blocking");
+  ok(start >= 0, "copy_pdf_to_clipboard_blocking exists");
+  const body = mainRs.slice(start, mainRs.indexOf("\n}\n", start));
+  ok(!/set the clipboard to \{/.test(body), "no AppleScript list on the clipboard — one item per flavour");
+  ok(!body.includes("«class PDF »"), "the list-form PDF flavour is gone");
+  ok(!body.includes("«class PNGf»"), "the list-form PNG flavour is gone");
+  ok(body.includes("NSPasteboardItem"), "each flavour gets its own pasteboard item");
+  ok(body.includes("writeObjects"), "the items are written as separate top-level items");
+  ok(body.includes("com.adobe.pdf"), "the PDF item carries the PDF pasteboard type");
+  ok(body.includes("public.png"), "the PNG item carries the PNG pasteboard type");
+  ok(body.includes("clearContents"), "the pasteboard is cleared before the write");
+  // Both copy paths still share this one native write (seq 446).
+  const graphSrc = readFileSync("src/views/graphs/graph-export.ts", "utf8");
+  ok(graphSrc.includes("writeVectorToClipboard(pdf, png)"), "copyGraphImage goes through the shared native write");
+  const figureSrc = readFileSync("src/views/figures/figure-export.ts", "utf8");
+  ok(figureSrc.includes("writeVectorToClipboard(pdf, png)"), "copyFigureImage goes through the shared native write");
 });
 
 check("seq 216: BMP is 24-bit bottom-up BGR with DPI in the header", () => {
