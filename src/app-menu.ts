@@ -61,9 +61,16 @@ function edit(command: EditCommand) {
 }
 
 /** Whether the Change Parameters menu entry is live for this node (seq 373):
- *  an analysis whose wizard can re-open it, unfrozen and not orphaned. */
-const isEditableAnalysis = (node: ProjectNode | undefined | null): boolean =>
-  node?.type === "analysis" && canEditAnalysisParams(node).editable;
+ *  an analysis whose wizard can re-open it, unfrozen and not orphaned — and
+ *  asking at least one question on its parent table (Issue 14). */
+const isEditableAnalysis = (
+  node: ProjectNode | undefined | null,
+  nodes: Record<string, ProjectNode>,
+): boolean => {
+  if (node?.type !== "analysis") return false;
+  const parent = node.parentId ? nodes[node.parentId] : undefined;
+  return canEditAnalysisParams(node, parent?.data, parent?.tableType).editable;
+};
 
 export function useAppMenu(doc: DocumentActions) {
   const store = useProjectStore();
@@ -572,11 +579,11 @@ export function useAppMenu(doc: DocumentActions) {
             // its wizard, pre-filled from the stored params.
             text: "Change Parameters…",
             accelerator: "CmdOrCtrl+T",
-            enabled: isEditableAnalysis(activeNode),
+            enabled: isEditableAnalysis(activeNode, nodes),
             action: () => {
               // Re-check at click time — the node may have frozen since the menu opened.
               const node = latest.current.store.activeNode;
-              if (isEditableAnalysis(node)) {
+              if (isEditableAnalysis(node, latest.current.store.nodes)) {
                 latest.current.store.openSelector({ kind: "edit-analysis-params", nodeId: node!.id });
               }
             },

@@ -55,12 +55,15 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
   const { cacheAnalysisResult, openSelector, setAnalysisFrozen, repointAnalysis, setResultCellBackground } = useProjectActions();
   // Change Parameters (seq 373): re-opens this test's wizard pre-filled from
   // the stored params. Frozen, orphaned and unmapped tests stay disabled,
-  // with the reason as the tooltip.
-  const edit = canEditAnalysisParams(node);
+  // with the reason as the tooltip. A wizard that asks nothing on the parent
+  // table (Issue 14) stays disabled too — the parent table is passed so the
+  // gate can count its questions.
+  const data = node.parentId ? nodes[node.parentId]?.data : undefined;
+  const parentTableType = node.parentId ? nodes[node.parentId]?.tableType : undefined;
+  const edit = canEditAnalysisParams(node, data, parentTableType);
   // The tables this orphaned analysis may move to (seq 242): only the
   // ones offering its test, so the re-run it is waiting for can run there.
   const candidates = node.orphaned ? repointCandidates(node, nodes) : [];
-  const data = node.parentId ? nodes[node.parentId]?.data : undefined;
   // A frozen or orphaned sheet never re-runs: it shows its saved result, so
   // the live run gets no data to run on (a frozen sheet stops auto-updating
   // when the data change; an orphaned one has no source table left).
