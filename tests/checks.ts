@@ -41262,6 +41262,198 @@ check("flow-f1c: FCS 2.0–3.2 reader (flow-fcs 0.6.0) into the event store + ti
   strictEqual(isFlowEnabled(), false);
 });
 
+check("flow-f2a: spillover-matrix compensation per sample (seq 447) — inverse applied over all events, sparse across measurement types", async () => {
+  // Seq 447: compensation is the inverse of the $SPILLOVER/$SPILL/$COMP
+  // matrix, multiplied per event (compensated = S^-1 x observed, column
+  // vector) — the same convention the F0 harness verified numerically
+  // (synth-spill first compensated value 87.60202 vs Python inv(spill)
+  // @ raw = 87.602). Channels outside the fluorochrome list pass through
+  // unchanged (FCS 3.1 sparse-matrix guidance: height vs area). Pre-fix
+  // this fails: no compensation module, no store operations, no tool.
+  // The module is loaded dynamically so the failure is this check's, not
+  // the whole file's (a static import would fail checks.ts to load).
+  const fcsDir = "tests/testdata/fcs";
+  const readBytes = (name: string) => readFileSync(`${fcsDir}/${name}`);
+  const headerOf = (buf: Buffer) => ({
+    textStart: parseInt(buf.subarray(10, 18).toString("ascii").trim(), 10),
+    textEnd: parseInt(buf.subarray(18, 26).toString("ascii").trim(), 10),
+    dataStart: parseInt(buf.subarray(26, 34).toString("ascii").trim(), 10),
+    dataEnd: parseInt(buf.subarray(34, 42).toString("ascii").trim(), 10),
+  });
+  const keywordsOf = (buf: Buffer): Record<string, string> => {
+    const { textStart, textEnd } = headerOf(buf);
+    const delim = String.fromCharCode(buf[textStart]);
+    const parts = buf.subarray(textStart, textEnd + 1).toString("ascii").split(delim);
+    const kw: Record<string, string> = {};
+    for (let i = 1; i + 1 < parts.length; i += 2) kw[parts[i]] = parts[i + 1];
+    return kw;
+  };
+  // Event-major F32 LE columns, re-derived from the file's own bytes.
+  const columnsOf = (buf: Buffer): { names: string[]; columns: Float32Array[] } => {
+    const kw = keywordsOf(buf);
+    const par = parseInt(kw["$PAR"], 10);
+    const tot = parseInt(kw["$TOT"], 10);
+    const names = Array.from({ length: par }, (_, i) => kw[`$P${i + 1}N`]);
+    const dataStart = parseInt(kw["$BEGINDATA"], 10);
+    const columns = names.map(() => new Float32Array(tot));
+    for (let e = 0; e < tot; e++) {
+      for (let p = 0; p < par; p++) {
+        columns[p][e] = buf.readFloatLE(dataStart + (e * par + p) * 4);
+      }
+    }
+    return { names, columns };
+  };
+  const closeTo = (actual: number, expected: number, tol: number, what: string) => {
+    ok(Math.abs(actual - expected) <= tol, `${what} must be ~${expected} (got ${actual})`);
+  };
+
+  // 1. The multi-measurement-type fixture exists and carries the sparse
+  //    3x3 matrix over the -A fluorochromes only (8 params, 4 events).
+  ok(existsSync(`${fcsDir}/f2a-multi-type.fcs`), "the F2a fixture f2a-multi-type.fcs must be committed under tests/testdata/fcs/");
+  const multi = readBytes("f2a-multi-type.fcs");
+  strictEqual(multi.subarray(0, 6).toString("ascii"), "FCS3.1", "multi-type fixture must be an FCS 3.1 file");
+  const multiKw = keywordsOf(multi);
+  strictEqual(multiKw["$PAR"], "8", "multi-type fixture $PAR must be 8");
+  strictEqual(multiKw["$TOT"], "4", "multi-type fixture $TOT must be 4");
+  strictEqual(
+    multiKw["$SPILLOVER"],
+    "3,FL1-A,FL2-A,FL3-A,1.0,0.05,0.01,0.02,1.0,0.03,0.0,0.04,1.0",
+    "multi-type fixture $SPILLOVER must be the 3x3 over FL1-A/FL2-A/FL3-A",
+  );
+  const multiData = columnsOf(multi);
+  deepStrictEqual(multiData.names, ["FSC-A", "FSC-H", "FL1-A", "FL1-H", "FL2-A", "FL2-H", "FL3-A", "FL3-H"]);
+  deepStrictEqual(Array.from(multiData.columns[2]), [100, 200, 300, 400], "multi-type fixture FL1-A raw must be [100, 200, 300, 400]");
+  deepStrictEqual(Array.from(multiData.columns[3]), [10, 20, 30, 40], "multi-type fixture FL1-H raw must be [10, 20, 30, 40]");
+
+  // 2. The synth-spill ground truth, re-derived from its own bytes: the
+  //    F0 oracle (first compensated value 87.60202).
+  const spillBuf = readBytes("synth-spill.fcs");
+  const spillKw = keywordsOf(spillBuf);
+  strictEqual(
+    spillKw["$SPILLOVER"],
+    "3,FL1-A,FL2-A,FL3-A,1.0,0.05,0.01,0.02,1.0,0.03,0.0,0.04,1.0",
+    "synth-spill $SPILLOVER must be the 3x3 over FL1-A/FL2-A/FL3-A",
+  );
+  const spillData = columnsOf(spillBuf);
+  deepStrictEqual(spillData.names, ["FL1-A", "FL2-A", "FL3-A"]);
+  deepStrictEqual(Array.from(spillData.columns[0]), [100, 200, 300, 400], "synth-spill FL1-A raw must be [100, 200, 300, 400]");
+
+  // 3. The math: f64 inverse matches the numpy reference, and applying it
+  //    to the raw columns gives the F0 oracle values.
+  const comp = await import("../src/flow/compensation");
+  const fluor = ["FL1-A", "FL2-A", "FL3-A"];
+  const matrix = [
+    [1.0, 0.05, 0.01],
+    [0.02, 1.0, 0.03],
+    [0.0, 0.04, 1.0],
+  ];
+  const inv = comp.invertMatrix(matrix);
+  closeTo(inv[0][0], 1.00099418, 1e-6, "inverse[0][0]");
+  closeTo(inv[0][1], -0.04970896, 1e-6, "inverse[0][1]");
+  closeTo(inv[1][2], -0.02986547, 1e-6, "inverse[1][2]");
+  closeTo(inv[2][0], 0.00080176, 1e-6, "inverse[2][0]");
+  const compensated = comp.compensateColumns(spillData.columns, spillData.names, fluor, matrix);
+  closeTo(compensated[0][0], 87.60202, 1e-3, "compensated FL1-A event 0");
+  closeTo(compensated[1][0], 189.47533, 1e-3, "compensated FL2-A event 0");
+  closeTo(compensated[2][0], 292.42099, 1e-3, "compensated FL3-A event 0");
+  closeTo(compensated[0][1], 175.20405, 1e-3, "compensated FL1-A event 1");
+  // The raw columns are untouched: compensation materialises a new copy.
+  deepStrictEqual(Array.from(spillData.columns[0]), [100, 200, 300, 400], "compensateColumns must not mutate the raw columns");
+
+  // 4. The store: apply the file's matrix, read compensated columns back,
+  //    re-applying with an edited matrix recomputes from RAW (never double
+  //    compensation), and clearing reverts to raw.
+  const store = new InMemoryFlowStore({ budgetBytes: 1024 * 1024 });
+  await store.loadSample("spill", spillData.columns, spillData.names, { name: "synth-spill", sourcePath: "synth-spill.fcs" });
+  const state = await store.applyCompensation("spill", { fluorochromes: fluor, matrix, source: "file" });
+  strictEqual(state.applied, true, "compensation state must report applied after apply");
+  strictEqual(state.source, "file", "compensation state must record the file source");
+  deepStrictEqual(state.fluorochromes, fluor);
+  const colAfter = await store.getColumn("spill", "FL1-A");
+  closeTo(colAfter![0], 87.60202, 1e-3, "stored FL1-A event 0 after apply");
+  closeTo(colAfter![3], 350.40809, 1e-3, "stored FL1-A event 3 after apply");
+  const got = await store.getCompensation("spill");
+  strictEqual(got?.applied, true, "getCompensation must report the applied state");
+  // Re-apply with an edited matrix (identity): values return to raw —
+  // the apply recomputes from the raw copy, it does not stack.
+  await store.applyCompensation("spill", {
+    fluorochromes: fluor,
+    matrix: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    source: "manual",
+  });
+  deepStrictEqual(Array.from((await store.getColumn("spill", "FL1-A"))!), [100, 200, 300, 400], "re-applying identity must restore raw values");
+  strictEqual((await store.getCompensation("spill"))?.source, "manual", "re-apply must record the new source");
+  // Clear reverts to raw and reports unapplied.
+  strictEqual(await store.clearCompensation("spill"), true, "clearCompensation must report true for a loaded sample");
+  deepStrictEqual(Array.from((await store.getColumn("spill", "FL2-A"))!), [200, 400, 600, 800], "clear must restore raw FL2-A");
+  strictEqual((await store.getCompensation("spill"))?.applied, false, "getCompensation must report unapplied after clear");
+  strictEqual(await store.clearCompensation("missing"), false, "clearCompensation must report false for an unknown sample");
+  await rejects(store.applyCompensation("missing", { fluorochromes: fluor, matrix, source: "file" }), "apply on an unknown sample must be refused");
+
+  // 5. Sparse across measurement types: the multi-type fixture's -H
+  //    params and FSC-A/FSC-H pass through bit-identical; only the -A
+  //    fluorochromes are compensated, to the numpy values.
+  const store2 = new InMemoryFlowStore({ budgetBytes: 1024 * 1024 });
+  await store2.loadSample("multi", multiData.columns, multiData.names, { name: "f2a-multi-type", sourcePath: "f2a-multi-type.fcs" });
+  await store2.applyCompensation("multi", { fluorochromes: fluor, matrix, source: "file" });
+  deepStrictEqual(Array.from((await store2.getColumn("multi", "FL1-H"))!), [10, 20, 30, 40], "FL1-H must pass through compensation unchanged");
+  deepStrictEqual(Array.from((await store2.getColumn("multi", "FSC-A"))!), [1000, 2000, 3000, 4000], "FSC-A must pass through compensation unchanged");
+  deepStrictEqual(Array.from((await store2.getColumn("multi", "FSC-H"))!), [100, 200, 300, 400], "FSC-H must pass through compensation unchanged");
+  closeTo((await store2.getColumn("multi", "FL1-A"))![0], 87.60202, 1e-3, "multi-type FL1-A event 0");
+  closeTo((await store2.getColumn("multi", "FL3-A"))![3], 1169.68395, 1e-3, "multi-type FL3-A event 3");
+
+  // 6. Matrix text: the $SPILLOVER flat form and the FlowJo-style CSV
+  //    form both parse, and refusals are explicit.
+  const fromKeyword = comp.parseSpilloverKeyword(multiKw["$SPILLOVER"]);
+  deepStrictEqual(fromKeyword.fluorochromes, fluor);
+  deepStrictEqual(fromKeyword.matrix, matrix);
+  const csv = " ,FL1-A,FL2-A,FL3-A\nFL1-A,1.0,0.05,0.01\nFL2-A,0.02,1.0,0.03\nFL3-A,0.0,0.04,1.0\n";
+  const fromCsv = comp.parseSpilloverCsv(csv);
+  deepStrictEqual(fromCsv.fluorochromes, fluor);
+  deepStrictEqual(fromCsv.matrix, matrix);
+  throws(() => comp.invertMatrix([[1, 1], [1, 1]]), /singular/, "a singular matrix must be refused");
+  throws(() => comp.invertMatrix([[1, 0], [0, 1, 0]]), /square/, "a non-square matrix must be refused");
+  throws(() => comp.invertMatrix([[1, Number.NaN], [0, 1]]), /finite/, "a non-finite matrix must be refused");
+  await rejects(
+    store.applyCompensation("spill", { fluorochromes: ["FL1-A", "NOPE"], matrix: [[1, 0], [0, 1]], source: "manual" }),
+    "an unknown fluorochrome must be refused",
+  );
+  throws(() => comp.parseSpilloverCsv(" ,FL1-A\nFL1-A,1.0\nFL2-A,0.0\n"), /match/, "CSV row labels must match the header");
+
+  // 7. The Rust mirror: apply/clear/get + Tauri commands + tests.
+  const flowStore = readFileSync("src-tauri/src/flow_store.rs", "utf8");
+  ok(flowStore.includes("fn apply_compensation"), "flow_store.rs must expose apply_compensation");
+  ok(flowStore.includes("flow_apply_compensation"), "flow_store.rs must expose the flow_apply_compensation command");
+  ok(flowStore.includes("flow_get_compensation"), "flow_store.rs must expose the flow_get_compensation command");
+  ok(flowStore.includes("flow_clear_compensation"), "flow_store.rs must expose the flow_clear_compensation command");
+  ok(flowStore.includes("f2a-multi-type.fcs"), "the Rust tests must load the multi-type fixture");
+  ok(flowStore.includes("87.602"), "the Rust tests must assert the 87.60202 oracle value");
+  const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(mainRs.includes("flow_store::flow_apply_compensation"), "main.rs must register flow_apply_compensation");
+  ok(mainRs.includes("flow_store::flow_clear_compensation"), "main.rs must register flow_clear_compensation");
+
+  // 8. The MCP slice: titer_apply_flow_compensation + the flow group,
+  //    the TS executor + dispatch branch + node update, 80 tools.
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes("titer_apply_flow_compensation"), "mcp.rs must define the titer_apply_flow_compensation tool");
+  ok(mcp.includes("ApplyFlowCompensationArgs"), "mcp.rs must define the ApplyFlowCompensationArgs schema");
+  ok(mcp.includes("apply-flow-compensation"), "mcp.rs must dispatch the apply-flow-compensation job action");
+  ok(mcp.includes("80 tools"), "mcp.rs header must count 80 tools after F2a");
+  const mcpFlow = readFileSync("src/store/mcp-flow.ts", "utf8");
+  ok(mcpFlow.includes("executeApplyFlowCompensation"), "src/store/mcp-flow.ts must execute the apply-flow-compensation job");
+  const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
+  ok(dispatch.includes('case "apply-flow-compensation"'), "mcp-dispatch.ts must have the apply-flow-compensation branch");
+  ok(dispatch.includes("updateFlowSampleCompensation"), "mcp-dispatch.ts must pass updateFlowSampleCompensation to the job");
+  ok(
+    readFileSync("src/store/use-project-store.tsx", "utf8").includes("updateFlowSampleCompensation"),
+    "the store must provide an updateFlowSampleCompensation action",
+  );
+  ok(
+    readFileSync("tests/mcp-coverage-180.ts", "utf8").includes("EXPECTED_TOOL_COUNT = 80"),
+    "mcp-coverage-180.ts must expect 80 tools after F2a",
+  );
+});
+
 
 // ── Run ──────────────────────────────────────────────────────────────────
 
