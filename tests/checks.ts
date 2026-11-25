@@ -6824,6 +6824,62 @@ check("seq 351: a summary table cannot derive range/IQR/geometric errors from st
   deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sd-n", "sd"), { error: 2, errorMinus: null });
 });
 
+check("seq 490: a Mean, SEM table draws its stored SEM as the error bar, with no N column", () => {
+  // Mean, SEM (no N): the stored value IS the SEM — asking for SEM error
+  // bars must draw it, not blank.
+  const sem = readTable({
+    columns: ["Title", "A:Mean", "A:SEM", "B:Mean", "B:SEM"],
+    rows: [
+      ["r1", "10", "2", "20", "4"],
+      ["r2", "12", "3", "22", "6"],
+    ],
+    groups: 2,
+    replicates: 2,
+    summaryFormat: "mean-sem",
+  });
+  const { sets } = sem;
+  deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sem", "sem"), { error: 2, errorMinus: null });
+  deepStrictEqual(summaryErrorAt(sets[0].columns, 1, "mean-sem", "sem"), { error: 3, errorMinus: null });
+  // …and the grouped bars draw those whiskers.
+  const options = newGraphOptions("grouped-bars");
+  const fig = GRAPHS["grouped-bars"].build(sem.numeric, options, paintOf(options, 2), sem.titles, "mean-sem");
+  const traces = fig.data as { name: string; y: (number | null)[]; error_y?: { array: number[] } }[];
+  deepStrictEqual(traces[0].error_y?.array, [2, 3]);
+  deepStrictEqual(traces[1].error_y?.array, [4, 6]);
+  // SD from a stored SEM still needs an N: no guessed bar.
+  deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sem", "sd"), { error: null, errorMinus: null });
+  // CV is a share of the mean's magnitude: a negative mean still gives a
+  // positive SD.
+  const cv = readTable({
+    columns: ["Title", "A:Mean", "A:CV"],
+    rows: [["r1", "-10", "10"]],
+    summaryFormat: "mean-cv",
+  });
+  deepStrictEqual(summaryErrorAt(cv.columns, 0, "mean-cv", "sd"), { error: 1, errorMinus: null });
+});
+
+check("seq 490: XY summary graphs keep the asymmetric lower error bar", () => {
+  const dataset = readTable({
+    columns: ["Title", "X", "A:Mean", "A:+error", "A:−error"],
+    rows: [
+      [null, "1", "5", "10", "2"],
+      [null, "2", "7", "4", "3"],
+    ],
+    groups: 1,
+    replicates: 3,
+    summaryFormat: "mean-plus-minus",
+  });
+  const { x: xCol, ys } = splitXY(dataset.columns);
+  const drawn = xyDrawn(xCol!, ys[0]!, newGraphOptions("xy-scatter"), "mean-plus-minus");
+  deepStrictEqual(drawn, { x: [1, 2], y: [5, 7], errors: [10, 4], errorMinus: [2, 3] });
+  // …and the scatter plots it as the lower side, not ±upper.
+  const options = newGraphOptions("xy-scatter");
+  const fig = GRAPHS["xy-scatter"].build(dataset.columns, options, paintOf(options, 1), dataset.titles, "mean-plus-minus");
+  const traces = fig.data as { name: string; error_y?: { array: number[]; arrayminus?: number[] } }[];
+  deepStrictEqual(traces[0].error_y?.array, [10, 4]);
+  deepStrictEqual(traces[0].error_y?.arrayminus, [2, 3]);
+});
+
 // seq 375 half A: per-series center/error overrides — model + paint threading.
 // A [1,2,4,8,16]: mean 6.2, median 4, geomean 4. B [1,2,3,10,20]: mean 7.2, median 3.
 check("seq 375: a per-series center override changes only that series", () => {
@@ -8767,6 +8823,70 @@ check("seq 223: bars with individual points draws bars plus one points trace per
   );
   strictEqual(summaryFig.data.length, 2);
   ok((summaryFig.data as { type: string }[]).every((t) => t.type === "bar"));
+});
+
+check("seq 489: bars with individual points draws each point once, on its own bar, with no duplicate legend entry", () => {
+  const dataset = readTable(groupedNumbers());
+  const options = newGraphOptions("grouped-bars-scatter");
+  const fig = GRAPHS["grouped-bars-scatter"].build(dataset.columns, options, paintOf(options, 2), dataset.titles);
+  const traces = fig.data as {
+    type: string;
+    mode?: string;
+    name: string;
+    x: unknown;
+    y: (number | null)[];
+    showlegend?: boolean;
+  }[];
+  // Two bars + one points trace per group: the bars builder draws the
+  // points itself, so no second scatter loop duplicates them.
+  strictEqual(traces.length, 4);
+  deepStrictEqual(
+    traces.map((t) => `${t.type}/${t.mode ?? ""}`),
+    ["bar/", "bar/", "scatter/markers", "scatter/markers"],
+  );
+  // The bars sit on numeric category positions (not the "category" axis),
+  // so the points share the bars' x instead of landing on float ticks
+  // to the right of them. Group A at r − 0.28, group B at r + 0.28.
+  const bars = traces.filter((t) => t.type === "bar");
+  const close = (a: unknown, b: number[]) =>
+    Array.isArray(a) && a.length === b.length && (a as number[]).every((v, i) => Math.abs(v - b[i]) < 1e-9);
+  ok(close(bars[0].x, [-0.28, 0.72]), JSON.stringify(bars[0].x));
+  ok(close(bars[1].x, [0.28, 1.28]), JSON.stringify(bars[1].x));
+  const layout = fig.layout as { xaxis?: { type?: string; tickmode?: string; ticktext?: string[] } };
+  strictEqual(layout.xaxis?.tickmode, "array");
+  deepStrictEqual(layout.xaxis?.ticktext, ["r1", "r2"]);
+  // The points traces stay out of the legend: no group appears twice.
+  const points = traces.filter((t) => t.type === "scatter");
+  strictEqual(points.length, 2);
+  ok(points.every((t) => t.showlegend === false), JSON.stringify(points.map((t) => t.showlegend)));
+  deepStrictEqual(points[0].y, [1, 3, 2, 4]);
+  deepStrictEqual(points[1].y, [10, 12, 20, 22]);
+  // With showPoints on, the points are still drawn exactly once.
+  const shown = GRAPHS["grouped-bars-scatter"].build(
+    dataset.columns,
+    { ...options, showPoints: true },
+    paintOf(options, 2),
+    dataset.titles,
+  );
+  strictEqual(shown.data.length, 4);
+  // Superimposed: both groups' bars overlay at the row centers, and the
+  // points sit there too (jittered ±0.06 around the center).
+  const sup = GRAPHS["grouped-bars-scatter"].build(
+    dataset.columns,
+    { ...options, groupLayout: "superimposed" as const },
+    paintOf(options, 2),
+    dataset.titles,
+  );
+  strictEqual(sup.layout.barmode, "overlay");
+  const supTraces = sup.data as { type: string; x: number[] }[];
+  deepStrictEqual(
+    supTraces.filter((t) => t.type === "bar").map((t) => t.x),
+    [[0, 1], [0, 1]],
+  );
+  ok(
+    supTraces.filter((t) => t.type === "scatter").every((t) => t.x.every((v) => v >= -0.5 && v <= 1.5)),
+    JSON.stringify(supTraces.filter((t) => t.type === "scatter").map((t) => t.x)),
+  );
 });
 
 check("seq 223: MCP build-graph accepts grouped-bars-scatter; update-graph accepts groupLayout superimposed", () => {

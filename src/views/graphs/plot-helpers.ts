@@ -582,14 +582,21 @@ export function xyDrawn(
     if (!meanCol) return { x: [], y: [] };
     const rows = x.rows.filter((r) => meanCol.byRow[r] != null);
     const xErrs = xErrors(rows);
+    // The stored errors, converted once per row — including the lower side
+    // for the asymmetric formats, which the callers plot as errorMinus.
+    const errs =
+      options.error === "none" ? null : rows.map((r) => summaryErrorAt(set.columns, r, summary, options.error));
     return {
       x: rows.map((r) => x.byRow[r]!),
       y: rows.map((r) => meanCol.byRow[r]!),
-      ...(options.error === "none"
-        ? {}
-        : {
-            errors: rows.map((r) => summaryErrorAt(set.columns, r, summary, options.error).error ?? 0),
-          }),
+      ...(errs
+        ? {
+            errors: errs.map((e) => e.error ?? 0),
+            ...(errs.some((e) => e.errorMinus != null)
+              ? { errorMinus: errs.map((e) => e.errorMinus ?? NaN) }
+              : {}),
+          }
+        : {}),
       // Only present when there really are X errors: the return's shape is
       // pinned (seq 208), and an `xErrors: undefined` key would change it.
       ...(xErrs ? { xErrors: xErrs } : {}),
@@ -1424,6 +1431,8 @@ export function summaryErrorAt(
     };
   }
   // The stored error, as an SD: SD itself, SEM × √N, or CV% of the mean.
+  // CV is a share of the mean's magnitude, so a negative mean still gives
+  // a positive SD.
   const stored =
     def.errorKind === "sd"
       ? col("SD")?.byRow[r] ?? null
@@ -1438,9 +1447,13 @@ export function summaryErrorAt(
           ? null
           : stored * Math.sqrt(n)
         : def.errorKind === "cv"
-          ? (stored / 100) * m
+          ? (stored / 100) * Math.abs(m)
           : stored;
-  const asSem = asSd == null ? null : def.errorKind === "sem" ? stored : n == null ? null : asSd / Math.sqrt(n);
+  // The stored error, as an SEM: the stored SEM itself when that is what
+  // the format holds (no N needed — the value is already the SEM), else
+  // the SD over √N.
+  const asSem =
+    def.errorKind === "sem" ? stored : asSd == null || n == null ? null : asSd / Math.sqrt(n);
   return {
     error:
       error === "sd" ? asSd : error === "sem" ? asSem : n == null || n < 2 || asSem == null ? null : tCrit95(n - 1) * asSem,
