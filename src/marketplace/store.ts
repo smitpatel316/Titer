@@ -69,7 +69,7 @@ export class MarketplaceStore {
     this.fetchBytes = deps.fetchBytes ?? defaultFetchBytes;
     this.loadBundledZip = deps.loadBundledZip;
     this.now = deps.now ?? (() => Date.now());
-    this.appVersion = deps.appVersion ?? "1.9.0";
+    this.appVersion = deps.appVersion ?? "2.0.0";
     this.loadInstalled();
   }
 
