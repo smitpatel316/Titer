@@ -17,13 +17,13 @@ import {
   mcpFeedbackConsent,
   mcpOpenAntigravity,
   mcpRegenerateToken,
+  mcpSendSavedFeedback,
   mcpSetAllowlist,
   mcpSetEnabled,
   mcpSetErrorLogConsent,
   mcpSetFeedbackConsent,
   mcpStatus,
   mcpToken,
-  openGithubIssue,
   type ErrorLogEntry,
   type FeedbackEntry,
   type McpAllowlistGroup,
@@ -79,13 +79,6 @@ function feedbackText(entry: FeedbackEntry): string {
   return `[${entry.kind}] ${entry.summary}\n${new Date(entry.ts * 1000).toLocaleString()}\n\n${feedbackIssueBody(entry)}`;
 }
 
-/** The pre-filled GitHub issue URL for one entry. The user reviews and
- *  submits it in the browser — nothing is sent from here. */
-function feedbackIssueUrl(entry: FeedbackEntry): string {
-  const title = `[feedback] ${entry.summary}`;
-  return `https://github.com/smitpatel316/Titer/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(feedbackIssueBody(entry))}`;
-}
-
 export function AiConnectionsDialog() {
   const { selector, closeSelector } = useProjectStore();
   const open = selector?.kind === "ai-connections";
@@ -100,6 +93,7 @@ export function AiConnectionsDialog() {
   const [errorLogSharing, setErrorLogSharing] = React.useState<boolean | null>(null);
   const [allowlist, setAllowlist] = React.useState<McpAllowlistGroup[] | null>(null);
   const [copiedFeedback, setCopiedFeedback] = React.useState<string | null>(null);
+  const [sentFeedback, setSentFeedback] = React.useState<string[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
   const [copied, setCopied] = React.useState<"token" | "command" | "antigravity" | "prompt" | null>(null);
@@ -154,9 +148,16 @@ export function AiConnectionsDialog() {
     setTimeout(() => setCopiedFeedback((c) => (c === entry.feedback_id ? null : c)), 2000);
   };
 
-  const sendFeedbackToGithub = async (entry: FeedbackEntry) => {
+  /** Sends one saved report straight to the team (seq 453): the direct
+   *  send that replaces the old pre-filled GitHub issue — Issues are off
+   *  on the repo. The server copy is consent-gated, like every other
+   *  send; when sharing is off the report stays on this Mac and the
+   *  button says so. */
+  const sendSavedFeedback = async (entry: FeedbackEntry) => {
     try {
-      await openGithubIssue(feedbackIssueUrl(entry));
+      const out = await mcpSendSavedFeedback(entry.feedback_id);
+      if (out.sent) setSentFeedback((sent) => [...sent, entry.feedback_id]);
+      else setError(out.note ?? "Sharing is off, so the report stays on this Mac.");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -474,8 +475,8 @@ export function AiConnectionsDialog() {
             </p>
             {feedback.length === 0 ? (
               <p className="text-regular text-secondary">
-                No feedback yet — your AI can report a missing feature or a bug with titer_send_feedback, and it will
-                show up here for you to review.
+                No feedback yet — your AI can report a missing feature or a bug with titer_send_feedback, or you can
+                send one yourself from Help ▸ Send Feedback, and it will show up here for you to review.
               </p>
             ) : (
               <div className="flex flex-col gap-3">
@@ -489,7 +490,12 @@ export function AiConnectionsDialog() {
                       <Button onClick={() => void copyFeedback(entry)}>
                         {copiedFeedback === entry.feedback_id ? "Copied" : "Copy"}
                       </Button>
-                      <Button onClick={() => void sendFeedbackToGithub(entry)}>Send to GitHub</Button>
+                      <Button
+                        disabled={sentFeedback.includes(entry.feedback_id)}
+                        onClick={() => void sendSavedFeedback(entry)}
+                      >
+                        {sentFeedback.includes(entry.feedback_id) ? "Sent" : "Send to the Titer team"}
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -497,8 +503,8 @@ export function AiConnectionsDialog() {
             )}
             <p className="mt-1 text-small text-secondary">
               Reports are always saved on this Mac first. With sharing on, a report is also sent to the Titer team
-              when your AI sends one; with sharing off, nothing leaves this Mac — use “Send to GitHub” to share one
-              yourself, which opens a pre-filled issue in your browser for you to review and submit.
+              when your AI sends one; with sharing off, nothing leaves this Mac — use “Send to the Titer team” to
+              share one yourself.
             </p>
           </Section>
 

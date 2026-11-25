@@ -2734,8 +2734,12 @@ check("seq 241: Help offers the User Guide (F1) and the shell opens only the fix
 // seq 432 (Help → entries beyond the User Guide): the Help menu carries
 // Prism's Help entries in Prism's order, each with a live destination —
 // Prism's own Curve Fitting and Statistics guides (labelled as Prism's),
-// Titer Tips and How to Cite Titer as in-app dialogs, the support entries
-// on GitHub, and the Titer web site — and no Manage License (open source).
+// Titer Tips and How to Cite Titer as in-app dialogs, the feedback loop
+// (seq 453: Send Feedback / Contact Support / Ask the Community /
+// What's New) in place of the dead pre-filled GitHub-issue entry
+// (Personal Support… — GitHub Issues are off on the repo), then the
+// support site + policies and the Titer web site — and no Manage License
+// (open source).
 check("seq 432: Help carries Prism's entries in order — guides, Tips, How to Cite, support — and no Manage License", () => {
   const menus = readFileSync("src/menus.ts", "utf8");
   const order = [
@@ -2745,9 +2749,12 @@ check("seq 432: Help carries Prism's entries in order — guides, Tips, How to C
     "Prism Statistics Guide",
     "Titer Tips",
     "How to Cite Titer",
+    "Send Feedback",
+    "Contact Support",
+    "Ask the Community",
     "Support Web Site",
-    "Personal Support…",
     "Support Policies",
+    "What's New",
     "Go to titer.smitpatel.net",
     "Buy Me a Coffee",
     "Sample Project",
@@ -2763,14 +2770,15 @@ check("seq 432: Help carries Prism's entries in order — guides, Tips, How to C
   // The new destinations ride the same fixed-address openLink as the guide.
   const native = readFileSync("src/native.ts", "utf8");
   const openLinkDecl = native.slice(native.indexOf("export const openLink"), native.indexOf(") => void invoke", native.indexOf("export const openLink")));
-  for (const key of ["curve-fitting", "statistics", "support", "support-policies", "site"]) {
+  for (const key of ["curve-fitting", "statistics", "support", "support-policies", "discussions", "site"]) {
     ok(openLinkDecl.includes(`"${key}"`), `openLink doesn't take the new Help destination ${key}`);
   }
   const shell = readFileSync("src-tauri/src/main.rs", "utf8");
   const arms: [string, string][] = [
     ["curve-fitting", "https://www.graphpad.com/guides/prism/latest/curve-fitting/"],
     ["statistics", "https://www.graphpad.com/guides/prism/latest/statistics/"],
-    ["support", "https://github.com/smitpatel316/Titer/issues"],
+    ["support", "https://titer.smitpatel.net/support"],
+    ["discussions", "https://github.com/smitpatel316/Titer/discussions"],
     ["support-policies", "https://github.com/smitpatel316/Titer/blob/main/SUPPORT.md"],
     ["site", "https://titer.smitpatel.net/"],
   ];
@@ -41217,6 +41225,106 @@ check("plugin-m5 seam: the interceptor never calls executeJob or Tauri invoke di
   );
   ok(!/\bexecuteJob\s*\(/.test(src), "isolation.ts must never call executeJob itself");
   ok(!/\binvoke\s*\(/.test(src), "isolation.ts must never call Tauri invoke itself");
+});
+
+
+check("feedback-loop-453: feedback reachable for every user, Discussions + support email, crash path, What's new, triage metadata", async () => {
+  // (a) Help menu: Send Feedback (dialog, no AI needed), Contact Support
+  // (mailto smit@muse.ai — the dead GitHub-issues support link is gone),
+  // Ask the Community (Discussions), What's New. No issues/new URL left
+  // in the support entries.
+  const menus = readFileSync("src/menus.ts", "utf8");
+  ok(menus.includes("Send Feedback"), "Help menu offers Send Feedback");
+  ok(menus.includes("openSendFeedback"), "Send Feedback opens the in-app dialog");
+  ok(menus.includes("Contact Support"), "Help menu offers Contact Support");
+  ok(menus.includes("smit@muse.ai"), "support mail goes to smit@muse.ai");
+  ok(menus.includes("Ask the Community"), "Help menu offers Ask the Community");
+  ok(menus.includes('openLink("discussions")'), "Ask the Community opens Discussions");
+  ok(menus.includes("What's New"), "Help menu offers What's New");
+  ok(menus.includes("openWhatsNew"), "What's New opens the dialog");
+  ok(!menus.includes("issues/new"), "no dead GitHub-issues support link remains in the menu");
+  ok(!menus.includes("Personal Support"), "the dead Personal Support… entry is gone");
+  // (b) Shell fixed addresses: Discussions URL exists; Support Web Site
+  // points at the site (the /issues page is off); the mail command only
+  // ever opens mailto:smit@muse.ai.
+  const main = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(main.includes('"discussions" =>'), "open_link has a discussions key");
+  ok(main.includes("https://github.com/smitpatel316/Titer/discussions"), "discussions address is the repo Discussions page");
+  ok(!/\"support\" => c?"https:\/\/github\.com\/smitpatel316\/Titer\/issues\"/.test(main), "Support Web Site no longer points at the disabled Issues page");
+  ok(main.includes('fn open_support_email'), "the shell has an open_support_email command");
+  ok(main.includes('mailto:smit@muse.ai?'), "the mail command only opens mailto:smit@muse.ai");
+  ok(main.includes("open_support_email"), "open_support_email is registered as a command");
+  // (c) Crash path (seq 452's interface, tip 5e0198e): one shared
+  // log-path constant, the scrubber, the log read + flush commands,
+  // and the panic hook — the two lanes converge on these exact names
+  // at merge. The offer signal is unsent entries (sent: false), not
+  // a crash marker: sharing off or a failed send leaves the same trace.
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes('ERROR_LOG_FILE'), "the shell owns the shared error-log file constant");
+  ok(mcp.includes("fn scrub_error_text"), "the shell scrubs error text before storing or sending");
+  ok(mcp.includes("fn error_log_sharing_enabled"), "sending is gated on the error-log consent");
+  ok(mcp.includes("fn mcp_error_log("), "the shell exposes the error-log read (newest first)");
+  ok(mcp.includes("fn mcp_flush_error_log("), "the shell exposes the error-log flush");
+  ok(mcp.includes("fn mcp_log_error("), "the shell exposes the log-error command");
+  ok(mcp.includes("fn mcp_error_log_consent("), "the shell exposes the error-log consent read");
+  ok(mcp.includes("fn mcp_set_error_log_consent("), "the shell exposes the error-log consent write");
+  ok(mcp.includes("fn record_rust_panic"), "Rust panics are recorded to the local log");
+  ok(mcp.includes("fn mcp_send_feedback"), "the shell exposes the direct UI feedback send");
+  ok(mcp.includes("feedback_share_result(&dir, &feedback_server_url(), &entry)"), "the UI send shares through the feedback path (consent-gated)");
+  ok(mcp.includes("scrub_error_text_strips_user_paths_but_keeps_relative_ones"), "a Rust test pins the scrubber's behaviour");
+  ok(main.includes("set_hook"), "main.rs installs a panic hook");
+  ok(main.includes("record_rust_panic"), "the panic hook records to the error log");
+  ok(main.includes("mcp_flush_error_log,"), "main.rs registers mcp_flush_error_log");
+  ok(main.includes("mcp_error_log,"), "main.rs registers mcp_error_log");
+  // The startup flush + capture live in main.tsx / error-log.ts.
+  const mainSrc = readFileSync("src/main.tsx", "utf8");
+  ok(mainSrc.includes("installErrorCapture"), "main.tsx installs the global error capture");
+  ok(mainSrc.includes("mcpFlushErrorLog"), "main.tsx flushes unsent error entries on startup");
+  // The frontend wrappers for the new commands.
+  const native = readFileSync("src/native.ts", "utf8");
+  for (const fn of ["mcpSendFeedback", "mcpErrorLog", "mcpFlushErrorLog", "mcpErrorLogConsent", "mcpSetErrorLogConsent", "mcpLogError", "openSupportEmail"]) {
+    ok(native.includes(fn), `native.ts exposes ${fn}`);
+  }
+  // (a) The dialog: three user-facing kinds, Question wired as "other"
+  // (the server's accepted enum is bug | missing-feature | other), and a
+  // button the startup guide can use.
+  const dialog = readFileSync("src/components/send-feedback-dialog.tsx", "utf8");
+  ok(dialog.includes("Feature request"), "the kind picker offers Feature request");
+  ok(dialog.includes("Question"), "the kind picker offers Question");
+  ok(dialog.includes('"other"'), "Question is wired as kind other");
+  ok(dialog.includes("mcpSendFeedback"), "the dialog sends through the direct command");
+  ok(dialog.includes("SendFeedbackButton"), "the dialog exports a button for the startup guide");
+  const bus = readFileSync("src/lib/feedback-ui.ts", "utf8");
+  for (const fn of ["openSendFeedback", "onSendFeedbackRequest", "openWhatsNew", "onWhatsNewRequest"]) {
+    ok(bus.includes(fn), `the feedback bus exposes ${fn}`);
+  }
+  ok(bus.includes("smit@muse.ai"), "the bus owns the support address");
+  // (c) The crash offer reads the log (unsent entries are the signal —
+  // not proof of a crash, so the copy says so) and sends via the flush;
+  // sharing off gets an explicit opt-in instead of a silent no-op.
+  const crash = readFileSync("src/components/crash-report-dialog.tsx", "utf8");
+  ok(crash.includes("mcpErrorLog"), "the crash dialog reads the error log first");
+  ok(crash.includes("!e.sent"), "the crash dialog offers only unsent entries");
+  ok(crash.includes("mcpFlushErrorLog"), "the crash dialog sends through the flush");
+  ok(crash.includes("mcpErrorLogConsent"), "the crash dialog reads the sharing choice");
+  ok(crash.includes("mcpSetErrorLogConsent"), "the crash dialog can turn sharing on to send");
+  ok(crash.includes("or a send failed"), "the copy admits unsent entries are not proof of a crash");
+  ok(crash.includes("Turn on sharing"), "sharing off offers an explicit opt-in, not a silent no-op");
+  // (d) What's new: versioned entries seeded from the 1.9.0 release
+  // notes, a once-per-version auto-show, mounted in the shell.
+  const whatsNew = readFileSync("src/lib/whats-new.ts", "utf8");
+  ok(whatsNew.includes("1.9.0"), "What's new is seeded with the 1.9.0 highlights");
+  ok(whatsNew.includes("shouldShowWhatsNew"), "What's new shows once per version");
+  ok(readFileSync("src/components/whats-new-dialog.tsx", "utf8").includes("WHAT_S_NEW"), "the What's New dialog renders the entries");
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(shell.includes("SendFeedbackDialog"), "the shell mounts the feedback dialog");
+  ok(shell.includes("CrashReportDialog"), "the shell mounts the crash-report dialog");
+  ok(shell.includes("WhatsNewDialog"), "the shell mounts the What's New dialog");
+  // (e) Triage: every posted entry carries kind + app version + OS, so
+  // the Scout/PM pipeline can turn it into a lane.
+  ok(mcp.includes('"app_version": env!("CARGO_PKG_VERSION")'), "feedback context carries the app version");
+  ok(mcp.includes('"os": std::env::consts::OS'), "feedback context carries the OS");
+  ok(mcp.includes('"kind": kind'), "feedback entries carry their kind");
 });
 
 

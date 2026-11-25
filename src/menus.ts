@@ -6,12 +6,13 @@ import {
   chooseProject,
   installMenuBar,
   newProject,
-  openGithubIssue,
   openLink,
   openProjects,
   openSample,
+  openSupportEmail,
   type MenuItems,
 } from "./native";
+import { openSendFeedback, openWhatsNew } from "./lib/feedback-ui";
 import { fileName } from "./lib/paths";
 import { checkForUpdates } from "./updates";
 import { version } from "../package.json";
@@ -68,14 +69,6 @@ const showCitation = () =>
     `Titer ${version} (https://github.com/smitpatel316/Titer). Titer is free and open-source software under GPL-3.0, a modified fork of Helix by mickaphd. Cite the version you used and the address above.`,
     "info",
   );
-
-/** A pre-filled support issue (Help ▸ Personal Support…, seq 432): the
- *  shell only opens the fixed issues/new address, so the title and body
- *  are the only free text — the same shape as the feedback issue. */
-const supportIssueUrl = () =>
-  `https://github.com/smitpatel316/Titer/issues/new?title=${encodeURIComponent("Support request")}&body=${encodeURIComponent(
-    "Titer version:\nOperating system:\n\nWhat happened?\n\n\nWhat did you expect?\n\n\nSteps to reproduce:\n",
-  )}`;
 
 /** Says a project file is gone (moved or deleted since). */
 export const sayGone = (path: string) =>
@@ -149,6 +142,12 @@ export function setMenuBar(menus: MenuItems) {
       // Titer has no equivalent of its own to point at. Check for Updates
       // already lives in the Titer menu, and Free Web QuickCalcs has no
       // Titer equivalent, so neither is repeated here.
+      // The support block (seq 453) is the feedback loop: Send Feedback
+      // opens the in-app dialog (no AI, no browser); Contact Support
+      // writes to smit@muse.ai; Ask the Community opens the repo's
+      // GitHub Discussions; What's New shows what shipped from feedback.
+      // The pre-filled GitHub-issue entry (seq 432) is gone: GitHub
+      // Issues are off on the repo, so the link was dead.
       { text: "Titer on GitHub", action: () => openLink("github") },
       // The user guide lives in the repo's README (Help ▸ Titer User Guide,
       // seq 241): the same fixed address as the GitHub link, opened the
@@ -160,9 +159,12 @@ export function setMenuBar(menus: MenuItems) {
       separator,
       { text: "How to Cite Titer", action: () => void showCitation() },
       separator,
+      { text: "Send Feedback", action: () => openSendFeedback() },
+      { text: "Contact Support", action: () => void openSupportEmail() },
+      { text: "Ask the Community", action: () => openLink("discussions") },
       { text: "Support Web Site", action: () => openLink("support") },
-      { text: "Personal Support…", action: () => void openGithubIssue(supportIssueUrl()) },
       { text: "Support Policies", action: () => openLink("support-policies") },
+      { text: "What's New", action: () => openWhatsNew() },
       separator,
       { text: "Go to titer.smitpatel.net", action: () => openLink("site") },
       { text: "Buy Me a Coffee", action: () => openLink("coffee") },

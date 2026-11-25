@@ -1285,6 +1285,14 @@ pub fn mcp_set_feedback_consent(app: AppHandle, state: State<McpState>, sharing:
 // Capture writes a scrubbed entry to a local rotating log, always; the
 // feedback channel only ever sees it when the user opted in.
 
+//
+// Seq 453 adds the crash path on top of this log: the crash-report
+// dialog reads the log with `mcp_error_log` (unsent entries are the
+// previous run's leftovers) and sends them with `mcp_flush_error_log`.
+// The scrubber, the log shape and the constants below are shared with
+// seq 452's lane — the two lanes converge on these exact names at
+// merge, so keep them identical here.
+
 /// A path token ends at whitespace, a quote, a closing bracket, a comma,
 /// a semicolon, or a colon (the `:12:3` of a stack location survives —
 /// line numbers carry no user data). Mirrors `scrubErrorText` in
@@ -1666,6 +1674,112 @@ pub(crate) fn record_rust_panic(dir: &std::path::Path, info: &std::panic::PanicH
         Ok(())
     })();
 }
+
+/// Append one feedback entry to the local file (owner-only write is the
+/// caller's job on first creation; the file lives in the 0700 `mcp/`
+/// directory like its neighbours). Shared by the MCP tool and the direct
+/// UI send below, so both save exactly the same way.
+fn append_feedback_entry(dir: &std::path::Path, entry: &serde_json::Value) -> Result<(), String> {
+    let line = serde_json::to_string(entry).map_err(|e| format!("Couldn't record the feedback ({e})."))?;
+    {
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join(FEEDBACK_FILE))
+            .map_err(|e| format!("Couldn't save the feedback ({e})."))?;
+        writeln!(file, "{line}").map_err(|e| format!("Couldn't save the feedback ({e})."))?;
+    }
+    Ok(())
+}
+
+/// Send feedback straight from the UI (seq 453) — the Help ▸ Send
+/// Feedback dialog, no AI needed. Same validation, same local-first save
+/// and same context (kind + app version + OS, so the Scout/PM pipeline
+/// can triage it into a lane) as `titer_send_feedback`; the server copy
+/// goes through `feedback_share_result`, so it is consent-gated exactly
+/// like the tool's: sharing off means saved locally, nothing leaves the
+/// machine.
+#[tauri::command]
+pub async fn mcp_send_feedback(
+    app: AppHandle,
+    state: State<'_, McpState>,
+    kind: String,
+    summary: String,
+    details: String,
+) -> Result<serde_json::Value, String> {
+    let kind = kind.trim();
+    if !matches!(kind, "bug" | "missing-feature" | "other") {
+        return Err("kind must be one of \"bug\", \"missing-feature\", \"other\".".into());
+    }
+    let summary = summary.trim();
+    if summary.is_empty() {
+        return Err("summary is required — one short line saying what is missing or broken.".into());
+    }
+    if summary.chars().count() > MAX_FEEDBACK_SUMMARY_CHARS {
+        return Err(format!(
+            "summary is too long ({0} characters) — keep it to {1} characters or fewer.",
+            summary.chars().count(),
+            MAX_FEEDBACK_SUMMARY_CHARS
+        ));
+    }
+    let details = details.trim();
+    if details.is_empty() {
+        return Err("details is required — say what was tried, what happened, and what was expected.".into());
+    }
+    if details.chars().count() > MAX_FEEDBACK_DETAILS_CHARS {
+        return Err(format!(
+            "details is too long ({0} characters) — keep it to {1} characters or fewer.",
+            details.chars().count(),
+            MAX_FEEDBACK_DETAILS_CHARS
+        ));
+    }
+    let dir = state.ensure_dir(&app)?;
+    let mut context = serde_json::json!({
+        "app_version": env!("CARGO_PKG_VERSION"),
+        "os": std::env::consts::OS,
+    });
+    if let Some(file) = state.front_project_file_name() {
+        context["project_file"] = serde_json::Value::String(file);
+    }
+    context["recent_activity"] = serde_json::Value::Array(recent_activity_context(&dir));
+    let feedback_id = new_feedback_id();
+    let entry = serde_json::json!({
+        "feedback_id": feedback_id,
+        "ts": now_ts(),
+        "kind": kind,
+        "summary": summary,
+        "details": details,
+        "context": context,
+    });
+    append_feedback_entry(&dir, &entry)?;
+    Ok(feedback_share_result(&dir, &feedback_server_url(), &entry).await)
+}
+
+/// Send one SAVED feedback entry to the team (seq 453): Settings → AI
+/// Connections lists saved reports, and this is the direct send that
+/// replaces the old pre-filled GitHub issue (Issues are off on the repo).
+/// No duplicate save — the entry is already in the file; the server copy
+/// goes through `feedback_share_result`, so it is consent-gated like
+/// every other send.
+#[tauri::command]
+pub async fn mcp_send_saved_feedback(
+    app: AppHandle,
+    state: State<'_, McpState>,
+    feedback_id: String,
+) -> Result<serde_json::Value, String> {
+    let dir = state.ensure_dir(&app)?;
+    let text = fs::read_to_string(dir.join(FEEDBACK_FILE)).unwrap_or_default();
+    let entry = text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|v| v.get("feedback_id").and_then(|v| v.as_str()) == Some(feedback_id.as_str()));
+    let Some(entry) = entry else {
+        return Err("That feedback report is no longer saved on this Mac.".into());
+    };
+    Ok(feedback_share_result(&dir, &feedback_server_url(), &entry).await)
+}
+
 
 /// The persisted MCP opt-in record: `<app_data>/mcp/mcp-opt-in.json`,
 /// `{"enabled": bool, "ts": <unix seconds>}`. The same shape as the
@@ -5089,16 +5203,7 @@ impl TiterMcpServer {
             "details": details,
             "context": context,
         });
-        let line = serde_json::to_string(&entry).map_err(|e| format!("Couldn't record the feedback ({e})."))?;
-        {
-            use std::io::Write;
-            let mut file = fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(dir.join(FEEDBACK_FILE))
-                .map_err(|e| format!("Couldn't save the feedback ({e})."))?;
-            writeln!(file, "{line}").map_err(|e| format!("Couldn't save the feedback ({e})."))?;
-        }
+        append_feedback_entry(&dir, &entry)?;
         // Log kind + id only — the details are the agent's words, not a
         // summary, and may quote what it saw.
         self.state.log_call(
@@ -13603,6 +13708,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&app_data);
     }
 
+    #[test]
+    fn scrub_error_text_strips_user_paths_but_keeps_relative_ones() {
+        // macOS / Linux home paths and any absolute path become [path];
+        // relative source paths survive — they name app code, not the user.
+        assert_eq!(
+            scrub_error_text("Cannot read /Users/smitpatel316/Documents/foo.prism: boom"),
+            "Cannot read [path]: boom"
+        );
+        assert_eq!(scrub_error_text("ENOENT /home/smit/work/data.csv"), "ENOENT [path]");
+        assert_eq!(
+            scrub_error_text("TypeError: x is not a function at src/lib/foo.ts:12:3"),
+            "TypeError: x is not a function at src/lib/foo.ts:12:3"
+        );
+        // A Windows home path: the token skip must start past the drive
+        // letter's colon, or it stops there and leaks `\\Users\\smit\\...`
+        // (the `:line` suffix still survives).
+        assert_eq!(
+            scrub_error_text("failed at C:\\Users\\smit\\AppData\\x.js:1"),
+            "failed at [path]:1"
+        );
+        assert!(!scrub_error_text("at /Users/smitpatel316/x.ts").contains("smitpatel316"));
+    }
+
     // ── Feedback sharing (server mode, seq 276) ─────────────────────────
     // The consent gate + POST live here, against a loopback mock server —
     // never the live endpoint. The mock mirrors the broker mock in
@@ -13800,29 +13928,6 @@ mod tests {
         );
         assert_eq!(seen.lock().expect("seen lock").len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn scrub_error_text_strips_user_paths_but_keeps_relative_ones() {
-        // macOS / Linux home paths and any absolute path become [path];
-        // relative source paths survive — they name app code, not the user.
-        assert_eq!(
-            scrub_error_text("Cannot read /Users/smitpatel316/Documents/foo.prism: boom"),
-            "Cannot read [path]: boom"
-        );
-        assert_eq!(scrub_error_text("ENOENT /home/smit/work/data.csv"), "ENOENT [path]");
-        assert_eq!(
-            scrub_error_text("TypeError: x is not a function at src/lib/foo.ts:12:3"),
-            "TypeError: x is not a function at src/lib/foo.ts:12:3"
-        );
-        // A Windows home path: the token skip must start past the drive
-        // letter's colon, or it stops there and leaks `\Users\smit\...`
-        // (the `:line` suffix still survives).
-        assert_eq!(
-            scrub_error_text("failed at C:\\Users\\smit\\AppData\\x.js:1"),
-            "failed at [path]:1"
-        );
-        assert!(!scrub_error_text("at /Users/smitpatel316/x.ts").contains("smitpatel316"));
     }
 
     #[test]
