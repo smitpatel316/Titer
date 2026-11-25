@@ -206,7 +206,7 @@ import {
 import { resultCellBackgroundKey } from "../src/lib/cell-colors";
 import { flattenThreeWay, rowGroupBands } from "../src/stats/grouped/base";
 import { gridMenu } from "../src/views/tables/grid-menu";
-import { analysisOptionsForTable, analysisOptionsKey } from "../src/views/analyses";
+import { analysisOptionsForTable, analysisOptionsKey, analysisTypesOfferedForTable } from "../src/views/analyses";
 import { followTable } from "../src/store/references";
 import { isSummaryFormatValue, summaryFormatOf, summaryTableProblem } from "../src/lib/summary-format";
 import { tCrit95 } from "../src/lib/student-t";
@@ -22509,6 +22509,101 @@ check("the chi-square-gof and binomial wizards ask the expected distribution, th
     columnOptions.slice(columnOptions.indexOf("kolmogorov-smirnov"), columnOptions.indexOf("outliers") + 1),
     ["kolmogorov-smirnov", "one-sample-ks", "chi-square-gof", "binomial-test", "outliers"],
   );
+});
+
+// pow-195: chi-square-gof and binomial-test are offered on Parts-of-whole
+// tables (Prism's "Parts of whole analyses" entry) and produce the same
+// results as on Column. A Parts-of-whole table holds one data set per
+// column with the categories as rows — Mendel's peas as Prism imports them
+// (an observed set plus an "Expected" set) — so the wizard asks which set
+// holds the observed counts, then the run must match the single-column
+// Column run exactly.
+check("pow-195: chi-square-gof and binomial-test are offered on Parts-of-whole tables and match the Column results", async () => {
+  ok(isAnalysisOffered("chi-square-gof", "parts-of-whole"), "chi-square-gof is offered on Parts of Whole");
+  ok(isAnalysisOffered("binomial-test", "parts-of-whole"), "binomial-test is offered on Parts of Whole");
+  deepStrictEqual(
+    analysisOptionsForTable("parts-of-whole").map((o) => o.value),
+    ["fraction-of-total", "chi-square-gof", "binomial-test", "transform", "plot-function"],
+  );
+  // The MCP gate reads the same offering list, so both tests are runnable
+  // via create-analysis on a Parts-of-whole table too.
+  const offeredTypes = analysisTypesOfferedForTable("parts-of-whole");
+  ok(offeredTypes.includes("chi-square-gof"), "the MCP gate offers chi-square-gof on Parts of Whole");
+  ok(offeredTypes.includes("binomial-test"), "the MCP gate offers binomial-test on Parts of Whole");
+
+  // Goodness of fit: Mendel's 9:3:3:1, two data sets as imported from Prism.
+  const powMendel: TableData = {
+    columns: ["Title", "# of seeds", "Expected"],
+    rows: [
+      ["Round and yellow", "315", "312.75"],
+      ["Round and green", "108", "104.25"],
+      ["Angular and yellow", "101", "104.25"],
+      ["Angular and green", "32", "34.75"],
+    ],
+  };
+  const columnMendel: TableData = {
+    columns: ["Title", "Peas"],
+    rows: [
+      ["Round and yellow", "315"],
+      ["Round and green", "108"],
+      ["Angular and yellow", "101"],
+      ["Angular and green", "32"],
+    ],
+  };
+  const gofAsked = WIZARDS["chi-square-gof"]!
+    .questions({}, readTable(powMendel))
+    .flatMap((q) => (q ? [q.id] : []));
+  deepStrictEqual(gofAsked, ["set", "expectedMode"]);
+  const gofFinished = WIZARDS["chi-square-gof"]!.finish(
+    { set: "# of seeds", expectedMode: "counts", expectedValues: "312.75, 104.25, 104.25, 34.75" },
+    readTable(powMendel),
+  );
+  deepStrictEqual(gofFinished, {
+    type: "chi-square-gof",
+    params: { expectedMode: "counts", expectedValues: [312.75, 104.25, 104.25, 34.75], sets: ["# of seeds"] },
+  });
+  const powGof = await runAnalysis("chi-square-gof", powMendel, gofFinished.params);
+  if ("error" in powGof) throw new Error(powGof.error);
+  const colGof = await runAnalysis("chi-square-gof", columnMendel, {
+    expectedMode: "counts",
+    expectedValues: [312.75, 104.25, 104.25, 34.75],
+  });
+  if ("error" in colGof) throw new Error(colGof.error);
+  deepStrictEqual(powGof.stats, colGof.stats, "Parts-of-whole goodness-of-fit stats match the Column run");
+  deepStrictEqual(powGof.gofCategories, colGof.gofCategories, "Parts-of-whole per-category table matches the Column run");
+
+  // Binomial test: two categories, two data sets (observed + expected).
+  const powCoin: TableData = {
+    columns: ["Title", "Observed", "Expected"],
+    rows: [
+      ["Heads", "8", "5"],
+      ["Tails", "2", "5"],
+    ],
+  };
+  const columnCoin: TableData = {
+    columns: ["Title", "Flips"],
+    rows: [
+      ["Heads", "8"],
+      ["Tails", "2"],
+    ],
+  };
+  const binAsked = WIZARDS["binomial-test"]!
+    .questions({}, readTable(powCoin))
+    .flatMap((q) => (q ? [q.id] : []));
+  deepStrictEqual(binAsked, ["set", "expectedProportion"]);
+  const binFinished = WIZARDS["binomial-test"]!.finish(
+    { set: "Observed", expectedProportion: 0.5 },
+    readTable(powCoin),
+  );
+  deepStrictEqual(binFinished, {
+    type: "binomial-test",
+    params: { expectedProportion: 0.5, sets: ["Observed"] },
+  });
+  const powBin = await runAnalysis("binomial-test", powCoin, binFinished.params);
+  if ("error" in powBin) throw new Error(powBin.error);
+  const colBin = await runAnalysis("binomial-test", columnCoin, { expectedProportion: 0.5 });
+  if ("error" in colBin) throw new Error(colBin.error);
+  deepStrictEqual(powBin.stats, colBin.stats, "Parts-of-whole binomial stats match the Column run");
 });
 
 // BUG-REPORT #28 leg 3: prop.trend.test on a first row/column holding 0%
