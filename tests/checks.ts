@@ -40230,6 +40230,37 @@ check("M2-install: bundled install runs download → hash → parse → install 
   strictEqual(reloaded.getInstalled("example.hello-analysis")?.status, "enabled");
 });
 
+check("plugin-registry-rehydrate-461: an enabled plugin's analyses survive a fresh store over the same storage (restart)", async () => {
+  // Seq 461: a fresh launch showed the Hello plugin installed+enabled in
+  // the GUI while `titer_list_plugin_analyses` returned [] — the store
+  // restored the record from storage but never re-registered the analyses.
+  // A fresh store over the same storage IS the restart: the in-memory
+  // registry is empty in a fresh process, the record persists.
+  const loader = fakeLoaderPort();
+  const storage = createMemoryStorage();
+  const store = new MarketplaceStore(m2StoreDeps({ loader, storage }));
+  const listing = m2Listing();
+  await m2Install(store, listing);
+  store.requestEnable("example.hello-analysis");
+  store.confirmEnable("example.hello-analysis", ["read-table"]);
+  ok(loader.enabledIds.has("example.hello-analysis"), "enable must register the plugin");
+  // Simulate the restart: the registry dies with the process.
+  loader.enabledIds.clear();
+  const reloaded = new MarketplaceStore(m2StoreDeps({ loader, storage }));
+  strictEqual(reloaded.getInstalled("example.hello-analysis")?.status, "enabled");
+  ok(
+    loader.enabledIds.has("example.hello-analysis"),
+    "restart must re-register the enabled plugin (seq 461) — the record says enabled, so the analyses must be live",
+  );
+  // A disabled plugin must stay unregistered across the same restart.
+  reloaded.disable("example.hello-analysis");
+  ok(!loader.enabledIds.has("example.hello-analysis"), "disable must unregister");
+  loader.enabledIds.clear();
+  const reloaded2 = new MarketplaceStore(m2StoreDeps({ loader, storage }));
+  strictEqual(reloaded2.getInstalled("example.hello-analysis")?.status, "disabled");
+  ok(!loader.enabledIds.has("example.hello-analysis"), "a disabled plugin must stay unregistered after restart");
+});
+
 check("M2-install: a hash mismatch refuses loudly and installs nothing", async () => {
   const listing = m2Listing();
   const store = new MarketplaceStore(
