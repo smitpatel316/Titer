@@ -49,6 +49,22 @@ ok(
 ok(Math.abs(normalCdf(0) - 0.5) < 1e-12, "Phi(0) = 0.5");
 ok(Math.abs(normalCdf(1.959963984540054) - 0.975) < 1e-9, "Phi(1.959964) = 0.975");
 
+// Bug 63, cycle 42: the noncentral t CDF cliffed to exactly 0 past
+// |δ| ≈ 38.5 — the first Poisson weight underflowed — instead of
+// continuing smoothly. References are SciPy nct.cdf cross-checks.
+ok(
+  Math.abs(noncentralTCdf(63.66, 1, 38.5) - 0.5453778383) < 1e-9,
+  `nct(63.66; 1, 38.5) must stay smooth: ${noncentralTCdf(63.66, 1, 38.5)} (want 0.5453778383)`,
+);
+ok(
+  Math.abs(noncentralTCdf(63.66, 1, 40) - 0.5298332787) < 1e-9,
+  `nct(63.66; 1, 40) must not cliff to 0: ${noncentralTCdf(63.66, 1, 40)} (want 0.5298332787)`,
+);
+ok(
+  Math.abs(noncentralTCdf(63.66, 1, 100) - 0.116263657) < 1e-9,
+  `nct(63.66; 1, 100) must stay smooth: ${noncentralTCdf(63.66, 1, 100)} (want 0.116263657)`,
+);
+
 // ── Two-sample t, equal variance (R pwr.t.test) ───────────────────────────
 let r = solve({ test: "two-sample-t", solveFor: "n", effect: 0.5, power: 0.8 });
 ok(close3(r.n, 63.76561), `two-sample t n: ${r.n} (want 63.76561)`);
