@@ -20492,7 +20492,7 @@ check("error-log-452: opt-in anonymous error logging via the feedback channel", 
   // The capture is installed at startup and reports through the shell.
   const mainSrc = readFileSync("src/main.tsx", "utf8");
   ok(mainSrc.includes("installErrorCapture"), "main.tsx installs the global error capture");
-  ok(mainSrc.includes("mcpFlushErrorLog"), "main.tsx flushes unsent error entries on startup");
+  ok(mainSrc.includes("startStartupErrorFlush"), "main.tsx flushes unsent error entries on startup");
   const logSrc = readFileSync("src/lib/error-log.ts", "utf8");
   ok(logSrc.includes('addEventListener("error"'), "uncaught exceptions are captured");
   ok(logSrc.includes('addEventListener("unhandledrejection"'), "unhandled rejections are captured");
@@ -20505,7 +20505,10 @@ check("error-log-452: opt-in anonymous error logging via the feedback channel", 
   ok(mcp.includes("ERROR_LOG_FILE"), "the shell owns an error-log file");
   ok(mcp.includes("fn scrub_error_text"), "the shell scrubs again before storing or sending");
   ok(mcp.includes("fn error_log_sharing_enabled"), "sending is gated on the error-log consent");
-  ok(mcp.includes("feedback_share_result(dir, &feedback_server_url(), &error_entry)"), "error reports reuse the feedback share path");
+  // #70: error reports post directly — independent of feedback sharing,
+  // so they send with feedback sharing off.
+  ok(mcp.includes("post_feedback_entry(url, &error_entry).await"), "error reports post directly, not through the feedback-sharing gate");
+  ok(!mcp.includes("feedback_share_result(dir, &feedback_server_url(), &error_entry)"), "error reports no longer delegate to feedback_share_result");
   ok(mcp.includes('name = "titer_read_error_log"'), "the MCP server exposes titer_read_error_log");
   ok(mcp.includes('"titer_read_error_log",'), "the error-log tool is in an allowlist group");
   ok(mcp.includes("mcp_error_log_consent"), "the shell exposes the error-log consent read");
@@ -20532,6 +20535,68 @@ check("error-log-452: opt-in anonymous error logging via the feedback channel", 
   // the consent check, and the hook only writes locally.
   ok(/if !error_log_sharing_enabled\(dir\) \{\s*return false;/.test(mcp), "send is refused before any POST when sharing is off");
   ok(!/set_hook[\s\S]{0,800}post_feedback_entry/.test(mainRs), "the panic hook never posts — it only writes locally");
+});
+
+// Bug-report sweep (Nov 25 2026): error-report sharing is independent
+// of feedback sharing (#70), the startup flush no longer races the
+// crash dialog and duplicates stop looping forever (#72), and failed
+// sends say so instead of claiming sharing is off while the UI send
+// keeps its text-only promise (#76). Each pin fails on pre-fix code;
+// the Rust unit tests beside them (error_report_sends_without_
+// feedback_sharing, error_report_flush_marks_duplicates_handled,
+// error_report_flush_keeps_failed_entries_unsent,
+// ui_feedback_entry_shares_text_only) exercise the behaviour.
+check("error-report-70-72-76: independent error sharing, no startup race, honest send errors, text-only UI feedback", () => {
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  // #70: the error send posts directly — it never consults the
+  // feedback-sharing gate, so error reports send with feedback
+  // sharing off (the old delegation returned sent: 0, no POST).
+  ok(mcp.includes("post_feedback_entry(url, &error_entry).await"), "error reports post directly, bypassing the feedback-sharing gate");
+  ok(!mcp.includes("feedback_share_result(dir, &feedback_server_url(), &error_entry)"), "error reports no longer delegate to feedback_share_result");
+  // #72: one flush at a time in the shell, and duplicates are handled
+  // instead of staying sent: false forever.
+  ok(mcp.includes("ERROR_LOG_FLUSH_LOCK"), "flushes serialize on a process-wide lock");
+  ok(mcp.includes("tokio::sync::Mutex"), "the flush lock is an async mutex (held across the POSTs)");
+  ok(mcp.includes("ErrorSendOutcome::Duplicate"), "a deduplicated entry has its own outcome, distinct from a failed send");
+  ok(mcp.includes('"duplicates":'), "the flush reports how many entries were deduplicated");
+  ok(mcp.includes('"failed":'), "the flush reports how many entries failed to send");
+  ok(mcp.includes("fn flush_error_log_entries"), "the flush core is a plain function the shell command delegates to");
+  // #72 (frontend): the startup flush is one shared promise, and the
+  // crash dialog awaits it before reading the log.
+  const logSrc = readFileSync("src/lib/error-log.ts", "utf8");
+  ok(logSrc.includes("startStartupErrorFlush"), "error-log.ts starts the shared startup flush");
+  ok(logSrc.includes("awaitStartupErrorFlush"), "error-log.ts exposes the startup flush to await");
+  const mainSrc = readFileSync("src/main.tsx", "utf8");
+  ok(mainSrc.includes("startStartupErrorFlush"), "main.tsx starts the shared startup flush");
+  ok(!mainSrc.includes("void mcpFlushErrorLog()"), "main.tsx no longer fires an unshared, unawaited flush");
+  const crash = readFileSync("src/components/crash-report-dialog.tsx", "utf8");
+  ok(crash.includes("awaitStartupErrorFlush"), "the crash dialog awaits the startup flush before reading the log");
+  ok(crash.includes("out.duplicates"), "the crash dialog reads the deduplicated count");
+  ok(crash.includes("out.failed"), "the crash dialog reads the failed count");
+  ok(crash.includes("already sent"), "a sent: 0 flush with nothing failed says already-sent, not couldn't-be-sent");
+  // #70 (frontend): Settings can send the backlog — the crash dialog's
+  // fallback copy points there, so the control must exist.
+  const settings = readFileSync("src/components/ai-connections-dialog.tsx", "utf8");
+  ok(settings.includes("Send unsent reports"), "Settings → AI Connections has a Send unsent reports control");
+  ok(settings.includes("mcpFlushErrorLog"), "the control sends through the flush");
+  // #76: both dialogs surface the delivery error instead of claiming
+  // sharing is off, and the saved-send no longer hides it either.
+  const feedbackDialog = readFileSync("src/components/send-feedback-dialog.tsx", "utf8");
+  ok(feedbackDialog.includes("out.error"), "the feedback dialog reads the delivery error");
+  ok(feedbackDialog.includes("out.sharing"), "the feedback dialog reads the sharing state");
+  ok(feedbackDialog.includes("Couldn't be sent"), "a failed send shows the delivery error, not the sharing-off copy");
+  ok(settings.includes("out.error"), "Settings surfaces the delivery error for a saved send");
+  ok(settings.includes("turn sharing on above, then use"), "Settings says Send needs sharing on first");
+  // #76 (shell): the UI send keeps its text-only promise — no project
+  // file, no recent activity in the entry it builds.
+  ok(mcp.includes("fn new_ui_feedback_entry"), "the UI send builds its entry in one place");
+  const uiEntry = mcp.slice(mcp.indexOf("fn new_ui_feedback_entry"), mcp.indexOf("fn new_ui_feedback_entry") + 1200);
+  ok(!uiEntry.includes("project_file"), "the UI feedback entry carries no project file");
+  ok(!uiEntry.includes("recent_activity"), "the UI feedback entry carries no recent activity");
+  // The flush result shape the dialogs read.
+  const native = readFileSync("src/native.ts", "utf8");
+  ok(native.includes("duplicates: number"), "the flush bridge carries the deduplicated count");
+  ok(native.includes("failed: number"), "the flush bridge carries the failed count");
 });
 
 // Seq 457 (proof batch #3): the seq 446 shell put real PDF + PNG bytes
@@ -43295,7 +43360,7 @@ check("feedback-loop-453: feedback reachable for every user, Discussions + suppo
   // The startup flush + capture live in main.tsx / error-log.ts.
   const mainSrc = readFileSync("src/main.tsx", "utf8");
   ok(mainSrc.includes("installErrorCapture"), "main.tsx installs the global error capture");
-  ok(mainSrc.includes("mcpFlushErrorLog"), "main.tsx flushes unsent error entries on startup");
+  ok(mainSrc.includes("startStartupErrorFlush"), "main.tsx flushes unsent error entries on startup");
   // The frontend wrappers for the new commands.
   const native = readFileSync("src/native.ts", "utf8");
   for (const fn of ["mcpSendFeedback", "mcpErrorLog", "mcpFlushErrorLog", "mcpErrorLogConsent", "mcpSetErrorLogConsent", "mcpLogError", "openSupportEmail"]) {

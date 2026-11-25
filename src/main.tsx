@@ -4,9 +4,9 @@ import { ProjectProvider } from "./store/use-project-store";
 import { LayoutProvider } from "./store/use-layout";
 import { AppShell } from "./components/app-shell";
 import { connectR } from "./stats/webr";
-import { accentColor, cancelR, evalR, isNative, mcpFlushErrorLog, onEngineReset, onFocusChange, setSpinner } from "./native";
+import { accentColor, cancelR, evalR, isNative, onEngineReset, onFocusChange, setSpinner } from "./native";
 import { checkForUpdatesDaily } from "./updates";
-import { installErrorCapture } from "./lib/error-log";
+import { installErrorCapture, startStartupErrorFlush } from "./lib/error-log";
 import { getMarketplaceStore } from "./marketplace/wiring";
 import "./styles.css";
 
@@ -36,9 +36,10 @@ checkForUpdatesDaily();
 // error-report sharing; otherwise everything stays on this Mac.
 if (isNative) {
   installErrorCapture();
-  void mcpFlushErrorLog().catch(() => {
-    // A failed flush is not itself an error to report.
-  });
+  // One shared startup flush (see error-log.ts): the crash dialog
+  // awaits this same promise before reading the log, so it never pops
+  // up over POSTs still in flight.
+  startStartupErrorFlush();
 }
 
 // The marketplace store is created at startup, not only when the dialog
