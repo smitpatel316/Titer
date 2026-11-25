@@ -84,7 +84,7 @@ import {
   isConflictError,
   isNotAuthenticatedError,
   isOfflineError,
-  readCachedFile,
+  readCachedDownload,
   remoteHandle as makeRemoteHandle,
   writeFile as writeCloudFile,
   type FileHandle,
@@ -517,9 +517,19 @@ export function useDocument() {
     };
     const openOfflineCopy = async (): Promise<boolean> => {
       // Offline: the cache copy, if there is one, is what editing uses.
+      // The cache carries the version it was written at: the handle keeps
+      // it, so a later save stays conditional on that version instead of
+      // uploading with no version and silently clobbering remote edits.
       let cached: Uint8Array;
+      let cachedVersion: string | null = null;
+      let cachedSha1: string | null = null;
+      let cachedModifiedAt: string | null = null;
       try {
-        cached = await readCachedFile(handle);
+        const download = await readCachedDownload(handle);
+        cached = base64ToBytes(download.base64);
+        cachedVersion = download.version ?? null;
+        cachedSha1 = download.sha1 ?? null;
+        cachedModifiedAt = download.modifiedAt ?? null;
       } catch {
         await native.alert(
           "Couldn't Open Project",
@@ -537,7 +547,12 @@ export function useDocument() {
         if (!ok) return false;
       }
       prismOrigin.current = false;
-      setRemote(handle);
+      setRemote({
+        ...handle,
+        version: cachedVersion ?? handle.version,
+        sha1: cachedSha1 ?? handle.sha1,
+        modifiedAt: cachedModifiedAt ?? handle.modifiedAt,
+      });
       setUntitled(fileTitle(handle.path));
       addRecent(recent);
       setOfflineNotice({ mode: "open" });

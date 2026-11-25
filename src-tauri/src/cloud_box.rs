@@ -48,13 +48,13 @@
 //   from Mansi to UCSF IT). Code must not depend on the answer.
 
 use crate::cloud::{
-    ephemeral_loopback_port, load_byo_credentials, load_tokens, new_pkce, new_state, save_tokens, url_encode,
-    wait_for_code, ByoCredentials, CloudAccount, CloudError, CloudProvider, RemoteDownload, RemoteEntry, RemoteVersion,
-    TokenSet,
+    load_byo_credentials, load_tokens, new_pkce, new_state, save_tokens, url_encode, wait_for_code, ByoCredentials,
+    CloudAccount, CloudError, CloudProvider, RemoteDownload, RemoteEntry, RemoteVersion, TokenSet,
 };
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::Deserialize;
+use std::net::TcpListener;
 
 const BOX_AUTHORIZE_URL: &str = "https://account.box.com/api/oauth2/authorize";
 const BOX_TOKEN_URL: &str = "https://api.box.com/oauth2/token";
@@ -334,10 +334,52 @@ impl BoxItem {
 /// refresh replaces the pair in memory AND in the keychain at once — Box
 /// refresh tokens are single-use, so the new one must be stored on every
 /// refresh, or the next refresh fails and the user is signed out.
+/// Refreshes serialize on `refresh_lock`, which IS held across the
+/// refresh await (that is the point: only one refresh per account is ever
+/// in flight, and a second caller re-checks expiry after acquiring it
+/// instead of racing the same single-use refresh token).
 pub struct BoxClient {
     http: reqwest::Client,
     account: CloudAccount,
     tokens: std::sync::Mutex<TokenSet>,
+    /// Serializes refreshes for this account (held across the refresh
+    /// await — see `access_token`).
+    refresh_lock: tokio::sync::Mutex<()>,
+}
+
+/// One shared client per Box account, for the life of the process.
+/// `cloud_provider` used to build a fresh `BoxClient` per IPC call, and
+/// two calls racing a refresh each spent the same single-use refresh
+/// token — the loser then deleted the winner's fresh pair. Sharing the
+/// client (and its refresh lock) makes the refresh single-flight per
+/// account. Evicted on disconnect / reconnect (`drop_cached_box_client`),
+/// so a stale in-memory pair can never outlive the keychain pair.
+static BOX_CLIENTS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<BoxClient>>>,
+> = std::sync::OnceLock::new();
+
+/// The shared client for `account_id`, building it from the keychain on
+/// first use. Every `cloud_*` call for the account goes through this one
+/// client, so token refreshes serialize instead of racing.
+pub fn cached_box_client(account_id: &str, login: &str, name: &str) -> Result<std::sync::Arc<BoxClient>, CloudError> {
+    let clients = BOX_CLIENTS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let mut guard = clients.lock().expect("box client cache lock");
+    if let Some(client) = guard.get(account_id) {
+        return Ok(std::sync::Arc::clone(client));
+    }
+    let client = std::sync::Arc::new(BoxClient::from_account(account_id, login, name)?);
+    guard.insert(account_id.to_string(), std::sync::Arc::clone(&client));
+    Ok(client)
+}
+
+/// Drops the shared client for `account_id` (disconnect / reconnect): the
+/// next call rebuilds it from the keychain pair, never from stale memory.
+pub fn drop_cached_box_client(account_id: &str) {
+    if let Some(clients) = BOX_CLIENTS.get() {
+        if let Ok(mut guard) = clients.lock() {
+            guard.remove(account_id);
+        }
+    }
 }
 
 fn http_client() -> Result<reqwest::Client, CloudError> {
@@ -468,7 +510,16 @@ pub async fn connect_box(prefer_byo: bool) -> Result<CloudAccount, CloudError> {
     let source = resolved.source();
     let pkce = new_pkce();
     let state = new_state();
-    let port = ephemeral_loopback_port()?;
+    // Bind the loopback listener BEFORE opening the browser: the old
+    // bind-drop-rebind race let a cached-consent redirect arrive before
+    // the listener existed. The listener is handed to wait_for_code,
+    // which never re-binds.
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .map_err(|e| CloudError::provider(format!("Couldn't start the sign-in listener: {e}")))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| CloudError::provider(format!("Couldn't start the sign-in listener: {e}")))?
+        .port();
     let redirect_uri = format!("http://127.0.0.1:{port}/callback");
     let authorize = format!(
         "{BOX_AUTHORIZE_URL}?response_type=code&client_id={}&redirect_uri={}&state={}&scope={}&code_challenge={}&code_challenge_method=S256",
@@ -480,7 +531,11 @@ pub async fn connect_box(prefer_byo: bool) -> Result<CloudAccount, CloudError> {
     );
     crate::cloud::open_browser_url(&authorize)?;
     // Box codes expire after 30 seconds: exchange the moment it arrives.
-    let code = wait_for_code(port, &state, std::time::Duration::from_secs(300))?;
+    // The blocking wait runs on Tokio's blocking pool, never a worker.
+    let code =
+        tokio::task::spawn_blocking(move || wait_for_code(listener, &state, std::time::Duration::from_secs(300)))
+            .await
+            .map_err(|e| CloudError::provider(format!("Sign-in wait failed: {e}")))??;
     let tokens = match &resolved {
         ResolvedCredentials::Broker { .. } => {
             let base = broker_base_url().ok_or_else(|| CloudError::provider("The Titer Box broker went away."))?;
@@ -551,6 +606,7 @@ impl BoxClient {
                 name: name.into(),
             },
             tokens: std::sync::Mutex::new(tokens),
+            refresh_lock: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -565,39 +621,52 @@ impl BoxClient {
     /// takes only the refresh token. A broker outage at refresh time is
     /// `Offline` (retryable): the stored tokens are untouched, never
     /// deleted, never treated as signed-out.
+    ///
+    /// Refreshes for one account serialize on `refresh_lock`, held across
+    /// the refresh await: Box refresh tokens are single-use, so two
+    /// overlapping refreshes race and the loser's `invalid_grant` used to
+    /// delete the winner's fresh pair from the keychain. After acquiring
+    /// the lock the expiry is re-checked — another caller may have
+    /// refreshed already. A failed refresh NEVER deletes the keychain
+    /// tokens: the stored pair may be another request's fresh pair, and
+    /// deleting it signs the user out; a dead refresh token simply fails
+    /// again on the next call, and reconnecting overwrites the pair.
     async fn access_token(&self) -> Result<String, CloudError> {
-        let (access, expires_at, refresh, issued_via_broker) = {
-            let tokens = self.tokens.lock().expect("box token lock");
-            (
-                tokens.access_token.clone(),
-                tokens.expires_at_unix,
-                tokens.refresh_token.clone(),
-                tokens.issued_via_broker,
-            )
-        };
-        if expires_at - now_unix() > 120 {
+        // Fast path: a fresh token needs no lock and no refresh.
+        if let Some(access) = self.fresh_access_token() {
             return Ok(access);
         }
-        let refresh_token = refresh.ok_or_else(|| CloudError::NotAuthenticated {
+        let _refresh_guard = self.refresh_lock.lock().await;
+        // Re-check: another caller may have refreshed while we waited.
+        if let Some(access) = self.fresh_access_token() {
+            return Ok(access);
+        }
+        let snapshot = self.tokens.lock().expect("box token lock").clone();
+        let refresh_token = snapshot.refresh_token.ok_or_else(|| CloudError::NotAuthenticated {
             message: "The Box sign-in expired. Reconnect Box to keep working on remote files.".into(),
         })?;
-        let tokens = self.refresh_tokens(&refresh_token, issued_via_broker).await.map_err(|e| {
-            // A dead refresh token must not be retried forever.
-            if matches!(e, CloudError::NotAuthenticated { .. }) {
-                let _ = crate::cloud::delete_tokens("box", &self.account.id);
-            }
-            e
-        })?;
+        let tokens = self.refresh_tokens(&refresh_token, snapshot.issued_via_broker).await?;
         let stored = TokenSet {
             access_token: tokens.access_token.clone(),
             refresh_token: tokens.refresh_token,
             expires_at_unix: now_unix() + tokens.expires_in.unwrap_or(3600) as i64,
             scope: BOX_SCOPE_READWRITE.into(),
-            issued_via_broker,
+            issued_via_broker: snapshot.issued_via_broker,
         };
         save_tokens("box", &self.account.id, &stored)?;
         *self.tokens.lock().expect("box token lock") = stored.clone();
         Ok(stored.access_token)
+    }
+
+    /// The live access token when it has more than 2 minutes left, else
+    /// `None` (a refresh is due). Short-held lock, never across an await.
+    fn fresh_access_token(&self) -> Option<String> {
+        let tokens = self.tokens.lock().expect("box token lock");
+        if tokens.expires_at_unix - now_unix() > 120 {
+            Some(tokens.access_token.clone())
+        } else {
+            None
+        }
     }
 
     /// Refreshes one pair through the source that issued it. Broker-side:
@@ -813,6 +882,7 @@ impl CloudProvider for BoxClient {
         file_id: &str,
         bytes: &[u8],
         expected_version: Option<&str>,
+        force: bool,
     ) -> Result<RemoteVersion, CloudError> {
         if bytes.len() as u64 > BOX_DIRECT_UPLOAD_MAX {
             return Err(CloudError::TooLarge {
@@ -821,17 +891,27 @@ impl CloudProvider for BoxClient {
         }
         // Conditional on the version seen at open/last-save: read the current
         // metadata, refuse on mismatch, and upload with If-Match on the
-        // current etag so the upload itself is conditional too.
+        // current etag so the upload itself is conditional too — unless this
+        // is the conflict dialog's explicit force-overwrite, which skips
+        // both checks AND the If-Match header (a racing etag must not fail
+        // an overwrite the user explicitly chose). An UNKNOWN version
+        // without force is refused as a conflict: the caller must
+        // re-download and let the user choose, never silently clobber
+        // remote edits.
         let meta = self.get_item(file_id).await?;
-        if let Some(expected) = expected_version {
-            if meta.version_number.as_deref() != Some(expected) {
-                return Err(self.conflict_for(file_id).await);
+        if !force {
+            match expected_version {
+                Some(expected) if meta.version_number.as_deref() != Some(expected) => {
+                    return Err(self.conflict_for(file_id).await);
+                }
+                Some(_) => {}
+                None => return Err(self.conflict_for(file_id).await),
             }
         }
         let attributes = serde_json::json!({ "name": meta.name.clone() }).to_string();
         let owned_bytes = bytes.to_vec();
         let owned_name = meta.name.clone();
-        let etag = meta.etag.clone();
+        let etag = if force { None } else { meta.etag.clone() };
         let response = self
             .send_authed(|http, token| {
                 // Rebuilt fresh on a retry: a multipart form can't be re-sent.
@@ -1284,6 +1364,7 @@ mod broker_tests {
                 scope: BOX_SCOPE_READWRITE.into(),
                 issued_via_broker: true,
             }),
+            refresh_lock: tokio::sync::Mutex::new(()),
         }
     }
 

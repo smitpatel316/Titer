@@ -24,7 +24,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     io::{BufRead, BufReader, Write},
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     sync::mpsc,
     time::Duration,
 };
@@ -214,15 +214,21 @@ pub trait CloudProvider: Send + Sync {
     /// (`TooLarge`) the caller must not silently split it — upload sessions
     /// are a later slice, and `.hlx` / `.prism` never approach the cap.
     async fn upload_new(&self, folder_id: &str, name: &str, bytes: &[u8]) -> Result<RemoteEntry, CloudError>;
-    /// A new version of `file_id`, conditional on `expected_version` when
-    /// given: `None` means "overwrite anyway" (the conflict dialog's
-    /// explicit third choice only — never autosave, never the default path).
-    /// A mismatch is `Conflict`, with the remote version filled in.
+    /// A new version of `file_id`, conditional on `expected_version`:
+    /// `Some(v)` uploads only if the remote is still at `v`; `None`
+    /// uploads only when `force` is set (the conflict dialog's explicit
+    /// "overwrite anyway" — never autosave, never the default path).
+    /// `None` without `force` means the version is UNKNOWN (an
+    /// offline-opened file whose cache predates version metadata): it is
+    /// refused as `Conflict`, never silently clobbered — the caller must
+    /// re-download and let the user choose. A mismatch is `Conflict`,
+    /// with the remote version filled in.
     async fn upload_version(
         &self,
         file_id: &str,
         bytes: &[u8],
         expected_version: Option<&str>,
+        force: bool,
     ) -> Result<RemoteVersion, CloudError>;
     async fn create_folder(&self, parent_id: &str, name: &str) -> Result<RemoteEntry, CloudError>;
     /// Moves a file or a folder into `new_parent_id`.
@@ -447,91 +453,153 @@ pub fn url_encode(value: &str) -> String {
     percent_encoding::utf8_percent_encode(value, percent_encoding::NON_ALPHANUMERIC).to_string()
 }
 
+/// One loopback connection, handled: `Some(result)` when it is the
+/// `/callback` redirect (code, refusal, or state mismatch — the wait is
+/// over either way), `None` for anything else (a `/favicon.ico` fetch, a
+/// speculative preconnect, a stray probe), which the accept loop answers
+/// briefly and then keeps waiting past.
+fn handle_loopback_connection(stream: &mut TcpStream, expected_state: &str) -> Option<Result<String, CloudError>> {
+    if stream.set_read_timeout(Some(Duration::from_secs(10))).is_err() {
+        return None;
+    }
+    let mut reader = BufReader::new(match stream.try_clone() {
+        Ok(cloned) => cloned,
+        Err(_) => return None,
+    });
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line).is_err() {
+        return None;
+    }
+    // Drain the headers so the browser isn't left hanging.
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {
+                if line == "\r\n" {
+                    break;
+                }
+            }
+        }
+    }
+    // GET /callback?code=…&state=… HTTP/1.1 — anything else is not our redirect.
+    let path = request_line.split_whitespace().nth(1).unwrap_or("");
+    if path != "/callback" && !path.starts_with("/callback?") {
+        let body = "Not found.";
+        let response = format!(
+            "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let _ = stream.write_all(response.as_bytes());
+        return None;
+    }
+    let query = path.splitn(2, '?').nth(1).unwrap_or("");
+    let params: HashMap<String, String> = query
+        .split('&')
+        .filter_map(|pair| {
+            let (k, v) = pair.split_once('=')?;
+            let decode = |s: &str| {
+                percent_encoding::percent_decode_str(&s.replace('+', " "))
+                    .decode_utf8()
+                    .map(|c| c.into_owned())
+                    .unwrap_or_else(|_| s.to_string())
+            };
+            Some((decode(k), decode(v)))
+        })
+        .collect();
+    let body = "<html><body><h1>Signed in to Titer</h1><p>You can close this tab.</p></body></html>";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let _ = stream.write_all(response.as_bytes());
+    if let Some(error) = params.get("error") {
+        return Some(Err(CloudError::Cancelled { message: format!("Sign-in was refused ({error}).") }));
+    }
+    match (params.get("code"), params.get("state")) {
+        (Some(code), Some(state)) if state == expected_state => Some(Ok(code.clone())),
+        (Some(_), Some(_)) => {
+            Some(Err(CloudError::Cancelled { message: "Sign-in state didn't match. Try connecting again.".into() }))
+        }
+        _ => Some(Err(CloudError::Cancelled { message: "Sign-in didn't return a code. Try connecting again.".into() })),
+    }
+}
+
 /// Waits for the provider's redirect to `http://127.0.0.1:<port>/callback`
-/// with `?code=…&state=…`. Validates `state`, answers the browser with a
-/// "you can close this tab" page, and returns the code. The code is
-/// single-use and short-lived (Box: 30 seconds), so the caller exchanges it
-/// immediately. Times out (`Cancelled`) if the user never completes sign-in.
-pub fn wait_for_code(port: u16, expected_state: &str, timeout: Duration) -> Result<String, CloudError> {
-    let listener = TcpListener::bind(("127.0.0.1", port))
+/// with `?code=…&state=…` on an ALREADY-BOUND listener. The caller binds
+/// the listener BEFORE opening the browser (see `connect_box` in
+/// cloud_box.rs) and hands it over: this function never re-binds, so a
+/// cached-consent redirect can't race the bind. Validates `state`,
+/// answers the browser with a "you can close this tab" page, and returns
+/// the code. The code is single-use and short-lived (Box: 30 seconds), so
+/// the caller exchanges it immediately. Times out (`Cancelled`) if the
+/// user never completes sign-in.
+///
+/// The accept runs in a worker thread that loops past non-callback
+/// connections (a `/favicon.ico` fetch or speculative preconnect no longer
+/// aborts sign-in). The caller polls the result channel instead of parking
+/// in a blocking receive, so the wait is bounded by the deadline on every
+/// path — and on timeout the worker is told to stop and JOINED: no thread
+/// and no bound port leak past this call.
+pub fn wait_for_code(listener: TcpListener, expected_state: &str, timeout: Duration) -> Result<String, CloudError> {
+    listener
+        .set_nonblocking(true)
         .map_err(|e| CloudError::provider(format!("Couldn't start the sign-in listener: {e}")))?;
     // The spawned thread must own everything it touches (`'static`): copy
     // the expected state instead of borrowing it across the spawn.
     let expected_state = expected_state.to_string();
     let (tx, rx) = mpsc::channel::<Result<String, CloudError>>();
-    std::thread::spawn(move || {
-        let result = (|| -> Result<String, CloudError> {
-            let (mut stream, _) =
-                listener.accept().map_err(|e| CloudError::provider(format!("Sign-in listener failed: {e}")))?;
-            stream
-                .set_read_timeout(Some(Duration::from_secs(30)))
-                .map_err(|e| CloudError::provider(format!("Sign-in listener failed: {e}")))?;
-            let mut reader = BufReader::new(stream.try_clone().map_err(|e| CloudError::provider(e.to_string()))?);
-            let mut request_line = String::new();
-            reader
-                .read_line(&mut request_line)
-                .map_err(|e| CloudError::provider(format!("Couldn't read the sign-in redirect: {e}")))?;
-            // Drain the headers so the browser isn't left hanging.
-            let mut line = String::new();
-            loop {
-                line.clear();
-                match reader.read_line(&mut line) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {
-                        if line == "\r\n" {
-                            break;
-                        }
-                    }
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop_flag = std::sync::Arc::clone(&stop);
+    let handle: std::thread::JoinHandle<()> = std::thread::spawn(move || loop {
+        if stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                if let Some(result) = handle_loopback_connection(&mut stream, &expected_state) {
+                    let _ = tx.send(result);
+                    break;
                 }
             }
-            // GET /callback?code=…&state=… HTTP/1.1 — anything else is not our redirect.
-            let path = request_line.split_whitespace().nth(1).unwrap_or("");
-            let query = path.splitn(2, '?').nth(1).unwrap_or("");
-            let params: HashMap<String, String> = query
-                .split('&')
-                .filter_map(|pair| {
-                    let (k, v) = pair.split_once('=')?;
-                    let decode = |s: &str| {
-                        percent_encoding::percent_decode_str(&s.replace('+', " "))
-                            .decode_utf8()
-                            .map(|c| c.into_owned())
-                            .unwrap_or_else(|_| s.to_string())
-                    };
-                    Some((decode(k), decode(v)))
-                })
-                .collect();
-            let body = "<html><body><h1>Signed in to Titer</h1><p>You can close this tab.</p></body></html>";
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(response.as_bytes());
-            if let Some(error) = params.get("error") {
-                return Err(CloudError::Cancelled { message: format!("Sign-in was refused ({error}).") });
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(25));
             }
-            match (params.get("code"), params.get("state")) {
-                (Some(code), Some(state)) if state == &expected_state => Ok(code.clone()),
-                (Some(_), Some(_)) => {
-                    Err(CloudError::Cancelled { message: "Sign-in state didn't match. Try connecting again.".into() })
-                }
-                _ => {
-                    Err(CloudError::Cancelled { message: "Sign-in didn't return a code. Try connecting again.".into() })
-                }
+            Err(e) => {
+                let _ = tx.send(Err(CloudError::provider(format!("Sign-in listener failed: {e}"))));
+                break;
             }
-        })();
-        let _ = tx.send(result);
+        }
     });
-    rx.recv_timeout(timeout)
-        .map_err(|_| CloudError::Cancelled { message: "Sign-in timed out. Try connecting again.".into() })?
-}
-
-/// An ephemeral loopback port for one sign-in (bound, read, released: the
-/// listener in `wait_for_code` binds it again immediately).
-pub fn ephemeral_loopback_port() -> Result<u16, CloudError> {
-    let listener = TcpListener::bind(("127.0.0.1", 0))
-        .map_err(|e| CloudError::provider(format!("Couldn't pick a sign-in port: {e}")))?;
-    Ok(listener.local_addr().map_err(|e| CloudError::provider(e.to_string()))?.port())
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match rx.try_recv() {
+            Ok(result) => {
+                // The worker already sent its result and is exiting; join
+                // it so no thread outlives the wait.
+                let _ = handle.join();
+                return result;
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                let _ = handle.join();
+                return Err(CloudError::provider("Sign-in listener stopped."));
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                if std::time::Instant::now() >= deadline {
+                    // Stop the worker and join it: its accept loop exits,
+                    // dropping the listener — the port is released here,
+                    // not held until process exit.
+                    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                    let _ = handle.join();
+                    return Err(CloudError::Cancelled { message: "Sign-in timed out. Try connecting again.".into() });
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+        }
+    }
 }
 
 // ── Local cache ──────────────────────────────────────────────────────────
@@ -555,15 +623,61 @@ pub fn cache_path(app: &tauri::AppHandle, provider: &str, file_id: &str, name: &
     app.path().app_data_dir().ok().map(|dir| dir.join("cloud-cache").join(provider).join(format!("{safe_id}.{ext}")))
 }
 
+/// The version metadata a cache copy was written at: the version the next
+/// save is conditional on, plus the sha1 / modified time the conflict
+/// dialog shows. `Default` (all `None`) is a legacy cache written before
+/// the sidecar existed — its version is genuinely unknown, and a save of
+/// it must conflict rather than clobber (see `upload_version`).
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct CacheMeta {
+    pub version: Option<String>,
+    pub sha1: Option<String>,
+    pub modified_at: Option<String>,
+}
+
+impl From<&RemoteDownload> for CacheMeta {
+    fn from(d: &RemoteDownload) -> Self {
+        CacheMeta { version: d.version.clone(), sha1: d.sha1.clone(), modified_at: d.modified_at.clone() }
+    }
+}
+
+impl From<&RemoteVersion> for CacheMeta {
+    fn from(v: &RemoteVersion) -> Self {
+        CacheMeta { version: Some(v.version.clone()), sha1: v.sha1.clone(), modified_at: v.modified_at.clone() }
+    }
+}
+
+/// A cache copy with the version metadata it was written at.
+pub struct CachedFile {
+    pub bytes: Vec<u8>,
+    pub version: Option<String>,
+    pub sha1: Option<String>,
+    pub modified_at: Option<String>,
+}
+
+/// The sidecar next to a cache copy (`<file>.meta.json`): the version
+/// metadata the bytes were written at. Bytes alone can't carry it — a
+/// cache copy without a version uploads blind.
+fn cache_meta_path(path: &std::path::Path) -> std::path::PathBuf {
+    let mut s = path.as_os_str().to_owned();
+    s.push(".meta.json");
+    std::path::PathBuf::from(s)
+}
+
 pub fn write_cache(
     app: &tauri::AppHandle,
     provider: &str,
     file_id: &str,
     name: &str,
     bytes: &[u8],
+    meta: &CacheMeta,
 ) -> Result<(), CloudError> {
     let path = cache_path(app, provider, file_id, name)
         .ok_or_else(|| CloudError::provider("Couldn't find the app-data folder for the cloud cache."))?;
+    write_cache_file(&path, bytes, meta)
+}
+
+fn write_cache_file(path: &std::path::Path, bytes: &[u8], meta: &CacheMeta) -> Result<(), CloudError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| CloudError::provider(format!("Couldn't make the cloud cache: {e}")))?;
@@ -574,11 +688,41 @@ pub fn write_cache(
     std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path)).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         CloudError::provider(format!("Couldn't write the cloud cache: {e}"))
+    })?;
+    // The sidecar goes with it, atomically too: a cache copy without its
+    // version is a silent overwrite waiting to happen.
+    let meta_path = cache_meta_path(path);
+    let sidecar = serde_json::json!({
+        "version": meta.version,
+        "sha1": meta.sha1,
+        "modified_at": meta.modified_at,
+    });
+    let sidecar_text = serde_json::to_string(&sidecar)
+        .map_err(|e| CloudError::provider(format!("Couldn't write the cloud cache: {e}")))?;
+    let mut meta_tmp = meta_path.as_os_str().to_owned();
+    meta_tmp.push(".tmp");
+    std::fs::write(&meta_tmp, sidecar_text).and_then(|()| std::fs::rename(&meta_tmp, &meta_path)).map_err(|e| {
+        let _ = std::fs::remove_file(&meta_tmp);
+        CloudError::provider(format!("Couldn't write the cloud cache: {e}"))
     })
 }
 
-pub fn read_cache(app: &tauri::AppHandle, provider: &str, file_id: &str, name: &str) -> Option<Vec<u8>> {
-    cache_path(app, provider, file_id, name).and_then(|path| std::fs::read(path).ok())
+fn read_cache_file(path: &std::path::Path) -> Option<CachedFile> {
+    let bytes = std::fs::read(path).ok()?;
+    // A missing or unreadable sidecar is a legacy cache: the bytes are
+    // still usable, but the version is unknown (None), never guessed.
+    let meta: CacheMeta = std::fs::read_to_string(cache_meta_path(path))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    Some(CachedFile { bytes, version: meta.version, sha1: meta.sha1, modified_at: meta.modified_at })
+}
+
+pub fn read_cache(app: &tauri::AppHandle, provider: &str, file_id: &str, name: &str) -> Option<CachedFile> {
+    // The bytes plus the version they were cached at: a cache copy written
+    // before the sidecar existed returns version None (unknown), and a
+    // later save of it must conflict rather than silently clobber.
+    cache_path(app, provider, file_id, name).and_then(|path| read_cache_file(&path))
 }
 
 /// SHA-1 hex, for conflict tokens where the provider reports one (Box).
@@ -764,8 +908,9 @@ impl CloudProvider for MockProvider {
         file_id: &str,
         bytes: &[u8],
         expected_version: Option<&str>,
+        force: bool,
     ) -> Result<RemoteVersion, CloudError> {
-        self.mock_upload_version(file_id, bytes, expected_version)
+        self.mock_upload_version(file_id, bytes, expected_version, force)
     }
 
     async fn create_folder(&self, parent_id: &str, name: &str) -> Result<RemoteEntry, CloudError> {
@@ -838,6 +983,7 @@ impl MockProvider {
         file_id: &str,
         bytes: &[u8],
         expected_version: Option<&str>,
+        force: bool,
     ) -> Result<RemoteVersion, CloudError> {
         let mut inner = self.inner.lock().expect("mock lock");
         Self::check_offline(&inner)?;
@@ -848,8 +994,17 @@ impl MockProvider {
         if file.is_folder {
             return Err(CloudError::provider("A folder can't be uploaded."));
         }
-        if let Some(expected) = expected_version {
-            if file.version.to_string() != expected {
+        // Unknown version without an explicit force is a conflict, never a
+        // silent overwrite: the caller must re-download and let the user
+        // choose (the offline-opened file whose version was never known).
+        // Force skips every version check (the conflict dialog's explicit
+        // "overwrite anyway"), mirroring BoxClient::upload_version.
+        if !force {
+            let mismatch = match expected_version {
+                Some(expected) => file.version.to_string() != expected,
+                None => true,
+            };
+            if mismatch {
                 let remote = RemoteVersion {
                     version: file.version.to_string(),
                     sha1: Some(sha1_hex(&file.bytes)),
@@ -907,7 +1062,7 @@ mod tests {
     async fn mock_conditional_upload_accepts_the_seen_version() {
         let mock = MockProvider::new();
         let entry = mock.upload_new("0", "Data.hlx", b"v1").await.expect("upload");
-        let saved = mock.mock_upload_version(&entry.id, b"v2", Some("1")).expect("conditional save");
+        let saved = mock.mock_upload_version(&entry.id, b"v2", Some("1"), false).expect("conditional save");
         assert_eq!(saved.version, "2");
     }
 
@@ -917,14 +1072,109 @@ mod tests {
         let entry = mock.upload_new("0", "Data.hlx", b"v1").await.expect("upload");
         // Another machine edits the same file: the version moves to 2.
         mock.mock_remote_edit(&entry.id, b"v2-remote").expect("remote edit");
-        let err = mock.mock_upload_version(&entry.id, b"v2-local", Some("1")).expect_err("must conflict");
+        let err = mock.mock_upload_version(&entry.id, b"v2-local", Some("1"), false).expect_err("must conflict");
         match err {
             CloudError::Conflict { remote_version, .. } => assert_eq!(remote_version, "2"),
             other => panic!("expected Conflict, got {other:?}"),
         }
         // The overwrite path (explicit choice only) still works.
-        let saved = mock.mock_upload_version(&entry.id, b"v2-local", None).expect("overwrite");
+        let saved = mock.mock_upload_version(&entry.id, b"v2-local", None, true).expect("overwrite");
         assert_eq!(saved.version, "3");
+    }
+
+    #[tokio::test]
+    async fn mock_upload_with_unknown_version_conflicts_without_force() {
+        // BUG-REPORT.md Round 2 Issue 9: an upload with no known version
+        // (an offline-opened file) must conflict, never silently clobber
+        // remote edits — only an explicit force overwrites blind.
+        let mock = MockProvider::new();
+        let entry = mock.upload_new("0", "Data.hlx", b"v1").await.expect("upload");
+        mock.mock_remote_edit(&entry.id, b"v2-remote").expect("remote edit");
+        let err = mock.upload_version(&entry.id, b"v2-local", None, false).await.expect_err("must conflict");
+        match err {
+            CloudError::Conflict { remote_version, .. } => assert_eq!(remote_version, "2"),
+            other => panic!("expected Conflict, got {other:?}"),
+        }
+        // The remote bytes are untouched by the refused upload.
+        let got = mock.download(&entry.id).await.expect("download");
+        assert_eq!(got.version.as_deref(), Some("2"));
+    }
+
+    #[tokio::test]
+    async fn mock_upload_with_unknown_version_overwrites_when_forced() {
+        // The conflict dialog's explicit "overwrite anyway": None + force
+        // is the only blind overwrite, and it lands a new version.
+        let mock = MockProvider::new();
+        let entry = mock.upload_new("0", "Data.hlx", b"v1").await.expect("upload");
+        mock.mock_remote_edit(&entry.id, b"v2-remote").expect("remote edit");
+        let saved = mock.upload_version(&entry.id, b"v2-local", None, true).await.expect("forced overwrite");
+        assert_eq!(saved.version, "3");
+    }
+
+    #[test]
+    fn wait_for_code_skips_non_callback_connections() {
+        // BUG-REPORT.md Round 2 Issue 45: a /favicon.ico fetch or
+        // speculative preconnect must not abort sign-in — the wait loops
+        // past it to the real callback.
+        use std::io::Read as _;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let port = listener.local_addr().expect("port").port();
+        let sender = std::thread::spawn(move || {
+            // A non-callback connection first, then the real redirect.
+            let mut favicon = TcpStream::connect(("127.0.0.1", port)).expect("favicon connect");
+            favicon.write_all(b"GET /favicon.ico HTTP/1.1\r\nHost: x\r\n\r\n").expect("favicon write");
+            let mut favicon_response = [0u8; 64];
+            let _ = favicon.read(&mut favicon_response);
+            let mut callback = TcpStream::connect(("127.0.0.1", port)).expect("callback connect");
+            callback
+                .write_all(b"GET /callback?code=CODE123&state=s3cr3t HTTP/1.1\r\nHost: x\r\n\r\n")
+                .expect("callback write");
+            let mut response = Vec::new();
+            callback.read_to_end(&mut response).expect("callback read");
+        });
+        let code = wait_for_code(listener, "s3cr3t", Duration::from_secs(10)).expect("code");
+        assert_eq!(code, "CODE123");
+        sender.join().expect("sender");
+    }
+
+    #[test]
+    fn wait_for_code_times_out_without_leaking_the_wait() {
+        // BUG-REPORT.md Round 2 Issue 45: on timeout the call returns
+        // promptly and the worker thread is joined — no thread or bound
+        // port lingers past the call.
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let port = listener.local_addr().expect("port").port();
+        let start = std::time::Instant::now();
+        let err = wait_for_code(listener, "s3cr3t", Duration::from_millis(200)).expect_err("must time out");
+        assert!(start.elapsed() < Duration::from_secs(5), "timed out after {:?}", start.elapsed());
+        assert!(matches!(err, CloudError::Cancelled { .. }));
+        // The port is released: binding it again succeeds immediately.
+        let rebound = TcpListener::bind(("127.0.0.1", port));
+        assert!(rebound.is_ok(), "port {port} still held after timeout");
+    }
+
+    #[test]
+    fn cache_sidecar_round_trips_version_metadata() {
+        // BUG-REPORT.md Round 2 Issue 9: the cache must persist the
+        // version alongside the bytes, so an offline-opened file keeps
+        // the version it was cached at.
+        let dir = std::env::temp_dir().join(format!("titer-cache-test-{}", std::process::id()));
+        let path = dir.join("123.hlx");
+        let meta =
+            CacheMeta { version: Some("7".into()), sha1: Some("abc".into()), modified_at: Some("2026-11-25".into()) };
+        write_cache_file(&path, b"bytes", &meta).expect("write");
+        let got = read_cache_file(&path).expect("read");
+        assert_eq!(got.bytes, b"bytes");
+        assert_eq!(got.version.as_deref(), Some("7"));
+        assert_eq!(got.sha1.as_deref(), Some("abc"));
+        assert_eq!(got.modified_at.as_deref(), Some("2026-11-25"));
+        // Legacy cache: bytes with no sidecar → version unknown, never guessed.
+        let legacy = dir.join("456.hlx");
+        std::fs::write(&legacy, b"old").expect("write legacy");
+        let got = read_cache_file(&legacy).expect("read legacy");
+        assert_eq!(got.bytes, b"old");
+        assert_eq!(got.version, None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
@@ -934,7 +1184,10 @@ mod tests {
         mock.set_offline(true);
         assert!(matches!(mock.list("0").await, Err(CloudError::Offline { .. })));
         assert!(matches!(mock.download(&entry.id).await, Err(CloudError::Offline { .. })));
-        assert!(matches!(mock.mock_upload_version(&entry.id, b"v2", Some("1")), Err(CloudError::Offline { .. })));
+        assert!(matches!(
+            mock.mock_upload_version(&entry.id, b"v2", Some("1"), false),
+            Err(CloudError::Offline { .. })
+        ));
         mock.set_offline(false);
         assert!(mock.download(&entry.id).await.is_ok(), "back online: download works again");
     }
