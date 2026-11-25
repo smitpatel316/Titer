@@ -79,16 +79,23 @@ export function mergedGraphData(
 ): MergedGraphData | null {
   const parent = graph.parentId ? nodes[graph.parentId] : undefined;
   if (!parent?.data || !parent.tableType) return null;
-  const primary: MergeInput = { id: parent.id, name: parent.name, tableType: parent.tableType, data: parent.data };
+  // A frozen graph (seq 237) draws its snapshot, not the live table:
+  // the freeze captured the primary table's data at freeze time, so the
+  // merge reads that snapshot as its primary input. Extra tables in
+  // `sourceTableIds` were not snapshotted by the freeze, so they still
+  // read live — a frozen multi-table graph's extras can still move.
+  const primaryData = graph.frozen && graph.frozenData ? graph.frozenData : parent.data;
+  const primary: MergeInput = { id: parent.id, name: parent.name, tableType: parent.tableType, data: primaryData };
   const extras: MergeInput[] = [];
   for (const id of graph.sourceTableIds ?? []) {
     const table = nodes[id];
     if (!table) {
       // A dangling source (the delete cascade and the file repair both
       // strip these, so this is a hand-edited file): say so, don't
-      // silently drop a table's data from the graph.
+      // silently drop a table's data from the graph. The fallback dataset
+      // is the frozen snapshot on a frozen graph, like the merge below.
       return {
-        dataset: readTable(parent.data),
+        dataset: readTable(primaryData),
         tableType: parent.tableType,
         problem: `The graph also plots a table that is no longer in this project — remove it in the graph's Data section, or restore the table.`,
         tables: [{ id: parent.id, name: parent.name }],

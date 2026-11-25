@@ -34,6 +34,10 @@ export function buildPanelFigure(
   if (!parent?.data || !parent.tableType) return null;
   // A multi-table graph (#48) draws its merged dataset — the same one its
   // own view draws — so a figure panel and an export show every table.
+  // A frozen graph (seq 237) draws its snapshot: `mergedGraphData` reads
+  // the graph's `frozenData` for its primary table, so a figure panel
+  // shows the same frozen data as the graph's own view. (A frozen figure
+  // hands its snapshots in through `nodes` instead — see figure-view.tsx.)
   // A merge problem draws nothing here; the graph's own view says why.
   const merged = mergedGraphData(graph, nodes);
   if (!merged || merged.problem) return null;

@@ -161,7 +161,10 @@ export function GraphView({ node }: { node: ProjectNode }) {
     () => mergedGraphData(node, nodes),
     [node, nodes],
   );
-  const drawDataset = merged?.dataset ?? dataset;
+  // `mergedGraphData` is frozen-aware (seq 237): a frozen graph's merged
+  // dataset reads its snapshot for the primary table, so the merged
+  // dataset never pulls live data into a frozen graph.
+  const drawDataset = merged ? merged.dataset : dataset;
   const drawColumns = React.useMemo(
     () => (drawDataset && parent?.tableType ? plotColumns(drawDataset, type, options, parent.tableType) : []),
     [
@@ -196,7 +199,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
   // columns are derived from the Cox analysis below, not the table's own X/Y shape).
   // A survival curve, one column per group (each row a subject, or a count), never replicates.
   const xyLack =
-    type === "survival" && parent?.data && isGrouped(parent.data)
+    type === "survival" && data && isGrouped(data)
       ? "Each group needs one column of event codes or survivor counts, not replicates."
       : family === "xy" &&
         type !== "roc-curve" &&
@@ -1047,7 +1050,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
           volcanoBelowZero={volcanoBelowZero}
           logLeftOut={logLeftOut}
           binsTooMany={binsTooMany}
-          replicates={parent?.tableType === "xy" && Boolean(parent.data && isGrouped(parent.data))}
+          replicates={parent?.tableType === "xy" && Boolean(data && isGrouped(data))}
           summary={dataset?.summary}
           onFindGenes={findGenes}
           numericNames={dataset?.numeric.map((c) => c.name) ?? []}
