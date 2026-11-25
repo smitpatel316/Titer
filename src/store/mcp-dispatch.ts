@@ -151,7 +151,6 @@ import {
   applySummaryFormatNested,
   applySummaryFormatXY,
   changeXFormat,
-  convertColumnToNested,
   convertCommaDecimals,
   deleteColumns,
   deleteRows,

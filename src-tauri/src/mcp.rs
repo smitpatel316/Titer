@@ -2,9 +2,9 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 78 tools: 21 read-only (list/read/job/
+// Settings → AI connections. 79 tools: 21 read-only (list/read/job/
 // activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list + refresh-linked-data + the plugin list)
-// and 57 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool + the 1.9 cell-background tool + the plugin run tool), via the L0 Rust→frontend dispatch + job queue —
+// and 58 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool + the 1.9 cell-background tool + the plugin run tool + the seq 450 convert-to-nested tool), via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 //
 // Why rmcp, not tauri-plugin-mcp-commands — see the lane log
@@ -1381,11 +1381,12 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "tables",
         label: "Edit tables",
-        description: "Create, write, edit, freeze, duplicate, rename and reorder tables; undo and redo.",
+        description: "Create, write, edit, convert, freeze, duplicate, rename and reorder tables; undo and redo.",
         tools: &[
             "titer_create_table",
             "titer_write_table",
             "titer_edit_table",
+            "titer_convert_to_nested",
             "titer_freeze_table",
             "titer_refresh_linked_data",
             "titer_duplicate_table_family",
@@ -3028,6 +3029,27 @@ pub struct TableArgs {
     pub project_id: Option<String>,
     /// The table's id, as shown by titer_list_tables.
     pub table_id: String,
+}
+
+/// Args for `titer_convert_to_nested`: the Column table to rebuild as
+/// Nested, and the factorization — how many subgroups each group splits
+/// into, of how many replicates each, and what the subgroups are called
+/// (one label per subgroup, the same labels in every group; omit for
+/// "S1", "S2"…). The rows must tile into subgroups × replicates exactly.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ConvertToNestedArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table's id, as shown by titer_list_tables.
+    pub table_id: String,
+    /// Subgroups per group; at least 1.
+    pub subgroups: usize,
+    /// Replicates per subgroup; at least 1.
+    pub replicates_per_subgroup: usize,
+    /// The subgroup labels, one per subgroup; omit for "S1", "S2"….
+    #[serde(default)]
+    pub subgroup_labels: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -5290,6 +5312,89 @@ impl TiterMcpServer {
             }
             Err(e) => {
                 self.state.log_call("titer_duplicate_table_family", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Convert a Column table to a Nested table (seq 450): each Column
+    /// dataset becomes a group, and its rows split into `subgroups`
+    /// subgroups of `replicates_per_subgroup` replicates each, in order.
+    /// `subgroup_labels` names the subgroups, one label per subgroup, the
+    /// same labels in every group (omit for "S1", "S2"…). The rows must
+    /// tile into subgroups × replicates exactly — a factorization that
+    /// doesn't tile is refused, never lossy. Only a Column table converts.
+    #[tool(
+        name = "titer_convert_to_nested",
+        description = "Convert a Column table to a Nested table: each Column dataset becomes a group, and its rows split into subgroups subgroups of replicates_per_subgroup replicates each, in order. subgroup_labels names the subgroups, one label per subgroup, the same labels in every group (omit for \"S1\", \"S2\"…). The rows must tile into subgroups × replicates exactly — a factorization that doesn't tile is refused, never lossy. Only a Column table converts.",
+        annotations(
+            title = "Convert to Nested",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn convert_to_nested(
+        &self,
+        Parameters(args): Parameters<ConvertToNestedArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({
+            "project_id": args.project_id,
+            "table_id": args.table_id,
+            "subgroups": args.subgroups,
+            "replicates_per_subgroup": args.replicates_per_subgroup,
+            "subgroup_labels": args.subgroup_labels.as_ref().map(|l| l.len()),
+        });
+        let outcome: Result<serde_json::Value, String> = async {
+            let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            let snap = self.state.snapshot_for_node(&id, snap, &args.table_id).await;
+            let node = find_node(&snap, &args.table_id).ok_or_else(|| {
+                format!("No table with id “{}” in project {id}. Ask titer_list_tables for the ids.", args.table_id)
+            })?;
+            if node.get("type").and_then(|v| v.as_str()) != Some("table") {
+                return Err(format!(
+                    "“{}” is not a table (it is a {}).",
+                    args.table_id,
+                    node.get("type").and_then(|v| v.as_str()).unwrap_or("node")
+                ));
+            }
+            let table_type = node.get("tableType").and_then(|v| v.as_str()).unwrap_or("column");
+            if table_type != "column" {
+                let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                return Err(format!(
+                    "only a Column table converts to Nested — “{name}” is a {} table.",
+                    display_table_type(table_type)
+                ));
+            }
+            if args.subgroups < 1 {
+                return Err("needs at least 1 subgroup per group.".into());
+            }
+            if args.replicates_per_subgroup < 1 {
+                return Err("needs at least 1 replicate per subgroup.".into());
+            }
+            self.run_table_job(
+                &id,
+                "convert-to-nested",
+                serde_json::json!({
+                    "table_id": args.table_id,
+                    "subgroups": args.subgroups,
+                    "replicates_per_subgroup": args.replicates_per_subgroup,
+                    "subgroup_labels": args.subgroup_labels,
+                }),
+            )
+            .await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_convert_to_nested", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_convert_to_nested", log_args, false, Some(&e));
                 Err(e)
             }
         }
@@ -11682,6 +11787,7 @@ mod tests {
             "titer_create_table",
             "titer_write_table",
             "titer_edit_table",
+            "titer_convert_to_nested",
             "titer_freeze_table",
             "titer_duplicate_table_family",
             "titer_rename_node",
