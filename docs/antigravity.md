@@ -70,9 +70,10 @@ Titer (once listed), or place the `plugins/titer/` folder in
 Enable it and Antigravity opens a setup dialog asking for the **Titer MCP
 endpoint** and **Titer local token** — paste the two values from Settings
 (see Prerequisites). The bundled server is then `titer_local`, with the
-five tools allowlisted and `titer_list_projects` eager-loaded (the rest
-load lazily on demand). If you regenerate the token in Titer Settings,
-re-enter the new one in the plugin setup.
+five Phase 1 read tools plus `titer_send_feedback` allowlisted and
+`titer_list_projects` eager-loaded (the rest load lazily on demand). If
+you regenerate the token in Titer Settings, re-enter the new one in the
+plugin setup.
 
 **Validate (maintainers):** from a checkout,
 
@@ -85,8 +86,13 @@ agy plugin validate --strict ./plugins/titer
 **One-click instead:** in Titer, **Settings → AI connections → Connect to Antigravity** writes the
 stdio entry below for you (after a consent dialog) — it turns the server on, reads your config
 leniently, updates only the `titer` key, keeps a `mcp_config.json.titer-bak` backup, and points at
-the bridge next to the running Titer app. The steps below are the manual equivalent, for reference
-or if the button is unavailable.
+the bridge next to the running Titer app. The `enabledTools` it writes are derived from your
+allowlist in effect right now (seq 540), and toggling a group in Settings re-applies the entry —
+so the client-side list and the server can never contradict each other again. Titer also
+re-syncs the entry on every launch, so a new version's tools appear without a reconnect. The
+entry lists the tools explicitly; omitting `enabledTools` (which Antigravity's docs imply means
+"all tools the server offers") is the preferred shape once it is verified live on the Mac. The steps below are
+the manual equivalent, for reference or if the button is unavailable.
 
 Antigravity reads MCP servers from `mcp_config.json` — globally at
 `~/.gemini/config/mcp_config.json`, or per workspace at
@@ -94,12 +100,16 @@ Antigravity reads MCP servers from `mcp_config.json` — globally at
 Installed → MCP Servers → **Copy Config File Path** shows the file; in
 the CLI, `/mcp` opens the server manager). Add one entry under
 `mcpServers`. The two transports are alternatives — pick one, not both
-(two entries would register the same five tools twice under different
+(two entries would register the same six tools twice under different
 names).
 
-Both snippets below allowlist exactly the five Phase 1 tools. That is
-deliberate: when Phase 2 adds write tools, they stay hidden in Antigravity
-until you opt in. `timeoutSeconds: 300` matches the bridge's per-request
+Both snippets below allowlist the five Phase 1 read tools plus
+`titer_send_feedback` — the set the one-click button writes when only the
+read groups are on. That is deliberate: when Phase 2 adds write tools,
+they stay hidden in Antigravity until you opt in. Note the snippets are
+a static snapshot: if you enable more groups, the button rewrites the
+entry to match, but a hand-pasted snippet does not — re-paste it, or use
+the button. `timeoutSeconds: 300` matches the bridge's per-request
 timeout — analyses can be slow; the default is 180 s per call.
 `tools.titer_list_projects.eager: true` registers the discovery tool
 upfront; the rest stay lazy-loaded.
@@ -119,7 +129,8 @@ upfront; the rest stay lazy-loaded.
         "titer_list_tables",
         "titer_read_table_summary",
         "titer_read_results",
-        "titer_read_graph"
+        "titer_read_graph",
+        "titer_send_feedback"
       ],
       "tools": {
         "titer_list_projects": { "eager": true }
@@ -154,7 +165,8 @@ Antigravity and Streamable HTTP to Titer, nothing else.
         "titer_list_tables",
         "titer_read_table_summary",
         "titer_read_results",
-        "titer_read_graph"
+        "titer_read_graph",
+        "titer_send_feedback"
       ],
       "tools": {
         "titer_list_projects": { "eager": true }
@@ -184,8 +196,11 @@ exist — build it with `scripts/build-stdio-bridge.sh`.)
 
 1. In the App: **Customizations → Installed → MCP Servers** — the server
    shows with a green status dot and “7 tools enabled” by default (the
-   seven read tools the server advertises by default — the five in the
-   snippets above, plus `titer_list_backups` and `titer_list_plugin_analyses`). Since 1.7.4 the server
+   seven read tools the server advertises by default — the five read tools
+   in the snippets above, plus `titer_list_backups` and
+   `titer_list_plugin_analyses`). The snippets also list
+   `titer_send_feedback`, which Antigravity only sees once the Read more
+   group is on in Titer Settings. Since 1.7.4 the server
    enforces the allowlist: Antigravity only ever sees the tools Titer
    has enabled, so the count here is the allowlisted count, not the
    server's full set. (In 1.7.3 the server advertised all 52 tools and
@@ -195,8 +210,11 @@ exist — build it with `scripts/build-stdio-bridge.sh`.)
    `/mcp`.
 2. To give the agent more tools, enable them in Titer under **Settings →
    AI connections** — the count in Antigravity rises to match what you
-   enabled. Enabling write tools lets the agent change your project, so
-   only enable what you trust the app with.
+   enabled, with no reconnect needed: Titer sends
+   `notifications/tools/list_changed` to connected apps and rewrites the
+   entry to match. If Antigravity doesn't refresh, click Refresh under
+   Installed MCP Servers, or reconnect. Enabling write tools lets the
+   agent change your project, so only enable what you trust the app with.
 3. Ask the agent: “List my open Titer projects and their tables.” It
    should call `titer_list_projects` and report what Titer has open.
 4. Cross-check in Titer: **Settings → AI connections → Activity log**

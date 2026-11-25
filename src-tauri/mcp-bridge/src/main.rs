@@ -273,6 +273,7 @@ fn content_type_is(headers: &reqwest::header::HeaderMap, needle: &str) -> bool {
 }
 
 /// Outcome of forwarding one client message.
+#[derive(Debug)]
 enum ForwardOutcome {
     /// Messages to write to stdout, in order (usually exactly one).
     Messages(Vec<String>),
@@ -338,6 +339,93 @@ fn close_session(client: &Client, cfg: &BridgeConfig, protocol_version: &str, se
         .send();
 }
 
+/// The JSON-RPC error for a POST that never reached the server (or timed
+/// out): the contract's server-off message, not reqwest's raw error.
+/// Shared by the first attempt and the post-recovery retry (seq 540).
+fn forward_post_error(e: &reqwest::Error, request_id: &Value, is_notification: bool) -> ForwardOutcome {
+    // The server is down (or never started): the client gets the clear
+    // message, not reqwest's "connection refused".
+    let message = if e.is_connect() {
+        SERVER_OFF_MESSAGE.to_string()
+    } else if e.is_timeout() {
+        "Titer took too long to answer (>5 min). The analysis may still be \
+         running in Titer — check the Activity log there."
+            .to_string()
+    } else {
+        format!("Could not reach Titer's MCP server: {e}. {SERVER_OFF_MESSAGE}")
+    };
+    if is_notification {
+        eprintln!("titer-stdio-bridge: notification failed: {message}");
+        return ForwardOutcome::NoResponse;
+    }
+    ForwardOutcome::Failed(jsonrpc_error(request_id, -32000, &message))
+}
+
+/// The `initialize` request the bridge replays to re-establish a dead
+/// session (seq 540): same shape as `--check`'s probe, with a synthetic
+/// id — its result is consumed by the bridge, never forwarded to the
+/// client. Pure: unit-tested below.
+fn reinitialize_message(protocol_version: &str) -> String {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": "titer-bridge-reinit",
+        "method": "initialize",
+        "params": {
+            "protocolVersion": protocol_version,
+            "capabilities": {},
+            "clientInfo": { "name": "titer-stdio-bridge", "version": VERSION },
+        },
+    })
+    .to_string()
+}
+
+/// The `notifications/initialized` that completes the replayed handshake.
+/// Pure: unit-tested below.
+fn initialized_message() -> String {
+    serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }).to_string()
+}
+
+/// Re-establish a dead session: re-read the discovery file (a restarted
+/// server listens on a new port, and may have a new token), replay
+/// `initialize` + `notifications/initialized` for a fresh session, and
+/// store the new session id. Returns false when any step fails — the
+/// caller then reports the original 404 as a JSON-RPC error instead of
+/// retrying forever. Only ever called after a 404 on a request that
+/// carried a session id.
+fn recover_session(
+    client: &Client,
+    cfg: &mut BridgeConfig,
+    session_id: &mut Option<String>,
+    protocol_version: &str,
+) -> bool {
+    // Re-read discovery first: without it the replay would POST to the
+    // dead endpoint. A failure here keeps the old config — the endpoint
+    // may still be alive (a session can expire without a restart).
+    if let Ok(fresh) = load_config(cfg.explicit_discovery.as_deref()) {
+        *cfg = fresh;
+    }
+    *session_id = None;
+    let init = reinitialize_message(protocol_version);
+    let resp = match post_once(client, cfg, session_id, protocol_version, &init) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    if !resp.status().is_success() {
+        return false;
+    }
+    let Some(sid) = resp.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    *session_id = Some(sid.to_string());
+    // Consume the body so the connection is released, then complete the
+    // handshake the spec requires after initialize.
+    let _ = resp.text();
+    match post_once(client, cfg, session_id, protocol_version, &initialized_message()) {
+        Ok(r) => r.status().is_success(),
+        Err(_) => false,
+    }
+}
+
 /// Forward one raw JSON-RPC line to the Streamable HTTP endpoint.
 /// `session_id` is the `Mcp-Session-Id` the server returned at initialize
 /// (if any); it is sent on every subsequent request and refreshed whenever
@@ -353,25 +441,22 @@ fn forward(
 ) -> ForwardOutcome {
     let mut resp = match post_once(client, cfg, session_id, protocol_version, line) {
         Ok(r) => r,
-        Err(e) => {
-            // The server is down (or never started): the client gets the
-            // clear message, not reqwest's "connection refused".
-            let message = if e.is_connect() {
-                SERVER_OFF_MESSAGE.to_string()
-            } else if e.is_timeout() {
-                "Titer took too long to answer (>5 min). The analysis may still be \
-                 running in Titer — check the Activity log there."
-                    .to_string()
-            } else {
-                format!("Could not reach Titer's MCP server: {e}. {SERVER_OFF_MESSAGE}")
-            };
-            if is_notification {
-                eprintln!("titer-stdio-bridge: notification failed: {message}");
-                return ForwardOutcome::NoResponse;
-            }
-            return ForwardOutcome::Failed(jsonrpc_error(request_id, -32000, &message));
-        }
+        Err(e) => return forward_post_error(&e, request_id, is_notification),
     };
+
+    // 404 with a live session id: the session expired (the server
+    // restarted, or the session timed out) — re-establish it and retry
+    // the request once (seq 540). A 404 without a session id is not a
+    // dead session (initialize itself cannot 404 one), so it falls
+    // through to the plain error below.
+    if resp.status().as_u16() == 404 && session_id.is_some() {
+        if recover_session(client, cfg, session_id, protocol_version) {
+            match post_once(client, cfg, session_id, protocol_version, line) {
+                Ok(r) => resp = r,
+                Err(e) => return forward_post_error(&e, request_id, is_notification),
+            }
+        }
+    }
 
     // 401: the token may have rotated since this bridge started (contract
     // §2). Re-read the discovery file once and retry once with the fresh
@@ -849,5 +934,239 @@ mod tests {
     fn server_off_message_names_the_fix() {
         assert!(SERVER_OFF_MESSAGE.contains("Settings"));
         assert!(SERVER_OFF_MESSAGE.contains("AI connections"));
+    }
+
+    #[test]
+    fn reinit_message_is_a_fresh_initialize() {
+        // Seq 540: the replayed handshake is a plain initialize with a
+        // synthetic id — its result is consumed by the bridge, never
+        // forwarded to the client.
+        let v: Value = serde_json::from_str(&reinitialize_message("2025-06-18")).unwrap();
+        assert_eq!(v["method"], "initialize");
+        assert_eq!(v["params"]["protocolVersion"], "2025-06-18");
+        assert_eq!(v["id"], "titer-bridge-reinit");
+        assert_eq!(v["clientInfo"]["name"], "titer-stdio-bridge");
+        let v: Value = serde_json::from_str(&initialized_message()).unwrap();
+        assert_eq!(v["method"], "notifications/initialized");
+        assert!(v.get("id").is_none(), "a notification has no id");
+    }
+
+    /// Read one HTTP request off a fake-server connection: headers +
+    /// Content-Length body. Returns the headers and the body text.
+    /// None on EOF or a malformed read.
+    fn read_fake_request(
+        stream: &mut std::net::TcpStream,
+    ) -> Option<(Vec<(String, String)>, String)> {
+        use std::io::Read;
+        let mut header_buf = Vec::new();
+        let mut byte = [0u8; 1];
+        loop {
+            match stream.read(&mut byte) {
+                Ok(0) => return None,
+                Ok(_) => {
+                    header_buf.push(byte[0]);
+                    if header_buf.ends_with(b"\r\n\r\n") {
+                        break;
+                    }
+                    if header_buf.len() > 65536 {
+                        return None;
+                    }
+                }
+                Err(_) => return None,
+            }
+        }
+        let header_text = String::from_utf8_lossy(&header_buf).into_owned();
+        let mut headers = Vec::new();
+        let mut content_length = 0usize;
+        for line in header_text.lines().skip(1) {
+            if let Some((k, v)) = line.split_once(':') {
+                if k.trim().eq_ignore_ascii_case("content-length") {
+                    content_length = v.trim().parse().unwrap_or(0);
+                }
+                headers.push((k.trim().to_string(), v.trim().to_string()));
+            }
+        }
+        let mut body = vec![0u8; content_length];
+        if content_length > 0 {
+            stream.read_exact(&mut body).ok()?;
+        }
+        Some((headers, String::from_utf8(body).unwrap_or_default()))
+    }
+
+    /// A fake Streamable HTTP server for the session-recovery tests: it
+    /// answers requests by ordinal from `script` — one
+    /// (status, extra-headers, body) per request — and records each
+    /// request's JSON-RPC method + `Mcp-Session-Id` header in `seen`.
+    /// Runs on its own thread with a deadline so a test that never
+    /// retries cannot hang the suite; the thread exits by itself.
+    fn run_fake_server(
+        script: Vec<(u16, Vec<(&'static str, String)>, String)>,
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<(String, Option<String>)>>>) {
+        use std::io::Write as _;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind fake server");
+        let addr = listener.local_addr().expect("fake addr");
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(String, Option<String>)>::new()));
+        let seen_clone = seen.clone();
+        std::thread::spawn(move || {
+            listener.set_nonblocking(true).ok();
+            let start = std::time::Instant::now();
+            let mut count = 0usize;
+            while count < script.len() && start.elapsed() < Duration::from_secs(10) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        stream.set_nonblocking(false).ok();
+                        stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+                        stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+                        loop {
+                            let Some((headers, body)) = read_fake_request(&mut stream) else {
+                                break;
+                            };
+                            let method = serde_json::from_str::<Value>(&body)
+                                .ok()
+                                .and_then(|v| v.get("method")?.as_str().map(str::to_string))
+                                .unwrap_or_default();
+                            let session = headers
+                                .iter()
+                                .find(|(k, _)| k.eq_ignore_ascii_case("mcp-session-id"))
+                                .map(|(_, v)| v.clone());
+                            {
+                                let mut seen = seen_clone.lock().unwrap();
+                                seen.push((method, session));
+                            }
+                            let (status, extra, resp_body) = &script[count];
+                            let mut out = format!(
+                                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
+                                resp_body.len()
+                            );
+                            for (k, v) in extra {
+                                out.push_str(&format!("{k}: {v}\r\n"));
+                            }
+                            out.push_str("\r\n");
+                            out.push_str(resp_body);
+                            if stream.write_all(out.as_bytes()).is_err() {
+                                break;
+                            }
+                            let _ = stream.flush();
+                            count += 1;
+                            if count >= script.len() {
+                                break;
+                            }
+                        }
+                    }
+                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        (format!("http://{addr}/mcp"), seen)
+    }
+
+    /// A discovery file pointing at the fake server, so a recovery
+    /// re-read finds the fake again instead of the real app-data file
+    /// (or none at all). Env overrides are cleared first: they outrank
+    /// the file in `load_config`.
+    fn fake_discovery_file(tag: &str, url: &str) -> PathBuf {
+        std::env::remove_var("TITER_MCP_URL");
+        std::env::remove_var("TITER_MCP_TOKEN");
+        std::env::remove_var("TITER_MCP_DISCOVERY");
+        let path = std::env::temp_dir()
+            .join(format!("titer-bridge-fake-discovery-{tag}-{}", std::process::id()));
+        let text = serde_json::json!({ "endpoint": url, "token": "test-token" }).to_string();
+        std::fs::write(&path, text).expect("fake discovery");
+        path
+    }
+
+    #[test]
+    fn forward_recovers_from_expired_session() {
+        // Seq 540: the first tools/call 404s (dead session) — the bridge
+        // re-reads discovery, replays initialize + notifications/initialized,
+        // and retries the call on the fresh session, all transparently.
+        let (url, seen) = run_fake_server(vec![
+            (
+                404,
+                vec![],
+                r#"{"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"Session not found"}}"#.to_string(),
+            ),
+            (
+                200,
+                vec![("mcp-session-id", "new-session".to_string())],
+                r#"{"jsonrpc":"2.0","id":"titer-bridge-reinit","result":{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"titer","version":"1.9.0"}}}"#.to_string(),
+            ),
+            (202, vec![], String::new()),
+            (
+                200,
+                vec![],
+                r#"{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{}"}]}}"#.to_string(),
+            ),
+        ]);
+        let client = Client::builder().timeout(Duration::from_secs(10)).build().expect("client");
+        let discovery = fake_discovery_file("recover", &url);
+        let mut cfg = BridgeConfig {
+            url,
+            token: "test-token".to_string(),
+            protocol_version: None,
+            explicit_discovery: Some(discovery.clone()),
+        };
+        let mut session_id = Some("old-session".to_string());
+        let line = serde_json::json!({
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": { "name": "titer_list_projects", "arguments": {} },
+        })
+        .to_string();
+        let outcome = forward(&client, &mut cfg, &mut session_id, "2025-11-25", &line, &serde_json::json!(7), false);
+        match outcome {
+            ForwardOutcome::Messages(messages) => {
+                assert_eq!(messages.len(), 1, "one reply: {messages:?}");
+                let v: Value = serde_json::from_str(&messages[0]).expect("result json");
+                assert_eq!(v["id"], 7, "the retried call answers with its own id");
+                assert!(v.get("result").is_some(), "the retried call succeeds: {}", messages[0]);
+            }
+            other => panic!("expected the retried result, got {other:?}"),
+        }
+        assert_eq!(session_id.as_deref(), Some("new-session"), "session id refreshed");
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 4, "four HTTP requests: {seen:?}");
+        assert_eq!(seen[0].0, "tools/call");
+        assert_eq!(seen[0].1.as_deref(), Some("old-session"));
+        assert_eq!(seen[1].0, "initialize");
+        assert_eq!(seen[1].1.as_deref(), None, "re-init carries no dead session id");
+        assert_eq!(seen[2].0, "notifications/initialized");
+        assert_eq!(seen[2].1.as_deref(), Some("new-session"));
+        assert_eq!(seen[3].0, "tools/call");
+        assert_eq!(seen[3].1.as_deref(), Some("new-session"), "retry uses the fresh session");
+        let _ = std::fs::remove_file(&discovery);
+    }
+
+    #[test]
+    fn forward_does_not_recover_without_a_session() {
+        // A 404 with no session id is not a dead session: no replay, one
+        // request, a plain JSON-RPC error.
+        let (url, seen) = run_fake_server(vec![(
+            404,
+            vec![],
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"Not found"}}"#.to_string(),
+        )]);
+        let client = Client::builder().timeout(Duration::from_secs(10)).build().expect("client");
+        let discovery = fake_discovery_file("no-session", &url);
+        let mut cfg = BridgeConfig {
+            url,
+            token: "test-token".to_string(),
+            protocol_version: None,
+            explicit_discovery: Some(discovery.clone()),
+        };
+        let mut session_id = None;
+        let line = serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": { "protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {} },
+        })
+        .to_string();
+        let outcome = forward(&client, &mut cfg, &mut session_id, "2025-11-25", &line, &serde_json::json!(1), false);
+        assert!(matches!(outcome, ForwardOutcome::Failed(_)), "404 without a session is an error: {outcome:?}");
+        // Give the fake thread a moment to record, then check it saw one.
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(seen.lock().unwrap().len(), 1, "no replay without a session");
+        let _ = std::fs::remove_file(&discovery);
     }
 }

@@ -6,7 +6,8 @@
         "titer_list_tables",
         "titer_read_table_summary",
         "titer_read_results",
-        "titer_read_graph"
+        "titer_read_graph",
+        "titer_send_feedback"
       ],
       "headers": {
         "Authorization": "Bearer ${TITER_MCP_TOKEN}"

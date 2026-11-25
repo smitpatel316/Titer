@@ -134,13 +134,15 @@ const OPT_IN_FILE: &str = "mcp-opt-in.json";
 
 /// The persisted tool-allowlist record: `{"groups": ["read", "analyses"],
 /// "ts": <unix seconds>}`. Written by `mcp_set_allowlist` every time the
-/// user flips a group toggle in Settings → AI Connections; read by every
-/// new MCP session (see `TiterMcpServer::new`), so a toggle change takes
-/// effect when the AI app reconnects. Same shape as the opt-in and
-/// feedback-consent records beside it, same 0700 directory, same
-/// owner-only (0600) file. Missing, unreadable, or malformed reads as the
-/// default — only the `read` group — so a fresh install advertises just
-/// the seven read-group tools (docs/mcp-server-contract.md §12).
+/// user flips a group toggle in Settings → AI Connections; read live by
+/// every `tools/list` and `tools/call` (seq 540), so a toggle change takes
+/// effect for already-connected sessions too — and
+/// `notifications/tools/list_changed` tells live clients to re-list.
+/// Same shape as the opt-in and feedback-consent records beside it, same
+/// 0700 directory, same owner-only (0600) file. Missing, unreadable, or
+/// malformed reads as the default — only the `read` group — so a fresh
+/// install advertises just the seven read-group tools
+/// (docs/mcp-server-contract.md §12).
 const ALLOWLIST_FILE: &str = "mcp-allowlist.json";
 
 /// The feedback server: `POST {this}` with one saved entry's JSON, and it
@@ -221,6 +223,16 @@ struct McpInner {
     enabled: bool,
     token: Option<String>,
     server: Option<RunningServer>,
+    /// Connected MCP sessions, as their rmcp peers — registered in
+    /// `TiterMcpServer::initialize`, so an allowlist change can send
+    /// `notifications/tools/list_changed` to every live client (seq 540).
+    /// Each entry carries a registration id: peers have no identity of
+    /// their own, and the id is what a failed notify prunes by. Capped —
+    /// a client that re-initializes in a loop cannot grow the list
+    /// without bound (oldest dropped first).
+    peers: Vec<(u64, rmcp::service::Peer<rmcp::RoleServer>)>,
+    /// Next peer registration id.
+    next_peer_id: u64,
     /// Published projects, by window label ("project-1", …).
     snapshots: HashMap<String, serde_json::Value>,
     /// The window whose snapshot was published most recently: the default
@@ -419,6 +431,53 @@ impl McpState {
         if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(dir.join(ACTIVITY_FILE)) {
             let _ = writeln!(file, "{line}");
         }
+    }
+
+    /// Remember a connected session's peer, so an allowlist change can
+    /// notify it (seq 540). Called from `TiterMcpServer::initialize` —
+    /// one peer per session. Capped at 64: a client that re-initializes
+    /// in a loop cannot grow the list without bound (oldest dropped
+    /// first). Returns the registration id.
+    fn register_peer(&self, peer: rmcp::service::Peer<rmcp::RoleServer>) -> u64 {
+        let mut inner = self.lock();
+        let id = inner.next_peer_id;
+        inner.next_peer_id += 1;
+        if inner.peers.len() >= 64 {
+            inner.peers.remove(0);
+        }
+        inner.peers.push((id, peer));
+        id
+    }
+
+    /// Send `notifications/tools/list_changed` to every registered
+    /// session, so clients that honor it re-list without a restart (seq
+    /// 540). Fire-and-forget: the caller is a sync Tauri command, so the
+    /// sends run on a spawned task and never block Settings. A peer whose
+    /// send fails is dead and is pruned by registration id; a peer that
+    /// times out (no open SSE stream to drain into) is left alone — the
+    /// notification is best-effort, and `tools/list` already reads the
+    /// allowlist live, so a missed notification changes nothing about
+    /// what the server advertises.
+    fn notify_tool_list_changed(&self) {
+        let peers = self.lock().peers.clone();
+        if peers.is_empty() {
+            return;
+        }
+        let state = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut dead = Vec::new();
+            for (id, peer) in &peers {
+                match tokio::time::timeout(Duration::from_secs(5), peer.notify_tool_list_changed()).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => dead.push(*id),
+                    Err(_) => {} // timed out: leave it; a later change retries
+                }
+            }
+            if !dead.is_empty() {
+                let mut inner = state.lock();
+                inner.peers.retain(|(id, _)| !dead.contains(id));
+            }
+        });
     }
 
     fn log_event(&self, event: &str, detail: serde_json::Value) {
@@ -1276,6 +1335,9 @@ pub fn mcp_set_feedback_consent(app: AppHandle, state: State<McpState>, sharing:
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(dir.join(FEEDBACK_CONSENT_FILE), fs::Permissions::from_mode(0o600));
     }
+    // Heal a stale Antigravity entry (e.g. pre-seq-540, without
+    // `titer_send_feedback`) for an already-connected user.
+    reapply_antigravity_entry_if_connected(&app, &state);
     Ok(Some(sharing))
 }
 
@@ -1824,7 +1886,19 @@ pub fn mcp_opted_in(app: &AppHandle) -> bool {
 /// once from `setup` in main.rs. A start failure (e.g. all ports 18741–18750
 /// busy) is logged to the Activity log, not fatal: the opt-in stays recorded,
 /// so the next launch retries.
+///
+/// The Antigravity entry is re-synced on every launch first (seq 540): a
+/// new version may have added tools, so the entry written by the old
+/// version is stale — the comparison against the current derived entry
+/// rewrites it when it differs, so new tools appear without any manual
+/// step. This runs opted in or not: the entry belongs to the user from an
+/// earlier connect, and its tool list should match the current server
+/// whether the server is on or not.
 pub async fn mcp_autostart_if_opted_in(app: AppHandle) {
+    {
+        let state = app.state::<McpState>();
+        reapply_antigravity_entry_if_connected(&app, &state);
+    }
     if !mcp_opted_in(&app) {
         return;
     }
@@ -1865,9 +1939,9 @@ struct AllowlistGroup {
 
 /// The seven read-group tools, on by default — the five Phase 1 tools plus
 /// `titer_list_backups` (seq 226) plus `titer_list_plugin_analyses`
-/// (marketplace M4). Note: `ANTIGRAVITY_ENABLED_TOOLS` below
-/// still allowlists exactly the five Phase 1 tools, by design; the
-/// server-side default is seven.
+/// (marketplace M4). Note: the Antigravity entry below derives its
+/// `enabledTools` from this allowlist (seq 540) — there is no separate
+/// hardcoded list to go stale; the server-side default is seven.
 const ALLOWLIST_DEFAULT_GROUPS: &[&str] = &["read"];
 
 const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
@@ -2121,8 +2195,11 @@ pub fn mcp_allowlist(app: AppHandle, state: State<McpState>) -> Result<Vec<McpAl
 /// Records the user's allowlist choice (Settings → AI Connections).
 /// Unknown group ids are dropped; an empty list is a valid explicit
 /// choice (nothing advertised). Returns the groups now in effect. Takes
-/// effect for MCP sessions started after the change — a connected AI app
-/// picks it up when it reconnects.
+/// effect immediately: `tools/list` and `tools/call` read the allowlist
+/// live, and connected clients get `notifications/tools/list_changed`
+/// (seq 540) — no reconnect needed for a client that honors it. The
+/// Antigravity config entry is re-applied too, so its `enabledTools`
+/// matches the new allowlist.
 #[tauri::command]
 pub fn mcp_set_allowlist(
     app: AppHandle,
@@ -2136,6 +2213,12 @@ pub fn mcp_set_allowlist(
     let mut sorted: Vec<&String> = enabled.iter().collect();
     sorted.sort();
     state.log_event("allowlist_changed", serde_json::json!({ "groups": sorted }));
+    // Heal a stale Antigravity entry (e.g. pre-seq-540, without
+    // `titer_send_feedback`) for an already-connected user.
+    reapply_antigravity_entry_if_connected(&app, &state);
+    // Tell live sessions the list changed, so clients that honor the
+    // notification re-list without a restart (seq 540).
+    state.notify_tool_list_changed();
     Ok(allowlist_groups_for_ui(&enabled))
 }
 
@@ -2147,17 +2230,33 @@ pub fn mcp_set_allowlist(
 // the remote `serverUrl` variant (which would need an `Authorization:
 // Bearer` header in the config file) is deliberately NOT used here.
 
-/// The 5 Phase 1 tools Antigravity gets: read-only, the same allowlist as
-/// the documented stdio entry in docs/antigravity.md (Path B) and the
-/// plugin's bundled config. Phase 2 write tools stay hidden — this button
-/// never widens the allowlist.
-const ANTIGRAVITY_ENABLED_TOOLS: &[&str] = &[
-    "titer_list_projects",
-    "titer_list_tables",
-    "titer_read_table_summary",
-    "titer_read_results",
-    "titer_read_graph",
-];
+/// Whether the written Antigravity entry omits `enabledTools` entirely
+/// (seq 540). Antigravity's own docs say the field is an allowlist —
+/// "when set, all other tools on the server are hidden" — which reads as
+/// absent = all tools the server offers, and Titer's own copy-paste
+/// remote config (`buildAntigravityConfig`) already omits it. Omitting
+/// would make the entry immune to staleness by construction, and is the
+/// preferred shape — BUT it must be verified live on the Mac first: if
+/// some Antigravity version treated absent as "none", omitting would
+/// break the integration outright, while the full derived list below is
+/// provably correct. Until that live check lands, this stays false and
+/// the entry carries the full derived list (the fallback).
+const ANTIGRAVITY_OMIT_ENABLED_TOOLS: bool = false;
+
+/// The Antigravity `enabledTools` list, derived from the server-side
+/// allowlist in effect right now: exactly the tools the server advertises
+/// (sorted, so the written entry is stable and comparable). The list is
+/// derived — never a hardcoded constant — so the client-side config and
+/// the server can never contradict each other again (seq 540: the old
+/// hardcoded five-tool list forbade `titer_send_feedback` in Antigravity
+/// while the server advertised it whenever the `read_more` group was on).
+/// The server-side allowlist is still the enforcement point: a tool
+/// outside it is rejected by name even if a stale config lists it.
+fn antigravity_enabled_tools(allowed: &HashSet<String>) -> Vec<String> {
+    let mut tools: Vec<String> = allowed.iter().cloned().collect();
+    tools.sort();
+    tools
+}
 
 /// `timeoutSeconds` for the entry: 300 s, matching the bridge's per-request
 /// timeout (docs/antigravity.md).
@@ -2169,15 +2268,31 @@ const ANTIGRAVITY_TIMEOUT_SECS: u64 = 300;
 const ANTIGRAVITY_CONFIG_BACKUP_SUFFIX: &str = ".titer-bak";
 
 /// The `titer` entry this build writes: stdio via the bridge binary next to
-/// the running app, the 5-tool allowlist, `titer_list_projects` eager, 300 s
+/// the running app, `enabledTools` derived from the allowlist in effect
+/// right now (or omitted entirely once `ANTIGRAVITY_OMIT_ENABLED_TOOLS`
+/// flips after the live Mac check), `titer_list_projects` eager, 300 s
 /// timeout. No `env`, no `headers`, no `serverUrl` — nothing secret in it.
-fn expected_antigravity_entry(bridge: &std::path::Path) -> serde_json::Value {
-    serde_json::json!({
+fn expected_antigravity_entry(bridge: &std::path::Path, allowed: &HashSet<String>) -> serde_json::Value {
+    expected_antigravity_entry_with(bridge, allowed, ANTIGRAVITY_OMIT_ENABLED_TOOLS)
+}
+
+/// The entry with the omit decision as a parameter, so both shapes are
+/// unit-testable (seq 540): `omit_enabled_tools = true` writes no
+/// `enabledTools` key at all.
+fn expected_antigravity_entry_with(
+    bridge: &std::path::Path,
+    allowed: &HashSet<String>,
+    omit_enabled_tools: bool,
+) -> serde_json::Value {
+    let mut entry = serde_json::json!({
         "command": bridge.to_string_lossy(),
-        "enabledTools": ANTIGRAVITY_ENABLED_TOOLS,
         "tools": { "titer_list_projects": { "eager": true } },
         "timeoutSeconds": ANTIGRAVITY_TIMEOUT_SECS,
-    })
+    });
+    if !omit_enabled_tools {
+        entry["enabledTools"] = serde_json::json!(antigravity_enabled_tools(allowed));
+    }
+    entry
 }
 
 /// The bridge binary next to the running app (`<bundle>/Contents/MacOS/`
@@ -2389,7 +2504,9 @@ pub async fn mcp_connect_antigravity(
 ) -> Result<McpAntigravityConnect, String> {
     let bridge = antigravity_bridge_path()?;
     let config_path = antigravity_config_path(&app)?;
-    let entry = expected_antigravity_entry(&bridge);
+    // The entry derives from the allowlist in effect right now (seq 540),
+    // so a user who toggled groups on before connecting gets those tools.
+    let entry = expected_antigravity_entry(&bridge, &load_allowlist(&state));
     let current = read_antigravity_config(&config_path)?;
     if let Some(doc) = &current {
         if doc.get("mcpServers").and_then(|s| s.get("titer")) == Some(&entry) {
@@ -2413,6 +2530,53 @@ pub async fn mcp_connect_antigravity(
         command: bridge.to_string_lossy().into_owned(),
         config_path: config_path.to_string_lossy().into_owned(),
     })
+}
+
+/// Whether an already-written Antigravity `titer` entry needs re-writing
+/// with the current expected entry: true only when a `titer` entry exists
+/// and differs from the one this build writes. Pure: unit-tested below.
+/// (No entry at all — the user never connected — is false: re-applying
+/// must never create an Antigravity config for someone who never asked
+/// for one.)
+fn antigravity_entry_needs_reapply(current: &serde_json::Value, entry: &serde_json::Value) -> bool {
+    match current.get("mcpServers").and_then(|s| s.get("titer")) {
+        None => false,
+        Some(existing) => existing != entry,
+    }
+}
+
+/// Re-writes the Antigravity `titer` entry with the current expected
+/// entry — but only if the user already has one (see
+/// `antigravity_entry_needs_reapply`). The entry is written at connect
+/// time only, so without this an already-connected user keeps a stale
+/// entry — e.g. the pre-seq-540 five-tool one without
+/// `titer_send_feedback` — until they reconnect. Called after an
+/// allowlist or feedback-consent change, so either Settings change heals
+/// a stale entry — and, because the entry derives from the live
+/// allowlist, a group toggle also updates the entry to match. Best-effort
+/// and silent: a missing bridge, an unreadable config, or a failed write
+/// must never fail the Settings change that triggered it.
+fn reapply_antigravity_entry_if_connected(app: &AppHandle, state: &McpState) {
+    // Resolve the mcp dir first: at startup `state.dir()` is still None,
+    // and deriving from the default allowlist would DOWNGRADE an entry
+    // written for a wider allowlist (seq 540). ensure_dir is idempotent
+    // — the Settings callers already ensured it, so this is a no-op there.
+    if state.ensure_dir(app).is_err() {
+        return;
+    }
+    let Ok(bridge) = antigravity_bridge_path() else { return };
+    let Ok(config_path) = antigravity_config_path(app) else { return };
+    let Ok(Some(current)) = read_antigravity_config(&config_path) else { return };
+    let entry = expected_antigravity_entry(&bridge, &load_allowlist(state));
+    if !antigravity_entry_needs_reapply(&current, &entry) {
+        return;
+    }
+    if write_antigravity_entry(&config_path, Some(current), &entry).is_ok() {
+        state.log_event(
+            "antigravity_entry_reapplied",
+            serde_json::json!({ "command": bridge.to_string_lossy() }),
+        );
+    }
 }
 
 /// Brings Antigravity forward (macOS `open -a Antigravity`): the last step
@@ -3184,10 +3348,6 @@ fn analysis_params_schema(analysis_type: &str) -> Option<serde_json::Value> {
 pub struct TiterMcpServer {
     state: McpState,
     tool_router: ToolRouter<Self>,
-    /// The tools this session may advertise and run, from the persisted
-    /// allowlist (contract §12). Read once per session in `new()` — a
-    /// toggle change takes effect when the client reconnects.
-    allowed: HashSet<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -9570,12 +9730,12 @@ impl TiterMcpServer {
 impl TiterMcpServer {
     pub fn new(state: McpState) -> Self {
         let mut tool_router = Self::tools();
-        // The allowlist (contract §12): read once per session, so a toggle
-        // change in Settings applies when the client reconnects. A fresh
-        // state with no `mcp/` directory yet reads as the default — only
-        // the seven read-group tools (the five Phase 1 tools plus
-        // `titer_list_backups` plus `titer_list_plugin_analyses`).
-        let allowed = load_allowlist(&state);
+        // The allowlist (contract §12) is NOT read here: `call_tool` and
+        // `list_tools` read it live on every request, so a toggle change
+        // in Settings takes effect for already-connected sessions too
+        // (seq 540) — a fresh state with no `mcp/` directory yet reads as
+        // the default, only the seven read-group tools (the five Phase 1
+        // tools plus `titer_list_backups` plus `titer_list_plugin_analyses`).
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
         // returns, so `tools/list` prints `{"tools": []}` even though the
@@ -9593,7 +9753,7 @@ impl TiterMcpServer {
             std::sync::Arc::make_mut(schema)
                 .insert("type".to_string(), serde_json::json!("object"));
         }
-        Self { state, tool_router, allowed }
+        Self { state, tool_router }
     }
 
     /// Enqueue a table job and wait for the frontend to run it, then return
@@ -9913,6 +10073,20 @@ fn ensure_export_extension(path: &str, ext: &str) -> String {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for TiterMcpServer {
+    /// Register this session's peer before the handshake completes, so an
+    /// allowlist change later can send it `notifications/tools/list_changed`
+    /// (seq 540). The default body is kept verbatim otherwise
+    /// (`set_peer_info` + `negotiate_initialize`).
+    async fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        context: rmcp::service::RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, ErrorData> {
+        context.peer.set_peer_info(request.clone());
+        self.state.register_peer(context.peer.clone());
+        self.negotiate_initialize(&request)
+    }
+
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
@@ -9986,7 +10160,11 @@ impl ServerHandler for TiterMcpServer {
         context: rmcp::service::RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let name = request.name.as_ref();
-        if self.tool_router.get(name).is_some() && !self.allowed.contains(name) {
+        // The allowlist is read live on every call (seq 540): a toggle
+        // change in Settings takes effect for already-connected sessions
+        // too — there is no per-session snapshot to go stale.
+        let allowed = load_allowlist(&self.state);
+        if self.tool_router.get(name).is_some() && !allowed.contains(name) {
             let message = allowlist_rejection(name);
             self.state.log_call(
                 name,
@@ -10003,7 +10181,9 @@ impl ServerHandler for TiterMcpServer {
     /// `tools/list` advertises only the allowed tools (contract §12) —
     /// the other half of the gate, and the fix for the audit's §5 finding
     /// (the server used to advertise all 56). Same cache-hint shape as
-    /// the `#[tool_handler]`-generated version, filtered to `self.allowed`.
+    /// the `#[tool_handler]`-generated version, filtered to the allowlist
+    /// read live on every call (seq 540) — a toggle change shows up here
+    /// without a reconnect.
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
@@ -10011,8 +10191,9 @@ impl ServerHandler for TiterMcpServer {
     ) -> Result<ListToolsResult, ErrorData> {
         let supports_cache_hints =
             context.protocol_version().is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
+        let allowed = load_allowlist(&self.state);
         let tools: Vec<Tool> =
-            self.tool_router.list_all().into_iter().filter(|t| self.allowed.contains(t.name.as_ref())).collect();
+            self.tool_router.list_all().into_iter().filter(|t| allowed.contains(t.name.as_ref())).collect();
         Ok(ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
             tools,
@@ -13492,9 +13673,11 @@ mod tests {
         assert_eq!(listed["result"]["isError"], false, "allowed read must succeed");
         assert!(call_text(&listed)["projects"].is_array(), "list_projects shape: {}", call_raw_text(&listed));
 
-        // Toggle the `destructive` group on, then reconnect: a NEW session
-        // picks the change up (the server is built per session — contract
-        // §12), while the old session keeps its original allowlist.
+        // Toggle the `destructive` group on: a NEW session picks the
+        // change up — and so does the EXISTING session (seq 540):
+        // `tools/list` and `tools/call` read the allowlist live on every
+        // request, so no reconnect is needed for the server side to
+        // follow a toggle.
         let dir = allowlist_scratch_dir("destructive", &["read", "destructive"]);
         state.lock().dir = Some(dir.clone());
         let session2 = mcp_initialize(&client, &url).await;
@@ -13520,9 +13703,86 @@ mod tests {
             call_raw_text(&resp)
         );
 
-        // The first session is untouched by the toggle: it still lists 7.
+        // The first session follows the toggle too — it now lists 9, and
+        // the previously-rejected call passes the gate (seq 540: the
+        // allowlist is live per request, not frozen per session).
         let names_again = mcp_list_tool_names(&client, &url, &session).await;
-        assert_eq!(names_again.len(), 7, "existing session keeps its allowlist: {names_again:?}");
+        assert_eq!(names_again.len(), 9, "existing session follows the toggle: {names_again:?}");
+        let (resp, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(3, "titer_delete_node", json!({ "project_id": "project-1" })),
+        )
+        .await;
+        assert_eq!(resp["result"]["isError"], true, "delete without node_id must fail");
+        assert!(
+            !call_raw_text(&resp).contains("not enabled"),
+            "delete now passes the gate on the old session too: {}",
+            call_raw_text(&resp)
+        );
+
+        cancel.cancel();
+        server.abort();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Seq 540: toggling a group notifies live sessions. A client with an
+    /// open GET (SSE) stream receives `notifications/tools/list_changed`
+    /// after the allowlist file is rewritten and the registered sessions
+    /// are notified — no reconnect needed to learn the list changed.
+    /// (Whether a given client ACTS on it is the client's business;
+    /// Antigravity's handling is verified live, not here.)
+    #[tokio::test]
+    async fn mcp_allowlist_change_notifies_live_session() {
+        let state = job_state();
+        let dir = allowlist_scratch_dir("notify", &["read"]);
+        state.lock().dir = Some(dir.clone());
+        state.lock().last_published = Some("project-1".to_string());
+        state.lock().token = Some(SMOKE_TOKEN.to_string());
+        let (url, client, cancel, server) = mcp_allowlist_harness(state.clone()).await;
+        let session = mcp_initialize(&client, &url).await;
+
+        // Open the SSE stream first, like a spec-compliant client: the
+        // notification travels on it.
+        let mut stream = client
+            .get(&url)
+            .header("Accept", "text/event-stream")
+            .header("Authorization", format!("Bearer {SMOKE_TOKEN}"))
+            .header("MCP-Protocol-Version", "2025-11-25")
+            .header("Mcp-Session-Id", &session)
+            .send()
+            .await
+            .expect("sse get");
+        assert!(stream.status().is_success(), "GET stream opens: {}", stream.status());
+
+        // Toggle read_more on the way mcp_set_allowlist does: rewrite the
+        // file, then notify the registered sessions.
+        let groups: HashSet<String> = ["read", "read_more"].iter().map(|g| g.to_string()).collect();
+        write_allowlist_file(&dir, &groups).expect("allowlist write");
+        state.notify_tool_list_changed();
+
+        // Read SSE chunks until the list_changed notification arrives.
+        let found = tokio::time::timeout(Duration::from_secs(10), async {
+            let mut buf = String::new();
+            loop {
+                match stream.chunk().await {
+                    Some(Ok(bytes)) => {
+                        buf.push_str(&String::from_utf8_lossy(&bytes));
+                        if buf.contains("notifications/tools/list_changed") {
+                            break true;
+                        }
+                    }
+                    Some(Err(e)) => panic!("sse read failed: {e}"),
+                    None => break false,
+                }
+            }
+        })
+        .await;
+        assert!(
+            found.expect("timed out waiting for list_changed"),
+            "no list_changed notification arrived on the SSE stream"
+        );
 
         cancel.cancel();
         server.abort();
@@ -13971,21 +14231,59 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The allowlist for these groups, as `expected_antigravity_entry` takes it.
+    fn allowed_for(groups: &[&str]) -> HashSet<String> {
+        allowed_tools(&groups.iter().map(|g| g.to_string()).collect())
+    }
+
     #[test]
-    fn antigravity_entry_is_stdio_with_the_five_read_only_tools() {
+    fn antigravity_entry_derives_enabled_tools_from_the_allowlist() {
         let bridge = std::path::Path::new("/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
-        let entry = expected_antigravity_entry(bridge);
+        // Default allowlist (read group only): exactly the seven read
+        // tools — no titer_send_feedback, because the server does not
+        // advertise it either.
+        let entry = expected_antigravity_entry(bridge, &allowed_for(&["read"]));
         assert_eq!(entry["command"], "/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
         assert_eq!(
             entry["enabledTools"],
             json!([
+                "titer_list_backups",
+                "titer_list_plugin_analyses",
                 "titer_list_projects",
                 "titer_list_tables",
-                "titer_read_table_summary",
+                "titer_read_graph",
                 "titer_read_results",
-                "titer_read_graph"
+                "titer_read_table_summary"
             ])
         );
+        // read_more on: the entry gains exactly the read_more tools —
+        // including titer_send_feedback (seq 540: the old hardcoded
+        // five-tool list forbade it in Antigravity while the server
+        // advertised it).
+        let entry = expected_antigravity_entry(bridge, &allowed_for(&["read", "read_more"]));
+        let tools: Vec<&str> = entry["enabledTools"]
+            .as_array()
+            .expect("enabledTools array")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(tools.contains(&"titer_send_feedback"), "feedback is in the entry: {tools:?}");
+        assert_eq!(tools.len(), 12, "seven read + five read-more: {tools:?}");
+        // All groups on: Antigravity gets everything the server offers —
+        // all 80 tools, including the destructive ones (seq 540: the
+        // allowlist is the only gate; the entry must not narrow it).
+        let all_groups: Vec<&str> = ALLOWLIST_GROUPS.iter().map(|g| g.id).collect();
+        let entry = expected_antigravity_entry(bridge, &allowed_for(&all_groups));
+        let tools: Vec<&str> = entry["enabledTools"]
+            .as_array()
+            .expect("enabledTools array")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert_eq!(tools.len(), 80, "all tools on by default: {tools:?}");
+        assert!(tools.contains(&"titer_delete_node"), "destructive tools included: {tools:?}");
+        assert!(tools.contains(&"titer_run_script"), "destructive tools included: {tools:?}");
+        assert!(tools.contains(&"titer_send_feedback"), "feedback included: {tools:?}");
         assert_eq!(entry["tools"]["titer_list_projects"]["eager"], true);
         assert_eq!(entry["timeoutSeconds"], 300);
         // Token safety: nothing secret in the entry — no headers, no
@@ -13997,6 +14295,53 @@ mod tests {
             !serde_json::to_string(&entry).unwrap().contains("Bearer"),
             "no bearer <redacted> in the entry"
         );
+    }
+
+    #[test]
+    fn antigravity_entry_omits_enabled_tools_when_asked() {
+        // Seq 540: the omit shape (preferred once the live Mac check
+        // confirms absent means "all") — no `enabledTools` key at all,
+        // everything else identical.
+        let bridge = std::path::Path::new("/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
+        let entry = expected_antigravity_entry_with(bridge, &allowed_for(&["read"]), true);
+        assert_eq!(entry["command"], "/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
+        assert!(entry.get("enabledTools").is_none(), "omit means no key: {entry}");
+        assert_eq!(entry["tools"]["titer_list_projects"]["eager"], true);
+        assert_eq!(entry["timeoutSeconds"], 300);
+        // And the shipped shape still carries the full derived list.
+        let entry = expected_antigravity_entry_with(bridge, &allowed_for(&["read"]), false);
+        assert_eq!(entry["enabledTools"].as_array().expect("list").len(), 7);
+    }
+
+    #[test]
+    fn antigravity_entry_needs_reapply_only_for_a_stale_titer_entry() {
+        let bridge = std::path::Path::new("/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
+        let entry = expected_antigravity_entry(bridge, &allowed_for(&["read", "read_more"]));
+        // No titer entry at all (never connected): never create one.
+        assert!(!antigravity_entry_needs_reapply(&json!({ "mcpServers": {} }), &entry));
+        assert!(!antigravity_entry_needs_reapply(&json!({ "mcpServers": { "other": {} } }), &entry));
+        // Already the current entry: nothing to do.
+        assert!(!antigravity_entry_needs_reapply(
+            &json!({ "mcpServers": { "titer": entry } }),
+            &entry
+        ));
+        // The pre-seq-540 five-tool entry: stale, must be re-applied.
+        let stale = json!({
+            "command": "/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge",
+            "enabledTools": [
+                "titer_list_projects",
+                "titer_list_tables",
+                "titer_read_table_summary",
+                "titer_read_results",
+                "titer_read_graph"
+            ],
+            "tools": { "titer_list_projects": { "eager": true } },
+            "timeoutSeconds": 300
+        });
+        assert!(antigravity_entry_needs_reapply(
+            &json!({ "mcpServers": { "titer": stale } }),
+            &entry
+        ));
     }
 
     #[test]
@@ -14024,7 +14369,7 @@ mod tests {
         let original = "{\n  \"mcpServers\": {\n    \"other\": { \"command\": \"other-bin\" }\n  }\n}\n";
         std::fs::write(&path, original).expect("original config");
         let bridge = std::path::Path::new("/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
-        let entry = expected_antigravity_entry(bridge);
+        let entry = expected_antigravity_entry(bridge, &allowed_for(&["read"]));
         let current = read_antigravity_config(&path).expect("read").expect("present");
         write_antigravity_entry(&path, Some(current), &entry).expect("write");
         // Backup holds the original bytes.
@@ -14055,7 +14400,7 @@ mod tests {
         std::fs::write(&path, "{broken").expect("broken config");
         assert!(read_antigravity_config(&path).is_err(), "broken config is an error, not a wipe");
         let bridge = std::path::Path::new("/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
-        let entry = expected_antigravity_entry(bridge);
+        let entry = expected_antigravity_entry(bridge, &allowed_for(&["read"]));
         // A top-level array is not a config object: refuse, leave the file alone.
         let before = std::fs::read_to_string(&path).expect("before");
         assert!(
@@ -14077,7 +14422,7 @@ mod tests {
         let dir = feedback_test_dir("antigravity-fresh");
         let path = dir.join("mcp_config.json");
         let bridge = std::path::Path::new("/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
-        let entry = expected_antigravity_entry(bridge);
+        let entry = expected_antigravity_entry(bridge, &allowed_for(&["read"]));
         assert!(read_antigravity_config(&path).expect("read").is_none(), "absent file reads as none");
         write_antigravity_entry(&path, None, &entry).expect("fresh write");
         let back = read_antigravity_config(&path).expect("re-read").expect("present");

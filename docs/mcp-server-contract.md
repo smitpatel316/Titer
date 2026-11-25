@@ -824,10 +824,12 @@ The choice is persisted as `<app_data>/mcp/mcp-allowlist.json`
 directory and shape as the opt-in and feedback-consent records).
 Missing, unreadable, or malformed reads as the default (only `read`);
 unknown group ids are dropped; an explicit empty list means nothing is
-advertised. The server reads the record once per MCP session, so a
-toggle change applies when the AI app reconnects — an already-connected
-session keeps the allowlist it started with. Toggling the server off
-and on re-reads it too.
+advertised. The server reads the record live on every `tools/list` and
+`tools/call` (seq 540), so a toggle change applies to already-connected
+sessions too — no reconnect needed for the server side to follow it.
+The server also sends `notifications/tools/list_changed` to every
+connected session, so clients that honor it re-list on their own.
+Toggling the server off and on re-reads it too.
 
 No MCP tool can read or change the allowlist: the two Tauri commands
 (`mcp_allowlist`, `mcp_set_allowlist`) are app commands, not tools —
@@ -837,11 +839,16 @@ the same human-only boundary as enable/token (D4).
 
 - The stdio bridge is untouched: it stays a byte-forwarder (§11.2)
   and naturally advertises only what the server advertises.
-- Antigravity's `mcp_config.json` is untouched: it keeps its 5-tool
-  `enabledTools` (the one-click entry still allowlists exactly the five
-  Phase 1 tools, by design). The server-side default is now seven read
-  tools — the six plus `titer_list_plugin_analyses` — and Antigravity follows
-  what the server advertises, so it shows seven. The config file format
-  does not change.
+- Antigravity's `mcp_config.json` keeps the same format — but the
+  one-click entry no longer carries a hardcoded list (seq 540): its
+  `enabledTools` is derived from the allowlist in effect when the entry
+  is written, toggling a group re-applies the entry, and Titer re-syncs
+  it on every launch too, so the client-side list and the server can
+  never contradict each other again — a new version's tools appear
+  without a manual step. Omitting `enabledTools` (absent = all, per
+  Antigravity's docs) is the preferred shape, pending a live Mac check.
+  The server-side default is now seven read tools — the six plus
+  `titer_list_plugin_analyses` — and Antigravity follows what the server
+  advertises, so it shows seven. The config file format does not change.
 - The server still *has* 80 tools. The allowlist decides which subset
   a given client sees — it does not remove tools from the server.

@@ -108,6 +108,12 @@ verbatim as a single HTTP POST and translates the reply back:
 - **401:** the token may have rotated — the bridge re-reads the discovery
   file once and retries once, then surfaces the contract's token-changed
   message ("The token changed — restart the bridge…").
+- **404 (session expired):** the server restarted, or the session timed
+  out — the bridge re-reads the discovery file once, replays
+  `initialize` + `notifications/initialized` for a fresh session, and
+  retries the failed request once on it (seq 540). A second 404, or a
+  404 with no session id, surfaces as a `-32000` error naming the HTTP
+  status.
 - **Timeout:** 300 s per request (analyses can be slow). A timeout returns
   `-32000` telling the user to check Titer's Activity log — the analysis
   may still be running.
