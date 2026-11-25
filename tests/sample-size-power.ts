@@ -58,6 +58,10 @@ r = solve({ test: "two-sample-t", solveFor: "power", effect: 0.5, n: 64 });
 ok(close3(r.power, 0.80146), `two-sample t power at n=64: ${r.power} (want 0.80146)`);
 r = solve({ test: "two-sample-t", solveFor: "effect", n: 64, power: 0.8 });
 ok(close3(r.effect, 0.49907), `two-sample t d at n=64: ${r.effect} (want 0.49907)`);
+// Upper-band effect (bug 43, cycle 42): d ∈ (6.4, 10] at n = 2/arm,
+// power 0.95 — the solver's doubling step used to jump past the cap.
+r = solve({ test: "two-sample-t", solveFor: "effect", n: 2, power: 0.95 });
+ok(close3(r.effect, 7.772), `two-sample t d at n=2: ${r.effect} (want 7.772)`);
 r = solve({ test: "two-sample-t", solveFor: "n", effect: 0.5, power: 0.8, alternative: "one-sided" });
 ok(close3(r.n, 50.15078), `two-sample t one-sided n: ${r.n} (want 50.15078)`);
 
@@ -103,6 +107,10 @@ r = solve({ test: "pearson-correlation", solveFor: "power", effect: 0.3, n: 85 }
 ok(close3(r.power, 0.80035), `correlation power at n=85: ${r.power} (want 0.80035)`);
 r = solve({ test: "pearson-correlation", solveFor: "effect", n: 85, power: 0.8 });
 ok(close3(r.effect, 0.29988), `correlation r at n=85: ${r.effect} (want 0.29988)`);
+// Upper-band effect (bug 43, cycle 42): the answer sits in the solver's
+// last doubling band — r ∈ (0.8, 1) at n = 6, power 0.8.
+r = solve({ test: "pearson-correlation", solveFor: "effect", n: 6, power: 0.8 });
+ok(close3(r.effect, 0.924), `correlation r at n=6: ${r.effect} (want 0.924)`);
 
 // ── One proportion (R pwr.p.test, Cohen's h) ──────────────────────────────
 r = solve({ test: "one-proportion", solveFor: "n", effect: 0.5, power: 0.8 });
@@ -171,6 +179,9 @@ const bad: [unknown, RegExp][] = [
   [{ test: "two-sample-t", solveFor: "n", effect: 0.5, power: 0.8, alpha: 1 }, /alpha/],
   [{ test: "two-sample-t", solveFor: "n", effect: -0.5, power: 0.8 }, /effect/],
   [{ test: "two-sample-t", solveFor: "n", effect: 0.5, power: 1.5 }, /power/],
+  // A target power at or below alpha is unreachable (power approaches
+  // alpha from above as the effect → 0) — refused, never effect ≈ 0.
+  [{ test: "two-sample-t", solveFor: "effect", n: 20, power: 0.02, alpha: 0.05 }, /power/],
   [{ test: "two-sample-t", solveFor: "n", effect: 0.5, power: 0.8, n: 1 }, /n\b/],
   [{ test: "one-way-anova", solveFor: "n", effect: 0.25, power: 0.8, groups: 1 }, /groups/],
   [{ test: "one-way-anova", solveFor: "n", effect: 0.25, power: 0.8, groups: 2.5 }, /groups/],
