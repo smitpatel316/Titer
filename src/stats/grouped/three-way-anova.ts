@@ -11,7 +11,7 @@
 import type { AnalysisOutcome, Column, ComparisonRow, ThreeWayAnovaParams } from "../types";
 import { FDR_METHODS, THREE_WAY_POSTHOCS, THREE_WAY_POSTHOC_SCOPES, fdrQError } from "../types";
 import type { RowGroup } from "../../store/types";
-import { adjustFdrPValues, adjustPValues, describe, effectSizeRow, pairIndices, pRow, R_ADJUST, R_CRIT, R_EFFECT_CI, R_PTUKEY, rStr, rVec, type FdrMethod } from "../column/base";
+import { adjustFdrPValues, adjustPValues, describe, effectSizeRow, identical, pairIndices, pRow, R_ADJUST, R_CRIT, R_EFFECT_CI, R_PTUKEY, rStr, rVec, type FdrMethod } from "../column/base";
 import { evalNamedVector } from "../webr";
 import { flattenThreeWay, rowGroupBands, rowName, threeWayTermCells, type ThreeWayTermCell } from "./base";
 import { R_MAXIMUM_T } from "../column/anova";
@@ -134,7 +134,7 @@ async function runPosthoc(
       const vj = members[j].values;
       const diff = mean(vi) - mean(vj);
       if (method === "games-howell") {
-        if (vi.length < 2 || vj.length < 2)
+        if (vi.length < 2 || vj.length < 2 || identical(vi) || identical(vj))
           return {
             error:
               "Games-Howell compares each cell on its own scatter: every cell compared needs 2 values or more that vary.",
