@@ -90,7 +90,7 @@ import {
   type ExportIo,
   type ExportJobDeps,
 } from "./mcp-export";
-import { executeImportFcs, type FlowJobDeps } from "./mcp-flow";
+import { executeImportFcs, executeApplyFlowCompensation, type FlowJobDeps } from "./mcp-flow";
 import {
   cancelR,
   isNative,
@@ -107,7 +107,7 @@ import { useProjectActions, useProjectStore } from "./use-project-store";
 import type { ProjectNode, RowGroup, TableData, TableType } from "./types";
 import type { TableMove } from "./references";
 import { groupsOf, isGrouped, isNested, leadOf, readTable, setColumns } from "../lib/dataset";
-import type { FlowSampleRef } from "../flow/sample";
+import type { FlowCompensationRef, FlowSampleRef } from "../flow/sample";
 import {
   addCalculatedVariable,
   isCalculatedColumn,
@@ -198,6 +198,9 @@ export interface JobDeps {
   /** Create a flow sample node from an imported FCS file (seq 443;
    *  default: the real store action). */
   createFlowSample?: (ref: FlowSampleRef) => string;
+  /** Update a flow sample node's compensation record (seq 447;
+   *  default: the real store action). */
+  updateFlowSampleCompensation?: (sampleId: string, compensation: FlowCompensationRef) => void;
   /** Create a plugin analysis node on a table (default: the real store action). */
   createPluginAnalysis?: (parentId: string, pluginId: string, params?: PluginParamValues) => string;
   /** Rename any node (default: the real store action). */
@@ -371,6 +374,7 @@ function toFlowDeps(deps: JobDeps): FlowJobDeps {
   return {
     getState: deps.getState,
     createFlowSample: deps.createFlowSample,
+    updateFlowSampleCompensation: deps.updateFlowSampleCompensation,
     flushUntilRevision: deps.flushUntilRevision,
     flush: deps.flush,
   };
@@ -1555,6 +1559,20 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       // Opt-in: the executor refuses while the flow toggle is off.
       const args = (job.args ?? {}) as { path?: unknown; sample_id?: unknown; name?: unknown };
       return executeImportFcs(toFlowDeps(deps), args, job.project_id);
+    }
+    case "apply-flow-compensation": {
+      // FlowJo (seq 447, F2a): apply a spillover matrix to a sample's
+      // stored events. The executor resolves the matrix (file / CSV /
+      // explicit), applies it in the store, and records it on the node.
+      // Opt-in: the executor refuses while the flow toggle is off.
+      const args = (job.args ?? {}) as {
+        sample_id?: unknown;
+        source?: unknown;
+        fluorochromes?: unknown;
+        matrix?: unknown;
+        matrix_csv?: unknown;
+      };
+      return executeApplyFlowCompensation(toFlowDeps(deps), args, job.project_id);
     }
     case "merge-project": {
       // Seq 180: read another project file and append its sheets to this
@@ -2856,6 +2874,7 @@ export function useMcpJobDispatcher() {
   const cacheAnalysisResult = actions.cacheAnalysisResult;
   const createAnalysis = actions.createAnalysis;
   const createFlowSample = actions.createFlowSample;
+  const updateFlowSampleCompensation = actions.updateFlowSampleCompensation;
   const createPluginAnalysis = actions.createPluginAnalysis;
   const renameNode = actions.renameNode;
   const setAnalysisFrozen = actions.setAnalysisFrozen;
@@ -2936,6 +2955,7 @@ export function useMcpJobDispatcher() {
                 cacheAnalysisResult,
                 createAnalysis,
                 createFlowSample,
+                updateFlowSampleCompensation,
                 createPluginAnalysis,
                 renameNode,
                 setAnalysisFrozen,

@@ -41418,7 +41418,7 @@ check("flow-f2a: spillover-matrix compensation per sample (seq 447) — inverse 
     store.applyCompensation("spill", { fluorochromes: ["FL1-A", "NOPE"], matrix: [[1, 0], [0, 1]], source: "manual" }),
     "an unknown fluorochrome must be refused",
   );
-  throws(() => comp.parseSpilloverCsv(" ,FL1-A\nFL1-A,1.0\nFL2-A,0.0\n"), /match/, "CSV row labels must match the header");
+  throws(() => comp.parseSpilloverCsv(" ,FL1-A\nFL2-A,1.0\n"), /match/, "CSV row labels must match the header");
 
   // 7. The Rust mirror: apply/clear/get + Tauri commands + tests.
   const flowStore = readFileSync("src-tauri/src/flow_store.rs", "utf8");
