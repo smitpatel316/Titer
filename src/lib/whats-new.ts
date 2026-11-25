@@ -11,8 +11,10 @@
 // news — a bad value never silently takes it away. The helpers never
 // throw (no localStorage in tests, private mode, or a full store).
 //
-// Entries are seeded from the release notes; the release-prep
-// coordinator adds the 2.0 entry when the 2.0 notes land.
+// Entries are seeded from the release notes. The newest entry must
+// name the version in package.json — pinned by the seq 542 check in
+// tests/checks.ts, so a release can never again ship showing the
+// previous version's news (2.0.0 shipped with only the 1.9.0 entry).
 
 import { version } from "../../package.json";
 
@@ -26,6 +28,16 @@ export interface WhatsNewEntry {
 
 /** The news, newest first. */
 export const WHAT_S_NEW: WhatsNewEntry[] = [
+  {
+    version: "2.0.0",
+    title: "Titer 2.0.0 — our public launch",
+    items: [
+      "Plugin marketplace, free only: install, enable, and run community plugins from inside Titer — no paid plugins, no marketplace cut, no license allowlist.",
+      "Rebuilt Import dialog — five tabs (File, Prism, Text, Clipboard, Script) with a live preview grid — and .dat / .prn files now import directly.",
+      "Mac clipboard fixes: Paste Special from the native menu, full-precision Excel values, table copies that paste as a real table, and graph copies as vector PDF.",
+      "Help menu completed, and four new MCP tools bring the total to 80 (was 76) — every one of Titer's 61 analyses is reachable from an AI assistant.",
+    ],
+  },
   {
     version: "1.9.0",
     title: "Titer 1.9.0 — more Prism coverage",

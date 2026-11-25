@@ -49,6 +49,7 @@ import {
   parseGuideSeen,
   shouldShowGuide,
 } from "../src/lib/startup-guide";
+import { WHAT_S_NEW } from "../src/lib/whats-new";
 import {
   extractMethod,
   formatMethodReport,
@@ -41786,11 +41787,25 @@ check("feedback-loop-453: feedback reachable for every user, Discussions + suppo
   ok(crash.includes("mcpSetErrorLogConsent"), "the crash dialog can turn sharing on to send");
   ok(crash.includes("or a send failed"), "the copy admits unsent entries are not proof of a crash");
   ok(crash.includes("Turn on sharing"), "sharing off offers an explicit opt-in, not a silent no-op");
-  // (d) What's new: versioned entries seeded from the 1.9.0 release
-  // notes, a once-per-version auto-show, mounted in the shell.
+  // (d) What's new: versioned entries seeded from the release notes,
+  // newest first, a once-per-version auto-show, mounted in the shell.
   const whatsNew = readFileSync("src/lib/whats-new.ts", "utf8");
   ok(whatsNew.includes("1.9.0"), "What's new is seeded with the 1.9.0 highlights");
   ok(whatsNew.includes("shouldShowWhatsNew"), "What's new shows once per version");
+  // Pin (seq 542): the newest entry must name the version in
+  // package.json — 2.0.0 shipped showing 1.9.0 news because the entry
+  // was never added when the version bumped. A release tip whose
+  // newest entry lags the app version fails here, never in the app.
+  const pkgVersion = (
+    JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")) as {
+      version: string;
+    }
+  ).version;
+  strictEqual(
+    WHAT_S_NEW[0]?.version,
+    pkgVersion,
+    `newest What's New entry (${WHAT_S_NEW[0]?.version}) must match package.json (${pkgVersion})`,
+  );
   ok(readFileSync("src/components/whats-new-dialog.tsx", "utf8").includes("WHAT_S_NEW"), "the What's New dialog renders the entries");
   const shell = readFileSync("src/components/app-shell.tsx", "utf8");
   ok(shell.includes("SendFeedbackDialog"), "the shell mounts the feedback dialog");
