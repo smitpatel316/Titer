@@ -40882,6 +40882,90 @@ check("plugin-m5 seam: the interceptor never calls executeJob or Tauri invoke di
 });
 
 
+check("feedback-loop-453: feedback reachable for every user, Discussions + support email, crash path, What's new, triage metadata", async () => {
+  // (a) Help menu: Send Feedback (dialog, no AI needed), Contact Support
+  // (mailto smit@muse.ai — the dead GitHub-issues support link is gone),
+  // Ask the Community (Discussions), What's New. No issues/new URL left
+  // in the support entries.
+  const menus = readFileSync("src/menus.ts", "utf8");
+  ok(menus.includes("Send Feedback"), "Help menu offers Send Feedback");
+  ok(menus.includes("openSendFeedback"), "Send Feedback opens the in-app dialog");
+  ok(menus.includes("Contact Support"), "Help menu offers Contact Support");
+  ok(menus.includes("smit@muse.ai"), "support mail goes to smit@muse.ai");
+  ok(menus.includes("Ask the Community"), "Help menu offers Ask the Community");
+  ok(menus.includes('openLink("discussions")'), "Ask the Community opens Discussions");
+  ok(menus.includes("What's New"), "Help menu offers What's New");
+  ok(menus.includes("openWhatsNew"), "What's New opens the dialog");
+  ok(!menus.includes("issues/new"), "no dead GitHub-issues support link remains in the menu");
+  ok(!menus.includes("Personal Support"), "the dead Personal Support… entry is gone");
+  // (b) Shell fixed addresses: Discussions URL exists; Support Web Site
+  // points at the site (the /issues page is off); the mail command only
+  // ever opens mailto:smit@muse.ai.
+  const main = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(main.includes('"discussions" =>'), "open_link has a discussions key");
+  ok(main.includes("https://github.com/smitpatel316/Titer/discussions"), "discussions address is the repo Discussions page");
+  ok(!/\"support\" => c?"https:\/\/github\.com\/smitpatel316\/Titer\/issues\"/.test(main), "Support Web Site no longer points at the disabled Issues page");
+  ok(main.includes('fn open_support_email'), "the shell has an open_support_email command");
+  ok(main.includes('mailto:smit@muse.ai?'), "the mail command only opens mailto:smit@muse.ai");
+  ok(main.includes("open_support_email"), "open_support_email is registered as a command");
+  // (c) Crash path: one shared log-path constant (the same name seq 452's
+  // pin expects — the two lanes converge on it at merge), the scrubber,
+  // the clean-shutdown marker written on Exit, and the three commands.
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes('ERROR_LOG_FILE'), "the shell owns the shared error-log file constant");
+  ok(mcp.includes("fn scrub_error_text"), "the shell scrubs error text before storing or sending");
+  ok(mcp.includes("CRASH_MARKER_FILE"), "the shell owns the clean-shutdown marker");
+  ok(mcp.includes("fn mcp_crash_report_pending"), "the shell exposes the crash-pending check");
+  ok(mcp.includes("fn mcp_send_crash_report"), "the shell exposes the crash-report send");
+  ok(mcp.includes("fn mcp_dismiss_crash_report"), "the shell exposes the crash-report dismiss");
+  ok(mcp.includes("fn mcp_send_feedback"), "the shell exposes the direct UI feedback send");
+  ok(mcp.includes("feedback_share_result(&dir, &feedback_server_url(), &entry)"), "the UI send shares through the feedback path (consent-gated)");
+  ok(mcp.includes("scrub_error_text_scrubs_paths"), "a Rust test pins the scrubber's behaviour");
+  ok(main.includes("RunEvent::Exit"), "the run loop handles Exit");
+  ok(main.includes("mark_clean_shutdown"), "Exit writes the clean-shutdown marker");
+  // The frontend wrappers for the new commands.
+  const native = readFileSync("src/native.ts", "utf8");
+  for (const fn of ["mcpSendFeedback", "mcpCrashReportPending", "mcpSendCrashReport", "mcpDismissCrashReport", "openSupportEmail"]) {
+    ok(native.includes(fn), `native.ts exposes ${fn}`);
+  }
+  // (a) The dialog: three user-facing kinds, Question wired as "other"
+  // (the server's accepted enum is bug | missing-feature | other), and a
+  // button the startup guide can use.
+  const dialog = readFileSync("src/components/send-feedback-dialog.tsx", "utf8");
+  ok(dialog.includes("Feature request"), "the kind picker offers Feature request");
+  ok(dialog.includes("Question"), "the kind picker offers Question");
+  ok(dialog.includes('"other"'), "Question is wired as kind other");
+  ok(dialog.includes("mcpSendFeedback"), "the dialog sends through the direct command");
+  ok(dialog.includes("SendFeedbackButton"), "the dialog exports a button for the startup guide");
+  const bus = readFileSync("src/lib/feedback-ui.ts", "utf8");
+  for (const fn of ["openSendFeedback", "onSendFeedbackRequest", "openWhatsNew", "onWhatsNewRequest"]) {
+    ok(bus.includes(fn), `the feedback bus exposes ${fn}`);
+  }
+  ok(bus.includes("smit@muse.ai"), "the bus owns the support address");
+  // (c) The crash offer only appears after a real unclean shutdown.
+  const crash = readFileSync("src/components/crash-report-dialog.tsx", "utf8");
+  ok(crash.includes("mcpCrashReportPending"), "the crash dialog checks the pending state first");
+  ok(crash.includes("pending"), "the crash dialog only opens when a report is pending");
+  ok(crash.includes("mcpSendCrashReport"), "the crash dialog can send the report");
+  ok(crash.includes("mcpDismissCrashReport"), "the crash dialog can dismiss the report");
+  // (d) What's new: versioned entries seeded from the 1.9.0 release
+  // notes, a once-per-version auto-show, mounted in the shell.
+  const whatsNew = readFileSync("src/lib/whats-new.ts", "utf8");
+  ok(whatsNew.includes("1.9.0"), "What's new is seeded with the 1.9.0 highlights");
+  ok(whatsNew.includes("shouldShowWhatsNew"), "What's new shows once per version");
+  ok(readFileSync("src/components/whats-new-dialog.tsx", "utf8").includes("WHAT_S_NEW"), "the What's New dialog renders the entries");
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(shell.includes("SendFeedbackDialog"), "the shell mounts the feedback dialog");
+  ok(shell.includes("CrashReportDialog"), "the shell mounts the crash-report dialog");
+  ok(shell.includes("WhatsNewDialog"), "the shell mounts the What's New dialog");
+  // (e) Triage: every posted entry carries kind + app version + OS, so
+  // the Scout/PM pipeline can turn it into a lane.
+  ok(mcp.includes('"app_version": env!("CARGO_PKG_VERSION")'), "feedback context carries the app version");
+  ok(mcp.includes('"os": std::env::consts::OS'), "feedback context carries the OS");
+  ok(mcp.includes('"kind": kind'), "feedback entries carry their kind");
+});
+
+
 // ── Run ──────────────────────────────────────────────────────────────────
 
 // Descriptives are computed by R since the v1.0.7 rebase, so checks that run
