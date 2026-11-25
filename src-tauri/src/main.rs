@@ -823,21 +823,27 @@ fn copy_png_to_clipboard_blocking(png_path: &str) -> Result<(), String> {
 }
 
 /// Copy a vector PDF plus its PNG fallback to the system clipboard
-/// (seq 446): the format panel's Copy button. The webview's
+/// (seq 446, seq 457): the format panel's Copy button. The webview's
 /// `ClipboardItem.supports("application/pdf")` is false on Mac WebKit
 /// (proof batch #2 verified twice: the pasteboard holds PNG only, no
 /// PDF, no error), so the web path can never write the PDF item — the
 /// copy falls back to PNG-only "by design" and the vector PDF is lost.
-/// The shell writes both flavours directly instead, mirroring the
-/// seq 296 write workaround (`copy_png_to_clipboard`): osascript puts
-/// the PDF (`«class PDF »`) and the PNG (`«class PNGf»`) on the
-/// pasteboard as two items, so an app that takes PDF pastes the vector
-/// and one that doesn't pastes the bitmap. macOS only — anywhere else
-/// this refuses outright, before touching anything. Same temp-file
-/// pattern as `copy_png_to_clipboard`: the script goes in a temp file,
-/// not an `osascript -e` argument; the temp script and both temp files
-/// are deleted once osascript finishes, whatever it reports. Async, on
-/// the blocking pool: osascript can block on a macOS TCC consent prompt.
+/// The shell writes both flavours directly instead — but NOT with
+/// AppleScript's `set the clipboard to {pdf, png}` (seq 457): that stores
+/// ONE list item, and proof batch #3 showed Preview's "New from
+/// Clipboard" disabled and TextEdit pasting nothing, even though the
+/// bytes were on the board. The shell runs JavaScript for Automation
+/// (`osascript -l JavaScript`) against NSPasteboard instead: one
+/// NSPasteboardItem per flavour — the PDF under `com.adobe.pdf` (plus
+/// `public.pdf`) and the PNG under `public.png` — written with
+/// `writeObjects` as two top-level items, so an app that takes PDF
+/// pastes the vector and one that doesn't pastes the bitmap. macOS only
+/// — anywhere else this refuses outright, before touching anything.
+/// Same temp-file pattern as `copy_png_to_clipboard`: the script goes in
+/// a temp file, not an `osascript -e` argument; the temp script and both
+/// temp files are deleted once osascript finishes, whatever it reports.
+/// Async, on the blocking pool: osascript can block on a macOS TCC
+/// consent prompt.
 #[tauri::command]
 async fn copy_pdf_to_clipboard(pdf_path: String, png_path: String) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
@@ -860,12 +866,37 @@ fn copy_pdf_to_clipboard_blocking(pdf_path: &str, png_path: &str) -> Result<(), 
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let script_path = std::env::temp_dir().join(format!("titer-clipboard-pdf-{stamp}.applescript"));
+    let script_path = std::env::temp_dir().join(format!("titer-clipboard-pdf-{stamp}.js"));
     // Both paths are ones this app wrote to its own temp dir under
-    // generated names — no user text reaches the script — so embedding
-    // them in the `POSIX file` literals needs no escaping.
+    // generated names — no user text reaches the script — but they are
+    // still JSON-escaped into the script, so a stray quote or backslash
+    // in a temp path can never break out of the string literal.
+    let pdf_json = serde_json::to_string(pdf_path)
+        .map_err(|e| format!("Couldn't encode the PDF path: {e}"))?;
+    let png_json = serde_json::to_string(png_path)
+        .map_err(|e| format!("Couldn't encode the PNG path: {e}"))?;
+    // Two top-level pasteboard items (seq 457), via JavaScript for
+    // Automation: AppleScript's braced-list form of `set the clipboard to`
+    // stores ONE list item, which no consumer reads as PDF/PNG. Each flavour gets
+    // its own NSPasteboardItem — the PDF under `com.adobe.pdf` (plus the
+    // `public.pdf` alias some consumers ask for) and the PNG under
+    // `public.png` — and `writeObjects` puts both on the board at once.
+    // A failed read or write throws, so osascript exits non-zero and the
+    // caller reports it instead of silently leaving a stale clipboard.
     let script = format!(
-        "set the clipboard to {{(read POSIX file \"{pdf_path}\" as «class PDF »), (read POSIX file \"{png_path}\" as «class PNGf»)}}"
+        "ObjC.import('AppKit');\n\
+        var pdfData = $.NSData.dataWithContentsOfFile({pdf_json});\n\
+        if (!pdfData) throw new Error('Could not read the PDF file for the clipboard');\n\
+        var pngData = $.NSData.dataWithContentsOfFile({png_json});\n\
+        if (!pngData) throw new Error('Could not read the PNG file for the clipboard');\n\
+        var pb = $.NSPasteboard.generalPasteboard;\n\
+        pb.clearContents();\n\
+        var pdfItem = $.NSPasteboardItem.alloc.init();\n\
+        pdfItem.setDataForType(pdfData, 'com.adobe.pdf');\n\
+        pdfItem.setDataForType(pdfData, 'public.pdf');\n\
+        var pngItem = $.NSPasteboardItem.alloc.init();\n\
+        pngItem.setDataForType(pngData, 'public.png');\n\
+        if (!pb.writeObjects($([pdfItem, pngItem]))) throw new Error('Could not write the PDF and PNG to the clipboard');\n"
     );
     let out = (|| -> Result<std::process::Output, String> {
         let mut script_file = std::fs::File::create(&script_path)
@@ -876,6 +907,8 @@ fn copy_pdf_to_clipboard_blocking(pdf_path: &str, png_path: &str) -> Result<(), 
             .map_err(|e| format!("Couldn't write the clipboard script: {e}"))?;
         drop(script_file);
         std::process::Command::new("osascript")
+            .arg("-l")
+            .arg("JavaScript")
             .arg(&script_path)
             .output()
             .map_err(|e| format!("Couldn't run osascript: {e}"))

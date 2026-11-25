@@ -19331,8 +19331,8 @@ check("copy-446: graph/figure copy writes the vector PDF natively on macOS", asy
   // The native command + wrapper exist (the pre-fix tree has neither).
   const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
   ok(mainRs.includes("copy_pdf_to_clipboard"), "the shell has a copy_pdf_to_clipboard command");
-  ok(mainRs.includes("«class PDF »"), "the shell writes the PDF flavour to the pasteboard");
-  ok(mainRs.includes("«class PNGf»"), "the shell writes the PNG fallback alongside it");
+  ok(mainRs.includes("com.adobe.pdf"), "the shell writes the PDF flavour to the pasteboard");
+  ok(mainRs.includes("public.png"), "the shell writes the PNG fallback alongside it");
   ok(/copy_pdf_to_clipboard,\n(\s+)read_clipboard_formats,/.test(mainRs), "the command is registered");
   const nativeSrc = readFileSync("src/native.ts", "utf8");
   ok(nativeSrc.includes("export async function copyPdfToClipboard"), "native.ts wraps the command");
