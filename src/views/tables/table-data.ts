@@ -156,11 +156,12 @@ export function writeBlock(data: TableData, r: number, c: number, block: Cell[][
   return { ...data, columns, rows, rowGroups, excluded: excluded.size ? [...excluded] : undefined };
 }
 
-/** How many of `block`'s columns, written from column `c`, a grouped table has no room
- *  for (its columns come from its groups: `writeBlock` adds none). */
+/** How many of `block`'s columns, written from column `c`, a grouped or
+ *  nested table has no room for (its columns come from its group
+ *  structure: `writeBlock` adds none). */
 export function columnsBeyond(data: TableData, c: number, block: Cell[][]): number {
   const width = block.reduce((w, row) => Math.max(w, row.length), 0);
-  return isGrouped(data) ? Math.max(0, c + width - data.columns.length) : 0;
+  return isGrouped(data) || isNested(data) ? Math.max(0, c + width - data.columns.length) : 0;
 }
 
 /** Sets every stored cell of `range` to `value` (null clears). Clearing also

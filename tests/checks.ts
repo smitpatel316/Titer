@@ -14921,6 +14921,12 @@ check("a paste wider than a grouped table says how many columns didn't fit", () 
   strictEqual(columnsBeyond({ columns: ["Title", "A"], rows: [] }, 1, [["1", "2", "3"]]), 0);
 });
 
+check("a paste wider than a Nested table says how many columns didn't fit (bugreport67)", () => {
+  const nested = newNestedTable(2, 1, 2); // Title + 4 sub-columns
+  strictEqual(columnsBeyond(nested, 3, [["1", "2", "3"]]), 1);
+  strictEqual(columnsBeyond(nested, 2, [["1", "2", "3"]]), 0);
+});
+
 check("a linear regression takes two variables of a Multiple Variables table", async () => {
   const data: TableData = {
     columns: ["Title", "Age", "Height", "Weight"],
