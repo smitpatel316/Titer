@@ -16,7 +16,7 @@ import { canEditAnalysisParams } from "./wizards";
 import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
 import { useAnalysis, useEngineBootStatus, usePluginAnalysis, useRQueue } from "./use-analysis";
 import { publishAnalysisResult } from "../../store/mcp-publish";
-import { rQueueStatusText } from "../../stats/r-queue";
+import { rQueueStatusText, type RQueueSnapshot } from "../../stats/r-queue";
 import { engineStatusText } from "../../stats/engine-status";
 import { repointCandidates } from "../../lib/repoint-analysis";
 
@@ -27,8 +27,19 @@ function formatElapsed(ms: number): string {
 }
 
 /** While the analysis runs: macOS's spinning wheel in the middle of the results, once it
- *  has taken half a second (R or a package loading): a quick one shows none. */
-function Running() {
+ *  has taken half a second (R or a package loading): a quick one shows none.
+ *  The elapsed time, the R queue position and a Cancel button ride along, so
+ *  a long run can be watched — and stopped — instead of staring at a bare
+ *  spinner. */
+function Running({
+  elapsedMs,
+  queue,
+  onCancel = cancelActiveEvals,
+}: {
+  elapsedMs: number;
+  queue: RQueueSnapshot | null;
+  onCancel?: () => void;
+}) {
   const ref = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     if (!isNative) return;
@@ -44,8 +55,12 @@ function Running() {
     };
   }, []);
   return (
-    <div ref={ref} className="flex h-full items-center justify-center text-regular text-secondary">
-      {!isNative && "Running…"}
+    <div ref={ref} className="flex h-full flex-col items-center justify-center gap-3 text-regular text-secondary">
+      <p>
+        Running… {formatElapsed(elapsedMs)}
+        {rQueueStatusText(queue)}
+      </p>
+      <Button onClick={onCancel}>Cancel</Button>
     </div>
   );
 }
@@ -205,7 +220,7 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
             onSetCellBackground={(key, color) => setResultCellBackground(node.id, key, color)}
           />
         ) : liveData && !outcome ? (
-          <Running />
+          <Running elapsedMs={elapsedMs} queue={queue} onCancel={cancelActiveEvals} />
         ) : (
           <div className="flex flex-col items-start gap-3 px-8 py-6">
             <p className="text-regular text-secondary">
@@ -219,7 +234,6 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
                       ? outcome.error
                       : `Running… ${formatElapsed(elapsedMs)}${rQueueStatusText(queue)}`}
             </p>
-            {running && <Button onClick={() => cancelActiveEvals()}>Cancel</Button>}
             {errored && (
               <Button variant="accent" onClick={() => setRetryNonce((n) => n + 1)}>
                 Retry
