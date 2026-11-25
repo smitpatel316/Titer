@@ -255,6 +255,14 @@ export function validateSampleSizeParams(params: unknown): SampleSizeParams {
   if (solveFor !== "power") {
     if (out.power === undefined) fail("power is required (pass the target power to solve from)");
     if (out.power <= 0 || out.power >= 1) fail(`power must be between 0 and 1 (got ${out.power})`);
+    // Power can never fall to alpha: at effect 0 (or at the minimum n)
+    // power approaches alpha from above, so a target at or below alpha
+    // is unreachable — refuse it instead of bisecting down to ≈ 0.
+    if (out.power <= alpha) {
+      fail(
+        `power must be greater than alpha (got power ${out.power}, alpha ${alpha}) — no effect reaches a power at or below the significance level`,
+      );
+    }
   }
   if (out.n !== undefined && out.n < MIN_N[out.test]) {
     fail(`n must be at least ${MIN_N[out.test]} for ${TEST_LABEL[out.test]} (got ${out.n})`);
@@ -429,7 +437,17 @@ function solveEffect(powerAtEffect: (e: number) => number, target: number, cap: 
   let hi = 0.1;
   while (powerAtEffect(hi) < target) {
     hi *= 2;
-    if (hi >= cap) fail(`target power ${target} is not reachable with an effect up to ${cap}`);
+    if (hi >= cap) {
+      // The doubling step jumped past the cap — the answer may still lie
+      // in (previous hi, cap] (Pearson r ∈ (0.8, 1), t/ANOVA/χ² effects
+      // ∈ (6.4, 10], one-proportion h ∈ (1.6, π]). Try the cap itself
+      // before giving up; only fail if even the cap falls short.
+      if (powerAtEffect(cap) < target) {
+        fail(`target power ${target} is not reachable with an effect up to ${cap}`);
+      }
+      hi = cap;
+      break;
+    }
   }
   return bisect((e) => powerAtEffect(e) - target, 0, hi);
 }
