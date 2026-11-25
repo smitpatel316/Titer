@@ -992,6 +992,107 @@ export function renestLoses(data: TableData, groups: number, subgroups: number, 
   return renestDropped(data, groups, subgroups, replicates).length > 0;
 }
 
+// ── Column → Nested conversion (seq 450) ──────────────────────────────────
+
+/** How a Column table factorizes into a Nested one: each Column dataset
+ *  becomes a group, and its rows split into `subgroups` equal subgroups of
+ *  `replicates` replicates each, in row order. `subgroupLabels` names the
+ *  subgroups (one label per subgroup, the same labels in every group);
+ *  omitted, they are "S1", "S2"… as in `newNestedTable`. */
+export interface ConvertToNestedSpec {
+  subgroups: number;
+  replicates: number;
+  subgroupLabels?: string[];
+}
+
+/**
+ * Rebuilds a Column table's data as Nested, values preserved: the value at
+ * row r of dataset g lands in subgroup ⌊r / replicates⌋, replicate
+ * r % replicates, of group g — so row r's values stay on row r, spread
+ * across the group's new sub-columns. Row titles, exclusions, cell
+ * backgrounds, column widths and decimal settings follow their values; a
+ * source column's width/decimals carry to all of its new sub-columns.
+ *
+ * A Column table carries no subgroup boundaries, so the factorization
+ * cannot be automatic: the caller supplies it, and a row count that
+ * doesn't tile into subgroups × replicates is refused instead of
+ * dropping or inventing values. Group names must not contain ":" — a
+ * nested column name uses ":" to separate group, subgroup and replicate.
+ * Throws a plain-language error naming the problem.
+ */
+export function convertColumnToNested(data: TableData, spec: ConvertToNestedSpec): TableData {
+  const { subgroups, replicates } = spec;
+  if (!Number.isInteger(subgroups) || subgroups < 1) {
+    throw new Error(`needs at least 1 subgroup per group, not ${subgroups}.`);
+  }
+  if (!Number.isInteger(replicates) || replicates < 1) {
+    throw new Error(`needs at least 1 replicate per subgroup, not ${replicates}.`);
+  }
+  const labels = spec.subgroupLabels ?? Array.from({ length: subgroups }, (_, s) => `S${s + 1}`);
+  if (labels.length !== subgroups) {
+    throw new Error(`needs ${subgroups} subgroup label${subgroups === 1 ? "" : "s"} (one per subgroup), not ${labels.length}.`);
+  }
+  const seen = new Set<string>();
+  for (const label of labels) {
+    const trimmed = label.trim();
+    if (!trimmed) throw new Error("a subgroup label must not be empty.");
+    if (trimmed.includes(":")) throw new Error(`subgroup label “${label}” must not contain “:” — a nested column name uses “:” to separate group, subgroup and replicate.`);
+    if (seen.has(trimmed)) throw new Error(`subgroup label “${trimmed}” is used twice — the subgroups of a group need distinct labels.`);
+    seen.add(trimmed);
+  }
+  const groups = data.columns.slice(1);
+  if (groups.length === 0) throw new Error("has no datasets to convert — a Column table needs at least one data column.");
+  for (const group of groups) {
+    if (group.includes(":")) {
+      throw new Error(`dataset “${group}” must not contain “:” — a nested column name uses “:” to separate group, subgroup and replicate. Rename it first.`);
+    }
+  }
+  const rows = data.rows.length;
+  if (rows === 0) throw new Error("has no rows to convert — a Column table needs at least one row.");
+  if (rows !== subgroups * replicates) {
+    throw new Error(
+      `has ${rows} rows, which don't split into ${subgroups} subgroups of ${replicates} replicates each (${subgroups} × ${replicates} = ${subgroups * replicates}). Change the subgroup count so it divides the row count, or add or remove rows first.`,
+    );
+  }
+  const perGroup = subgroups * replicates;
+  const columns = ["Title", ...groups.flatMap((group) => labels.flatMap((sub) => Array.from({ length: replicates }, (_, r) => `${group}:${sub}:R${r + 1}`)))];
+  // Source cell (r, c ≥ 1) → group c − 1, subgroup ⌊r / replicates⌋,
+  // replicate r % replicates; the row title (c = 0) stays put.
+  const to = (r: number, c: number): [number, number] => [r, c === 0 ? 0 : 1 + (c - 1) * perGroup + Math.floor(r / replicates) * replicates + (r % replicates)];
+  // A source column's width / decimals carry to all of its new sub-columns.
+  const carry = (record: Record<string, number> | undefined): Record<string, number> | undefined => {
+    if (!record) return undefined;
+    const out: Record<string, number> = {};
+    for (const group of groups) {
+      if (record[group] === undefined) continue;
+      for (const sub of labels) for (let r = 0; r < replicates; r++) out[`${group}:${sub}:R${r + 1}`] = record[group];
+    }
+    return Object.keys(out).length ? out : undefined;
+  };
+  return {
+    ...data,
+    columns,
+    // Output cell (r, c ≥ 1) holds source group 1 + ⌊(c − 1) / perGroup⌋'s
+    // value exactly when row r falls in that column's subgroup and
+    // replicate — every other slot of the row is empty.
+    rows: data.rows.map((row, r) =>
+      columns.map((_, c) => {
+        if (c === 0) return row[0] ?? null;
+        const slot = (c - 1) % perGroup;
+        if (Math.floor(r / replicates) !== Math.floor(slot / replicates) || r % replicates !== slot % replicates) return null;
+        return row[1 + Math.floor((c - 1) / perGroup)] ?? null;
+      }),
+    ),
+    groups: groups.length,
+    subgroups,
+    replicates,
+    excluded: remapExcluded(data, (r, c) => to(r, c)),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => to(r, c)),
+    widths: carry(data.widths),
+    decimals: carry(data.decimals),
+  };
+}
+
 // ── Row groups (a grouped table's third factor) ─────────────────────────
 
 /** The bands a grouped table shows before the user edits them: one band
