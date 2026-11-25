@@ -19605,6 +19605,20 @@ check("copy-457: graph/figure copy writes two top-level pasteboard items, not an
   ok(body.includes("com.adobe.pdf"), "the PDF item carries the PDF pasteboard type");
   ok(body.includes("public.png"), "the PNG item carries the PNG pasteboard type");
   ok(body.includes("clearContents"), "the pasteboard is cleared before the write");
+  // JXA quirk (Mac proof batch #4, Nov 2026): on this Mac's JXA,
+  // zero-argument ObjC methods are bare properties — calling them with
+  // parens throws `TypeError: Object is not a function`, which killed
+  // the whole native write and silently fell back to PNG-only web copy.
+  // The seq 457 fix shipped with the parens and never worked on macOS.
+  // (Scoped to the script literal: the comment above it names the
+  // broken form in prose.)
+  const scriptStart = body.indexOf("let script = format!(");
+  const script = scriptStart >= 0 ? body.slice(scriptStart) : "";
+  ok(script.length > 0, "the JXA script literal is present");
+  ok(!script.includes("clearContents()"), "JXA: clearContents is a bare property, not a call");
+  ok(!script.includes(".alloc.init()"), "JXA: alloc.init is a bare property, not a call");
+  ok(body.includes("pb.clearContents;"), "the pasteboard is cleared via the bare property");
+  ok(body.includes("$.NSPasteboardItem.alloc.init;"), "pasteboard items are built via the bare property");
   // Both copy paths still share this one native write (seq 446).
   const graphSrc = readFileSync("src/views/graphs/graph-export.ts", "utf8");
   ok(graphSrc.includes("writeVectorToClipboard(pdf, png)"), "copyGraphImage goes through the shared native write");
