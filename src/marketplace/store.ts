@@ -91,12 +91,22 @@ export class MarketplaceStore {
       // A plugin that cannot re-register comes back disabled/incompatible
       // instead of enabled-but-empty; the stored record is left alone, so
       // the next launch retries. One bad plugin never takes the rest down.
+      // Seq 518: "incompatible" records get the same treatment. An app
+      // upgrade can make one compatible again (it returns to "disabled"
+      // and waits for the user to re-enable it, never auto-enabled) or
+      // keep it incompatible with a fresh message; without the re-check
+      // it stayed stuck "incompatible" forever after the upgrade.
       for (const record of this.installed.values()) {
-        if (record.status !== "enabled") continue;
+        if (record.status !== "enabled" && record.status !== "incompatible") continue;
         try {
           this.installed.set(record.manifest.id, this.loader.rehydrateEnabledPlugin(record, this.appVersion));
         } catch {
-          this.installed.set(record.manifest.id, { ...record, status: "disabled" });
+          // An incompatible record stays incompatible — the failure says
+          // nothing about whether the upgrade made it compatible again.
+          this.installed.set(
+            record.manifest.id,
+            record.status === "incompatible" ? record : { ...record, status: "disabled" },
+          );
         }
       }
     } catch {
