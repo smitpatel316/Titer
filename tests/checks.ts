@@ -3125,6 +3125,18 @@ const mcpLaggingHarness = (withRevisionWait: boolean) => {
     createSimulatedTable: neverUnused,
     updateTable: (id, data, label, move) => dispatch({ type: "updateTable", id, data, label, move }),
     removeDataSet: (id, data, setName, label) => dispatch({ type: "removeDataSet", id, data, setName, label }),
+    convertTableToNested: (id, spec) => {
+      const node = s.nodes[id];
+      if (!node || node.type !== "table") throw new Error(`no table with id “${id}” in this project.`);
+      if (node.tableType !== "column") throw new Error(`only a Column table converts to Nested.`);
+      if (node.frozen) throw new Error(`table “${node.name}” is frozen — unfreeze it before converting it.`);
+      dispatch({
+        type: "convertTableToNested",
+        id,
+        data: convertColumnToNested(node.data!, spec),
+        label: "Convert to Nested",
+      });
+    },
     duplicateFamily: (id) => dispatch({ type: "duplicateFamily", id }),
     renameNode: (id, name) => dispatch({ type: "rename", id, name }),
     removeNode: (id) => dispatch({ type: "remove", id }),
