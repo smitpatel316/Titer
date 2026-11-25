@@ -198,6 +198,24 @@ export async function copyPngToClipboard(png: Uint8Array): Promise<void> {
   await invoke<void>("copy_png_to_clipboard", { pngPath });
 }
 
+/** Hands a vector PDF plus its PNG fallback to the system clipboard on
+ *  macOS (seq 446): both go to temp files, and the shell puts them on
+ *  the pasteboard via osascript (`copy_pdf_to_clipboard` in main.rs) —
+ *  the webview's `ClipboardItem.supports("application/pdf")` is false on
+ *  Mac WebKit, so the web path can never write the PDF item. The shell
+ *  deletes both temp files and its script file once osascript finishes.
+ *  Throws on non-macOS. */
+export async function copyPdfToClipboard(pdf: Uint8Array, png: Uint8Array): Promise<void> {
+  if (!isMacOs()) throw new Error("Copying a vector PDF to the clipboard needs macOS.");
+  const tmp = await tempDir();
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const pdfPath = await join(tmp, `titer-clipboard-${stamp}.pdf`);
+  const pngPath = await join(tmp, `titer-clipboard-${stamp}.png`);
+  await writeFile(pdfPath, pdf);
+  await writeFile(pngPath, png);
+  await invoke<void>("copy_pdf_to_clipboard", { pdfPath, pngPath });
+}
+
 /** Reads the clipboard's text and HTML forms natively on macOS (seq 439):
  *  `pbpaste` for the plain text, `pbpaste -Prefer html` for the HTML table
  *  (`read_clipboard_formats` in main.rs). Paste Special's menu-bar entry

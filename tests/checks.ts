@@ -19313,6 +19313,44 @@ check("copy-431: graph/figure copy writes a vector PDF item with a PNG fallback"
   );
 });
 
+check("copy-446: graph/figure copy writes the vector PDF natively on macOS", async () => {
+  const { writeVectorToClipboard } = await import("../src/views/graphs/graph-export");
+  // The node harness is not the native app: the native write refuses, so
+  // the helper reports false — and the promised blobs survive the attempt
+  // for the webview fallback.
+  const pdfBytes = svgToPdf(seq216Svg);
+  const pdf = Promise.resolve(new Blob([pdfBytes as BlobPart], { type: "application/pdf" }));
+  const pngBytes = readFileSync("docs/hero-dose-response.png");
+  const png = Promise.resolve(new Blob([pngBytes as BlobPart], { type: "image/png" }));
+  strictEqual(await writeVectorToClipboard(pdf, png), false, "not the native app here, so no native write");
+  const pdfBlob = await pdf;
+  ok(
+    new TextDecoder().decode(new Uint8Array(await pdfBlob.arrayBuffer())).startsWith("%PDF-1.4"),
+    "the PDF promise is still usable after the refused native write",
+  );
+  // The native command + wrapper exist (the pre-fix tree has neither).
+  const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(mainRs.includes("copy_pdf_to_clipboard"), "the shell has a copy_pdf_to_clipboard command");
+  ok(mainRs.includes("«class PDF »"), "the shell writes the PDF flavour to the pasteboard");
+  ok(mainRs.includes("«class PNGf»"), "the shell writes the PNG fallback alongside it");
+  ok(/copy_pdf_to_clipboard,\n(\s+)read_clipboard_formats,/.test(mainRs), "the command is registered");
+  const nativeSrc = readFileSync("src/native.ts", "utf8");
+  ok(nativeSrc.includes("export async function copyPdfToClipboard"), "native.ts wraps the command");
+  ok(nativeSrc.includes('"copy_pdf_to_clipboard"'), "the wrapper invokes copy_pdf_to_clipboard");
+  // Both copy paths go through the native-first write, and neither gates
+  // the PDF render on supports() any more — the pre-fix tree did both.
+  const graphSrc = readFileSync("src/views/graphs/graph-export.ts", "utf8");
+  ok(graphSrc.includes("writeVectorToClipboard(pdf, png)"), "copyGraphImage goes through the native-first write");
+  ok(!graphSrc.includes("clipboardSupportsPdf() ? toImage"), "the graph PDF render is no longer gated on supports()");
+  ok(graphSrc.includes("export async function writeVectorToClipboard"), "the shared helper exists");
+  const figureSrc = readFileSync("src/views/figures/figure-export.ts", "utf8");
+  ok(figureSrc.includes("writeVectorToClipboard(pdf, png)"), "copyFigureImage goes through the native-first write");
+  ok(
+    !/clipboardSupportsPdf\(\)\s*\n\s*\? renderFigurePdf/.test(figureSrc),
+    "the figure PDF render is no longer gated on supports()",
+  );
+});
+
 check("seq 216: BMP is 24-bit bottom-up BGR with DPI in the header", () => {
   const bmp = bmpEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200);
   strictEqual(String.fromCharCode(bmp[0]!, bmp[1]!), "BM");

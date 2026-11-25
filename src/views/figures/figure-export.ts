@@ -22,7 +22,7 @@ import {
 } from "../../lib/figure";
 import { buildGraphFigure, type GraphOverlayStatus } from "../graphs/graph-figure";
 import type { ExportFormat, Resolution } from "../graphs/graph-export";
-import { clipboardSupportsPdf, vectorClipboardItem } from "../graphs/graph-export";
+import { clipboardSupportsPdf, vectorClipboardItem, writeVectorToClipboard } from "../graphs/graph-export";
 import { buildOfficeDocument, officeDialogTitle, officeExtension, type OfficeTarget } from "../../lib/office-export";
 import type { FigurePanel, ProjectNode } from "../../store/types";
 
@@ -404,13 +404,17 @@ export async function saveFigureImage(
 
 /** Starts the clipboard write inside the click, with promised images, as
  *  WebKit requires. Vector PDF first (seq 431 — Prism copies a layout as
- *  vector PDF on Mac), PNG as the fallback for apps that take no PDF;
- *  when this webview reports no PDF support the copy is PNG-only, the
- *  old behaviour. A rejected vector write falls back to a PNG-only write,
- *  so a platform that takes the PDF type but refuses the write still
- *  leaves the PNG on the clipboard. Grayscale applies; CMYK falls back
- *  to colour (the clipboard has no CMYK). */
-export function copyFigureImage(
+ *  vector PDF on Mac), PNG as the fallback for apps that take no PDF.
+ *  Native first on macOS (seq 446): the shell writes the PDF + PNG to
+ *  the pasteboard directly, because this webview reports no PDF support
+ *  and the web path would silently fall back to PNG-only. The PDF render
+ *  always runs now. When the native write is unavailable or fails, the
+ *  webview write runs instead (PDF item where supports() says so, else
+ *  PNG-only, the old behaviour); a rejected vector write falls back to a
+ *  PNG-only write, so a platform that takes the PDF type but refuses the
+ *  write still leaves the PNG on the clipboard. Grayscale applies; CMYK
+ *  falls back to colour (the clipboard has no CMYK). */
+export async function copyFigureImage(
   figure: ProjectNode,
   nodes: Record<string, ProjectNode>,
   dpi: Resolution,
@@ -418,13 +422,13 @@ export function copyFigureImage(
 ) {
   if (!figure.panels?.length) return void alert("Couldn't Copy the Figure", "Add a panel first.", "error");
   const mode = colorMode === "cmyk" ? "color" : colorMode;
-  // The PDF render only runs where the platform takes it.
-  const pdf = clipboardSupportsPdf()
-    ? renderFigurePdf(figure, nodes, dpi, mode).then((out) => out.blob)
-    : undefined;
+  // The PDF render always runs (seq 446): the native write takes it on
+  // macOS, the webview write where supports() says so.
+  const pdf = renderFigurePdf(figure, nodes, dpi, mode).then((out) => out.blob);
   const png = renderFigureRaster(figure, nodes, "png", dpi, mode).then((out) => out.blob);
+  if (await writeVectorToClipboard(pdf, png)) return;
   navigator.clipboard
-    .write([new ClipboardItem(vectorClipboardItem(pdf, png))])
+    .write([new ClipboardItem(clipboardSupportsPdf() ? vectorClipboardItem(pdf, png) : { "image/png": png })])
     .catch(() =>
       navigator.clipboard
         .write([new ClipboardItem({ "image/png": png })])
