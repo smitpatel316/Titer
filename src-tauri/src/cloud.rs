@@ -1044,6 +1044,108 @@ impl MockProvider {
     }
 }
 
+// ── Plugin secure storage (LabForge R3) ─────────────────────────────────────
+// A plugin's pairing token must survive a Titer restart, so it lives in the
+// OS keychain — one entry per (plugin id, key), under its own service, never
+// in a file. The TS side (src/plugins/secure-storage.ts) binds the plugin id
+// at construction; these commands never accept another plugin's id from the
+// caller. Errors are plain strings: no key, no value, no keychain detail ever
+// leaves Rust.
+//
+// PENDING: registration in `generate_handler!` (src-tauri/src/main.rs) —
+// that file is owned by the `bugfix/br-1-81-main-rs` lane. Until the three
+// lines land, invoking these commands fails with Tauri's unknown-command
+// error (surfaced plainly by the TS side). The `#[tauri::command]` macro
+// generates the caller, so these fns are not dead code before then.
+
+/// Keychain service for plugin storage entries (separate from the cloud
+/// service: plugin entries must never be mistaken for cloud accounts).
+const PLUGIN_KEYCHAIN_SERVICE: &str = "net.smitpatel.helix.plugin-storage";
+
+/// Largest value the host will store (64 KB — a token is ~100 chars).
+const PLUGIN_SECURE_MAX_VALUE_CHARS: usize = 65536;
+
+fn plugin_secure_account(plugin_id: &str, key: &str) -> String {
+    format!("{plugin_id}:{key}")
+}
+
+fn plugin_secure_valid_id(plugin_id: &str) -> bool {
+    !plugin_id.is_empty()
+        && plugin_id.len() <= 128
+        && plugin_id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_' || c == '-')
+        && plugin_id
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            .unwrap_or(false)
+}
+
+fn plugin_secure_valid_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 64
+        && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+}
+
+fn plugin_secure_entry(plugin_id: &str, key: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(PLUGIN_KEYCHAIN_SERVICE, &plugin_secure_account(plugin_id, key))
+        .map_err(|_| "Secure storage is not available — the OS keychain refused.".to_string())
+}
+
+/// Store a plugin's secret in the OS keychain. Overwrites any previous
+/// value under the same (plugin id, key).
+#[tauri::command]
+pub fn plugin_secure_set(plugin_id: String, key: String, value: String) -> Result<(), String> {
+    if !plugin_secure_valid_id(&plugin_id) || !plugin_secure_valid_key(&key) {
+        return Err("Secure storage needs a valid plugin id and key.".to_string());
+    }
+    if value.chars().count() > PLUGIN_SECURE_MAX_VALUE_CHARS {
+        return Err("That value is too large to keep in secure storage (64 KB limit).".to_string());
+    }
+    plugin_secure_entry(&plugin_id, &key).and_then(|entry| {
+        entry
+            .set_password(&value)
+            .map_err(|_| "Secure storage could not write — the OS keychain refused.".to_string())
+    })
+}
+
+/// Read a plugin's secret from the OS keychain. `None` when nothing is
+/// stored under the key — a missing key is not an error.
+#[tauri::command]
+pub fn plugin_secure_get(plugin_id: String, key: String) -> Result<Option<String>, String> {
+    if !plugin_secure_valid_id(&plugin_id) || !plugin_secure_valid_key(&key) {
+        return Err("Secure storage needs a valid plugin id and key.".to_string());
+    }
+    let entry = match plugin_secure_entry(&plugin_id, &key) {
+        Ok(entry) => entry,
+        Err(err) => return Err(err),
+    };
+    match entry.get_password() {
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(_) => Err("Secure storage could not read — the OS keychain refused.".to_string()),
+    }
+}
+
+/// Delete a plugin's secret from the OS keychain. Returns whether
+/// anything was stored (`false` when the key was already absent).
+#[tauri::command]
+pub fn plugin_secure_delete(plugin_id: String, key: String) -> Result<bool, String> {
+    if !plugin_secure_valid_id(&plugin_id) || !plugin_secure_valid_key(&key) {
+        return Err("Secure storage needs a valid plugin id and key.".to_string());
+    }
+    let entry = match plugin_secure_entry(&plugin_id, &key) {
+        Ok(entry) => entry,
+        Err(err) => return Err(err),
+    };
+    match entry.delete_credential() {
+        Ok(()) => Ok(true),
+        Err(keyring::Error::NoEntry) => Ok(false),
+        Err(_) => Err("Secure storage could not delete — the OS keychain refused.".to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1263,5 +1365,26 @@ mod tests {
         )
         .expect("old token json");
         assert!(!old.issued_via_broker);
+    }
+
+    #[test]
+    fn plugin_secure_ids_and_keys_are_validated() {
+        // LabForge R3: the (plugin id, key) pair names the keychain entry,
+        // so both halves are charset-checked — a `:` or `/` in either
+        // half would smuggle a second namespace.
+        assert!(plugin_secure_valid_id("titer.labforge"));
+        assert!(plugin_secure_valid_id("example.hello-analysis"));
+        assert!(!plugin_secure_valid_id(""));
+        assert!(!plugin_secure_valid_id("Titer.LabForge"));
+        assert!(!plugin_secure_valid_id("titer:labforge"));
+        assert!(!plugin_secure_valid_id("titer/labforge"));
+        assert!(!plugin_secure_valid_id(".titer.labforge"));
+        assert!(plugin_secure_valid_key("labforge-token"));
+        assert!(plugin_secure_valid_key("a.b_c-d9"));
+        assert!(!plugin_secure_valid_key(""));
+        assert!(!plugin_secure_valid_key("labforge/token"));
+        assert!(!plugin_secure_valid_key("labforge:token"));
+        assert!(!plugin_secure_valid_key("x".repeat(65).as_str()));
+        assert_eq!(plugin_secure_account("titer.labforge", "labforge-token"), "titer.labforge:labforge-token");
     }
 }

@@ -49460,6 +49460,309 @@ check("flow-f2c: per-population stats match the independent Python reference on 
 });
 
 
+// ── LabForge connection, Titer side (phase 2) ───────────────────────────
+// The host implementations for the LabForge plugin: host-scoped fetch
+// (R1), import-into-open-project (R2), plugin secure storage (R3), and
+// the per-plugin host router that wires them together. The integration
+// points that live in files owned by other lanes (manifest.ts id
+// exception + permissions + networkHosts, capabilities.ts command
+// registration, loader.ts connection-only plugins, the app mount) are
+// PENDING — these checks cover the handlers themselves, with stubbed
+// fetch / dispatch / invoke, so no network, keychain or app is touched.
+check(
+  "labforge-r1 fetch: allowed origin returns {status, body}; undeclared origin, remote http, credentials-in-URL and blocked headers deny",
+  async () => {
+    const { createHostFetchHandler, HOST_FETCH_MAX_BODY_BYTES } = await import("../src/plugins/host-fetch");
+    const json = (body: unknown, status = 200, contentType = "application/json") =>
+      new Response(typeof body === "string" ? body : JSON.stringify(body), {
+        status,
+        headers: { "content-type": contentType },
+      });
+    const seen: { url: string; init: RequestInit }[] = [];
+    const stubFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      seen.push({ url: String(url), init: init ?? {} });
+      if (String(url).includes("/slow")) {
+        return new Promise<never>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        });
+      }
+      if (String(url).includes("/binary")) return new Response(new Uint8Array([0, 1, 2, 3]), { status: 200 });
+      if (String(url).includes("/unauthorized")) return json({ message: "nope" }, 401);
+      if (String(url).includes("/huge"))
+        return new Response(new Uint8Array(HOST_FETCH_MAX_BODY_BYTES + 1), { status: 200 });
+      if (String(url).includes("/text")) return json("plain text", 200, "text/plain");
+      return json({ status: "ok" });
+    }) as typeof fetch;
+    const fetchLabforge = createHostFetchHandler({
+      allowedOrigins: ["https://labforge.smitpatel.net"],
+      fetchImpl: stubFetch,
+      timeoutMs: 50,
+    });
+    deepStrictEqual(await fetchLabforge("titer.fetch", { url: "https://labforge.smitpatel.net/api/v1/health" }), {
+      status: 200,
+      body: { status: "ok" },
+    });
+    // POST with an object body is JSON-stringified with the content type set.
+    deepStrictEqual(
+      await fetchLabforge("titer.fetch", {
+        url: "https://labforge.smitpatel.net/api/v1/auth/pair",
+        method: "POST",
+        headers: { Accept: "application/json" },
+        body: { code: "AAAA-BBBB-CCCC", user_id: "user-admin-x" },
+      }),
+      { status: 200, body: { status: "ok" } },
+    );
+    strictEqual(JSON.parse(seen[1].init.body as string).code, "AAAA-BBBB-CCCC");
+    strictEqual((seen[1].init.headers as Record<string, string>)["Content-Type"], "application/json");
+    // A non-2xx status is returned, not thrown — the plugin turns it into
+    // its own failure with the server's message.
+    deepStrictEqual(await fetchLabforge("titer.fetch", { url: "https://labforge.smitpatel.net/unauthorized" }), {
+      status: 401,
+      body: { message: "nope" },
+    });
+    // arraybuffer downloads come back base64-flagged; text stays text.
+    deepStrictEqual(
+      await fetchLabforge("titer.fetch", { url: "https://labforge.smitpatel.net/binary", responseType: "arraybuffer" }),
+      {
+        status: 200,
+        body: "AAECAw==",
+        bodyEncoding: "base64",
+      },
+    );
+    deepStrictEqual(await fetchLabforge("titer.fetch", { url: "https://labforge.smitpatel.net/text" }), {
+      status: 200,
+      body: "plain text",
+    });
+    // Host scoping: anything not declared denies, fail-closed.
+    await rejects(fetchLabforge("titer.fetch", { url: "https://evil.example/x" }), /is not one of them/);
+    await rejects(fetchLabforge("titer.fetch", { url: "http://example.org/x" }), /only fetches https/);
+    await rejects(
+      fetchLabforge("titer.fetch", { url: "https://user:pass@labforge.smitpatel.net/x" }),
+      /never sends credentials/,
+    );
+    await rejects(
+      fetchLabforge("titer.fetch", { url: "https://labforge.smitpatel.net/x", headers: { Cookie: "session=1" } }),
+      /cannot set the “Cookie” header/,
+    );
+    await rejects(
+      fetchLabforge("titer.fetch", { url: "https://labforge.smitpatel.net/x", method: "TRACE" }),
+      /cannot use the “TRACE” method/,
+    );
+    await rejects(
+      fetchLabforge("titer.fetch", { url: "https://labforge.smitpatel.net/x", body: { a: 1 } }),
+      /cannot send a body with GET/,
+    );
+    await rejects(
+      fetchLabforge("titer.fetch", { url: "https://labforge.smitpatel.net/x", responseType: "blob" }),
+      /is not json, text or arraybuffer/,
+    );
+    await rejects(fetchLabforge("titer.fetch", { url: "https://labforge.smitpatel.net/huge" }), /larger than 25 MB/);
+    await rejects(fetchLabforge("titer.fetch", { url: "https://labforge.smitpatel.net/slow" }), /timed out/);
+    strictEqual(seen.length, 7, "denied calls must never reach fetch");
+    // An empty allowlist denies everything; a malformed declaration throws
+    // at construction instead of silently narrowing the list.
+    const denyAll = createHostFetchHandler({ allowedOrigins: [], fetchImpl: stubFetch });
+    await rejects(denyAll("titer.fetch", { url: "https://labforge.smitpatel.net/x" }), /is not one of them/);
+    throws(
+      () => createHostFetchHandler({ allowedOrigins: ["not a url"], fetchImpl: stubFetch }),
+      /unusable fetch origin/,
+    );
+    throws(
+      () =>
+        createHostFetchHandler({ allowedOrigins: ["https://labforge.smitpatel.net/some/path"], fetchImpl: stubFetch }),
+      /unusable fetch origin/,
+    );
+  },
+);
+
+check("labforge-r2 import: validates args and forwards import-data-file; bad files never reach dispatch", async () => {
+  const { createImportDataHandler } = await import("../src/plugins/host-import");
+  const jobs: { action: string; args: Record<string, unknown> }[] = [];
+  const dispatch = async (action: string, args: Record<string, unknown>) => {
+    jobs.push({ action, args });
+    return { project_id: "p1", table_id: "t9", name: "Results", table_type: "Column", rows: 96, data_columns: 2 };
+  };
+  const importData = createImportDataHandler(dispatch);
+  deepStrictEqual(await importData("titer.importData", { path: "/tmp/labforge-results.csv" }), {
+    project_id: "p1",
+    table_id: "t9",
+    name: "Results",
+    table_type: "Column",
+    rows: 96,
+    data_columns: 2,
+  });
+  deepStrictEqual(jobs, [{ action: "import-data-file", args: { path: "/tmp/labforge-results.csv" } }]);
+  deepStrictEqual(await importData("titer.importData", { path: "/tmp/results.xlsx", name: "Run 12" }), {
+    project_id: "p1",
+    table_id: "t9",
+    name: "Results",
+    table_type: "Column",
+    rows: 96,
+    data_columns: 2,
+  });
+  deepStrictEqual(jobs[1], { action: "import-data-file", args: { path: "/tmp/results.xlsx", name: "Run 12" } });
+  await rejects(importData("titer.importData", { path: "/tmp/results.exe" }), /is not a data file/);
+  await rejects(importData("titer.importData", { path: "" }), /needs a file path/);
+  await rejects(importData("titer.importData", { path: "/tmp/x.csv", name: "  " }), /needs a non-empty name/);
+  await rejects(importData("titer.importData", "not an object"), /needs \{ path, name\? \}/);
+  strictEqual(jobs.length, 2, "invalid imports must never reach dispatch");
+});
+
+check(
+  "labforge-r3 secure storage: set/get/delete round-trip; the plugin id is bound, never taken from args; bad keys and invoke failures surface plainly",
+  async () => {
+    const { createSecureStorageHandlers } = await import("../src/plugins/secure-storage");
+    const store = new Map<string, string>();
+    const calls: { command: string; args: Record<string, unknown> }[] = [];
+    const invokeImpl = async (command: string, args: Record<string, unknown>) => {
+      calls.push({ command, args });
+      const account = `${args.pluginId as string}:${args.key as string}`;
+      if (command === "plugin_secure_set") {
+        store.set(account, args.value as string);
+        return undefined;
+      }
+      if (command === "plugin_secure_get") return store.get(account) ?? null;
+      if (command === "plugin_secure_delete") return store.delete(account);
+      throw new Error(`unknown command ${command}`);
+    };
+    const { secureGet, secureSet, secureDelete } = createSecureStorageHandlers("titer.labforge", invokeImpl);
+    deepStrictEqual(await secureSet("titer.secureSet", { key: "labforge-token", value: "lfpt_secret" }), {
+      stored: true,
+    });
+    deepStrictEqual(await secureGet("titer.secureGet", { key: "labforge-token" }), { value: "lfpt_secret" });
+    deepStrictEqual(await secureDelete("titer.secureDelete", { key: "labforge-token" }), { deleted: true });
+    deepStrictEqual(await secureGet("titer.secureGet", { key: "labforge-token" }), { value: null });
+    deepStrictEqual(await secureDelete("titer.secureDelete", { key: "labforge-token" }), { deleted: false });
+    // The bound id wins: a plugin passing another plugin's id in its args
+    // still writes under its own id — the args value is ignored.
+    await secureSet("titer.secureSet", { key: "k", value: "v", pluginId: "example.evil" });
+    strictEqual(calls[calls.length - 1].args.pluginId, "titer.labforge");
+    ok(store.has("titer.labforge:k") && !store.has("example.evil:k"), "nothing is ever stored under the args id");
+    await rejects(secureSet("titer.secureSet", { key: "bad/key", value: "v" }), /short plain name/);
+    await rejects(secureSet("titer.secureSet", { key: "k", value: "x".repeat(65537) }), /too large/);
+    await rejects(secureGet("titer.secureGet", { key: 42 }), /short plain name/);
+    throws(() => createSecureStorageHandlers("Not A Plugin Id!", invokeImpl), /valid plugin id/);
+    // An invoke failure is a plain error, never a stack or a secret.
+    const failing = createSecureStorageHandlers("titer.labforge", async () => {
+      throw new Error("keyring exploded: /home/secret/path");
+    });
+    await rejects(failing.secureGet("titer.secureGet", { key: "k" }), /OS keychain refused/);
+    const unregistered = createSecureStorageHandlers("titer.labforge", async () => {
+      throw new Error("unknown command plugin_secure_get");
+    });
+    await rejects(unregistered.secureGet("titer.secureGet", { key: "k" }), /not available in this Titer yet/);
+  },
+);
+
+check(
+  "labforge-r1 router: one handler serves the LabForge plugin — fetch/import/secure route to their handlers, catalogue commands to the app deps, unknown and unwired commands deny",
+  async () => {
+    const { buildPluginHostRouterFor, PLUGIN_HOST_COMMANDS } = await import("../src/plugins/plugin-host");
+    const dispatched: { action: string; args: Record<string, unknown> }[] = [];
+    const opened: string[] = [];
+    const keychain = new Map<string, string>();
+    const router = buildPluginHostRouterFor(
+      { id: "titer.labforge", networkHosts: ["https://labforge.smitpatel.net"] },
+      {
+        dispatch: async (action, args) => {
+          dispatched.push({ action, args });
+          return { result: action };
+        },
+        readTable: async () => ({ tableId: "t1", name: "ELISA", columns: ["Sample", "OD"], rows: [["A1", "0.5"]] }),
+        readColumns: async () => ({
+          tableName: "ELISA",
+          name: "ELISA",
+          columns: [
+            { id: "c1", name: "Sample" },
+            { id: "c2", name: "OD" },
+          ],
+        }),
+        saveFile: async (args) => ({ path: `/tmp/${args.filename}` }),
+        openLink: async (args) => {
+          opened.push(args.url);
+          return { opened: true };
+        },
+        invokeImpl: async (command, args) => {
+          const account = `${args.pluginId as string}:${args.key as string}`;
+          if (command === "plugin_secure_set") {
+            keychain.set(account, args.value as string);
+            return undefined;
+          }
+          if (command === "plugin_secure_get") return keychain.get(account) ?? null;
+          if (command === "plugin_secure_delete") return keychain.delete(account);
+          throw new Error(`unknown command ${command}`);
+        },
+      },
+    );
+    // The router serves the catalogue + the four LabForge commands.
+    for (const name of [
+      "titer.readTable",
+      "titer.readColumns",
+      "titer.runAnalysis",
+      "titer.createAnalysis",
+      "titer.saveFile",
+      "titer.exportResults",
+      "titer.openLink",
+      "titer.fetch",
+      "titer.importData",
+      "titer.secureGet",
+      "titer.secureSet",
+      "titer.secureDelete",
+    ]) {
+      ok(PLUGIN_HOST_COMMANDS.includes(name), `${name} is served by the plugin host router`);
+    }
+    // Catalogue commands reach the app deps (readColumns with no args is
+    // the LabForge plugin's open-project probe).
+    deepStrictEqual(await router("titer.readColumns", {}), {
+      tableName: "ELISA",
+      name: "ELISA",
+      columns: [
+        { id: "c1", name: "Sample" },
+        { id: "c2", name: "OD" },
+      ],
+    });
+    deepStrictEqual(await router("titer.readTable", { tableId: "t1" }), {
+      tableId: "t1",
+      name: "ELISA",
+      columns: ["Sample", "OD"],
+      rows: [["A1", "0.5"]],
+    });
+    deepStrictEqual(await router("titer.runAnalysis", { analysisId: "a1" }), { result: "run-analysis" });
+    deepStrictEqual(dispatched[dispatched.length - 1], { action: "run-analysis", args: { analysisId: "a1" } });
+    deepStrictEqual(
+      await router("titer.saveFile", { filename: "results.zip", dataBase64: "aGk=", contentType: "application/zip" }),
+      {
+        path: "/tmp/results.zip",
+      },
+    );
+    deepStrictEqual(await router("titer.openLink", { url: "https://labforge.smitpatel.net/runs/r1" }), {
+      opened: true,
+    });
+    strictEqual(opened.length, 1);
+    await rejects(router("titer.openLink", { url: "http://evil.example/" }), /only opens https/);
+    await rejects(router("titer.saveFile", { filename: "../evil.zip", dataBase64: "aGk=" }), /plain file name/);
+    // New commands route to their handlers (the fetch here has no stub, so
+    // it denies on the origin before touching the network — the allowlist
+    // is what this check proves at the router level).
+    deepStrictEqual(await router("titer.importData", { path: "/tmp/results.csv" }), { result: "import-data-file" });
+    deepStrictEqual(dispatched[dispatched.length - 1], {
+      action: "import-data-file",
+      args: { path: "/tmp/results.csv" },
+    });
+    deepStrictEqual(await router("titer.secureSet", { key: "labforge-token", value: "tok" }), { stored: true });
+    deepStrictEqual(await router("titer.secureGet", { key: "labforge-token" }), { value: "tok" });
+    await rejects(router("titer.fetch", { url: "https://evil.example/x" }), /is not one of them/);
+    // Unknown commands and the unwired exportResults deny, fail-closed.
+    await rejects(router("titer.teleport", {}), /is not a Titer plugin command/);
+    await rejects(router("titer.exportResults", {}), /No host handler for “titer.exportResults”/);
+    throws(() => buildPluginHostRouterFor({ id: "" }, {} as never), /needs a plugin id/);
+  },
+);
+
 // ── Run ──────────────────────────────────────────────────────────────────
 
 // Descriptives are computed by R since the v1.0.7 rebase, so checks that run
