@@ -1,91 +1,110 @@
-# Titer (Helix) Bug Report — Round 2
+# Titer (Helix) Bug Report — Round 2 (Recheck at `b8a2528`)
 
-Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Marketplace) with **67 verified findings** (**43 High**, **21 Medium**, **3 Low**).
+Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findings) and rechecked at `HEAD` `b8a2528` across the 57 commits in `62678b2..b8a2528`.
 
-## Round 1 Status (28 prior issues from `85f6c91`)
+## Recheck Status at `b8a2528`
 
-**27 of the 28** issues from the Round 1 report are completely **FIXED** at `d44c1da` (Issues #1–#27 fixed; Issue #28 parts 2–4 fixed). **1 item carries over** into this report as Issue #67 (`columnsBeyond` in `src/views/tables/table-data.ts:161-164` still omits `isNested(data)`).
+- **Round 1 (`85f6c91`, 28 issues)**: **28 of 28** now fixed (the sole Round 1 carryover `#67` was fixed in `242e6c9`).
+- **Round 2 (`d44c1da`, #1–#67)**: **10 Fixed** (`#2`, `#3`, `#13`, `#14`, `#15`, `#21`, `#42`, `#43`, `#55`, `#67`), **8 Partially Fixed** (`#1`, `#12`, `#17`, `#34`, `#49`, `#54`, `#56`, `#63`), **49 Open**.
+- **New in `62678b2..b8a2528` (#68–#81)**: **14 New** (**5 High**, **8 Medium**, **1 Low**).
+- **Active Total**: **71 Active** (**40 High**, **28 Medium**, **3 Low**).
 
 ---
 
 ## Summary of Findings
 
-| # | Severity | Area | Issue Title |
-| :- | :--- | :--- | :--- |
-| 1 | **High** | Native IPC / Security | Unrestricted AppleScript execution (RCE), arbitrary file deletion, and ungated file moves in new shell IPC commands |
-| 2 | **High** | Cloud / Security | Arbitrary file read via unvalidated `provider` path traversal in `cloud_read_cache` |
-| 3 | **High** | Cloud / Security | OAuth browser URL allowlist bypass in `open_browser_url` / `open_url` via userinfo (`@`) |
-| 4 | **High** | Plugins / Security | Plugin permission UI spoofing in `permissionChoices`: non-canonical permission order swaps checkbox labels and grants the wrong capability |
-| 5 | **High** | Plugins / Security | Plugin capability revocation bypass: disabling/uninstalling a plugin never tears down its Isolation session, letting re-enable retain revoked permissions |
-| 6 | **High** | Plugins / Security | Plugin static-gate bypasses (`__TAURI_INTERNALS__` regex typo, `Function()`, R backtick/dynamic dispatch) and `.GlobalEnv` escape in shared WebR |
-| 7 | **High** | Plugins / Security | Path traversal in `manifest.entry` / zip-slip entries in `loadPluginFromZip`, plus unverified manifest ID/version on marketplace install & update |
-| 8 | **High** | Server / Security | Feedback server global rate limit can be exhausted by a single per-IP blocked attacker, plus unbounded rate-limiter maps and dedupe TOCTOU race |
-| 9 | **High** | Cloud Sync | Cloud conflict "Overwrite" always fails (`expectedVersion ?? handle.version`), while offline-opened remote files silently overwrite remote edits |
-| 10 | **High** | Cloud Auth | Concurrent Box token refresh deletes fresh single-use tokens and signs user out; deleted tokens leave permanent zombie accounts |
-| 11 | **High** | Plugins / Isolation | `PluginIsolationWebview` is non-functional in both dev (`<StrictMode>` teardown) and release builds (Tauri CSP blocks `srcDoc` inline `<script>`s) |
-| 12 | **High** | Marketplace / Plugins | Enabled marketplace plugins are never re-registered into the live plugin registry on app restart |
-| 13 | **High** | UI / Scripts | `ScriptDialog` crashes React on opening File ▸ Run Script… (conditional `useState` after early `return null`) |
-| 14 | **High** | UI / Wizard | `AnalysisWizard` crashes with uncaught `TypeError` on Change Parameters… (`⌘T`) whenever a wizard has 0 questions for the current table |
-| 15 | **High** | UI / Analyses | `AnalysisView` Cancel button and elapsed-time/queue display are unreachable dead code while an analysis is running |
-| 16 | **High** | UI / Import | `ImportDialog` overwrites the parent table when "Create a new table" is shown selected (`insertionPoint === null`), drops all edits on `Enter` (stale closure), and strips the whole file as Info/Notes on `fromRow` |
-| 17 | **High** | Graphs / Store | Freezing a graph does not freeze it — `mergedGraphData` always reads live `parent.data` and overrides `frozenData` |
-| 18 | **High** | Store / Duplicate | `duplicateFamily` fails to remap analysis links in cloned graphs, binding duplicated graphs to the original table's analyses |
-| 19 | **High** | Store / Document | `use-document.ts` reads stale `latest.current` immediately after `dispatch`, dropping `runOnClose` script changes on close and skipping crash-recovery backup refresh in `revertToSaved` |
-| 20 | **High** | Project File | Save/load round-trip regressions in `project-file.ts`: frozen graphs/figures always reopen `updated: true`, blank/image figure panels trigger false "missing graph" warnings, and `rootOrder`/`orphanedDataSet` mismatches |
-| 21 | **High** | Calculated Variables | `calcvars.ts`: `NOT` binds tighter than comparisons/arithmetic (inverting `WHERE NOT …` and `IF(NOT …)`), and `renameVariableInFormula` writes unbracketed names (breaking formulas or silently substituting `Math.E`/`Math.PI`) and corrupts scientific notation |
-| 22 | **High** | Calculated Variables | `calcvars.ts`: stale `rawTextAt` for chained calculated variables (`COUNTA`, `OVER`), silent wrong/blank results for expression aggregates (`MIN(A+B)`, `MEAN(A+B)`), and `RANK` returning `0.5` on excluded rows |
-| 23 | **High** | Tabular Import | `.xlsx` import misclassifies custom number formats containing `[Red]`, currency codes, or unit suffixes (`"nM"`, `"mg/mL"`) as dates — silently corrupting numeric data into 1900-era date strings |
-| 24 | **High** | Tabular Import | `.xlsx` / CSV importer corrupts rows on self-closing `<row .../>` and `<t/>` tags, crashes on malformed attributes/entities, and overflows the call stack before `MAX_IMPORT_ROWS` truncation |
-| 25 | **High** | Prism `.prism` Import | `.prism` import drops `summaryFormat` on grouped summary tables (treating Mean/SD/N as raw replicates) and fails to sanitize `:` or pad ragged subcolumns |
-| 26 | **High** | Prism `.prism`/`.pzfx` Export | Native Titer XY replicate (`A:Y1`, `A:Y2`) and XY summary (`A:Mean`, `A:SD`, `A:N`) tables lose their grouping, `summaryFormat`, and nonlinear-regression dataset links in both `.prism` and `.pzfx` exports |
-| 27 | **High** | Vector Export (EPS) | EPS vector export produces invalid/corrupted PostScript (`nocurrentpoint` crash on text + leaked `clip` path) |
-| 28 | **High** | Vector Export (PDF) | PDF vector export corrupts all non-ASCII text (`−`, `R²`, `±`, `µM`, `°C`, `×`) by writing UTF-16BE bytes into single-byte Type1 `Tj` streams |
-| 29 | **High** | Vector Export (PDF/EPS) | Vector PDF/EPS export silently ignores Plotly CSS `px` units (`font-size`, `stroke-width`, `stroke-dasharray`), erases parent `<g>` opacity, and `grayscaleFigure` rewrites series labels matching CSS color names |
-| 30 | **High** | Vector Export (Figures) | Multi-panel Figure vector PDF and EPS exports are shrunk to 75% (`0.75×`) of configured physical dimensions |
-| 31 | **High** | Graphs (Grouped) | `grouped-bars-scatter` ("Bars with individual points") plots numeric scatter X coordinates on a categorical X axis and duplicates points/legend entries |
-| 32 | **High** | Graphs (Summary) | Summary tables draw no SEM error bars on `"mean-sem"` tables and drop asymmetric lower error bars (`errorMinus`) on XY summary graphs |
-| 33 | **High** | MCP Server | `titer_read_results` returns stale cached results after table mutations and returns `not_computed` for frozen/orphaned/cloned analyses with saved `cachedResult` |
-| 34 | **High** | MCP / Param Validation | `validateAnalysisParams` omits 11 per-analysis enum narrowings from `analysis-params-schema.json`, allowing cross-family params that silently run the wrong statistical test or crash R |
-| 35 | **High** | XY Graphs / Overlays | `addFittedCurve` draws all-`NaN` curves (no line rendered) for every multi-Y (`params.ys`) and curve-comparison (`params.compareWith`) nonlinear regression |
-| 36 | **High** | XY Stats (Nonlinear) | Raw-X sigmoidal models (`sigmoidal-4pl-x`, `absolute-ic50-x`, `asymmetric-5pl-x`, `agonist-4pl-normalized-x`) force `Y = Bottom` (or `0`) at `X = 0` in R even when `HillSlope < 0`, corrupting falling-curve fits and disagreeing with TS `evaluate()` |
-| 37 | **High** | XY Stats (Nonlinear) | `applyFitOptions` (`transformNlsCall`) silently strips built-in `lower=`/`upper=` bounds on 17+ models whenever weights, fixed params, bounds, or robust/Poisson IRLS are used — and crashes on `logistic-growth` / `gompertz-growth` |
-| 38 | **High** | XY Stats (Nonlinear) | Weighted, robust, and Poisson fits on log-Y models (`semilog-y-log`, `log-log-line`, `exponential-growth-log`) compute `R²` by dividing `log(Y)`-scale SS by raw `Y`-scale SST, and Poisson IRLS uses `1/log(Y)` weights |
-| 39 | **High** | XY Stats (Nonlinear) | `ecAnything` crashes R (`subscript out of bounds`) when `params.ecx` is requested on competition models, and `runGlobalNonlinear` mislabels shared `IC50`/`IC50Hi`/`LogKd` midpoints as `"EC50"` |
-| 40 | **High** | XY Stats (User-Defined) | `user-defined.ts` accepts R reserved keywords (`NA`, `Inf`, `NULL`, `TRUE`, `for`, `in`, …) causing R syntax errors, and naming a parameter `HillSlope` causes the fitted curve overlay to render nothing (all `NaN`) |
-| 41 | **High** | Multiple Stats | Multiple Linear Regression (`multiple-regression.ts`) miscomputes VIFs, crashes with R syntax error when only categorical predictors are present, and passes raw unaligned columns to `describe()` |
-| 42 | **High** | Grouped Stats | Three-way ANOVA Games–Howell post-hoc crashes R (`object 'Infinity' not found`) when compared cells have zero variance (identical replicates) |
-| 43 | **High** | Sample Size & Power | Sample Size & Power `solveEffect` fails for all valid effects in the upper doubling band (e.g. Pearson `r ∈ (0.8, 1)`, one-proportion `h ∈ (1.6, π]`, t/ANOVA/χ² `∈ (6.4, 10]`), and `power <= alpha` returns bogus `effect ≈ 0` |
-| 44 | **Medium** | Tauri Capabilities | Missing `core:window:allow-hide` and `core:window:allow-set-focus` capabilities silently break BUG-12 close-quiesce mitigation and non-macOS Window menu switcher |
-| 45 | **Medium** | Cloud Auth (Box) | Box OAuth loopback flow has bind-after-open race, aborts on single non-callback socket, blocks Tokio worker, and leaks thread/port on timeout |
-| 46 | **Medium** | Auto-Updater | Auto-updater `download_update` and `apply_update` block the macOS main thread and accept arbitrary HTTPS URLs / unverified bundles |
-| 47 | **Medium** | MCP Server | Failed `titer_open_project`, `titer_import_prism`, `titer_create_project`, and `titer_cloud_download` leak a blank window and hijack `last_published` |
-| 48 | **Medium** | Export / Paths | Export tools fail with `"Titer can't access <path>"` whenever the output filename contains a dot (e.g. `Fig 1.2`) or on Windows paths with a dot in a parent directory |
-| 49 | **Medium** | MCP Schema | `analysis-params-schema.json` omits `"none"` from `posthoc` enum for `nested-anova`/`multifactor-anova`, marks defaulted params required for `two-way-anova`/`rm-anova`, and duplicates `"xy"` in `nonlinear-regression.offered_on` |
-| 50 | **Medium** | Graphs / Figures Export | `titer_export_all_graphs` and Figure exports omit `deps.run` / `rootOrder`; `buildGraphFigure` diverges from `GraphView` (drops `sourceTableIds`, `frozenData`, `sigAnalysisIds`, number/date formatting) |
-| 51 | **Medium** | XY Graphs / Overlays | Replicate XY tables break `deming-overlay.ts` & `binding-curve.ts` overlays; `addLogisticCurve` queries three nonexistent stat labels (always displaying `—`) |
-| 52 | **Medium** | Store / Transforms | Renaming a column/group blanks dependent `% of control` transformed tables, edits overwrite frozen transformed tables, and `followTable` misses newly added column-name fields |
-| 53 | **Medium** | Tables / CalcVars | `permuteColumns`, `dropColumns`, and `removeCalculatedVariable` corrupt or leak `cellBackgrounds`, `linkedPaste`, `calculated`, `decimals`, `variableTypes`, `labelVariable`, and `levelOrder` |
-| 54 | **Medium** | Data Grid / Clipboard | Copying cells in Titer and pasting via Paste Special (default options) inserts a spurious column-header row |
-| 55 | **Medium** | Prism `.pzfx` Import | `.pzfx` XML parser scrambles mixed-content `<Title>`/`<d>` tags (`H<Sub>2</Sub>O` → `"HO2"`), drops `<Font>`-wrapped `<Info>` text, double-decodes CDATA, and matches closing-tag prefixes |
-| 56 | **Medium** | Prism Import | Scientific-notation comma-decimal numbers (e.g. `"4,096e+007"`, `"1,5e-3"`) are not normalized in `.pzfx` or `.prism` import and are silently dropped as non-numeric text |
-| 57 | **Medium** | Prism Scripts | `prism-script.ts`: `DuplicateDataTable Clear` leaks phantom exclusions, `Import` at `row = 0` drops first CSV row, Survival tables mis-index Y columns by 1, `ExportTable All` without `SetPath` targets `/`, and script table mutations leave calculated variables & transformed tables stale |
-| 58 | **Medium** | Prism Graph Regen | `applyRegenDecisions` mutates the project before validating later decisions (creating duplicate graphs on retry), and `mapSidecarGraph` ignores summary formats on grouped `.prism` tables |
-| 59 | **Medium** | Multi-Table Graphs | `mergeGraphTables` skips the `summaryFormat` mismatch check for XY tables and silently drops extra Nested tables whose name contains `:` |
-| 60 | **Medium** | Prism `.prism` Import | `.prism` import destroys line breaks in Info Sheet `notes` via `plainTitle()` and lacks bounds/type guards on malformed `document.json` / `content.json` and large row/column spreads |
-| 61 | **Medium** | Stats Report | `report/conclusion.ts`, `report/checks.ts`, and `report/analyzed.ts` produce inverted/misleading conclusions and assumption checks (FDR `multiple-t-tests` always concludes "no difference", `compareModel` prints `"Y" and "undefined"`, `chi-square` trend uses omnibus Pearson P, `checks.ts` ignores weights & replicates, `analyzed.ts` ignores `chi-square` `sets` and misreports MV `linear-regression` X) |
-| 62 | **Medium** | XY Stats (Nonlinear) | `AICc` in `enzyme-inhibition.ts` (and `nonlinear-regression.ts`) omits the residual-variance parameter (`+ 1`) from `k`; `interpolationCode` silently drops 95% CIs on tight positive-X ranges; multi-Y centered polynomials share only the first set's `centeredX` |
-| 63 | **Medium** | Sample Size & Power | `noncentralTCdf` underflows to `0` at `|δ| ≥ 38.57`, causing t-test power to jump discontinuously to `100%` and `solveN` to underestimate `n` at small `df` / strict `α` |
-| 64 | **Medium** | Plugins / Marketplace | Plugin wizard `kind: "text"` questions reject all non-numeric text, and `MarketplaceDialog` pre-checks `"network"` (and all permissions) by default |
-| 65 | **Low** | UI / Menus | UI/menu minor defects: duplicate Grubbs' `"Outliers by column"` table, duplicate `Edit ▸ Fill Down` menu item (first lacks `!activeTableFrozen`), `CmdOrCtrl+Alt+I` shortcut collision (`New Info Sheet…` vs `Inspector`), and stale `Change Parameters…` enabled state |
-| 66 | **Low** | WebR / Survival | WebR / survival edge cases: `ensurePackages` doubles caller `timeoutMs` on claim timeout; `survival-analysis.ts` computes 2-group HR on `k ≥ 3` and returns `—` without explanation on disjoint risk sets |
-| 67 | **Low** | Nested Tables (R1 #28) | [Carryover from Round 1 #28] Pasting wide data into a Nested table silently drops overflow columns without showing the `"Some Values Weren't Pasted"` notice (`columnsBeyond` omits `isNested(data)`) |
+| # | Severity | Status | Area | Issue Title |
+| :- | :--- | :--- | :--- | :--- |
+| 1 | **High** | Partial | Native IPC / Security | Unrestricted AppleScript execution (RCE), arbitrary file deletion, and ungated file moves in new shell IPC commands |
+| 2 | **High** | Fixed | Cloud / Security | Arbitrary file read via unvalidated `provider` path traversal in `cloud_read_cache` |
+| 3 | **High** | Fixed | Cloud / Security | OAuth browser URL allowlist bypass in `open_browser_url` / `open_url` via userinfo (`@`) |
+| 4 | **High** | Open | Plugins / Security | Plugin permission UI spoofing in `permissionChoices`: non-canonical permission order swaps checkbox labels and grants the wrong capability |
+| 5 | **High** | Open | Plugins / Security | Plugin capability revocation bypass: disabling/uninstalling a plugin never tears down its Isolation session, letting re-enable retain revoked permissions |
+| 6 | **High** | Open | Plugins / Security | Plugin static-gate bypasses (`__TAURI_INTERNALS__` regex typo, `Function()`, R backtick/dynamic dispatch) and `.GlobalEnv` escape in shared WebR |
+| 7 | **High** | Open | Plugins / Security | Path traversal in `manifest.entry` / zip-slip entries in `loadPluginFromZip`, plus unverified manifest ID/version on marketplace install & update |
+| 8 | **High** | Open | Server / Security | Feedback server global rate limit can be exhausted by a single per-IP blocked attacker, plus unbounded rate-limiter maps and dedupe TOCTOU race |
+| 9 | **High** | Open | Cloud Sync | Cloud conflict "Overwrite" always fails (`expectedVersion ?? handle.version`), while offline-opened remote files silently overwrite remote edits |
+| 10 | **High** | Open | Cloud Auth | Concurrent Box token refresh deletes fresh single-use tokens and signs user out; deleted tokens leave permanent zombie accounts |
+| 11 | **High** | Open | Plugins / Isolation | `PluginIsolationWebview` is non-functional in both dev (`<StrictMode>` teardown) and release builds (Tauri CSP blocks `srcDoc` inline `<script>`s) |
+| 12 | **High** | Partial | Marketplace / Plugins | Enabled marketplace plugins are never re-registered into the live plugin registry on app restart |
+| 13 | **High** | Fixed | UI / Scripts | `ScriptDialog` crashes React on opening File ▸ Run Script… (conditional `useState` after early `return null`) |
+| 14 | **High** | Fixed | UI / Wizard | `AnalysisWizard` crashes with uncaught `TypeError` on Change Parameters… (`⌘T`) whenever a wizard has 0 questions for the current table |
+| 15 | **High** | Fixed | UI / Analyses | `AnalysisView` Cancel button and elapsed-time/queue display are unreachable dead code while an analysis is running |
+| 16 | **High** | Open | UI / Import | `ImportDialog` overwrites the parent table when "Create a new table" is shown selected (`insertionPoint === null`), drops all edits on `Enter` (stale closure), and strips the whole file as Info/Notes on `fromRow` |
+| 17 | **High** | Partial | Graphs / Store | Freezing a graph does not freeze it — `mergedGraphData` always reads live `parent.data` and overrides `frozenData` |
+| 18 | **High** | Open | Store / Duplicate | `duplicateFamily` fails to remap analysis links in cloned graphs, binding duplicated graphs to the original table's analyses |
+| 19 | **High** | Open | Store / Document | `use-document.ts` reads stale `latest.current` immediately after `dispatch`, dropping `runOnClose` script changes on close and skipping crash-recovery backup refresh in `revertToSaved` |
+| 20 | **High** | Open | Project File | Save/load round-trip regressions in `project-file.ts`: frozen graphs/figures always reopen `updated: true`, blank/image figure panels trigger false "missing graph" warnings, and `rootOrder`/`orphanedDataSet` mismatches |
+| 21 | **High** | Fixed | Calculated Variables | `calcvars.ts`: `NOT` binds tighter than comparisons/arithmetic (inverting `WHERE NOT …` and `IF(NOT …)`), and `renameVariableInFormula` writes unbracketed names (breaking formulas or silently substituting `Math.E`/`Math.PI`) and corrupts scientific notation |
+| 22 | **High** | Open | Calculated Variables | `calcvars.ts`: stale `rawTextAt` for chained calculated variables (`COUNTA`, `OVER`), silent wrong/blank results for expression aggregates (`MIN(A+B)`, `MEAN(A+B)`), and `RANK` returning `0.5` on excluded rows |
+| 23 | **High** | Open | Tabular Import | `.xlsx` import misclassifies custom number formats containing `[Red]`, currency codes, or unit suffixes (`"nM"`, `"mg/mL"`) as dates — silently corrupting numeric data into 1900-era date strings |
+| 24 | **High** | Open | Tabular Import | `.xlsx` / CSV importer corrupts rows on self-closing `<row .../>` and `<t/>` tags, crashes on malformed attributes/entities, and overflows the call stack before `MAX_IMPORT_ROWS` truncation |
+| 25 | **High** | Open | Prism `.prism` Import | `.prism` import drops `summaryFormat` on grouped summary tables (treating Mean/SD/N as raw replicates) and fails to sanitize `:` or pad ragged subcolumns |
+| 26 | **High** | Open | Prism `.prism`/`.pzfx` Export | Native Titer XY replicate (`A:Y1`, `A:Y2`) and XY summary (`A:Mean`, `A:SD`, `A:N`) tables lose their grouping, `summaryFormat`, and nonlinear-regression dataset links in both `.prism` and `.pzfx` exports |
+| 27 | **High** | Open | Vector Export (EPS) | EPS vector export produces invalid/corrupted PostScript (`nocurrentpoint` crash on text + leaked `clip` path) |
+| 28 | **High** | Open | Vector Export (PDF) | PDF vector export corrupts all non-ASCII text (`−`, `R²`, `±`, `µM`, `°C`, `×`) by writing UTF-16BE bytes into single-byte Type1 `Tj` streams |
+| 29 | **High** | Open | Vector Export (PDF/EPS) | Vector PDF/EPS export silently ignores Plotly CSS `px` units (`font-size`, `stroke-width`, `stroke-dasharray`), erases parent `<g>` opacity, and `grayscaleFigure` rewrites series labels matching CSS color names |
+| 30 | **High** | Open | Vector Export (Figures) | Multi-panel Figure vector PDF and EPS exports are shrunk to 75% (`0.75×`) of configured physical dimensions |
+| 31 | **High** | Open | Graphs (Grouped) | `grouped-bars-scatter` ("Bars with individual points") plots numeric scatter X coordinates on a categorical X axis and duplicates points/legend entries |
+| 32 | **High** | Open | Graphs (Summary) | Summary tables draw no SEM error bars on `"mean-sem"` tables and drop asymmetric lower error bars (`errorMinus`) on XY summary graphs |
+| 33 | **High** | Open | MCP Server | `titer_read_results` returns stale cached results after table mutations and returns `not_computed` for frozen/orphaned/cloned analyses with saved `cachedResult` |
+| 34 | **High** | Partial | MCP / Param Validation | `validateAnalysisParams` omits 11 per-analysis enum narrowings from `analysis-params-schema.json`, allowing cross-family params that silently run the wrong statistical test or crash R |
+| 35 | **High** | Open | XY Graphs / Overlays | `addFittedCurve` draws all-`NaN` curves (no line rendered) for every multi-Y (`params.ys`) and curve-comparison (`params.compareWith`) nonlinear regression |
+| 36 | **High** | Open | XY Stats (Nonlinear) | Raw-X sigmoidal models (`sigmoidal-4pl-x`, `absolute-ic50-x`, `asymmetric-5pl-x`, `agonist-4pl-normalized-x`) force `Y = Bottom` (or `0`) at `X = 0` in R even when `HillSlope < 0`, corrupting falling-curve fits and disagreeing with TS `evaluate()` |
+| 37 | **High** | Open | XY Stats (Nonlinear) | `applyFitOptions` (`transformNlsCall`) silently strips built-in `lower=`/`upper=` bounds on 17+ models whenever weights, fixed params, bounds, or robust/Poisson IRLS are used — and crashes on `logistic-growth` / `gompertz-growth` |
+| 38 | **High** | Open | XY Stats (Nonlinear) | Weighted, robust, and Poisson fits on log-Y models (`semilog-y-log`, `log-log-line`, `exponential-growth-log`) compute `R²` by dividing `log(Y)`-scale SS by raw `Y`-scale SST, and Poisson IRLS uses `1/log(Y)` weights |
+| 39 | **High** | Open | XY Stats (Nonlinear) | `ecAnything` crashes R (`subscript out of bounds`) when `params.ecx` is requested on competition models, and `runGlobalNonlinear` mislabels shared `IC50`/`IC50Hi`/`LogKd` midpoints as `"EC50"` |
+| 40 | **High** | Open | XY Stats (User-Defined) | `user-defined.ts` accepts R reserved keywords (`NA`, `Inf`, `NULL`, `TRUE`, `for`, `in`, …) causing R syntax errors, and naming a parameter `HillSlope` causes the fitted curve overlay to render nothing (all `NaN`) |
+| 41 | **High** | Open | Multiple Stats | Multiple Linear Regression (`multiple-regression.ts`) miscomputes VIFs, crashes with R syntax error when only categorical predictors are present, and passes raw unaligned columns to `describe()` |
+| 42 | **High** | Fixed | Grouped Stats | Three-way ANOVA Games–Howell post-hoc crashes R (`object 'Infinity' not found`) when compared cells have zero variance (identical replicates) |
+| 43 | **High** | Fixed | Sample Size & Power | Sample Size & Power `solveEffect` fails for all valid effects in the upper doubling band (e.g. Pearson `r ∈ (0.8, 1)`, one-proportion `h ∈ (1.6, π]`, t/ANOVA/χ² `∈ (6.4, 10]`), and `power <= alpha` returns bogus `effect ≈ 0` |
+| 44 | **Medium** | Open | Tauri Capabilities | Missing `core:window:allow-hide` and `core:window:allow-set-focus` capabilities silently break BUG-12 close-quiesce mitigation and non-macOS Window menu switcher |
+| 45 | **Medium** | Open | Cloud Auth (Box) | Box OAuth loopback flow has bind-after-open race, aborts on single non-callback socket, blocks Tokio worker, and leaks thread/port on timeout |
+| 46 | **Medium** | Open | Auto-Updater | Auto-updater `download_update` and `apply_update` block the macOS main thread and accept arbitrary HTTPS URLs / unverified bundles |
+| 47 | **Medium** | Open | MCP Server | Failed `titer_open_project`, `titer_import_prism`, `titer_create_project`, and `titer_cloud_download` leak a blank window and hijack `last_published` |
+| 48 | **Medium** | Open | Export / Paths | Export tools fail with `"Titer can't access <path>"` whenever the output filename contains a dot (e.g. `Fig 1.2`) or on Windows paths with a dot in a parent directory |
+| 49 | **Medium** | Partial | MCP Schema | `analysis-params-schema.json` omits `"none"` from `posthoc` enum for `nested-anova`/`multifactor-anova`, marks defaulted params required for `two-way-anova`/`rm-anova`, and duplicates `"xy"` in `nonlinear-regression.offered_on` |
+| 50 | **Medium** | Open | Graphs / Figures Export | `titer_export_all_graphs` and Figure exports omit `deps.run` / `rootOrder`; `buildGraphFigure` diverges from `GraphView` (drops `sourceTableIds`, `frozenData`, `sigAnalysisIds`, number/date formatting) |
+| 51 | **Medium** | Open | XY Graphs / Overlays | Replicate XY tables break `deming-overlay.ts` & `binding-curve.ts` overlays; `addLogisticCurve` queries three nonexistent stat labels (always displaying `—`) |
+| 52 | **Medium** | Open | Store / Transforms | Renaming a column/group blanks dependent `% of control` transformed tables, edits overwrite frozen transformed tables, and `followTable` misses newly added column-name fields |
+| 53 | **Medium** | Open | Tables / CalcVars | `permuteColumns`, `dropColumns`, and `removeCalculatedVariable` corrupt or leak `cellBackgrounds`, `linkedPaste`, `calculated`, `decimals`, `variableTypes`, `labelVariable`, and `levelOrder` |
+| 54 | **Medium** | Partial | Data Grid / Clipboard | Copying cells in Titer and pasting via Paste Special (default options) inserts a spurious column-header row |
+| 55 | **Medium** | Fixed | Prism `.pzfx` Import | `.pzfx` XML parser scrambles mixed-content `<Title>`/`<d>` tags (`H<Sub>2</Sub>O` → `"HO2"`), drops `<Font>`-wrapped `<Info>` text, double-decodes CDATA, and matches closing-tag prefixes |
+| 56 | **Medium** | Partial | Prism Import | Scientific-notation comma-decimal numbers (e.g. `"4,096e+007"`, `"1,5e-3"`) are not normalized in `.pzfx` or `.prism` import and are silently dropped as non-numeric text |
+| 57 | **Medium** | Open | Prism Scripts | `prism-script.ts`: `DuplicateDataTable Clear` leaks phantom exclusions, `Import` at `row = 0` drops first CSV row, Survival tables mis-index Y columns by 1, `ExportTable All` without `SetPath` targets `/`, and script table mutations leave calculated variables & transformed tables stale |
+| 58 | **Medium** | Open | Prism Graph Regen | `applyRegenDecisions` mutates the project before validating later decisions (creating duplicate graphs on retry), and `mapSidecarGraph` ignores summary formats on grouped `.prism` tables |
+| 59 | **Medium** | Open | Multi-Table Graphs | `mergeGraphTables` skips the `summaryFormat` mismatch check for XY tables and silently drops extra Nested tables whose name contains `:` |
+| 60 | **Medium** | Open | Prism `.prism` Import | `.prism` import destroys line breaks in Info Sheet `notes` via `plainTitle()` and lacks bounds/type guards on malformed `document.json` / `content.json` and large row/column spreads |
+| 61 | **Medium** | Open | Stats Report | `report/conclusion.ts`, `report/checks.ts`, and `report/analyzed.ts` produce inverted/misleading conclusions and assumption checks (FDR `multiple-t-tests` always concludes "no difference", `compareModel` prints `"Y" and "undefined"`, `chi-square` trend uses omnibus Pearson P, `checks.ts` ignores weights & replicates, `analyzed.ts` ignores `chi-square` `sets` and misreports MV `linear-regression` X) |
+| 62 | **Medium** | Open | XY Stats (Nonlinear) | `AICc` in `enzyme-inhibition.ts` (and `nonlinear-regression.ts`) omits the residual-variance parameter (`+ 1`) from `k`; `interpolationCode` silently drops 95% CIs on tight positive-X ranges; multi-Y centered polynomials share only the first set's `centeredX` |
+| 63 | **Medium** | Partial | Sample Size & Power | `noncentralTCdf` underflows to `0` at `|δ| ≥ 38.57`, causing t-test power to jump discontinuously to `100%` and `solveN` to underestimate `n` at small `df` / strict `α` |
+| 64 | **Medium** | Open | Plugins / Marketplace | Plugin wizard `kind: "text"` questions reject all non-numeric text, and `MarketplaceDialog` pre-checks `"network"` (and all permissions) by default |
+| 65 | **Low** | Open | UI / Menus | UI/menu minor defects: duplicate Grubbs' `"Outliers by column"` table, duplicate `Edit ▸ Fill Down` menu item (first lacks `!activeTableFrozen`), `CmdOrCtrl+Alt+I` shortcut collision (`New Info Sheet…` vs `Inspector`), and stale `Change Parameters…` enabled state |
+| 66 | **Low** | Open | WebR / Survival | WebR / survival edge cases: `ensurePackages` doubles caller `timeoutMs` on claim timeout; `survival-analysis.ts` computes 2-group HR on `k ≥ 3` and returns `—` without explanation on disjoint risk sets |
+| 67 | **Low** | Fixed | Nested Tables (R1 #28) | [Carryover from Round 1 #28] Pasting wide data into a Nested table silently drops overflow columns without showing the `"Some Values Weren't Pasted"` notice (`columnsBeyond` omits `isNested(data)`) |
+| 68 | **High** | New | Native Clipboard | `copy_pdf_to_clipboard` puts two separate `NSPasteboardItem`s on the macOS clipboard instead of one multi-flavour item |
+| 69 | **High** | New | UI / What's New | `WhatsNewDialog` auto-closes itself 2 seconds after opening via Help ▸ What's New |
+| 70 | **High** | New | Error Reporting | Independent error-report sharing (`CrashReportDialog` / `try_send_error_entry`) never sends when feedback sharing is off |
+| 71 | **High** | New | UI / Startup Guide | `StartupGuideDialog`'s `mailto:smit@muse.ai` support link is silently blocked by Tauri's `.on_navigation` policy |
+| 72 | **High** | New | Error Reporting | Startup flush race and permanent unsent-duplicate loop in `CrashReportDialog` / `main.tsx` / `mcp_flush_error_log` |
+| 73 | **Medium** | New | Figures / Freeze | Freezing or re-freezing a graph overrides the snapshot of a previously frozen Figure |
+| 74 | **Medium** | New | UI / Analyses | macOS native `NSProgressIndicator` spinner overlaps the `Running…` text and `Cancel` button in `AnalysisView` |
+| 75 | **Medium** | New | Native Clipboard | `copy_pdf_to_clipboard` JXA `if (!pdfData)` / `if (!pngData)` checks are dead code, wiping the user's clipboard on read failure |
+| 76 | **Medium** | New | Feedback / Privacy | `SendFeedbackDialog` and `AiConnectionsDialog` drop server/network errors and falsely claim "Sharing is off"; `mcp_send_feedback` sends `project_file` + `recent_activity` |
+| 77 | **Medium** | New | UI / Modals | `StartupGuideDialog`'s global `window` keydown handler hijacks `Enter` and `Escape` from top-layer `<dialog>` modals (including `SendFeedbackDialog`) |
+| 78 | **Medium** | New | Native Menu | Windowless Help menu exposes Help ▸ Send Feedback and Help ▸ What's New as enabled dead no-ops |
+| 79 | **Medium** | New | UI / Startup Guide | `StartupGuideDialog` auto-show omits `!openedFile.current` and pops over opened `.pzt` templates, Sample Project, and slow/failed file launches |
+| 80 | **Medium** | New | Math / Distributions | `noncentralTCdf` (`logWeights` path) silently returns `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447` |
+| 81 | **Low** | New | Native IPC | `send_to_keynote_blocking` / `applescript_number` lacks `.is_finite()` / upper-bound checks and can emit invalid AppleScript `inf` or `0` |
 
 ---
 
 ## High-Severity Issues
 
-### Issue 1: Unrestricted AppleScript execution (RCE), arbitrary file deletion, and ungated file moves in new shell IPC commands
+### Issue 1 [PARTIALLY FIXED]: Unrestricted AppleScript execution (RCE), arbitrary file deletion, and ungated file moves in new shell IPC commands
 - **Severity**: High
+- **Status**: Partially Fixed at `b8a2528` (core AppleScript RCE and ungated `move_file` closed)
+- **Remaining at `b8a2528`**: `canonicalize_in_temp_dir` (`src-tauri/src/main.rs:573-581`) runs `check_extension(path, allowed)?` *before* `Path::new(path).canonicalize()` and never re-checks the extension on `canonical`. A `*.png`/`*.pdf` symlink in shared `$TMPDIR` targeting a non-image file in `$TMPDIR` passes validation, is read, and is deleted (`fs::remove_file`), and any other app's `.png`/`.pdf` in shared `$TMPDIR` can be read/deleted via IPC.
 - **Files**:
   - `src-tauri/src/main.rs:671-700` (`move_file`, `move_file_blocking`)
   - `src-tauri/src/main.rs:714-759` (`send_to_keynote`, `send_to_keynote_blocking`)
@@ -107,8 +126,9 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 2: Arbitrary file read via unvalidated `provider` path traversal in `cloud_read_cache`
+### Issue 2 [FIXED]: Arbitrary file read via unvalidated `provider` path traversal in `cloud_read_cache`
 - **Severity**: High
+- **Status**: Fixed at `b8a2528` (`src-tauri/src/cloud.rs:549-556` allowlists `PROVIDER_BOX` / `PROVIDER_MOCK`)
 - **Files**:
   - `src-tauri/src/main.rs:1254-1268` (`cloud_read_cache`)
   - `src-tauri/src/cloud.rs:534-538, 562-564` (`cache_path`, `read_cache`)
@@ -126,8 +146,9 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 3: OAuth browser URL allowlist bypass in `open_browser_url` / `open_url` via userinfo (`@`)
+### Issue 3 [FIXED]: OAuth browser URL allowlist bypass in `open_browser_url` / `open_url` via userinfo (`@`)
 - **Severity**: High
+- **Status**: Fixed at `b8a2528` (`src-tauri/src/cloud.rs:370-384` fails closed when authority contains `@`)
 - **Files**:
   - `src-tauri/src/cloud.rs:362-383` (`BROWSER_ALLOWLIST`, `url_host`, `open_browser_url`)
   - `src-tauri/src/main.rs:1366-1369, 1911` (`open_url`)
@@ -300,8 +321,10 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 12: Enabled marketplace plugins are never re-registered into the live plugin registry on app restart
+### Issue 12 [PARTIALLY FIXED]: Enabled marketplace plugins are never re-registered into the live plugin registry on app restart
 - **Severity**: High
+- **Status**: Partially Fixed at `b8a2528` (`rehydrateEnabledPlugin` added in `src/plugins/loader.ts:266-282` and called from `src/main.tsx:48` / `src/marketplace/store.ts:92-99`)
+- **Remaining at `b8a2528`**: (1) `src/main.tsx:48` fires `void getMarketplaceStore()` without awaiting it before mounting `<AppShell />`, so a restored plugin analysis sheet or early MCP call races `import()` + `appVersion()` and permanently renders `"Unknown plugin analysis: plugin:..."` (`src/views/analyses/use-analysis.ts:114-122`, `src/store/mcp-dispatch.ts:961-1027`); (2) `MarketplaceStore.loadInstalled()` skips `record.status !== "enabled"`, leaving `"incompatible"` plugins permanently stuck after an app upgrade; (3) `getMarketplaceStore()` (`src/marketplace/wiring.ts:19-25`) caches a rejected `storePromise` forever on transient startup failure.
 - **Files**:
   - `src/marketplace/store.ts:76-90`
   - `src/marketplace/wiring.ts:22-52`
@@ -319,8 +342,9 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 13: `ScriptDialog` crashes React on opening **File ▸ Run Script…** (conditional `useState` after early `return null`)
+### Issue 13 [FIXED]: `ScriptDialog` crashes React on opening **File ▸ Run Script…** (conditional `useState` after early `return null`)
 - **Severity**: High
+- **Status**: Fixed at `b8a2528` (conditional hooks moved into `SavedScriptsPanel` in `src/components/script-dialog-saved.tsx:16-31` / `src/components/script-dialog.tsx:54-62, 157-163`)
 - **Files**:
   - `src/components/script-dialog.tsx:54-62, 116-118`
   - `src/components/app-shell.tsx:246`
@@ -333,8 +357,9 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 14: `AnalysisWizard` crashes with uncaught `TypeError` on **Change Parameters… (`⌘T`)** whenever a wizard has 0 questions for the current table
+### Issue 14 [FIXED]: `AnalysisWizard` crashes with uncaught `TypeError` on **Change Parameters… (`⌘T`)** whenever a wizard has 0 questions for the current table
 - **Severity**: High
+- **Status**: Fixed at `b8a2528` (`canEditAnalysisParams` + `wizardAsksNothing` in `src/views/analyses/wizards.ts:632-655, 706-752` and `!q` guards in `src/views/analyses/analysis-wizard.tsx:228-327`)
 - **Files**:
   - `src/views/analyses/analysis-wizard.tsx:46-63, 226-235`
   - `src/views/analyses/wizards.ts:597-645` (`wizardForAnalysis`, `canEditAnalysisParams`)
@@ -348,8 +373,9 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 15: `AnalysisView` **Cancel** button and elapsed-time/queue display are unreachable dead code while an analysis is running
+### Issue 15 [FIXED]: `AnalysisView` **Cancel** button and elapsed-time/queue display are unreachable dead code while an analysis is running
 - **Severity**: High
+- **Status**: Fixed at `b8a2528` (`src/views/analyses/analysis-view.tsx:34-66, 225-227` renders elapsed time, queue position, and **Cancel** inside `<Running />`; see new macOS native spinner overlap regression in Issue #74)
 - **Files**:
   - `src/views/analyses/analysis-view.tsx:99, 207-229`
 - **Explanation**:
@@ -387,8 +413,10 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 17: Freezing a graph does not freeze it — `mergedGraphData` always reads live `parent.data` and overrides `frozenData`
+### Issue 17 [PARTIALLY FIXED]: Freezing a graph does not freeze it — `mergedGraphData` always reads live `parent.data` and overrides `frozenData`
 - **Severity**: High
+- **Status**: Partially Fixed at `b8a2528` (single-table frozen graphs now read `graph.frozenData` in `src/lib/multi-table.ts:87`, `src/views/graphs/graph-view.tsx:90, 167`, `src/views/figures/panel-figure.ts:42`, and `src/views/graphs/graph-figure.ts:193, 361`; see also regression Issue #73)
+- **Remaining at `b8a2528`**: (1) Multi-table frozen graphs (`graph.sourceTableIds`) do not snapshot extra tables in `setGraphFrozen` (`src/store/use-project-store.tsx:749-754`) and `mergedGraphData` (`src/lib/multi-table.ts:84-86, 90-105`) still reads live `table.data` for secondary tables; (2) significance-bracket overlays in `GraphView` (`src/views/graphs/graph-view.tsx:429-438`) still pass live `nodes[a.parentId]?.data` even when `a.parentId === node.parentId` on a frozen graph.
 - **Files**:
   - `src/lib/multi-table.ts:76-101` (`mergedGraphData`)
   - `src/views/graphs/graph-view.tsx:89-90, 140, 160-166`
@@ -452,8 +480,9 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 21: `calcvars.ts`: `NOT` binds tighter than comparisons/arithmetic (inverting `WHERE NOT …` and `IF(NOT …)`), and `renameVariableInFormula` writes unbracketed names and corrupts scientific notation
+### Issue 21 [FIXED]: `calcvars.ts`: `NOT` binds tighter than comparisons/arithmetic (inverting `WHERE NOT …` and `IF(NOT …)`), and `renameVariableInFormula` writes unbracketed names and corrupts scientific notation
 - **Severity**: High
+- **Status**: Fixed at `b8a2528` (`not()` precedence added in `src/lib/calcvars.ts:251-264, 301-304`; `renameVariableInFormula` at `src/lib/calcvars.ts:1253-1301` skips numeric literals and brackets non-identifier/reserved names)
 - **Files**:
   - `src/lib/calcvars.ts:245-296` (`Parser.or`, `and`, `cmp`, `add`, `mul`, `pow`, `unary`)
   - `src/lib/calcvars.ts:319-322` (`CONSTANTS` lookup)
@@ -666,8 +695,10 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 34: `validateAnalysisParams` omits 11 per-analysis enum narrowings from `analysis-params-schema.json`, allowing cross-family params that silently run the wrong statistical test or crash R
+### Issue 34 [PARTIALLY FIXED]: `validateAnalysisParams` omits 11 per-analysis enum narrowings from `analysis-params-schema.json`, allowing cross-family params that silently run the wrong statistical test or crash R
 - **Severity**: High
+- **Status**: Partially Fixed at `b8a2528` (15 enum narrowings added to `PARAM_CHOICES` in `src/lib/project-file.ts:996-1029`; runtime guards added in `chi-square.ts:40-43`, `shapiro-wilk.ts:74-77`, and `rm-anova.ts:30-39`)
+- **Remaining at `b8a2528`**: `spline-lowess.method` and `transform-data.xFunction` (`scripts/generate-analysis-params-schema.py:111, 147-148`) are still omitted from `PARAM_CHOICES` (`src/lib/project-file.ts:982-1030`), and direct calls to `runMonteCarlo` (`src/stats/simulation/monte-carlo.ts:124, 334`) or `runMixedModel` (`src/stats/column/mixed-model.ts:90-97`) still lack enum validation.
 - **Files**:
   - `src/lib/project-file.ts:980-991, 1441-1451` (`PARAM_CHOICES`, `validateAnalysisParams`)
   - `scripts/generate-analysis-params-schema.py:102-144` (`ENUM_OVERRIDES`)
@@ -801,8 +832,9 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 42: Three-way ANOVA Games–Howell post-hoc crashes R (`object 'Infinity' not found`) when compared cells have zero variance (identical replicates)
+### Issue 42 [FIXED]: Three-way ANOVA Games–Howell post-hoc crashes R (`object 'Infinity' not found`) when compared cells have zero variance (identical replicates)
 - **Severity**: High
+- **Status**: Fixed at `b8a2528` (`src/stats/grouped/three-way-anova.ts:137` now checks `identical(vi) || identical(vj)`)
 - **Files**:
   - `src/stats/grouped/three-way-anova.ts:137-154, 196-225`
 - **Explanation**:
@@ -814,8 +846,9 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 43: Sample Size & Power `solveEffect` fails for all valid effects in the upper doubling band (e.g. Pearson `r ∈ (0.8, 1)`, one-proportion `h ∈ (1.6, π]`, t/ANOVA/χ² `∈ (6.4, 10]`), and `power <= alpha` returns bogus `effect ≈ 0`
+### Issue 43 [FIXED]: Sample Size & Power `solveEffect` fails for all valid effects in the upper doubling band (e.g. Pearson `r ∈ (0.8, 1)`, one-proportion `h ∈ (1.6, π]`, t/ANOVA/χ² `∈ (6.4, 10]`), and `power <= alpha` returns bogus `effect ≈ 0`
 - **Severity**: High
+- **Status**: Fixed at `b8a2528` (`src/stats/sample-size-power.ts:258-265, 436-453` rejects `power <= alpha` and clamps `hi = cap`)
 - **Files**:
   - `src/stats/sample-size-power.ts:155-164, 255-258, 428-435`
 - **Explanation**:
@@ -892,8 +925,10 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 49: `analysis-params-schema.json` omits `"none"` from `posthoc` enum for `nested-anova`/`multifactor-anova`, marks defaulted params required for `two-way-anova`/`rm-anova`, and duplicates `"xy"` in `nonlinear-regression.offered_on`
+### Issue 49 [PARTIALLY FIXED]: `analysis-params-schema.json` omits `"none"` from `posthoc` enum for `nested-anova`/`multifactor-anova`, marks defaulted params required for `two-way-anova`/`rm-anova`, and duplicates `"xy"` in `nonlinear-regression.offered_on`
 - **Severity**: Medium
+- **Status**: Partially Fixed at `b8a2528` (`"none"` added for `nested-anova`/`multifactor-anova` `posthoc`, `rm-anova.posthoc` & `two-way-anova.{posthoc,posthocTarget}` defaulted, and `nonlinear-regression.offered_on` deduplicated)
+- **Remaining at `b8a2528`**: `two-way-anova.params.design` (`src-tauri/src/analysis-params-schema.json:3405-3413`) is still marked `"required": true` with no `"default"` because `scripts/generate-analysis-params-schema.py:492-493` omitted `("two-way-anova", "design"): "ordinary"`.
 - **Files**:
   - `scripts/generate-analysis-params-schema.py:124-125, 494-505`
   - `src-tauri/src/analysis-params-schema.json:1385-1390, 1524-1529, 1563-1567, 2663-2674, 3260-3296`
@@ -960,8 +995,10 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 54: Copying cells in Titer and pasting via Paste Special (default options) inserts a spurious column-header row
+### Issue 54 [PARTIALLY FIXED]: Copying cells in Titer and pasting via Paste Special (default options) inserts a spurious column-header row
 - **Severity**: Medium
+- **Status**: Partially Fixed at `b8a2528` (`parseClipboardHTML` at `src/views/tables/table-data.ts:1397` now strips `<thead>...</thead>`)
+- **Remaining at `b8a2528`**: `decodeHtmlEntities` (`src/views/tables/table-data.ts:1370-1371`) still calls `String.fromCodePoint` without a `<= 0x10ffff` / surrogate check, throwing an uncaught `RangeError` on malformed numeric entities (e.g. `&#9999999;`).
 - **Files**:
   - `src/views/tables/grid.tsx:506-515, 769-781`
   - `src/views/tables/table-data.ts:1271-1292, 1384-1413`
@@ -972,8 +1009,9 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 55: `.pzfx` XML parser scrambles mixed-content `<Title>`/`<d>` tags (`H<Sub>2</Sub>O` → `"HO2"`), drops `<Font>`-wrapped `<Info>` text, double-decodes CDATA, and matches closing-tag prefixes
+### Issue 55 [FIXED]: `.pzfx` XML parser scrambles mixed-content `<Title>`/`<d>` tags (`H<Sub>2</Sub>O` → `"HO2"`), drops `<Font>`-wrapped `<Info>` text, double-decodes CDATA, and matches closing-tag prefixes
 - **Severity**: Medium
+- **Status**: Fixed at `b8a2528` (`src/lib/pzfx.ts:93, 107, 174-239, 264-267, 759-775`)
 - **Files**:
   - `src/lib/pzfx.ts:82-99, 167-189, 206-210, 719-729`
 - **Explanation**:
@@ -983,8 +1021,10 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 56: Scientific-notation comma-decimal numbers (e.g. `"4,096e+007"`, `"1,5e-3"`) are not normalized in `.pzfx` or `.prism` import and are silently dropped as non-numeric text
+### Issue 56 [PARTIALLY FIXED]: Scientific-notation comma-decimal numbers (e.g. `"4,096e+007"`, `"1,5e-3"`) are not normalized in `.pzfx` or `.prism` import and are silently dropped as non-numeric text
 - **Severity**: Medium
+- **Status**: Partially Fixed at `b8a2528` (optional exponent `([eE][+-]?\d+)?` added to `src/lib/pzfx.ts:368`, `src/lib/prism.ts:655`, `src/lib/import-choices.ts:206`, `src/lib/variable-types.ts:20`, and `src/views/tables/table-data.ts:1237`)
+- **Remaining at `b8a2528`**: Optional leading `+` (e.g. `"+1,5e-3"`) is still rejected by `^-?` in `src/lib/pzfx.ts:320, 368`, `src/lib/prism.ts:655`, and `src/views/tables/table-data.ts:1237` (while `src/lib/variable-types.ts:20` classifies it as numeric), and `src/lib/prism.ts:653` `thousandsMode` omits the optional exponent.
 - **Files**:
   - `src/lib/pzfx.ts:285, 329-334`
   - `src/lib/prism.ts:648-654`
@@ -1079,8 +1119,10 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 63: `noncentralTCdf` underflows to `0` at `|δ| ≥ 38.57`, causing t-test power to jump discontinuously to `100%` and `solveN` to underestimate `n` at small `df` / strict `α`
+### Issue 63 [PARTIALLY FIXED]: `noncentralTCdf` underflows to `0` at `|δ| ≥ 38.57`, causing t-test power to jump discontinuously to `100%` and `solveN` to underestimate `n` at small `df` / strict `α`
 - **Severity**: Medium
+- **Status**: Partially Fixed at `b8a2528` (`src/stats/distributions.ts:331-385` switches to log-space `logP`/`logQ` for `mu > 700`, fixing `sample-size-power.ts` underflow at `|δ| ≈ 38.57`)
+- **Remaining at `b8a2528`**: The `logWeights` branch introduces a silent cliff to `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447` (tracked as new Issue #80).
 - **Files**:
   - `src/stats/distributions.ts:306-361`
   - `src/stats/sample-size-power.ts:291-306`
@@ -1135,8 +1177,9 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
 
 ---
 
-### Issue 67: [Carryover from Round 1 #28] Pasting wide data into a Nested table silently drops overflow columns without showing the `"Some Values Weren't Pasted"` notice
+### Issue 67 [FIXED]: [Carryover from Round 1 #28] Pasting wide data into a Nested table silently drops overflow columns without showing the `"Some Values Weren't Pasted"` notice
 - **Severity**: Low
+- **Status**: Fixed at `b8a2528` (`src/views/tables/table-data.ts:162-165` now checks `isGrouped(data) || isNested(data)`)
 - **Files**:
   - `src/views/tables/table-data.ts:161-164` (`columnsBeyond`)
   - `src/views/tables/table-data.ts:123` (`writeBlock`)
@@ -1144,3 +1187,225 @@ Review of `smitpatel316/Helix` (Titer) at `HEAD` `d44c1da` (v1.9.0+ / post-M5 Ma
   `writeBlock` refuses to auto-append columns when `isGrouped(data) || isNested(data)`, but `columnsBeyond` (`src/views/tables/table-data.ts:163`) still checks only `isGrouped(data)` and returns `0` for Nested tables, silently discarding overflow pasted columns without triggering the warning dialog.
 - **Suggested Fix**:
   Update `columnsBeyond` to check `(isGrouped(data) || isNested(data))` and update the warning text to mention Nested tables.
+
+---
+
+## New Issues Found in Recheck at `b8a2528` (#68–#81)
+
+### Issue 68: `copy_pdf_to_clipboard` puts TWO separate `NSPasteboardItem`s on the macOS clipboard instead of one multi-flavour item
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/main.rs:1039-1044` (`copy_pdf_to_clipboard_blocking`)
+- **Explanation**:
+  In AppKit (`NSPasteboard`), each `NSPasteboardItem` in `pb.writeObjects([...])` represents a distinct copied object, whereas alternative representations of one object (PDF primary + PNG fallback) must be attached to the **same** `NSPasteboardItem`. Lines 1039–1044 create `pdfItem` (`com.adobe.pdf`, `public.pdf`) and a separate `pngItem` (`public.png`) and call `pb.writeObjects($([pdfItem, pngItem]))`. Live verification against AppKit shows `pb.pasteboardItems.count === 2` and `pb.readObjectsForClasses([NSImage])` returns 2 images — so multi-item apps (Keynote, Pages, Notes, Mail, TextEdit, Word) paste **two copies** of the graph (one PDF + one PNG), while single-item readers inspecting `pasteboardItems[0]` find no `public.png` fallback.
+- **Minimal Reproduction**:
+  Copy any graph/figure on macOS via the Copy button (`copy_pdf_to_clipboard`) and paste into Notes, Pages, or Keynote: two images are pasted side by side.
+- **Suggested Fix**:
+  Attach all three UTIs (`com.adobe.pdf`, `public.pdf`, and `public.png`) to a single `NSPasteboardItem` and pass `$([item])` to `pb.writeObjects(...)`.
+
+---
+
+### Issue 69: `WhatsNewDialog` auto-closes itself 2 seconds after opening via **Help ▸ What's New**
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/components/whats-new-dialog.tsx:16-35`
+  - `src/lib/whats-new.ts:51-53, 68-74`
+- **Explanation**:
+  `WhatsNewDialog` shares a single `open` boolean between first-launch auto-show (lines 21–25) and manual on-demand opening via **Help ▸ What's New** (`line 18`: `onWhatsNewRequest(() => setOpen(true))`). While `open` is `true`, lines 29–35 run a 2-second `setInterval` intended to close auto-opened dialogs in other windows whenever `shouldShowWhatsNew(readWhatsNewSeen())` becomes `false`. Once the user has dismissed the initial auto-shown dialog (`markWhatsNewSeen()` writes `localStorage["titer.whats-new-seen"]`), `shouldShowWhatsNew(...)` is always `false`, so every subsequent manual **Help ▸ What's New** open closes itself after 2 seconds.
+- **Minimal Reproduction**:
+  1. Launch Titer and click **OK** on the auto-shown **What's New** dialog.
+  2. Click **Help ▸ What's New** and wait 2 seconds: the dialog disappears automatically.
+- **Suggested Fix**:
+  Track whether the current open session was auto-shown (`autoShown`), and only run the 2-second re-check interval while `open && autoShown`.
+
+---
+
+### Issue 70: Independent error-report sharing (`CrashReportDialog` / `try_send_error_entry`) never sends when feedback sharing is off
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/mcp.rs:1558-1574, 2510-2525` (`try_send_error_entry`, `feedback_share_result`)
+  - `src/components/crash-report-dialog.tsx:79-93, 150-155`
+  - `src/components/ai-connections-dialog.tsx:191-194, 511-540`
+  - `src/components/feedback-consent-dialog.tsx:21-24, 65-69, 85-87`
+- **Explanation**:
+  Error-report sharing (`error-log-consent.json`) is advertised as independent from AI feedback sharing (`feedback-consent.json`). However, `try_send_error_entry` (`src-tauri/src/mcp.rs:1558-1574`) checks `error_log_sharing_enabled(dir)` and then delegates to `feedback_share_result(...)`, which immediately aborts unless `feedback_sharing_enabled(dir)` is also `true`. When feedback sharing is off, clicking **Send reports** → **Turn on sharing & send** in `CrashReportDialog` returns `{ flushed: N, sent: 0, sharing: "enabled" }` without making any HTTP request and tells the user they can send them from **Settings → AI Connections**, which has no flush button.
+- **Minimal Reproduction**:
+  Leave feedback sharing off, have an unsent entry in `<app_data>/mcp/error-log.jsonl`, launch Titer, and click **Send reports** → **Turn on sharing & send** in `CrashReportDialog`: `mcp_flush_error_log` returns `sent: 0` with no HTTP POST attempted.
+- **Suggested Fix**:
+  In `try_send_error_entry` (`src-tauri/src/mcp.rs:1572`), call `post_feedback_entry(&feedback_server_url(), &error_entry).await.is_ok()` directly instead of `feedback_share_result`, and add a "Send unsent reports" control in `AiConnectionsDialog` (or update the fallback copy in `crash-report-dialog.tsx:153`).
+
+---
+
+### Issue 71: `StartupGuideDialog`'s `mailto:smit@muse.ai` support link is silently blocked by Tauri's `.on_navigation` policy
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/components/startup-guide-dialog.tsx:99-105`
+  - `src/lib/startup-guide.ts:63-67`
+  - `src-tauri/src/main.rs:145-148, 1665-1674`
+- **Explanation**:
+  On Step 6 ("Where to get help"), `StartupGuideDialog` renders `<a className="underline" href="mailto:smit@muse.ai">`. Every project window created in `src-tauri/src/main.rs:145-147` installs `.on_navigation(|url| url.scheme() == "tauri" || (cfg!(debug_assertions) && url.host_str() == Some("localhost")))`, so clicking `mailto:smit@muse.ai` is silently rejected in both debug and release builds instead of invoking the mail client (unlike **Help ▸ Contact Support**, which calls `openSupportEmail()`).
+- **Minimal Reproduction**:
+  Open **Help ▸ Startup Guide…**, advance to Step 6, and click `smit@muse.ai`: nothing happens.
+- **Suggested Fix**:
+  Intercept `mailto:` clicks when `isNative` (`e.preventDefault(); void openSupportEmail();`) or render a button backed by `openSupportEmail()` from `src/native.ts`.
+
+---
+
+### Issue 72: Startup flush race and permanent unsent-duplicate loop in `CrashReportDialog` / `main.tsx` / `mcp_flush_error_log`
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/main.tsx:37-42, 50-57`
+  - `src/components/crash-report-dialog.tsx:38-60, 62-77, 150-155`
+  - `src-tauri/src/mcp.rs:1558-1574, 1619-1641`
+- **Explanation**:
+  1. `src/main.tsx:39` fires `void mcpFlushErrorLog()` without awaiting it and mounts `<AppShell />` immediately. `CrashReportDialog` mounts milliseconds later and reads `mcpErrorLog()` while HTTP POSTs are still in flight and entries still have `sent: false`, popping up spuriously, racing concurrent flushes on `error-log.jsonl`, and falsely showing `"The reports couldn't be sent..."` if the startup flush finishes first (`sent: 0`).
+  2. In `mcp_flush_error_log` (`src-tauri/src/mcp.rs:1628-1638`), entries skipped by `sent_this_flush` or the 1-hour dedup window in `try_send_error_entry` never get marked `sent = true`, leaving duplicate entries as `sent: false` forever and re-triggering `CrashReportDialog` on every subsequent launch with `sent: 0`.
+- **Minimal Reproduction**:
+  With error-report sharing enabled and 1 unsent entry in `error-log.jsonl`, launch Titer during a normal 100–500 ms network request: `CrashReportDialog` pops up before the startup flush finishes, and clicking **Send reports** after 1 second reports `"The reports couldn't be sent..."`. Or log two identical errors while offline, then flush: the second remains `sent: false` permanently.
+- **Suggested Fix**:
+  Await the shared startup `mcpFlushErrorLog()` promise inside `CrashReportDialog` before reading `mcpErrorLog()`, serialize `mcp_flush_error_log` in Rust with an async mutex, and mark deduplicated entries as handled (`sent = true` or a `deduplicated` state).
+
+---
+
+### Issue 73: Freezing or re-freezing a graph overrides the snapshot of a previously frozen Figure
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/lib/multi-table.ts:87`
+  - `src/views/graphs/graph-figure.ts:193, 361`
+  - `src/views/figures/panel-figure.ts:37-42`
+  - `src/views/figures/figure-view.tsx:208-217, 890-895`
+- **Explanation**:
+  `FigureView` (`src/views/figures/figure-view.tsx:208-217`) hands frozen Figure snapshots to `<PanelPlot>` by overriding `next[parent.id] = { ...parent, data }` in `figureNodes` while still passing the live `graph` node. Because `mergedGraphData` (`src/lib/multi-table.ts:87`) and `figureInputs`/`buildGraphFigure` (`src/views/graphs/graph-figure.ts:193, 361`) now prefer `graph.frozen && graph.frozenData` over `parent.data`, freezing a graph after editing its table (or unfreezing and re-freezing it) silently overrides the snapshot displayed in any already-frozen Figure containing that graph.
+- **Minimal Reproduction**:
+  Create Table 1 (`v1`), Graph 1, and Figure 1 containing Graph 1; freeze Figure 1; edit Table 1 to `v2`; freeze Graph 1; switch back to frozen Figure 1 → panel displays `v2` instead of `v1`.
+- **Suggested Fix**:
+  In `FigureView` (`src/views/figures/figure-view.tsx:208-217, 891`), also override the graph entry in `figureNodes` with `{ ...graph, frozen: true, frozenData: data }` and pass `figureNodes[panel.graphId]` to `<PanelPlot>`.
+
+---
+
+### Issue 74: macOS native `NSProgressIndicator` spinner overlaps the `Running…` text and `Cancel` button in `AnalysisView`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/views/analyses/analysis-view.tsx:34-66` (`Running`)
+  - `src-tauri/src/main.rs:1597-1629` (`set_spinner`)
+- **Explanation**:
+  `Running()` renders `<p>Running… …</p>` and `<Button>Cancel</Button>` inside `<div ref={ref} className="flex h-full flex-col items-center justify-center gap-3">` (~60 px tall). `setSpinner([left + width / 2, top + height / 2])` places macOS's 32×32 pt native `NSProgressIndicator` subview at the exact center of `ref` on top of the WKWebView, directly overlapping the `Running…` text and the top of the `Cancel` button.
+- **Minimal Reproduction**:
+  On macOS native, run an analysis taking >500 ms (e.g., `mixed-effects` or `monte-carlo`): at 500 ms the native spinning wheel renders over the centered text and `Cancel` button.
+- **Suggested Fix**:
+  Place a dedicated empty `<div ref={ref} className="h-9 w-9" aria-hidden="true" />` above the `<p>` and `<Button>Cancel</Button>` when `isNative` so `setSpinner` centers cleanly above them.
+
+---
+
+### Issue 75: `copy_pdf_to_clipboard` JXA `if (!pdfData)` / `if (!pngData)` checks are dead code, wiping the user's clipboard on read failure
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/main.rs:1033-1038` (`copy_pdf_to_clipboard_blocking`)
+- **Explanation**:
+  In JXA (`osascript -l JavaScript`), an Objective-C `nil` return from `$.NSData.dataWithContentsOfFile(...)` is wrapped as a truthy function proxy (`!missing === false`, `missing.isNil() === true`). Consequently, `if (!pdfData)` and `if (!pngData)` never trigger on read failure; execution continues through `pb.clearContents;` — erasing the user's clipboard — before throwing inside `setDataForType`.
+- **Minimal Reproduction**:
+  Invoke `copy_pdf_to_clipboard_blocking` with a nonexistent/unreadable path while text or an image is on the clipboard: the clipboard is cleared before the script errors.
+- **Suggested Fix**:
+  Replace `if (!pdfData)` / `if (!pngData)` with `if (pdfData.isNil())` / `if (pngData.isNil())`.
+
+---
+
+### Issue 76: `SendFeedbackDialog` and `AiConnectionsDialog` drop server/network errors and falsely claim "Sharing is off", and `mcp_send_feedback` sends `project_file` + `recent_activity` despite promising "Only the text below is ever shared"
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/mcp.rs:1738-1756, 1766-1780, 2510-2540`
+  - `src/components/send-feedback-dialog.tsx:62-98`
+  - `src/components/ai-connections-dialog.tsx:156-164, 493-508`
+- **Explanation**:
+  1. When feedback sharing is ON and `post_feedback_entry` fails (offline, timeout, HTTP 429/5xx), `feedback_share_result` returns `{ sent: false, sharing: "enabled", error: "..." }` with no `note` field. Both `SendFeedbackDialog` (lines 63–64, 93–97) and `AiConnectionsDialog` (line 160) ignore `out.error` and `out.sharing` and display `"Sharing is off, so nothing left the machine..."` / `"Sharing is off, so the report stays on this Mac."` (and `AiConnectionsDialog` line 506–507 claims `"Send to the Titer team"` works when sharing is off even though `mcp_send_saved_feedback` refuses when sharing is off).
+  2. `SendFeedbackDialog` (line 79) promises `"Only the text below is ever shared — no project data, no file contents, no personal information."`, yet `mcp_send_feedback` (`src-tauri/src/mcp.rs:1742-1745`) attaches `context["project_file"]` (open `.hlx` filename) and `context["recent_activity"]` (MCP tool names + timestamps).
+- **Minimal Reproduction**:
+  Enable Feedback sharing, disconnect from the network, and submit via **Help ▸ Send Feedback** (or click **Send to the Titer team** in **Settings → AI Connections**): both claim sharing is off instead of showing the delivery error.
+- **Suggested Fix**:
+  Inspect `out.sharing` and `out.error` in both dialogs so network/server errors display `out.error`; either omit `project_file`/`recent_activity` from UI-submitted feedback or disclose them accurately in `SendFeedbackDialog`.
+
+---
+
+### Issue 77: `StartupGuideDialog`'s global `window` keydown handler hijacks `Enter` and `Escape` from top-layer `<dialog>` modals (including `SendFeedbackDialog`)
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/components/startup-guide-dialog.tsx:42-72, 106-110`
+  - `src/components/send-feedback-dialog.tsx:30-32, 117-124`
+  - `src/components/app-shell.tsx:414-426`
+- **Explanation**:
+  When `StartupGuideDialog` is open, its global `window` `keydown` listener (`src/components/startup-guide-dialog.tsx:42-72`) intercepts `Escape` unconditionally and `Enter` whenever `!(e.target instanceof HTMLButtonElement)` — without checking if a top-layer `<dialog>` is open or if `e.target` is inside `panelRef.current`. Opening `SendFeedbackDialog` from Step 6's `SendFeedbackButton` and pressing `Enter` inside the Details `<textarea>` calls `e.preventDefault()` (swallowing the newline) and closes `StartupGuideDialog` underneath; pressing `Escape` on overlapping first-launch modals (`WhatsNewDialog` / `FeedbackConsentDialog`) dismisses and marks the unseen guide seen.
+- **Minimal Reproduction**:
+  Open **Help ▸ Startup Guide…**, advance to Step 6, click **Send Feedback**, focus Details, type text, and press **Enter**: no newline is inserted and the guide behind closes.
+- **Suggested Fix**:
+  Ignore events in `StartupGuideDialog`'s `onKeyDown` whenever `document.querySelector("dialog[open]")` exists or when `e.target` is an `HTMLInputElement`/`HTMLTextAreaElement`/outside `panelRef.current`; defer auto-showing the guide while top-layer onboarding dialogs are open.
+
+---
+
+### Issue 78: Windowless Help menu exposes **Help ▸ Send Feedback** and **Help ▸ What's New** as enabled dead no-ops
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/menus.ts:119, 166, 171`
+  - `src/engine.ts:28-40`
+  - `src/lib/feedback-ui.ts:23-25, 36-38`
+  - `engine.html:1-10`
+- **Explanation**:
+  When all project windows are closed on macOS, the hidden `engine` webview installs `setMenuBar(...)` (`src/engine.ts:39`). Unlike **Startup Guide…** (passed via `extraHelpItems` so the windowless menu omits it), **Send Feedback** (`src/menus.ts:166`) and **What's New** (`src/menus.ts:171`) are unconditionally enabled in `setMenuBar`. Clicking either with no project window open dispatches a DOM `CustomEvent` on the hidden `engine` window, which has no React tree or listeners, so nothing happens.
+- **Minimal Reproduction**:
+  Close all project windows on macOS (`⌘W`) and click **Help ▸ Send Feedback** or **Help ▸ What's New**: both are enabled and do nothing.
+- **Suggested Fix**:
+  Move **Send Feedback** and **What's New** into `extraHelpItems` (or disable them when no project window is open), or have the windowless menu open a project window first and trigger the dialog via Tauri event.
+
+---
+
+### Issue 79: `StartupGuideDialog` auto-show omits `!openedFile.current` and pops over opened `.pzt` templates, Sample Project, and slow/failed file launches
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/store/use-document.ts:1710-1763, 2714-2726`
+- **Explanation**:
+  Unlike `WelcomeDialog` (which checks `!openedFile.current` at `src/store/use-document.ts:2696`), `StartupGuideDialog`'s auto-show (`use-document.ts:2721`) checks only `firstWindow && shouldShowGuide(readGuideSeen()) && !s.filePath && !s.isDirty`. Launching Titer by opening a `.pzt` template or Sample Project (`untitled: true` leaves `filePath === null`), or opening a file that takes >900 ms or fails to open, causes `StartupGuideDialog` to pop up over the opened file/error state.
+- **Minimal Reproduction**:
+  Clear `localStorage["titer.startup-guide-seen"]` (with Welcome already dismissed/disabled) and launch Titer by double-clicking a `.pzt` template file: 900 ms later, `StartupGuideDialog` opens over the template.
+- **Suggested Fix**:
+  Add `!openedFile.current` to the guard at `src/store/use-document.ts:2721`.
+
+---
+
+### Issue 80: `noncentralTCdf` (`logWeights` path) silently returns `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/stats/distributions.ts:316-389` (`noncentralTCdf`)
+- **Explanation**:
+  In `noncentralTCdf`'s new `logWeights` branch (`mu > 700`), line 357 computes `rxb = Math.pow(1 - x, b)`. Whenever `(df / 2) * ln(1 + t^2 / df) > 745` (e.g., `|t| >= 50` at `df >= 1500`), `rxb` underflows to `0.0`, zeroing `godd`/`geven` and freezing `xodd = xeven = 1` so the `logP + logQ` sum silently returns **`1.0`** regardless of the true CDF. In addition, starting from `en = 1` with cap `100000` (line 366) instead of centering at the Poisson mode `floor(mu)` causes `noncentralTCdf` to cliff to `0.0` whenever `mu > 100000` (`|δ| > 447.21`).
+- **Minimal Reproduction**:
+  - `noncentralTCdf(50, 2000, 50)` returns `1.0` (true `≈ 0.500`); `noncentralTCdf(50, 2000, 100)` returns `1.0` (true `≈ 0.0`).
+  - `noncentralTCdf(500, 1, 500)` returns `0.0` (true `≈ 0.500`).
+- **Suggested Fix**:
+  Center the Poisson-mixture sum around the mode `floor(mu)` and compute `godd`/`geven` (or `regularizedIncompleteBeta`) in log-space without underflowing `rxb`.
+
+---
+
+### Issue 81: `send_to_keynote_blocking` / `applescript_number` lacks `.is_finite()` / upper-bound checks and can emit invalid AppleScript `inf` or `0`
+- **Severity**: Low
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/main.rs:557-564, 856-859`
+- **Explanation**:
+  `send_to_keynote_blocking` validates only `!(width_pt > 0.0 && height_pt > 0.0)`. Finite values `>= 1.8e306` overflow `(value * 100.0).round()` in `applescript_number` to `f64::INFINITY` and emit invalid AppleScript `set imgW to inf`, while tiny positive values `< 0.005` round to `0` (`set imgW to 0`).
+- **Minimal Reproduction**:
+  Invoke `send_to_keynote` with `widthPt: 1e307, heightPt: 100` (or `widthPt: 0.001, heightPt: 100`).
+- **Suggested Fix**:
+  Require `width_pt.is_finite() && height_pt.is_finite()` within reasonable point bounds (e.g., `1.0..=1e5`) in `send_to_keynote_blocking`.
+
