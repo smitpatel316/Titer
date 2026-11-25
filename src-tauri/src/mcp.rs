@@ -238,6 +238,11 @@ struct McpInner {
     /// The window whose snapshot was published most recently: the default
     /// project when a tool call omits `project_id`.
     last_published: Option<String>,
+    /// The window that held `last_published` before the current one
+    /// published (Issue 47): a window that fails its open/import hands
+    /// the default back to this one (`clear_window`) instead of leaving
+    /// it pointing at a dead blank window.
+    prev_last_published: Option<String>,
     /// Analysis outcomes computed in-session, by (window label, analysis id).
     results: HashMap<(String, String), serde_json::Value>,
     /// Pending jobs, by id ("job-1", …): the dispatch queue (L0, GAP-1).
@@ -1031,11 +1036,68 @@ impl McpState {
             inner.results.retain(|(w, _), _| *w != label);
             inner.remote_handles.remove(label);
             inner.last_publish.remove(label);
+            // Issue 47: hand the default back to the project that held
+            // it before this window published — a failed open/import's
+            // blank window must not keep hijacking it — else any
+            // survivor. A no-op when the default never pointed here.
             if inner.last_published.as_deref() == Some(label) {
-                inner.last_published = inner.snapshots.keys().next().cloned();
+                inner.last_published = inner
+                    .prev_last_published
+                    .take()
+                    .filter(|prev| inner.snapshots.contains_key(prev))
+                    .or_else(|| inner.snapshots.keys().next().cloned());
             }
         }
         self.drop_jobs_for_window(label);
+    }
+
+    /// Drop everything the server holds for a window, restoring
+    /// `last_published` to a surviving project (Issue 47's failure
+    /// cleanup: a new window whose load/import/template step failed is
+    /// abandoned — see `abandon_window` — and must stop being the
+    /// default project). Same drop as `drop_window`; the name the
+    /// open/import/create tools call. Idempotent.
+    pub fn clear_window(&self, label: &str) {
+        self.drop_window(label);
+    }
+
+    /// Drop the session results of one table's non-frozen child analyses
+    /// (Issue 33): the table's data just changed, so the numbers those
+    /// analyses were computed from are gone. Frozen children keep their
+    /// result by design, as do analyses of other tables — and the
+    /// analyses of tables computed from this one (`transform.from`,
+    /// transitively), whose values changed with it. The snapshot read is
+    /// the freshest publish; a table edit never changes a child's parent
+    /// or frozen flag, so a pre-edit snapshot names the same children.
+    /// A no-op when the project has not published.
+    pub fn invalidate_results_for_table(&self, project_id: &str, table_id: &str) {
+        let Some(snap) = self.snapshot_for(project_id) else {
+            return;
+        };
+        let mut inner = self.lock();
+        for id in analyses_staled_by_table(&snap, table_id) {
+            inner.results.remove(&(project_id.to_string(), id));
+        }
+    }
+
+    /// Drop the session results of every non-frozen analysis in the
+    /// project (Issue 33): undo, redo and scripts can change any table,
+    /// so the table is unknown — everything non-frozen goes stale
+    /// together. Frozen analyses keep their result by design.
+    pub fn invalidate_all_results(&self, project_id: &str) {
+        let Some(snap) = self.snapshot_for(project_id) else {
+            return;
+        };
+        let mut inner = self.lock();
+        for (id, node) in nodes_of(&snap) {
+            if node.get("type").and_then(|v| v.as_str()) != Some("analysis") {
+                continue;
+            }
+            if node.get("frozen").and_then(|v| v.as_bool()).unwrap_or(false) {
+                continue;
+            }
+            inner.results.remove(&(project_id.to_string(), id.clone()));
+        }
     }
 
     /// A window closed (its snapshot publish said `closed: true`): its
@@ -2836,8 +2898,28 @@ pub fn mcp_publish_snapshot(window: tauri::WebviewWindow, state: State<McpState>
     }
     let mut inner = state.lock();
     inner.last_publish.insert(label.clone(), std::time::Instant::now());
-    inner.snapshots.insert(label.clone(), snapshot);
-    inner.last_published = Some(label);
+    // Issue 33: the frontend clears a non-frozen analysis's saved
+    // `cachedResult` when its table's data changes (`updateTable`) — a
+    // publish carrying that loss IS the edit, from any path (grid typing,
+    // paste, undo, a script): drop the session result with it, or
+    // `titer_read_results` would keep serving the pre-edit numbers while
+    // the analysis sheet is closed.
+    let dropped: Vec<String> = match inner.snapshots.get(&label) {
+        Some(old) => dropped_cached_results(old, &snapshot),
+        None => Vec::new(),
+    };
+    for id in dropped {
+        inner.results.remove(&(label.clone(), id));
+    }
+    // Issue 47: remember which project was default before this one
+    // published, so a window that fails its open/import can hand the
+    // default back (`clear_window`) instead of leaving it pointing at
+    // a dead blank window.
+    if inner.last_published.as_deref() != Some(label.as_str()) {
+        inner.prev_last_published = inner.last_published.take();
+        inner.last_published = Some(label.clone());
+    }
+    inner.snapshots.insert(label, snapshot);
 }
 
 /// An analysis outcome the frontend computed in-session, for
@@ -3145,6 +3227,28 @@ fn app_handle_or_err(state: &McpState) -> Result<AppHandle, String> {
     state.app_handle().ok_or_else(|| "Titer's project windows aren't available to this server right now.".to_string())
 }
 
+/// Best-effort cleanup of a window a failed open/import/create left
+/// behind (Issue 47): close it, then drop everything the server holds
+/// for it — the blank snapshot it published hijacked `last_published`
+/// for every project-defaulted tool call after the failure. The close is
+/// best-effort — a stuck window must not stop the state cleanup, which
+/// is the leak that matters — so `clear_window` runs even when the close
+/// fails. The close-project job (save: discard) arms the close bypass
+/// first, so a blank window the failed step left dirty closes without a
+/// save prompt.
+async fn abandon_window(state: &McpState, label: &str) {
+    if let Ok(job) = state.enqueue_job(
+        label,
+        "close-project",
+        serde_json::json!({ "save": "discard" }),
+        serde_json::json!({}),
+    ) {
+        let _ = state.await_job_or_timeout(&job.job_id, Duration::from_secs(5)).await;
+    }
+    let _ = state.close_window(label).await;
+    state.clear_window(label);
+}
+
 /// Open a Prism file in a fresh blank window via an `import-prism` dispatch
 /// job: the window's dispatcher reads the file and loads it as an untitled
 /// project. Returns the window label and the job's result
@@ -3155,19 +3259,31 @@ async fn import_prism_in_new_window(
     path: &str,
 ) -> Result<(String, serde_json::Value), String> {
     let label = create_blank_window_bounded(app).await?;
-    if !state.await_snapshot(&label, |_| true, Duration::from_secs(10)).await {
-        return Err(format!(
-            "The new project window ({label}) did not report back within 10s — it may still be opening. Ask titer_list_projects for the open projects."
-        ));
+    // Issue 47: every failure below abandons the blank window just made —
+    // it stays open and hijacks `last_published` otherwise.
+    let outcome: Result<(String, serde_json::Value), String> = async {
+        if !state.await_snapshot(&label, |_| true, Duration::from_secs(10)).await {
+            return Err(format!(
+                "The new project window ({label}) did not report back within 10s, so it was closed."
+            ));
+        }
+        let job = state.enqueue_job(&label, "import-prism", serde_json::json!({ "path": path }), serde_json::json!({}))?;
+        let done = state.await_job(&job.job_id, Duration::from_secs(60)).await?;
+        if done.status == JobStatus::Done {
+            done.result
+                .map(|result| (label.clone(), result))
+                .ok_or_else(|| "The import finished without reporting what it imported.".to_string())
+        } else {
+            Err(done.error.unwrap_or_else(|| format!("Importing “{path}” failed.")))
+        }
     }
-    let job = state.enqueue_job(&label, "import-prism", serde_json::json!({ "path": path }), serde_json::json!({}))?;
-    let done = state.await_job(&job.job_id, Duration::from_secs(60)).await?;
-    if done.status == JobStatus::Done {
-        done.result
-            .map(|result| (label, result))
-            .ok_or_else(|| "The import finished without reporting what it imported.".to_string())
-    } else {
-        Err(done.error.unwrap_or_else(|| format!("Importing “{path}” failed.")))
+    .await;
+    match outcome {
+        Ok(ok) => Ok(ok),
+        Err(e) => {
+            abandon_window(state, &label).await;
+            Err(e)
+        }
     }
 }
 
@@ -5646,7 +5762,7 @@ impl TiterMcpServer {
                     }
                 }
             }
-            self.run_table_job(
+            let done = self.run_table_job(
                 &id,
                 "write-table",
                 serde_json::json!({
@@ -5659,7 +5775,12 @@ impl TiterMcpServer {
                     "row_groups": args.row_groups,
                 }),
             )
-            .await
+            .await?;
+            // Issue 33: the new values stale every non-frozen child
+            // analysis's session result — drop it now, while the sheet is
+            // closed, instead of serving pre-edit numbers.
+            self.state.invalidate_results_for_table(&id, &args.table_id);
+            Ok(done)
         }
         .await;
         match outcome {
@@ -5976,7 +6097,7 @@ impl TiterMcpServer {
                 // mode and step all have dispatcher defaults.
                 _ => {}
             }
-            self.run_table_job(
+            let done = self.run_table_job(
                 &id,
                 "edit-table",
                 serde_json::json!({
@@ -6018,7 +6139,17 @@ impl TiterMcpServer {
                     },
                 }),
             )
-            .await
+            .await?;
+            // Issue 33: the edit stales every non-frozen child analysis's
+            // session result — except the cosmetic ops, which change no
+            // value an analysis could have read.
+            if !matches!(
+                args.op.as_str(),
+                "set-cell-background" | "set-decimal-places" | "freeze-title"
+            ) {
+                self.state.invalidate_results_for_table(&id, &args.table_id);
+            }
+            Ok(done)
         }
         .await;
         match outcome {
@@ -6082,14 +6213,21 @@ impl TiterMcpServer {
                     args.table_id
                 ));
             }
-            self.run_table_job(
+            let done = self.run_table_job(
                 &id,
                 "refresh-linked-data",
                 serde_json::json!({
                     "table_id": args.table_id,
                 }),
             )
-            .await
+            .await?;
+            // Issue 33: a refresh that changed values stales every
+            // non-frozen child analysis's session result; an unchanged
+            // source (`updated: false`) stales nothing.
+            if done.get("updated").and_then(|v| v.as_bool()).unwrap_or(true) {
+                self.state.invalidate_results_for_table(&id, &args.table_id);
+            }
+            Ok(done)
         }
         .await;
         match outcome {
@@ -6390,7 +6528,11 @@ impl TiterMcpServer {
         let log_args = serde_json::json!({ "project_id": args.project_id });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, _snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
-            self.run_table_job(&id, "undo", serde_json::json!({})).await
+            let done = self.run_table_job(&id, "undo", serde_json::json!({})).await?;
+            // Issue 33: an undo can restore or rewrite any table, so
+            // every non-frozen analysis goes stale together.
+            self.state.invalidate_all_results(&id);
+            Ok(done)
         }
         .await;
         match outcome {
@@ -6424,7 +6566,11 @@ impl TiterMcpServer {
         let log_args = serde_json::json!({ "project_id": args.project_id });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, _snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
-            self.run_table_job(&id, "redo", serde_json::json!({})).await
+            let done = self.run_table_job(&id, "redo", serde_json::json!({})).await?;
+            // Issue 33: a redo can restore or rewrite any table, so
+            // every non-frozen analysis goes stale together.
+            self.state.invalidate_all_results(&id);
+            Ok(done)
         }
         .await;
         match outcome {
@@ -6471,32 +6617,45 @@ impl TiterMcpServer {
         let result: Result<serde_json::Value, String> = async {
             let app = app_handle_or_err(&self.state)?;
             let label = create_blank_window_bounded(&app).await?;
-            if !self.state.await_snapshot(&label, |_| true, Duration::from_secs(10)).await {
-                return Err(format!(
-                    "The new project window ({label}) did not report back within 10s — it may still be opening. Ask titer_list_projects for the open projects."
-                ));
-            }
-            match args.template.as_deref() {
-                None => Ok(serde_json::json!({ "project_id": label, "file_path": serde_json::Value::Null, "blank": true })),
-                Some(template) => {
-                    // The template applies in the new window, through the
-                    // same `apply-template` job the Welcome dialog's plan
-                    // drives — no second implementation.
-                    let job = self.state.enqueue_job(
-                        &label,
-                        "apply-template",
-                        serde_json::json!({ "template_id": template }),
-                        serde_json::json!({}),
-                    )?;
-                    let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
-                    if done.status == JobStatus::Done {
-                        done.result
-                            .ok_or_else(|| "The template applied without reporting its table.".to_string())
-                    } else {
-                        Err(done
-                            .error
-                            .unwrap_or_else(|| "Applying the template failed.".to_string()))
+            // Issue 47: a snapshot timeout or a failed template abandons
+            // the blank window just made — it stays open and hijacks
+            // `last_published` otherwise.
+            let outcome: Result<serde_json::Value, String> = async {
+                if !self.state.await_snapshot(&label, |_| true, Duration::from_secs(10)).await {
+                    return Err(format!(
+                        "The new project window ({label}) did not report back within 10s, so it was closed."
+                    ));
+                }
+                match args.template.as_deref() {
+                    None => Ok(serde_json::json!({ "project_id": label.clone(), "file_path": serde_json::Value::Null, "blank": true })),
+                    Some(template) => {
+                        // The template applies in the new window, through the
+                        // same `apply-template` job the Welcome dialog's plan
+                        // drives — no second implementation.
+                        let job = self.state.enqueue_job(
+                            &label,
+                            "apply-template",
+                            serde_json::json!({ "template_id": template }),
+                            serde_json::json!({}),
+                        )?;
+                        let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+                        if done.status == JobStatus::Done {
+                            done.result
+                                .ok_or_else(|| "The template applied without reporting its table.".to_string())
+                        } else {
+                            Err(done
+                                .error
+                                .unwrap_or_else(|| "Applying the template failed.".to_string()))
+                        }
                     }
+                }
+            }
+            .await;
+            match outcome {
+                Ok(ok) => Ok(ok),
+                Err(e) => {
+                    abandon_window(&self.state, &label).await;
+                    Err(e)
                 }
             }
         }
@@ -6563,12 +6722,19 @@ impl TiterMcpServer {
                         // The frontend's own message — the same one the GUI
                         // shows for this file — so a damaged file errors
                         // instead of opening as a silently-truncated project.
+                        // Issue 47: the failed open abandons the blank
+                        // window — it stays open and hijacks
+                        // `last_published` otherwise.
                         OpenOutcome::Failed(err) => {
+                            abandon_window(&self.state, &label).await;
                             Err(format!("Couldn’t open “{}”: {}", args.path, err))
                         }
-                        OpenOutcome::Timeout => Err(format!(
-                            "Project {label} did not report the opened file within 15s — it may still be loading. Ask titer_list_projects for the open projects."
-                        )),
+                        OpenOutcome::Timeout => {
+                            abandon_window(&self.state, &label).await;
+                            Err(format!(
+                                "Project {label} did not report the opened file within 60s, so its window was closed — it may still have been loading. Ask titer_list_projects for the open projects."
+                            ))
+                        }
                     }
                 }
             }
@@ -8740,7 +8906,12 @@ impl TiterMcpServer {
                     "warning": "Running this script replaces the current project's content — its tables, analyses, graphs and figures — with what the script builds. The current content is kept as one Undo step in Titer, but nothing is saved to disk until you save. File writes and graph exports the script asks for are reported, not run. Repeat with confirm: true to run it.",
                 }));
             }
-            self.run_table_job(&project_id, "run-script", serde_json::json!({ "script": args.script })).await
+            let done =
+                self.run_table_job(&project_id, "run-script", serde_json::json!({ "script": args.script })).await?;
+            // Issue 33: a script can rewrite any table, so every
+            // non-frozen analysis goes stale together.
+            self.state.invalidate_all_results(&project_id);
+            Ok(done)
         }
         .await;
         match result {
@@ -8940,12 +9111,17 @@ impl TiterMcpServer {
                         .await
                     {
                         OpenOutcome::Loaded => label,
+                        // Issue 47: the failed open abandons the blank
+                        // window — it stays open and hijacks
+                        // `last_published` otherwise.
                         OpenOutcome::Failed(err) => {
+                            abandon_window(&self.state, &label).await;
                             return Err(format!("Couldn’t open “{cache_path}”: {err}"));
                         }
                         OpenOutcome::Timeout => {
+                            abandon_window(&self.state, &label).await;
                             return Err(format!(
-                                "Project {label} did not report the opened file within 15s — it may still be loading. Ask titer_list_projects for the open projects."
+                                "Project {label} did not report the opened file within 60s, so its window was closed — it may still have been loading. Ask titer_list_projects for the open projects."
                             ));
                         }
                     }
@@ -10369,6 +10545,79 @@ fn node_name(node: &serde_json::Value) -> &str {
     node.get("name").and_then(|v| v.as_str()).unwrap_or("")
 }
 
+/// Whether an analysis node carries a saved result (Issue 33): a
+/// present, non-null `cachedResult` — what a `.hlx` file, a frozen or
+/// orphaned analysis, or a clone brings with it.
+fn has_cached_result(node: &serde_json::Value) -> bool {
+    node.get("cachedResult").is_some_and(|v| !v.is_null())
+}
+
+/// The ids of the non-frozen analyses whose saved result goes stale when
+/// `table_id`'s data changes (Issue 33): the table's own child analyses,
+/// plus the child analyses of every table computed from it
+/// (`transform.from`, transitively — a Transform's values change with
+/// its source). Frozen analyses keep their result by design; orphaned
+/// ones (no parent) are untouched.
+fn analyses_staled_by_table(snapshot: &serde_json::Value, table_id: &str) -> Vec<String> {
+    let mut affected: HashSet<&str> = HashSet::new();
+    affected.insert(table_id);
+    // Transitive closure over the tables computed from the edited one.
+    loop {
+        let mut grew = false;
+        for (id, node) in nodes_of(snapshot) {
+            if node.get("type").and_then(|v| v.as_str()) != Some("table") {
+                continue;
+            }
+            let from = node.get("transform").and_then(|t| t.get("from")).and_then(|v| v.as_str());
+            if from.is_some_and(|f| affected.contains(f)) && affected.insert(id.as_str()) {
+                grew = true;
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    nodes_of(snapshot)
+        .iter()
+        .filter_map(|(id, node)| {
+            if node.get("type").and_then(|v| v.as_str()) != Some("analysis") {
+                return None;
+            }
+            if node.get("frozen").and_then(|v| v.as_bool()).unwrap_or(false) {
+                return None;
+            }
+            let parent = node.get("parentId").and_then(|v| v.as_str())?;
+            if !affected.contains(parent) {
+                return None;
+            }
+            Some(id.clone())
+        })
+        .collect()
+}
+
+/// The ids of the analyses whose saved `cachedResult` the new snapshot no
+/// longer carries (Issue 33): the frontend clears it when the analysis's
+/// table changes (`updateTable`), so the loss is the edit. A node that
+/// vanished counts too — its result is unreachable either way.
+fn dropped_cached_results(old: &serde_json::Value, new: &serde_json::Value) -> Vec<String> {
+    nodes_of(old)
+        .iter()
+        .filter_map(|(id, node)| {
+            if node.get("type").and_then(|v| v.as_str()) != Some("analysis") {
+                return None;
+            }
+            if !has_cached_result(node) {
+                return None;
+            }
+            let gone = match find_node(new, id) {
+                None => true,
+                Some(n) => !has_cached_result(n),
+            };
+            gone.then(|| id.clone())
+        })
+        .collect()
+}
+
 /// The snapshot's saved order for `key` (`rootOrder`), as ids — the
 /// project's own order, which the list tools must report (BUG-13: both
 /// list tools sorted by name instead, so a reorder read back as a no-op).
@@ -10997,6 +11246,36 @@ fn table_summary(
     Ok(out)
 }
 
+/// One analysis outcome as the `titer_read_results` envelope: `computed`
+/// with the outcome, or `error` with its message.
+fn result_envelope(
+    project_id: &str,
+    analysis_id: &str,
+    name: &str,
+    analysis_type: &str,
+    outcome: &serde_json::Value,
+) -> serde_json::Value {
+    if let Some(error) = outcome.get("error").and_then(|v| v.as_str()) {
+        serde_json::json!({
+            "status": "error",
+            "project_id": project_id,
+            "analysis_id": analysis_id,
+            "name": name,
+            "analysis_type": analysis_type,
+            "message": error,
+        })
+    } else {
+        serde_json::json!({
+            "status": "computed",
+            "project_id": project_id,
+            "analysis_id": analysis_id,
+            "name": name,
+            "analysis_type": analysis_type,
+            "result": outcome,
+        })
+    }
+}
+
 /// Returns `Err` (a tool error) when the id names no analysis at all —
 /// unknown id, or an id that belongs to a non-analysis node — so MCP
 /// clients never mistake a failed lookup for a successful read. The
@@ -11009,10 +11288,12 @@ fn read_results(
     analysis_id: &str,
 ) -> Result<serde_json::Value, String> {
     let node = find_node(snapshot, analysis_id);
-    let (name, analysis_type) = match node {
-        Some(n) if n.get("type").and_then(|v| v.as_str()) == Some("analysis") => {
-            (node_name(n).to_string(), n.get("analysisType").and_then(|v| v.as_str()).unwrap_or("").to_string())
-        }
+    let (name, analysis_type, cached) = match node {
+        Some(n) if n.get("type").and_then(|v| v.as_str()) == Some("analysis") => (
+            node_name(n).to_string(),
+            n.get("analysisType").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            n.get("cachedResult").cloned(),
+        ),
         Some(_) => {
             return Err(format!("“{analysis_id}” is not an analysis node. Ask titer_list_projects for the analysis ids."));
         }
@@ -11021,35 +11302,24 @@ fn read_results(
         }
     };
     Ok(match results.get(&(project_id.to_string(), analysis_id.to_string())) {
-        None => serde_json::json!({
-            "status": "not_computed",
-            "project_id": project_id,
-            "analysis_id": analysis_id,
-            "name": name,
-            "analysis_type": analysis_type,
-            "message": "This analysis has not been run in this Titer session yet, so there is no result to read. Open the analysis in Titer to run it, then ask again.",
-        }),
-        Some(outcome) => {
-            if let Some(error) = outcome.get("error").and_then(|v| v.as_str()) {
-                serde_json::json!({
-                    "status": "error",
-                    "project_id": project_id,
-                    "analysis_id": analysis_id,
-                    "name": name,
-                    "analysis_type": analysis_type,
-                    "message": error,
-                })
-            } else {
-                serde_json::json!({
-                    "status": "computed",
-                    "project_id": project_id,
-                    "analysis_id": analysis_id,
-                    "name": name,
-                    "analysis_type": analysis_type,
-                    "result": outcome,
-                })
+        Some(outcome) => result_envelope(project_id, analysis_id, &name, &analysis_type, outcome),
+        // Issue 33: a frozen or orphaned analysis opened from a file, or
+        // a clone (`duplicateNode` copies `cachedResult`), never ran in
+        // this session — the session map has no entry — but its saved
+        // result is the answer, not `not_computed`.
+        None => match &cached {
+            Some(cached) if !cached.is_null() => {
+                result_envelope(project_id, analysis_id, &name, &analysis_type, cached)
             }
-        }
+            _ => serde_json::json!({
+                "status": "not_computed",
+                "project_id": project_id,
+                "analysis_id": analysis_id,
+                "name": name,
+                "analysis_type": analysis_type,
+                "message": "This analysis has not been run in this Titer session yet, so there is no result to read. Open the analysis in Titer to run it, then ask again.",
+            }),
+        },
     })
 }
 
@@ -11688,6 +11958,92 @@ mod tests {
         let results = HashMap::new();
         let err = read_results("project-1", &snap, &results, "t1").expect_err("a table is not an analysis");
         assert!(err.contains("not an analysis node"), "{err}");
+    }
+
+    #[test]
+    fn read_results_falls_back_to_cached_result() {
+        // Issue 33: a frozen analysis opened from a file — or a clone,
+        // whose `duplicateNode` copies `cachedResult` — never ran in
+        // this session, so the session map has no entry; its saved
+        // result is the answer, not `not_computed`.
+        let mut snap = snapshot();
+        snap["nodes"]["a1"]["cachedResult"] =
+            json!({ "testType": "dose-response-4pl", "stats": [], "groups": [], "notes": "EC50 = 3.2 nM" });
+        let results = HashMap::new();
+        let out = read_results("project-1", &snap, &results, "a1").expect("computed from cache");
+        assert_eq!(out["status"], "computed");
+        assert_eq!(out["result"]["notes"], "EC50 = 3.2 nM");
+    }
+
+    #[test]
+    fn read_results_prefers_live_outcome_over_cached_result() {
+        // The session's fresh run wins over the saved one: a table edit
+        // followed by a re-run must read back the re-run, not the file's
+        // older numbers.
+        let mut snap = snapshot();
+        snap["nodes"]["a1"]["cachedResult"] = json!({ "notes": "stale" });
+        let mut results = HashMap::new();
+        results.insert(
+            ("project-1".to_string(), "a1".to_string()),
+            json!({ "testType": "dose-response-4pl", "stats": [], "groups": [], "notes": "EC50 = 3.2 nM" }),
+        );
+        let out = read_results("project-1", &snap, &results, "a1").expect("computed");
+        assert_eq!(out["status"], "computed");
+        assert_eq!(out["result"]["notes"], "EC50 = 3.2 nM");
+    }
+
+    #[test]
+    fn read_results_cached_error_reads_as_error() {
+        let mut snap = snapshot();
+        snap["nodes"]["a1"]["cachedResult"] = json!({ "error": "The fit did not converge." });
+        let out = read_results("project-1", &snap, &HashMap::new(), "a1").expect("error envelope");
+        assert_eq!(out["status"], "error");
+        assert_eq!(out["message"], "The fit did not converge.");
+    }
+
+    #[test]
+    fn analyses_staled_by_table_keeps_frozen_and_other_tables() {
+        // Issue 33: editing t1 stales its live child a1 — not the frozen
+        // child a2, not the child of the untouched table t2 — but it does
+        // stale the child of the Transform computed from t1.
+        let snap = json!({
+            "nodes": {
+                "t1": { "id": "t1", "type": "table", "name": "Dose", "parentId": null },
+                "t2": { "id": "t2", "type": "table", "name": "Control", "parentId": null },
+                "tx": { "id": "tx", "type": "table", "name": "% of control", "parentId": null, "transform": { "from": "t1" } },
+                "a1": { "id": "a1", "type": "analysis", "name": "Fit", "parentId": "t1", "analysisType": "nonlinear-regression" },
+                "a2": { "id": "a2", "type": "analysis", "name": "Frozen fit", "parentId": "t1", "analysisType": "nonlinear-regression", "frozen": true },
+                "a3": { "id": "a3", "type": "analysis", "name": "Other", "parentId": "t2", "analysisType": "anova" },
+                "a4": { "id": "a4", "type": "analysis", "name": "Transform fit", "parentId": "tx", "analysisType": "anova" },
+                "a5": { "id": "a5", "type": "analysis", "name": "Orphan", "parentId": null, "orphaned": true, "analysisType": "anova" },
+            }
+        });
+        let mut staled = analyses_staled_by_table(&snap, "t1");
+        staled.sort();
+        assert_eq!(staled, vec!["a1".to_string(), "a4".to_string()]);
+    }
+
+    #[test]
+    fn dropped_cached_results_spots_a_cleared_save() {
+        // Issue 33: the publish after a table edit carries the analysis
+        // without the `cachedResult` the previous publish had.
+        let old = json!({ "nodes": {
+            "a1": { "id": "a1", "type": "analysis", "cachedResult": { "notes": "EC50 = 3.2 nM" } },
+            "a2": { "id": "a2", "type": "analysis", "cachedResult": { "notes": "kept" }, "frozen": true },
+        }});
+        let new = json!({ "nodes": {
+            "a1": { "id": "a1", "type": "analysis" },
+            "a2": { "id": "a2", "type": "analysis", "cachedResult": { "notes": "kept" }, "frozen": true },
+        }});
+        assert_eq!(dropped_cached_results(&old, &new), vec!["a1".to_string()]);
+        // Nothing lost, nothing dropped — a run's publish included.
+        let before = json!({ "nodes": {
+            "a1": { "id": "a1", "type": "analysis" },
+        }});
+        let ran = json!({ "nodes": {
+            "a1": { "id": "a1", "type": "analysis", "cachedResult": { "notes": "fresh" } },
+        }});
+        assert!(dropped_cached_results(&before, &ran).is_empty());
     }
 
     #[test]
@@ -12376,6 +12732,62 @@ mod tests {
         state.drop_window("project-1");
         assert!(state.lock().snapshots.contains_key("project-2"));
         assert_eq!(state.lock().last_published.as_deref(), Some("project-2"));
+    }
+
+    #[test]
+    fn invalidate_results_for_table_drops_only_non_frozen_children() {
+        // Issue 33: the write-table path — a table edit while the
+        // analysis sheet is closed must not leave pre-edit numbers in
+        // the session map.
+        let state = job_state();
+        let mut snap = state.snapshot_for("project-1").expect("fixture");
+        snap["nodes"]["a2"] = json!({ "id": "a2", "type": "analysis", "name": "Frozen fit", "parentId": "t1", "analysisType": "anova", "frozen": true });
+        state.lock().snapshots.insert("project-1".to_string(), snap);
+        state.lock().results.insert(("project-1".to_string(), "a1".to_string()), json!({ "notes": "stale" }));
+        state.lock().results.insert(("project-1".to_string(), "a2".to_string()), json!({ "notes": "frozen" }));
+        // Editing the other table leaves t1's children alone.
+        state.invalidate_results_for_table("project-1", "t2");
+        assert!(state.lock().results.contains_key(&("project-1".to_string(), "a1".to_string())));
+        assert!(state.lock().results.contains_key(&("project-1".to_string(), "a2".to_string())));
+        // Editing t1 drops the live child's entry, never the frozen one.
+        state.invalidate_results_for_table("project-1", "t1");
+        assert!(!state.lock().results.contains_key(&("project-1".to_string(), "a1".to_string())));
+        assert!(state.lock().results.contains_key(&("project-1".to_string(), "a2".to_string())));
+    }
+
+    #[test]
+    fn invalidate_all_results_keeps_frozen() {
+        // Issue 33: the undo/redo/script path — any table may have
+        // changed, so every non-frozen analysis goes stale together.
+        let state = job_state();
+        let mut snap = state.snapshot_for("project-1").expect("fixture");
+        snap["nodes"]["a2"] = json!({ "id": "a2", "type": "analysis", "name": "Frozen fit", "parentId": "t1", "analysisType": "anova", "frozen": true });
+        state.lock().snapshots.insert("project-1".to_string(), snap);
+        state.lock().results.insert(("project-1".to_string(), "a1".to_string()), json!({ "notes": "stale" }));
+        state.lock().results.insert(("project-1".to_string(), "a2".to_string()), json!({ "notes": "frozen" }));
+        state.invalidate_all_results("project-1");
+        assert!(!state.lock().results.contains_key(&("project-1".to_string(), "a1".to_string())));
+        assert!(state.lock().results.contains_key(&("project-1".to_string(), "a2".to_string())));
+    }
+
+    #[test]
+    fn clear_window_restores_prior_last_published() {
+        // Issue 47: a failed open/import's blank window published last,
+        // hijacking the default — clearing it hands the default back to
+        // the project that held it before.
+        let state = job_state();
+        state.lock().snapshots.insert("project-2".to_string(), json!({ "nodes": {} }));
+        state.lock().last_published = Some("project-2".to_string());
+        state.lock().prev_last_published = Some("project-1".to_string());
+        state.lock().results.insert(("project-2".to_string(), "a1".to_string()), json!({ "ok": true }));
+        state.clear_window("project-2");
+        assert!(!state.lock().snapshots.contains_key("project-2"));
+        assert!(state.lock().results.keys().all(|(w, _)| w != "project-2"));
+        assert_eq!(state.lock().last_published.as_deref(), Some("project-1"));
+        // Clearing a window that never held the default leaves it alone.
+        state.lock().snapshots.insert("project-3".to_string(), json!({ "nodes": {} }));
+        state.clear_window("project-3");
+        assert_eq!(state.lock().last_published.as_deref(), Some("project-1"));
     }
 
     #[test]

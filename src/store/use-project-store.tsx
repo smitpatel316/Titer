@@ -921,6 +921,18 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         const old = before.data;
         const same = (k: "rows" | "columns" | "excluded" | "cellBackgrounds" | "groups" | "replicates") => old?.[k] === data[k];
         if (same("rows") && same("columns") && same("excluded") && same("cellBackgrounds") && same("groups") && same("replicates")) return;
+        // Issue 33: the values a non-frozen child analysis ran on are
+        // gone — drop its saved result with them, so the sheet (and
+        // `titer_read_results`) re-run instead of serving pre-edit
+        // numbers. Frozen analyses keep theirs by design, as do
+        // orphaned ones (no parent table left to change).
+        for (const child of Object.values(nodes)) {
+          if (child.type === "analysis" && child.parentId === id && !child.frozen && child.cachedResult) {
+            const next = { ...child };
+            delete next.cachedResult;
+            nodes[child.id] = next;
+          }
+        }
         for (const t of Object.values(nodes)) {
           if (t.transform?.from === id) update(t.id, transformTable(data, t.tableType!, t.transform, t.data));
         }
