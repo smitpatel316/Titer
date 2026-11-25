@@ -1,6 +1,6 @@
 // Linked paste (Prism 11, seq 168): a block of a table's cells pasted from
-// a data file (CSV / TXT / XLSX) that stays linked to it, so the table
-// updates when the file changes. Prism's side of it is the "Insert and
+// a data file (CSV / TXT / DAT / PRN / XLSX) that stays linked to it, so the
+// table updates when the file changes. Prism's side of it is the "Insert and
 // maintain link" choice (with "Automatically update Prism when the data
 // file is changed") in its Import and Paste Special dialog.
 //
@@ -54,7 +54,11 @@ export async function parseLinkedSource(name: string, content: string | Uint8Arr
     rows = (await parseXlsx(content)).sheet.rows;
   } else {
     if (typeof content !== "string") throw new Error(`“${name}” couldn't be read as a text file.`);
-    rows = parseDelimited(content, detectDelimiter(content, name.toLowerCase().endsWith(".tsv") ? "\t" : ","));
+    // Tab is preferred for .txt/.tsv — and for .dat/.prn, which are the
+    // same text-table shape (a Prism .prn export is tab-delimited; seq 451).
+    const lower = name.toLowerCase();
+    const preferred = lower.endsWith(".tsv") || lower.endsWith(".txt") || lower.endsWith(".dat") || lower.endsWith(".prn") ? "\t" : ",";
+    rows = parseDelimited(content, detectDelimiter(content, preferred));
   }
   // Trailing empty rows are the file's padding, not data (parseDelimited
   // already drops the final newline's); a file of nothing but padding has
@@ -151,12 +155,13 @@ export async function refreshLinked(
 }
 
 /** The kind a source path names: `.xlsx` is a workbook, anything else
- *  delimited text (`.csv` / `.tsv` / `.txt`). */
+ *  delimited text (`.csv` / `.tsv` / `.txt` / `.dat` / `.prn` — seq 451:
+ *  a .dat/.prn file imports, so it paste-links too). */
 export function linkedPasteKindOf(sourcePath: string): LinkedPasteKind {
   return sourcePath.toLowerCase().endsWith(".xlsx") ? "xlsx" : "csv";
 }
 
 /** Whether `sourcePath` names a file a link can be pasted from. */
 export function isLinkedSourcePath(sourcePath: string): boolean {
-  return /\.(csv|tsv|txt|xlsx)$/i.test(sourcePath);
+  return /\.(csv|tsv|txt|dat|prn|xlsx)$/i.test(sourcePath);
 }

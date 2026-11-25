@@ -752,6 +752,11 @@ export const mcpSendSavedFeedback = (feedbackId: string) =>
     { feedbackId },
   );
 
+/** Opens a file in its default app (seq 451): the Import dialog's
+ *  "Open File to Edit Data" / "Open File" buttons open the file being
+ *  imported. The shell refuses a path that names no file. */
+export const openFileInDefaultApp = (path: string) => invoke<void>("open_file", { path });
+
 // ── Updates ──────────────────────────────────────────────────────────────
 // The shell side lives in src-tauri/src/updater.rs.
 
@@ -972,21 +977,6 @@ export async function askPasteLink(sourceName: string): Promise<"auto" | "manual
   });
   if (answer === "Update Automatically" || answer === "Yes") return "auto";
   if (answer === "Update By Hand" || answer === "No") return "manual";
-  return "cancel";
-}
-
-/** Where an imported data file goes when its shape matches the active
- *  table: a new table, appended to that table, or nowhere (Cancel). In the
- *  web build (no native shell) a confirm stands in for the dialog. */
-export async function askImportTarget(tableName: string): Promise<"new" | "append" | "cancel"> {
-  if (!isNative) return window.confirm(`Add the imported data to “${tableName}”, or make a new table?`) ? "append" : "new";
-  const answer = await message(`The imported data fits “${tableName}” — same kind of table, same number of columns.`, {
-    title: "Import Data File",
-    kind: "info",
-    buttons: { yes: "New Table", no: `Add to “${tableName}”`, cancel: "Cancel" },
-  });
-  if (answer === "New Table" || answer === "Yes") return "new";
-  if (answer === `Add to “${tableName}”` || answer === "No") return "append";
   return "cancel";
 }
 

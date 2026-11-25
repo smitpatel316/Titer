@@ -22,7 +22,9 @@
 //   Placement — rename (file name / text in a row), insertion point
 //     (the live one, or a row + column), arrangement (maintain /
 //     transpose / by rows / by columns), blank-row handling, column titles.
-//   Info & Notes — <Info> / <Notes> sections, or rows by number.
+//   Info & Notes — <Info> / <Notes> sections, or rows by number, into
+//     the sheet the "Import into:" popup names (a new info sheet, or an
+//     existing one — seq 451).
 //
 // Two judgement calls, documented where they bite:
 //   * Commas-as-thousands/decimal only rewrites a comma inside a field of
@@ -126,6 +128,10 @@ export interface ImportChoices {
     notesFromRow: number;
     /** Last row of the notes range, 1-based, or "last" (fromRow). */
     notesEndRow: "last" | number;
+    /** Where the imported info and notes go (the Info & Notes tab's
+     *  "Import into:" popup, seq 451): "new" for a new info sheet
+     *  linked to the table, or the id of an existing info sheet. */
+    importInto: string;
   };
 }
 
@@ -172,6 +178,7 @@ export function defaultImportChoices(): ImportChoices {
       notesMode: "none",
       notesFromRow: 1,
       notesEndRow: "last",
+      importInto: "new",
     },
   };
 }
@@ -290,6 +297,56 @@ export function extractInfoSections(
     infoRows: info.taken,
     notesRows: notes.taken,
   };
+}
+
+// ── Info & Notes destination ("Import into:", seq 451) ───────────────
+
+/** An info sheet the "Import into:" popup can name: its id (the choice's
+ *  value) and its sidebar name (the popup's label). */
+export interface InfoImportSheet {
+  id: string;
+  name: string;
+}
+
+/** The sheet the imported info and notes go to: the named sheet when it
+ *  still exists, a new info sheet otherwise. A saved default naming a
+ *  sheet from another project — or one deleted since — falls back to new
+ *  instead of importing nowhere. */
+export function resolveInfoImportTarget(importInto: string, sheets: InfoImportSheet[]): "new" | string {
+  if (importInto === "new") return "new";
+  return sheets.some((s) => s.id === importInto) ? importInto : "new";
+}
+
+/** Imported constants + notes merged into an info sheet's data. A
+ *  constant whose name the sheet already has (case-insensitive, like
+ *  hook lookup) takes the imported value in place, keeping its id; a
+ *  new name appends. Notes append after a blank line when both sides
+ *  have text. A null sheet is a new one: the imported constants alone
+ *  (as the import always did — the six defaults are not kept), with no
+ *  table link yet; the caller links it. */
+export function mergeImportedInfo(
+  existing: InfoSheetData | null,
+  imported: { name: string; value: string }[],
+  notesText: string,
+): InfoSheetData {
+  if (!existing) {
+    return {
+      constants: imported.map((c) => ({ id: newConstantId(), name: c.name, value: c.value })),
+      notes: notesText,
+      linkedTableId: null,
+    };
+  }
+  const constants = existing.constants.map((c) => ({ ...c }));
+  for (const c of imported) {
+    const at = constants.findIndex((e) => e.name.trim().toLowerCase() === c.name.trim().toLowerCase());
+    if (at === -1) constants.push({ id: newConstantId(), name: c.name, value: c.value });
+    else constants[at] = { ...constants[at], value: c.value };
+  }
+  const notes =
+    existing.notes !== "" && notesText !== ""
+      ? `${existing.notes}\n\n${notesText}`
+      : existing.notes || notesText;
+  return { constants, notes, linkedTableId: existing.linkedTableId };
 }
 
 // ── Filter ───────────────────────────────────────────────────────────────

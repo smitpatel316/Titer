@@ -13,9 +13,14 @@
 // Prism's Source tab ("Paste as many digits as possible", "Paste older
 // text-based clipboard format") are clipboard options — they live in
 // Paste Special (seq 428), not in a file import, so they are not here.
-// "Open File to Edit Data" and the View tab's "Open File" are also
-// absent: Titer has no native file-opener command to wire them to.
+// "Open File to Edit Data" (Source tab) and the View tab's "Open File"
+// open the file being imported in its default app (seq 451, via the
+// shell's `open_file` command) — there is no path on the web build, so
+// both buttons are disabled there.
 import * as React from "react";
+import { alert, openFileInDefaultApp } from "../../native";
+import { infoSheetsOf } from "../../lib/info-sheets";
+import { useProjectStore } from "../../store/use-project-store";
 import { Button } from "../../ui/controls";
 import {
   clearSavedImportChoices,
@@ -186,6 +191,16 @@ export function ImportDialog({
   const isXlsx = ext === "xlsx";
   const fileLabel = offer.path ?? offer.name;
 
+  // The project's info sheets, for the Info & Notes tab's "Import into:"
+  // popup (seq 451): a saved default naming a sheet that no longer exists
+  // falls back to a new sheet.
+  const { nodes, rootOrder } = useProjectStore();
+  const infoSheets = infoSheetsOf(nodes, rootOrder);
+  const importInto =
+    choices.info.importInto === "new" || infoSheets.some((s) => s.id === choices.info.importInto)
+      ? choices.info.importInto
+      : "new";
+
   // The preview: the file as the Source tab reads it, with the <Info> /
   // <Notes> sections taken out — the View tab shows what will be filtered
   // and placed, not the raw bytes.
@@ -213,6 +228,22 @@ export function ImportDialog({
     if (p.target === "new") return onConfirm(choices, null);
     if (p.useLiveInsertionPoint && insertionPoint) return onConfirm(choices, insertionPoint);
     return onConfirm(choices, { r: Math.max(1, p.insertRow) - 1, c: Math.max(1, p.insertCol) });
+  };
+
+  /** The Source tab's "Open File to Edit Data" and the View tab's
+   *  "Open File": the file being imported, in its default app. A file
+   *  that moved since it was picked says so and leaves the dialog open. */
+  const openSourceFile = async () => {
+    if (!offer.path) return;
+    try {
+      await openFileInDefaultApp(offer.path);
+    } catch (err) {
+      await alert(
+        "Couldn't Open File",
+        err instanceof Error ? err.message : "The file couldn't be opened.",
+        "error",
+      );
+    }
   };
 
   React.useEffect(() => {
@@ -365,8 +396,11 @@ export function ImportDialog({
                 The other tabs in this dialog are optional. They let you filter and rearrange the data. To import the
                 entire file, click Import button now.
               </p>
-              <div>
+              <div className="flex gap-2">
                 <Button onClick={onChooseFile}>Choose...</Button>
+                <Button onClick={() => void openSourceFile()} disabled={offer.path === null}>
+                  Open File to Edit Data
+                </Button>
               </div>
             </div>
           )}
@@ -410,6 +444,11 @@ export function ImportDialog({
                 </p>
               )}
               <p className="text-regular text-secondary">{fileLabel}</p>
+              <div>
+                <Button onClick={() => void openSourceFile()} disabled={offer.path === null}>
+                  Open File
+                </Button>
+              </div>
             </div>
           )}
 
@@ -832,8 +871,27 @@ export function ImportDialog({
                 </div>
               </Section>
               <Section title="Info Sheet">
+                <div className="flex flex-wrap items-center gap-1 text-regular">
+                  <label htmlFor="import-into">Import into:</label>
+                  <select
+                    id="import-into"
+                    aria-label="Import into"
+                    value={importInto}
+                    onChange={(e) => setInfo({ importInto: e.target.value })}
+                    className="h-6 rounded-md bg-control px-1 text-regular outline-none"
+                  >
+                    <option value="new">New info sheet</option>
+                    {infoSheets.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <p className="text-regular text-secondary">
-                  Imported info and notes go to a new info sheet linked to the table.
+                  {importInto === "new"
+                    ? "Imported info and notes go to a new info sheet linked to the table."
+                    : "Imported info and notes go to the chosen info sheet."}
                 </p>
               </Section>
               <p className="text-regular text-secondary">

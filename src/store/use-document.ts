@@ -34,13 +34,15 @@ import { isDataFilePath, parseXlsx, rowsToTable } from "../lib/tabular-import";
 import {
   computeImport,
   dataColumnLetter,
+  mergeImportedInfo,
   resolveImportTableName,
+  resolveInfoImportTarget,
   type ImportChoices,
   type ImportOffer,
 } from "../lib/import-choices";
 import { applyLinkedBlock, linkedPasteKindOf, type LinkedPaste } from "../lib/linked-paste";
 import { columnsBeyond, writeBlock } from "../views/tables/table-data";
-import { newConstantId } from "../lib/info-sheets";
+import { infoSheetsOf } from "../lib/info-sheets";
 import { formatWriteReport, writePrism, type PrismWriteReport } from "../lib/prism-write";
 import { loadPrismSaveChoice, nextSaveAction, savePrismSaveChoice } from "../lib/prism-nudge";
 import { AUTOSAVE_DEBOUNCE_MS, isAutosaveEnabled } from "../lib/autosave";
@@ -2212,10 +2214,12 @@ export function useDocument() {
    *  for it (the walk2 import renamed its table "import-test"). As a new
    *  table, the header reading applies and the table takes the chosen
    *  name. A link stores the source on the table either way, so Update
-   *  Linked Data can refresh it. Info constants and notes go to a new
-   *  info sheet linked to the table. A choices combination that leaves
-   *  nothing to import says so and leaves the dialog open, so the user
-   *  can loosen the filter instead of starting over. */
+   *  Linked Data can refresh it. Info constants and notes go to the
+   *  sheet the "Import into:" popup named — a new info sheet linked to
+   *  the table, or the chosen existing one, merged in (seq 451). A choices
+   *  combination that leaves nothing to import says so and leaves the
+   *  dialog open, so the user can loosen the filter instead of starting
+   *  over. */
   const confirmImport = async (
     choices: ImportChoices,
     insertion: { r: number; c: number } | null,
@@ -2310,15 +2314,34 @@ export function useDocument() {
     if (offer.parseNotes) lines.push(...offer.parseNotes.map((n) => `• ${n}`));
     if (computed.infoConstants.length > 0 || computed.notesText !== "") {
       if (tableId) {
-        const infoId = latest.current.createInfoSheet(tableId);
-        latest.current.updateInfoSheet(infoId, {
-          constants: computed.infoConstants.map((c) => ({ id: newConstantId(), name: c.name, value: c.value })),
-          notes: computed.notesText,
-          linkedTableId: tableId,
-        });
-        lines.push(
-          `Imported ${computed.infoConstants.length} info constant${computed.infoConstants.length === 1 ? "" : "s"} and notes into a new info sheet.`,
-        );
+        // The Info & Notes tab's "Import into:" popup (seq 451): a new
+        // info sheet linked to the table, or the chosen existing sheet
+        // (merged in — a same-named constant takes the imported value).
+        // A choice naming a sheet that no longer exists falls back to new.
+        const s = latest.current.get();
+        const sheets = infoSheetsOf(s.nodes, s.rootOrder);
+        const target = resolveInfoImportTarget(choices.info.importInto, sheets);
+        if (target === "new") {
+          const infoId = latest.current.createInfoSheet(tableId);
+          latest.current.updateInfoSheet(infoId, {
+            ...mergeImportedInfo(null, computed.infoConstants, computed.notesText),
+            linkedTableId: tableId,
+          });
+          lines.push(
+            `Imported ${computed.infoConstants.length} info constant${computed.infoConstants.length === 1 ? "" : "s"} and notes into a new info sheet.`,
+          );
+        } else {
+          const sheet = sheets.find((n) => n.id === target);
+          if (sheet?.info) {
+            latest.current.updateInfoSheet(
+              target,
+              mergeImportedInfo(sheet.info, computed.infoConstants, computed.notesText),
+            );
+            lines.push(
+              `Imported ${computed.infoConstants.length} info constant${computed.infoConstants.length === 1 ? "" : "s"} and notes into info sheet “${sheet.name}”.`,
+            );
+          }
+        }
       }
     }
     lines.push(...computed.notes.map((n) => `• ${n}`));

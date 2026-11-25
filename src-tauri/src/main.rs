@@ -1675,6 +1675,34 @@ fn open_support_email() {
     }
 }
 
+/// The guard every file opener shares (seq 451): the path must name an
+/// existing file, so a moved or deleted source says so instead of opening
+/// nothing (or, on Windows, a bare `start` window).
+fn check_openable_file(path: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("No file to open.".to_string());
+    }
+    if !std::path::Path::new(path).is_file() {
+        return Err(format!("“{path}” couldn't be found — the file may have moved or been deleted."));
+    }
+    Ok(())
+}
+
+/// Opens a file in its default app (seq 451): the Import dialog's
+/// "Open File to Edit Data" (Source tab) and "Open File" (View tab) open
+/// the file being imported, so the user can edit it in its own app and
+/// re-import. `open` is the macOS launcher.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn open_file(path: String) -> Result<(), String> {
+    check_openable_file(&path)?;
+    std::process::Command::new("open")
+        .arg(&path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// Quitting (Titer ▸ Quit, the Dock, the app switcher, logout) asks the app delegate
 /// `applicationShouldTerminate:`, which tao doesn't answer, so Titer would quit
 /// without asking to save. This answers "not now" and closes the project windows
@@ -1832,6 +1860,19 @@ fn open_link(link: String) {
 fn open_support_email() {
     let url = format!("mailto:smit@muse.ai?subject=Titer%20{}%20support", env!("CARGO_PKG_VERSION"));
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+}
+
+/// Linux: the same file opener as on macOS, via xdg-open (Windows:
+/// `cmd /C start`, whose empty first argument is the window title).
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn open_file(path: String) -> Result<(), String> {
+    check_openable_file(&path)?;
+    #[cfg(target_os = "windows")]
+    let spawned = std::process::Command::new("cmd").args(["/C", "start", "", &path]).spawn();
+    #[cfg(not(target_os = "windows"))]
+    let spawned = std::process::Command::new("xdg-open").arg(&path).spawn();
+    spawned.map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// Linux: no spinning wheel; the page never shows one here.
@@ -2093,6 +2134,7 @@ fn main() {
             accent_color,
             open_link,
             open_support_email,
+            open_file,
             set_spinner,
             open_url,
             cloud_status,

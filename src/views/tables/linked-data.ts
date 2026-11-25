@@ -141,7 +141,7 @@ export async function pickLinkedSource(): Promise<
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".csv,.tsv,.txt,.xlsx";
+    input.accept = ".csv,.tsv,.txt,.dat,.prn,.xlsx";
     input.onchange = () => {
       const file = input.files?.[0];
       if (!file) return resolve(null);
