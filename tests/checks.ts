@@ -34501,7 +34501,7 @@ check("seq 454: Help re-opens the startup guide, and it waits behind the Welcome
   ok(appMenu.includes(`{ text: "Startup Guide…"`), "no Help entry re-opens the startup guide");
   ok(appMenu.includes("openGuide()"), "the Help entry never opens the guide");
   const menus = readFileSync("src/menus.ts", "utf8");
-  ok(/setMenuBar\(menus: MenuItems, extraHelpItems: MenuItems = \[\]\)/.test(menus), "setMenuBar takes no extra Help items");
+  ok(/setMenuBar\(menus: MenuItems, extraHelpItems: MenuItems = \[\], hasProjectWindow = true\)/.test(menus), "setMenuBar takes no extra Help items or project-window flag");
   const tipsAt = menus.indexOf(`{ text: "Titer Tips"`);
   const extraAt = menus.indexOf("...extraHelpItems");
   ok(tipsAt > -1 && extraAt > tipsAt, "extra Help items do not land after Titer Tips");
@@ -34524,6 +34524,70 @@ check("seq 454: Help re-opens the startup guide, and it waits behind the Welcome
   ok(!dialogCode.includes(".showModal("), "the guide calls showModal() — pointer events fail on Mac WebKit (seq 397)");
   ok(dialog.includes("fixed inset-0"), "the guide is not a plain fixed overlay");
   ok(dialog.includes("Skip tour"), "the guide has no Skip control");
+});
+
+// bugfix br-71-77-78-79 (startup guide / Help menu): the guide's support
+// link, its global keys, the windowless Help menu, and its auto-show.
+// #71: a mailto: href is silently blocked by Tauri's .on_navigation policy
+// (main.rs allows only the tauri: scheme), so the native guide must route
+// the help step's mailto: link through open_support_email, like Help ▸
+// Contact Support — a plain href never reaches the mail client.
+// #77: the guide's window keydown handler must never steal Enter/Escape
+// from a top-layer <dialog> (SendFeedbackDialog, WhatsNewDialog,
+// FeedbackConsentDialog), from a text field, or from outside its panel;
+// and the auto-show must wait while such a dialog is open instead of
+// popping over it. #78: Send Feedback and What's New open dialogs that
+// live in a project window's React tree, so the windowless (engine) menu
+// must disable them instead of showing enabled dead no-ops. #79: the
+// auto-show guard must include !openedFile.current — a .pzt template,
+// Sample Project, or slow/failed launch leaves filePath null and isDirty
+// false, so those alone can't keep the guide from popping over the file.
+check("bugfix br-71-77-78-79: startup guide mailto, key hijack, windowless Help, auto-show over opened files", () => {
+  const dialog = readFileSync("src/components/startup-guide-dialog.tsx", "utf8");
+  // #71: the help step's mailto: link is intercepted natively.
+  ok(dialog.includes("openSupportEmail"), "the guide never routes its mailto link through openSupportEmail");
+  ok(dialog.includes("isNative"), "the guide never checks isNative before intercepting its mailto link");
+  ok(/\.startsWith\("mailto:"\) && isNative/.test(dialog), "the guide intercepts every link, not just mailto: in the native shell");
+  ok(
+    /e\.preventDefault\(\);\s*void openSupportEmail\(\);/.test(dialog),
+    "the guide's mailto click does not preventDefault into openSupportEmail",
+  );
+  // #77: the window keydown handler yields to top-layer dialogs, fields,
+  // and targets outside the panel — before it touches Escape/Enter.
+  const dialogAt = dialog.indexOf('document.querySelector("dialog[open]")');
+  ok(dialogAt > -1, "the guide's keydown handler never checks for an open top-layer <dialog>");
+  ok(dialog.indexOf("HTMLInputElement") > -1, "the guide's keydown handler never yields to text inputs");
+  ok(dialog.indexOf("HTMLTextAreaElement") > -1, "the guide's keydown handler never yields to textareas");
+  ok(dialog.indexOf("panelRef.current.contains") > -1, "the guide's keydown handler never yields to targets outside its panel");
+  const escapeAt = dialog.indexOf('"Escape"', dialogAt);
+  ok(escapeAt > dialogAt, "the guide's <dialog> guard does not run before its Escape handling");
+  // #77 + #79: the auto-show defers while a top-layer dialog is open and
+  // never fires over a file that opened into this window.
+  const doc = readFileSync("src/store/use-document.ts", "utf8");
+  const effect = doc.slice(doc.indexOf("guideDecided"));
+  ok(effect.includes('document.querySelector("dialog[open]")'), "the guide auto-show never waits for an open top-layer <dialog>");
+  ok(effect.includes("!openedFile.current"), "the guide auto-show guard omits !openedFile.current");
+  const guardAt = effect.indexOf("!openedFile.current");
+  ok(
+    guardAt > -1 && effect.indexOf("setGuideOpen(true)", guardAt) > guardAt,
+    "the guide auto-show guard does not gate setGuideOpen on !openedFile.current",
+  );
+  // #78: the dialog Help items are disabled with no project window open.
+  const menus = readFileSync("src/menus.ts", "utf8");
+  ok(
+    /setMenuBar\(menus: MenuItems, extraHelpItems: MenuItems = \[\], hasProjectWindow = true\)/.test(menus),
+    "setMenuBar takes no hasProjectWindow flag",
+  );
+  ok(
+    menus.includes('{ text: "Send Feedback", enabled: hasProjectWindow'),
+    "Send Feedback is not gated on a project window being open",
+  );
+  ok(
+    menus.includes('{ text: "What\'s New", enabled: hasProjectWindow'),
+    "What's New is not gated on a project window being open",
+  );
+  const engine = readFileSync("src/engine.ts", "utf8");
+  ok(engine.includes("[], false"), "the windowless menu never passes hasProjectWindow=false");
 });
 
 check("a template replaces the fresh window's untouched table, and only that one", () => {

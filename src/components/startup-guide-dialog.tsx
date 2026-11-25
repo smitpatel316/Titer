@@ -19,6 +19,7 @@
 import * as React from "react";
 import { Button } from "../ui/controls";
 import { GUIDE_STEPS } from "../lib/startup-guide";
+import { isNative, openSupportEmail } from "../native";
 import { SendFeedbackButton } from "./send-feedback-dialog";
 
 export function StartupGuideDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -42,7 +43,15 @@ export function StartupGuideDialog({ open, onClose }: { open: boolean; onClose: 
   React.useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      const targetIsButton = e.target instanceof HTMLButtonElement;
+      // A top-layer <dialog> (SendFeedbackDialog, WhatsNewDialog,
+      // FeedbackConsentDialog) owns its own keys while open: never steal
+      // Enter/Escape from it — and never act on keys typed into a field or
+      // outside this panel (the listener is on window, so it sees them all).
+      if (document.querySelector("dialog[open]")) return;
+      const target = e.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+      if (panelRef.current && target instanceof Node && !panelRef.current.contains(target)) return;
+      const targetIsButton = target instanceof HTMLButtonElement;
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
@@ -98,7 +107,23 @@ export function StartupGuideDialog({ open, onClose }: { open: boolean; onClose: 
           <p className="text-regular text-primary">{current.body}</p>
           {current.link && (
             <p className="text-regular">
-              <a className="underline" href={current.link.href}>
+              <a
+                className="underline"
+                href={current.link.href}
+                onClick={
+                  // Tauri's .on_navigation policy (main.rs) only allows the
+                  // tauri: scheme, so a mailto: href is silently blocked in
+                  // the native shell — route it through the shell's
+                  // open_support_email command instead, like Help ▸ Contact
+                  // Support. In a browser the plain mailto: href works as-is.
+                  current.link.href.startsWith("mailto:") && isNative
+                    ? (e) => {
+                        e.preventDefault();
+                        void openSupportEmail();
+                      }
+                    : undefined
+                }
+              >
                 {current.link.label}
               </a>
             </p>
