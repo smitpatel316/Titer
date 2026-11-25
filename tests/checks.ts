@@ -19,7 +19,7 @@ import {
   type RQueueSnapshot,
 } from "../src/stats/r-queue";
 import { PARAM_KEYS_BY_ANALYSIS, parseProjectFile, parseProjectText, readPalette, serializeProjectFile, validateAnalysisParams, type ProjectFilePayload } from "../src/lib/project-file";
-import { createSampleNode, isSampleNode, readFlowSample, type FlowSampleRef } from "../src/flow/sample";
+import { createSampleNode, isSampleNode, readFlowSample, type FlowPopulationRef, type FlowSampleRef } from "../src/flow/sample";
 import { InMemoryFlowStore, createFlowStore, isFlowEnabled } from "../src/flow/store";
 import { buildExperimentSummaryTable, buildSampleSummaryTable, createSummaryTableNode } from "../src/flow/summary";
 import {
@@ -333,7 +333,7 @@ import { FLOW_FIXTURE_PARAMS, FLOW_FIXTURE_SAMPLE_ID, generateFixtureSample, loa
 import { bin2D, downsampleIndices, FLOW_SCATTER_CAP, histogram1D, pointDensities, smoothGrid } from "../src/flow/density";
 import { getColumn, listSamples, sampleStats, unloadSample } from "../src/flow/store";
 import { buildFlowContourPlot, buildFlowDensityPlot, buildFlowDotPlot, buildFlowHistogram, buildFlowPseudocolorPlot } from "../src/flow/viewer";
-import { isFlowEnabled as isFlowPickerEnabled } from "../src/flow/feature-flag";
+import { isFlowEnabled as isFlowPickerEnabled, setFlowEnabled } from "../src/flow/feature-flag";
 import { evaluate as evaluateFittedCurve, addLogisticCurve } from "../src/views/graphs/fitted-curve";
 import { addSchildPlot, schildPlotPoints } from "../src/views/graphs/schild-plot";
 import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay";
@@ -48588,6 +48588,228 @@ check(
     );
   },
 );
+
+
+// ── FlowJo track, seq 449 (F2c) ────────────────────────────────────────────
+
+/** One population × parameter stats row, as `computePopulationStats` returns it. */
+type F2cStatRow = {
+  count: number;
+  median: number | null;
+  mean: number | null;
+  geoMean: number | null;
+  sd: number | null;
+  cv: number | null;
+  rSd: number | null;
+  rCv: number | null;
+  min: number | null;
+  max: number | null;
+  p10: number | null;
+  p25: number | null;
+  p75: number | null;
+  p90: number | null;
+};
+
+// Expected per-population stats for the F2c pin, from the independent
+// Python reference (tmp-f2c/ref-stats.py) over the dumped fixture CSV
+// (20,000 events, seed 42). CD4 for every population; FSC-A for root
+// and CD4+ as a second parameter. Compared with rel tol 1e-6.
+// Expected per-population stats for the F2c pin, from the independent
+// Python reference (tmp-f2c/ref-stats.py) over the dumped fixture CSV
+// (20,000 events, seed 42). CD4 for every population; FSC-A for root
+// and CD4+ as a second parameter. Compared with rel tol 1e-6.
+const F2C_EXPECTED: Record<string, { count: number; pctParent: number; pctGrandparent: number; pctTotal: number; cd4: F2cStatRow; fsc?: F2cStatRow }> = {
+  root: { count: 20000, pctParent: 100.0, pctGrandparent: 100.0, pctTotal: 100.0, cd4: { count: 20000, median: 126.67417907714844, mean: 2603.9638810212136, geoMean: 381.28887624180913, sd: 4151.914895540651, cv: 159.44594799496096, rSd: 3832.8934507183076, rCv: 3025.7890587030834, min: 30.227510452270508, max: 27220.119140625, p10: 71.12716369628906, p25: 91.32402420043945, p75: 5680.608154296875, p90: 9212.535644531254 }, fsc: { count: 20000, median: 50176.734375, mean: 51652.845087011716, geoMean: 50066.38079214023, sd: 13087.615362229371, cv: 25.337646629498625, rSd: 12606.417960351562, rCv: 25.124030324764558, min: 17305.34765625, max: 126635.078125, p10: 36286.207812500004, p25: 42222.6396484375, p75: 59218.939453125, p90: 68984.51796875002 } },
+  cd4pos: { count: 6000, pctParent: 30.0, pctGrandparent: 30.0, pctTotal: 30.0, cd4: { count: 6000, median: 7941.746826171875, mean: 8422.083399515788, geoMean: 7926.0205692449845, sd: 3016.3473914283136, cv: 35.8147414166159, rSd: 2768.317082519531, rCv: 34.857785612059494, min: 1581.6090087890625, max: 27220.119140625, p10: 5099.6115234375, p25: 6300.981689453125, p75: 10016.081787109375, p90: 12400.6546875 }, fsc: { count: 6000, median: 50218.357421875, mean: 51723.36415820313, geoMean: 50142.338533874194, sd: 13024.856805971174, cv: 25.18176653423554, rSd: 12731.312789062504, rCv: 25.351910023876595, min: 17305.34765625, max: 122599.6484375, p10: 36395.575000000004, p25: 42242.7939453125, p75: 59476.10546875, p90: 69016.1546875 } },
+  cd4neg: { count: 14000, pctParent: 70.0, pctGrandparent: 70.0, pctTotal: 70.0, cd4: { count: 14000, median: 104.06755065917969, mean: 110.48408738068171, geoMean: 103.86811558576173, sd: 40.02580498277061, cv: 36.227664935004185, rSd: 37.18668200759888, rCv: 35.733215370259785, min: 30.227510452270508, max: 376.9671936035156, p10: 66.46517486572266, p25: 81.62627792358398, p75: 131.64856338500977, p90: 163.10320434570312 } },
+  cd4pos_cd8neg: { count: 6000, pctParent: 100.0, pctGrandparent: 30.0, pctTotal: 30.0, cd4: { count: 6000, median: 7941.746826171875, mean: 8422.083399515788, geoMean: 7926.0205692449845, sd: 3016.3473914283136, cv: 35.8147414166159, rSd: 2768.317082519531, rCv: 34.857785612059494, min: 1581.6090087890625, max: 27220.119140625, p10: 5099.6115234375, p25: 6300.981689453125, p75: 10016.081787109375, p90: 12400.6546875 } },
+  cd4pos_cd8pos: { count: 0, pctParent: 0.0, pctGrandparent: 0.0, pctTotal: 0.0, cd4: { count: 0, median: null, mean: null, geoMean: null, sd: null, cv: null, rSd: null, rCv: null, min: null, max: null, p10: null, p25: null, p75: null, p90: null } },
+};
+
+check("flow-f2c: per-population stats match the independent Python reference on the fixture, predicates round-trip, and titer_flow_population_stats is wired", async () => {
+  // Seq 449: per-population statistics (counts, frequencies, medians/MFIs,
+  // geo-mean, CV, robust CV/SD, percentiles) for gated populations,
+  // differentially tested against FlowJo's known behaviour (see
+  // docs/flow-population-stats.md). Pre-fix this fails: no stats module, no
+  // predicate on the population ref, no executor, no MCP tool.
+  const close = (got: number | null, want: number | null, what: string) => {
+    if (got === null || want === null) {
+      strictEqual(got, want, `${what} must agree on null`);
+      return;
+    }
+    ok(Math.abs(got - want) <= 1e-6 * Math.max(1, Math.abs(want)), `${what}: got ${got}, want ${want}`);
+  };
+  const checkRow = (got: F2cStatRow, want: F2cStatRow, what: string) => {
+    strictEqual(got.count, want.count, `${what} count`);
+    for (const k of ["median", "mean", "geoMean", "sd", "cv", "rSd", "rCv", "min", "max", "p10", "p25", "p75", "p90"] as const) {
+      close(got[k], want[k], `${what} ${k}`);
+    }
+  };
+
+  // 1. The wiring surface (file-content — fails pre-fix).
+  const statsPath = "src/flow/stats.ts";
+  ok(existsSync(statsPath), "src/flow/stats.ts must exist (computePopulationStats)");
+  const statsSrc = readFileSync(statsPath, "utf8");
+  ok(statsSrc.includes("computePopulationStats"), "stats.ts must export computePopulationStats");
+  ok(statsSrc.includes("buildPopulationStatsTable"), "stats.ts must export buildPopulationStatsTable");
+  ok(statsSrc.includes("resolvePopulationIndices"), "stats.ts must export resolvePopulationIndices");
+  ok(statsSrc.includes("type 6"), "stats.ts must document the R type-6 quantile method");
+  const sampleSrc = readFileSync("src/flow/sample.ts", "utf8");
+  ok(sampleSrc.includes("predicate"), "FlowPopulationRef must carry a predicate");
+  ok(sampleSrc.includes('"range"'), "the predicate kind must be a 1-D range gate");
+  const flowSrc = readFileSync("src/store/mcp-flow.ts", "utf8");
+  ok(flowSrc.includes("executePopulationStats"), "src/store/mcp-flow.ts must execute the flow-population-stats job");
+  const dispatchSrc = readFileSync("src/store/mcp-dispatch.ts", "utf8");
+  ok(dispatchSrc.includes('case "flow-population-stats"'), "mcp-dispatch.ts must have the flow-population-stats branch");
+  ok(dispatchSrc.includes("createFlowStatsTable"), "mcp-dispatch.ts must pass createFlowStatsTable to the job");
+  ok(readFileSync("src/store/use-project-store.tsx", "utf8").includes("createFlowStatsTable"), "the store must provide a createFlowStatsTable action");
+
+  // 2. Runtime stats vs the independent Python reference, on the fixture.
+  const statsMod = await import("../src/flow/stats");
+  const store = new InMemoryFlowStore({ budgetBytes: 1024 * 1024 * 1024 });
+  const { columns, paramNames } = generateFixtureSample();
+  await store.loadSample(FLOW_FIXTURE_SAMPLE_ID, columns, paramNames);
+  const pops: FlowPopulationRef[] = [
+    { id: "root", name: "All events", parentId: null },
+    { id: "cd4pos", name: "CD4+", parentId: "root", predicate: { kind: "range", param: "CD4", min: 1000 } },
+    { id: "cd4neg", name: "CD4-", parentId: "root", predicate: { kind: "range", param: "CD4", max: 1000 } },
+    { id: "cd4pos_cd8neg", name: "CD4+ CD8-", parentId: "cd4pos", predicate: { kind: "range", param: "CD8", max: 1000 } },
+    { id: "cd4pos_cd8pos", name: "CD4+ CD8+", parentId: "cd4pos", predicate: { kind: "range", param: "CD8", min: 1000 } },
+  ];
+  const resolved = statsMod.resolvePopulationIndices(columns, paramNames, pops);
+  const computed = statsMod.computePopulationStats(columns, paramNames, pops, resolved);
+  strictEqual(computed.length, 5);
+  for (const pop of computed) {
+    const want = F2C_EXPECTED[pop.id];
+    ok(want, `unexpected population ${pop.id}`);
+    strictEqual(pop.count, want.count, `${pop.id} count`);
+    close(pop.pctParent, want.pctParent, `${pop.id} % parent`);
+    close(pop.pctGrandparent, want.pctGrandparent, `${pop.id} % grandparent`);
+    close(pop.pctTotal, want.pctTotal, `${pop.id} % total`);
+    const byParam = new Map(pop.params.map((p) => [p.param, p]));
+    checkRow(byParam.get("CD4")!, want.cd4, `${pop.id} CD4`);
+    if (want.fsc) checkRow(byParam.get("FSC-A")!, want.fsc, `${pop.id} FSC-A`);
+  }
+  // The empty population reads count 0 with null stats, not NaN or a crash.
+  const empty = computed.find((p) => p.id === "cd4pos_cd8pos")!;
+  strictEqual(empty.count, 0);
+  for (const p of empty.params) {
+    strictEqual(p.count, 0, `${p.param} count in the empty population`);
+    for (const k of ["median", "mean", "geoMean", "sd", "cv", "rSd", "rCv", "min", "max", "p10", "p25", "p75", "p90"] as const) {
+      strictEqual(p[k], null, `${p.param} ${k} in the empty population`);
+    }
+  }
+  // The table bridge: one row per population, values at six significant figures.
+  const table = statsMod.buildPopulationStatsTable(computed, paramNames);
+  strictEqual(table.rows.length, 5);
+  ok(table.columns.includes("Population"), "the stats table must name the population");
+  ok(table.columns.includes("CD4 median"), "the stats table must carry a CD4 median column");
+  ok(table.columns.includes("% Parent"), "the stats table must carry frequencies");
+  const cd4posRow = table.rows.find((r) => r[0] === "CD4+")!;
+  strictEqual(cd4posRow[table.columns.indexOf("Events")], "6000");
+  strictEqual(cd4posRow[table.columns.indexOf("CD4 median")], "7941.75");
+  strictEqual(cd4posRow[table.columns.indexOf("% Total")], "30");
+
+  // 3. Predicates survive the .hlx round-trip through the forgiving reader.
+  const ref: FlowSampleRef = {
+    sampleId: FLOW_FIXTURE_SAMPLE_ID,
+    sourcePath: "",
+    sourceKind: "fcs",
+    name: "Fixture",
+    eventCount: 20000,
+    parameters: paramNames.map((name) => ({ name })),
+    gating: { populations: pops },
+  };
+  const node = createSampleNode(FLOW_FIXTURE_SAMPLE_ID, "Fixture", ref);
+  const payload: ProjectFilePayload = {
+    nodes: { [FLOW_FIXTURE_SAMPLE_ID]: node },
+    rootOrder: [FLOW_FIXTURE_SAMPLE_ID],
+    childOrder: {},
+    activeNodeId: FLOW_FIXTURE_SAMPLE_ID,
+  };
+  const back = parseProjectFile(JSON.parse(serializeProjectFile(payload)));
+  if ("error" in back) throw new Error(back.error);
+  const backRef = readFlowSample(back.project.nodes[FLOW_FIXTURE_SAMPLE_ID].flowSample);
+  ok(backRef?.gating, "the gating tree must survive the round-trip");
+  deepStrictEqual(
+    backRef!.gating!.populations.map((p) => p.predicate ?? null),
+    pops.map((p) => p.predicate ?? null),
+    "predicates must round-trip",
+  );
+  // A bad predicate is dropped, not trusted — the forgiving reader's rule.
+  const bad = readFlowSample({ ...ref, gating: { populations: [{ id: "x", name: "X", parentId: null, predicate: { kind: "polygon", param: "CD4" } }] } });
+  strictEqual(bad?.gating?.populations[0].predicate, undefined, "an unknown predicate kind must be dropped");
+
+  // 4. The executor, with injected deps: refusal while off, the stats table
+  //    while on, ad-hoc populations, and refusal on a bad predicate.
+  const flowMod = await import("../src/store/mcp-flow");
+  ok(typeof flowMod.executePopulationStats === "function", "mcp-flow.ts must export executePopulationStats");
+  const nodes: Record<string, ProjectNode> = { [FLOW_FIXTURE_SAMPLE_ID]: node };
+  let revision = 1;
+  const getState = () =>
+    ({ nodes, rootOrder: [FLOW_FIXTURE_SAMPLE_ID], childOrder: {}, activeNodeId: FLOW_FIXTURE_SAMPLE_ID, revision, projectName: "flow-f2c pin" }) as unknown as DocumentState;
+  let created: { table: TableData; name: string; sampleIds: readonly string[] } | null = null;
+  const createFlowStatsTable = (t: TableData, name: string, sampleIds: readonly string[]) => {
+    created = { table: t, name, sampleIds };
+    const id = "stats-table-1";
+    nodes[id] = createSummaryTableNode(id, name, t, sampleIds);
+    revision++;
+    return id;
+  };
+  const deps = { getState, flowStore: store, createFlowStatsTable };
+  try {
+    await rejects(
+      flowMod.executePopulationStats(deps, { sample_id: FLOW_FIXTURE_SAMPLE_ID }, "project-1"),
+      /off/,
+      "the job must refuse while the flow toggle is off",
+    );
+    setFlowEnabled(true);
+    const out = await flowMod.executePopulationStats(deps, { sample_id: FLOW_FIXTURE_SAMPLE_ID }, "project-1");
+    const result = out.result as { table_id: string; populations: { id: string; count: number }[] };
+    strictEqual(result.table_id, "stats-table-1");
+    deepStrictEqual(result.populations.map((p) => p.count), [20000, 6000, 14000, 6000, 0]);
+    strictEqual(out.created?.table_id, "stats-table-1");
+    ok(created, "the executor must create the stats table through the store action");
+    strictEqual(created!.table.rows.length, 5);
+    deepStrictEqual(created!.sampleIds, [FLOW_FIXTURE_SAMPLE_ID]);
+    ok(nodes["stats-table-1"].type === "table" && nodes["stats-table-1"].tableType === "column", "the stats table must be an ordinary Column table");
+    // Ad-hoc populations replace the sample's gating tree.
+    const adhoc = await flowMod.executePopulationStats(
+      deps,
+      { sample_id: FLOW_FIXTURE_SAMPLE_ID, populations: [{ id: "root", name: "All events", parent_id: null }] },
+      "project-1",
+    );
+    strictEqual((adhoc.result as { populations: unknown[] }).populations.length, 1);
+    // A missing sample and an unknown parameter are refused, not silently run.
+    await rejects(flowMod.executePopulationStats(deps, { sample_id: "no-such-sample" }, "project-1"));
+    await rejects(
+      flowMod.executePopulationStats(
+        deps,
+        { sample_id: FLOW_FIXTURE_SAMPLE_ID, populations: [{ id: "x", name: "X", parent_id: null, predicate: { kind: "range", param: "Nope", min: 0 } }] },
+        "project-1",
+      ),
+    );
+  } finally {
+    setFlowEnabled(false);
+  }
+  strictEqual(isFlowEnabled(), false, "the pin must leave the flow toggle off");
+
+  // 5. The MCP slice: titer_flow_population_stats + the flow allowlist group.
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes("titer_flow_population_stats"), "mcp.rs must define the titer_flow_population_stats tool");
+  ok(mcp.includes("PopulationStatsArgs"), "mcp.rs must define the PopulationStatsArgs schema");
+  ok(mcp.includes("flow-population-stats"), "mcp.rs must dispatch the flow-population-stats job action");
+  ok(mcp.includes('"titer_flow_population_stats"'), "mcp.rs must list the tool in the flow allowlist group");
+  ok(/two flow tools/.test(mcp), "the tools/list count comment must say two flow tools");
+
+  // 6. The lane doc records the FlowJo differential-testing decision.
+  const docPath = "docs/flow-population-stats.md";
+  ok(existsSync(docPath), "docs/flow-population-stats.md must record the parity decision");
+  const doc = readFileSync(docPath, "utf8");
+  ok(doc.includes("4096"), "the lane doc must record FlowJo's 4096-bin computation");
+  ok(doc.toLowerCase().includes("binned"), "the lane doc must report the measured binned-vs-unbinned deltas");
+});
+
 
 // ── Run ──────────────────────────────────────────────────────────────────
 
