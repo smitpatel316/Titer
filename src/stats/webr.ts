@@ -348,6 +348,67 @@ async function withEvalWatchdog<T>(
 }
 
 /**
+ * The R string literal holding `code` as a single braced expression.
+ * First-party code is built by joining fragments with `;`, and a
+ * missing fragment leaves a double separator (`;;` — the RM-ANOVA head
+ * is `${a};${gg or ""};${ec}`). At the top level of `parse(text=…)` a
+ * `;;` is a parse error (`unexpected ';'`), while inside braces it is
+ * an empty statement, exactly as the old `local({…})` form parsed it —
+ * so the text is braced. The braces also close on their own line, so a
+ * trailing `#` comment in the code cannot swallow the closing brace.
+ */
+function bracedCodeLiteral(code: string): string {
+  return JSON.stringify(`{\n${code}\n}`);
+}
+
+/**
+ * R source that evaluates `code` inside a fresh child environment of the
+ * global environment — the replacement for the old `local()` template
+ * interpolation. Two properties matter, and both are security properties
+ * (Round 2 Issue 6, seq 470):
+ *
+ * 1. The code travels as DATA, not as code: it is embedded as a
+ *    JSON-escaped string literal and parsed inside R (`parse(text=…)`).
+ *    A `})` in the code can no longer close the surrounding expression
+ *    and inject further R — the old form interpolated the code straight
+ *    into the `local({…})` template, so plugin code could break out of
+ *    the block entirely.
+ * 2. The code runs in a FRESH environment (`new.env(parent=globalenv())`),
+ *    so bindings it creates never land in the shared evaluation
+ *    environment, while attached packages stay visible through the
+ *    global environment's parent chain — the same name resolution
+ *    `local()` gave, without sharing the environment itself.
+ */
+function freshEnvEvalExpression(code: string): string {
+  return `eval(parse(text=${bracedCodeLiteral(code)}), envir=new.env(parent=globalenv()))`;
+}
+
+/**
+ * R source that evaluates PLUGIN `code` inside its own fresh environment
+ * with the shared global environment shadowed: `.GlobalEnv` inside the
+ * plugin environment is bound to a throwaway empty environment (and the
+ * binding is locked), so plugin code that assigns into `.GlobalEnv` —
+ * the shared-engine escape — writes into the void instead of the
+ * engine's global environment, and the binding itself cannot be
+ * rebound. The plugin's own bindings still land in its private
+ * environment, and attached packages stay visible through the parent
+ * chain (Round 2 Issue 6, seq 470). The static gates (gates.ts) reject
+ * `.GlobalEnv` / `globalenv()` / `parent.env()` in plugin code at
+ * install time; this is the runtime backstop for code that reaches the
+ * engine anyway.
+ */
+function pluginEvalExpression(code: string): string {
+  return (
+    `local({` +
+    ` .__titer_plugin_env__ <- new.env(parent=globalenv());` +
+    ` assign(".GlobalEnv", new.env(parent=emptyenv()), envir=.__titer_plugin_env__);` +
+    ` lockBinding(".GlobalEnv", .__titer_plugin_env__);` +
+    ` eval(parse(text=${bracedCodeLiteral(code)}), envir=.__titer_plugin_env__)` +
+    ` })`
+  );
+}
+
+/**
  * Evaluate R code that returns an unnamed numeric vector, marshalled to a JS
  * array in order. The vector twin of `evalNamedVector` — what lets an
  * analysis return per-point results (fitted values, a dense curve).
@@ -361,7 +422,9 @@ export async function evalNumericVector(code: string, opts?: EvalOptions): Promi
   const graceMs = opts?.graceMs ?? INTERRUPT_GRACE_MS;
   if (remote) {
     const named = await withEvalWatchdog(
-      remote(`v<-local({${code}});names(v)<-paste0("v",seq_along(v));v`),
+      remote(
+        `v<-eval(parse(text=${bracedCodeLiteral(code)}), envir=new.env(parent=globalenv()));names(v)<-paste0("v",seq_along(v));v`,
+      ),
       {
         timeoutMs,
         graceMs,
@@ -380,7 +443,7 @@ export async function evalNumericVector(code: string, opts?: EvalOptions): Promi
   try {
     const values = await withEvalWatchdog(
       (async () => {
-        const result = await shelter.evalR(`local({${code}})`).catch((err: unknown) => {
+        const result = await shelter.evalR(freshEnvEvalExpression(code)).catch((err: unknown) => {
           // R says "Error in `call`: reason". The call is our generated code: keep the reason.
           throw new Error(String(err instanceof Error ? err.message : err).replace(/^Error in `[^`]*`\s*:\s*/, ""));
         });
@@ -397,14 +460,34 @@ export async function evalNumericVector(code: string, opts?: EvalOptions): Promi
 
 /**
  * Evaluate R code that returns a named numeric vector, marshalled to a plain
- * `{ name: value }` map. The single primitive every analysis builds on. `local()`
- * gives each run a fresh environment, so analyses can never read each other's variables.
+ * `{ name: value }` map. The single primitive every analysis builds on. The
+ * code runs in a fresh environment (see `freshEnvEvalExpression`), so
+ * analyses can never read each other's variables — or each other's
+ * bindings in the shared engine.
  */
 export async function evalNamedVector(code: string, opts?: EvalOptions): Promise<RVector> {
+  return evalNamedVectorIn(code, opts, false);
+}
+
+/**
+ * Evaluate PLUGIN R code that returns a named numeric vector — the only
+ * path plugin compute code may take into the shared engine (registry.ts).
+ * Plugin code runs in its own environment with `.GlobalEnv` shadowed
+ * (see `pluginEvalExpression`): it can neither read nor write the
+ * engine's global environment, and it cannot break out of the evaluation
+ * by closing a brace — the code travels as a string literal, never
+ * interpolated as R source (Round 2 Issue 6, seq 470).
+ */
+export async function evalPluginNamedVector(code: string, opts?: EvalOptions): Promise<RVector> {
+  return evalNamedVectorIn(code, opts, true);
+}
+
+async function evalNamedVectorIn(code: string, opts: EvalOptions | undefined, plugin: boolean): Promise<RVector> {
   const timeoutMs = opts?.timeoutMs ?? EVAL_TIMEOUT_MS;
   const graceMs = opts?.graceMs ?? INTERRUPT_GRACE_MS;
+  const wrapped = plugin ? pluginEvalExpression(code) : freshEnvEvalExpression(code);
   if (remote) {
-    return withEvalWatchdog(remote(code), {
+    return withEvalWatchdog(remote(wrapped), {
       timeoutMs,
       graceMs,
       signal: opts?.signal,
@@ -418,7 +501,7 @@ export async function evalNamedVector(code: string, opts?: EvalOptions): Promise
   try {
     const { names, values } = await withEvalWatchdog(
       (async () => {
-        const result = await shelter.evalR(`local({${code}})`).catch((err: unknown) => {
+        const result = await shelter.evalR(wrapped).catch((err: unknown) => {
           // R says "Error in `call`: reason". The call is our generated code: keep the reason.
           throw new Error(String(err instanceof Error ? err.message : err).replace(/^Error in `[^`]*`\s*:\s*/, ""));
         });

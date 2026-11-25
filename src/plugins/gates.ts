@@ -101,6 +101,53 @@ const BASE_R_PATTERNS: RPattern[] = [
   { pattern: /\beval\s*\(/, message: "must not evaluate generated code (eval())" },
 ];
 
+/** Names the R denylist forbids — for the dynamic-dispatch patterns
+ *  below. `do.call("eval", …)`, `get("system")(…)`, `match.fun("eval")`
+ *  resolve the callee at runtime, so the `name(` patterns can never see
+ *  them; the first argument names the forbidden function instead
+ *  (Round 2 Issue 6, seq 470). A bare-name form (`do.call(eval, …)`) is
+ *  covered too. A variable callee (`do.call(fn, …)`) cannot be caught by
+ *  a static scan — the tripwire catches the literal spellings. */
+const DYNAMIC_R_NAMES = [
+  "system",
+  "shell",
+  "system2",
+  "pipe",
+  "source",
+  "eval",
+  "library",
+  "require",
+  "download.file",
+  "url",
+  "socketConnection",
+  "readLines",
+  "read.csv",
+  "read.table",
+  "scan",
+  "file",
+  "list.files",
+  "dir",
+  "unlink",
+  "file.create",
+  "file.remove",
+  "file.rename",
+  "file.copy",
+  "write.csv",
+  "write.table",
+  "writeLines",
+  "saveRDS",
+  "save",
+  "install.packages",
+  "install_github",
+  "dyn.load",
+  "library.dynam",
+  "load",
+  ".Call",
+  ".External",
+  ".C",
+];
+const dynamicNameAlt = DYNAMIC_R_NAMES.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+
 const EXTENDED_R_PATTERNS: RPattern[] = [
   { pattern: /\b(system2|pipe)\s*\(/, message: "must not run shell commands (system2()/pipe())" },
   {
@@ -133,6 +180,59 @@ const EXTENDED_R_PATTERNS: RPattern[] = [
     message: "must not call native code (.Call()/.External()/.C()) — plugins are R + JS/TS only",
   },
   { pattern: /\bload\s*\(/, message: "must not load saved workspaces (load())" },
+  {
+    pattern: new RegExp(`\\bdo\\.call\\s*\\(\\s*["'](${dynamicNameAlt})["']`),
+    message: "must not call a forbidden function through do.call() — resolving it by name does not exempt it",
+  },
+  {
+    pattern: new RegExp(`\\bdo\\.call\\s*\\(\\s*(${dynamicNameAlt})\\b`),
+    message: "must not call a forbidden function through do.call() — resolving it by name does not exempt it",
+  },
+  {
+    pattern: new RegExp(`\\b(?:get0?|mget)\\s*\\(\\s*["'](${dynamicNameAlt})["']`),
+    message: "must not resolve a forbidden function by name (get()/get0()/mget())",
+  },
+  {
+    pattern: new RegExp(`\\bmatch\\.fun\\s*\\(\\s*["'](${dynamicNameAlt})["']`),
+    message: "must not resolve a forbidden function by name (match.fun())",
+  },
+  // The shared-engine escape routes (Round 2 Issue 6, seq 470): plugin R
+  // runs in its own environment inside the shared webR engine (webr.ts),
+  // and `.GlobalEnv` is shadowed there — but the gate rejects reaching
+  // for it in the first place, so a plugin that tries fails at install
+  // instead of at run time.
+  {
+    pattern: /\.GlobalEnv\b/,
+    message: "must not reach the shared global environment (.GlobalEnv) — plugin code runs in its own environment",
+  },
+  {
+    pattern: /\bglobalenv\s*\(/,
+    message: "must not reach the shared global environment (globalenv())",
+  },
+  {
+    pattern: /\bparent\.env\s*\(/,
+    message: "must not walk out of the plugin environment (parent.env())",
+  },
+  {
+    pattern: /\bparent\.frame\s*\(/,
+    message: "must not walk out of the plugin environment (parent.frame())",
+  },
+  {
+    pattern: /\bsys\.frame\s*\(/,
+    message: "must not walk out of the plugin environment (sys.frame())",
+  },
+  {
+    pattern: /\bunlockBinding\s*\(/,
+    message: "must not unlock bindings (unlockBinding())",
+  },
+  {
+    pattern: /\battach\s*\(/,
+    message: "must not modify the search path (attach())",
+  },
+  {
+    pattern: /\bas\.environment\s*\(/,
+    message: "must not reach an environment by position or name (as.environment())",
+  },
 ];
 
 /** The full R denylist: the groundwork base plus the M3 extensions. */
@@ -141,11 +241,17 @@ export const R_DENYLIST: readonly RPattern[] = [...BASE_R_PATTERNS, ...EXTENDED_
 const lineOf = (code: string, index: number): number => code.slice(0, index).split("\n").length;
 
 /** The forbidden-pattern findings in R code (empty: clean). Each finding
- *  names the pattern that tripped and the line it is on. */
+ *  names the pattern that tripped and the line it is on. Backtick-quoted
+ *  names are unwrapped first: R lets any function be called through
+ *  backticks (`` `eval`(…) ``), which the `name\s*\(` patterns can never
+ *  see (Round 2 Issue 6, seq 470). Unwrapping only removes backticks
+ *  around identifiers, never newlines, so reported line numbers are
+ *  unaffected. */
 export function scanPluginRCodeExtended(code: string, file?: string): GateFinding[] {
   const findings: GateFinding[] = [];
+  const normalized = code.replace(/`([A-Za-z_.][A-Za-z0-9_.]*)`/g, "$1");
   for (const { pattern, message } of R_DENYLIST) {
-    const match = pattern.exec(code);
+    const match = pattern.exec(normalized);
     if (match) {
       findings.push({
         severity: "error",
@@ -178,6 +284,15 @@ const JS_PATTERNS: JsPattern[] = [
     pattern: /\bnew\s+Function\s*\(/,
     name: "Function",
     message: "must not build functions from strings (new Function())",
+  },
+  {
+    // `Function()` without `new` is the same constructor call — the old
+    // scan only caught the `new` spelling (Round 2 Issue 6, seq 470).
+    // The lookbehind keeps `new Function(` on the pattern above, so one
+    // spelling reports once.
+    pattern: /(?<!new\s+)\bFunction\s*\(/,
+    name: "Function",
+    message: "must not build functions from strings (Function())",
   },
   {
     pattern: /require\s*\(\s*["'](node:)?child_process["']\s*\)|from\s+["'](node:)?child_process["']/,
@@ -214,7 +329,17 @@ const JS_PATTERNS: JsPattern[] = [
     network: true,
   },
   {
-    pattern: /from\s+["']@tauri-apps\/api[^"']*["']|__TAURI(_INTERNALS__)?__/,
+    // The Tauri v2 global is `__TAURI_INTERNALS__` (one trailing
+    // double-underscore). The old spelling matched `__TAURI__` or the
+    // global with FOUR trailing underscores, never the real global
+    // (Round 2 Issue 6, seq 470) — the `(_INTERNALS)` group was written
+    // with its closing underscores inside the group.
+    pattern: /__TAURI(_INTERNALS)?__/,
+    name: "tauri",
+    message: "must not call Tauri directly — plugin code reaches the app only through titer.* commands",
+  },
+  {
+    pattern: /from\s+["']@tauri-apps\/api[^"']*["']/,
     name: "tauri",
     message: "must not call Tauri directly — plugin code reaches the app only through titer.* commands",
   },

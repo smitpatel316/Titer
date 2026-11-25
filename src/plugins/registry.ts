@@ -16,17 +16,20 @@
 // a disabled plugin's analyses are unregistered here, so they vanish from
 // `resolveAnalysis` the moment the plugin is disabled (see loader.ts).
 //
-// Computation containment: plugin R code runs through the existing webR
-// engine — `evalNamedVector`, the single primitive every first-party
-// analysis builds on — with the data groups declared as `g0`, `g1`, … and
-// packages installed first via `ensurePackages` from the vendored repo.
+// Computation containment: plugin R code runs through the shared webR
+// engine — `evalPluginNamedVector` (webr.ts), the plugin-only twin of the
+// first-party `evalNamedVector` — with the data groups declared as `g0`,
+// `g1`, … and packages installed first via `ensurePackages` from the
+// vendored repo. Plugin code evaluates in its own environment with
+// `.GlobalEnv` shadowed, and travels as a string literal, never
+// interpolated as R source (Round 2 Issue 6, seq 470).
 // A pure-TypeScript analysis never touches R: its descriptives come from
 // `../lib/summary`. Runs on a table are cached per table version in
 // `runPluginAnalysisOnTable` below (same-keyed as first-party `runAnalysis`);
 // the bare `runPluginAnalysis` (columns, no table) is not cached.
 
 import { ANALYSES } from "../stats/index";
-import { ensurePackages, evalNamedVector, packageErrorMessage } from "../stats/webr";
+import { ensurePackages, evalPluginNamedVector, packageErrorMessage } from "../stats/webr";
 import { dataGroups, declareGroups, describe } from "../stats/column/base";
 import { mean, median, sd, sem } from "../lib/summary";
 import { readTable } from "../lib/dataset";
@@ -352,8 +355,11 @@ export async function runPluginAnalysis(
       }
     }
     // Groups are declared as g0, g1, … (the ColumnTestSpec contract); the
-    // plugin code ends in a c(name=value, …) named vector.
-    const v = await evalNamedVector(`${declareGroups(groups)};${spec.compute.code}`);
+    // plugin code ends in a c(name=value, …) named vector. Plugin compute
+    // runs through `evalPluginNamedVector`, never the shared first-party
+    // primitive: its own environment, `.GlobalEnv` shadowed, code passed
+    // as data (Round 2 Issue 6, seq 470).
+    const v = await evalPluginNamedVector(`${declareGroups(groups)};${spec.compute.code}`);
     const { groups: described } = await describe(groups);
     const stats = spec.rows ? spec.rows(v, described, values) : defaultRows(v);
     return {

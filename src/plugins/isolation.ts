@@ -61,9 +61,11 @@
 // refuses a disabled (or pending-review, or incompatible) record — via
 // M4's `checkPluginDependency` (workflow-dependency.ts), reused here
 // rather than a third copy of the check — and `onPluginDisabled` /
-// `onPluginUninstalled` tear the frame down. The app shell calls those
-// hooks from the same place it calls `disablePlugin` (loader.ts); the
-// interceptor also re-checks liveness against the live registry on
+// `onPluginUninstalled` tear the frame down. The loader calls those
+// hooks itself from `disablePlugin` (loader.ts), and the marketplace
+// store calls them from its own disable/uninstall paths too, so no
+// disable path can leave a frame running (Round 2 Issue 5, seq 469);
+// the interceptor also re-checks liveness against the live registry on
 // every call, so a frame whose plugin was disabled without the hook
 // still denies on its next call and tears itself down.
 
@@ -108,6 +110,10 @@ export interface PluginWebviewSession {
   /** The plugin's entry source, as loaded. Empty when the plugin ships no
    *  entry file (analysis-only plugins have nothing to execute). */
   source: string;
+  /** What the plugin was granted when this frame launched. The
+   *  interceptor enforces the LIVE grants (see `resolveLivePermissions`),
+   *  not this snapshot — a re-enable with fewer permissions narrows the
+   *  frame's calls without waiting for a relaunch. */
   grantedPermissions: readonly PluginPermission[];
   status: "running" | "torn-down";
   launchedAt: string;
@@ -133,11 +139,55 @@ export interface PluginWebviewLaunchOptions {
 const activeWebviews = new Map<string, PluginWebviewSession>();
 
 /**
+ * Live granted permissions, as last recorded by the loader's enable path
+ * (`confirmEnable`, and `launchPluginWebview` below) — the interceptor's
+ * source of truth on every call, not the session's launch-time snapshot.
+ * A session's `grantedPermissions` is what the plugin was granted when
+ * the frame launched; the map is what it is granted NOW. The two agree
+ * whenever the loader is the only grant writer (it is: grants change
+ * only at `confirmEnable`, and `disablePlugin` clears the entry). The
+ * map is consulted first and the snapshot is only the fallback for a
+ * session the loader never recorded (e.g. a test-built session), so a
+ * re-enable with a smaller grant set can never leave an old session
+ * enforcing the revoked permissions (Round 2 Issue 5, seq 469).
+ */
+const liveGrantedPermissions = new Map<string, readonly PluginPermission[]>();
+
+/** Record the permissions a plugin currently holds (loader enable path). */
+export function setLiveGrantedPermissions(pluginId: string, granted: readonly PluginPermission[]): void {
+  liveGrantedPermissions.set(pluginId, [...granted]);
+}
+
+/** Forget a plugin's live grants (loader disable path). */
+export function clearLiveGrantedPermissions(pluginId: string): void {
+  liveGrantedPermissions.delete(pluginId);
+}
+
+/** The permissions the interceptor enforces for a session: the live
+ *  grants when the loader recorded any, else the session's snapshot. */
+function resolveLivePermissions(session: PluginWebviewSession): readonly PluginPermission[] {
+  return liveGrantedPermissions.get(session.pluginId) ?? session.grantedPermissions;
+}
+
+/** Whether two grant sets hold the same permissions (order-insensitive). */
+function sameGrantedPermissions(
+  a: readonly PluginPermission[],
+  b: readonly PluginPermission[],
+): boolean {
+  return a.length === b.length && a.every((p) => b.includes(p));
+}
+
+/**
  * Launch a plugin's Isolation frame. Refuses a plugin that is not
  * enabled — via M4's dependency check, so "disabled" reports the same
  * "needs plugin X — install it?" notice the workflow engine shows.
  * Launching an already-running plugin returns its live session instead
- * of a second frame.
+ * of a second frame — but only when the session still matches the
+ * record: if the granted permissions changed (a re-enable with a
+ * smaller grant set) or a new entry source was supplied, the stale
+ * session is torn down first and a fresh one launched, so a revoked
+ * permission can never survive a re-enable inside an old frame
+ * (Round 2 Issue 5, seq 469).
  */
 export function launchPluginWebview(
   record: PluginRecord,
@@ -149,8 +199,14 @@ export function launchPluginWebview(
   );
   if (!dep.ok) return { error: dep.notice };
   const existing = activeWebviews.get(record.manifest.id);
-  if (existing && existing.status === "running") return { session: existing };
+  if (existing && existing.status === "running") {
+    const samePermissions = sameGrantedPermissions(existing.grantedPermissions, record.grantedPermissions);
+    const sameSource = opts.source === undefined || opts.source === existing.source;
+    if (samePermissions && sameSource) return { session: existing };
+    teardownPluginWebview(record.manifest.id);
+  }
   const pluginId = record.manifest.id;
+  setLiveGrantedPermissions(pluginId, record.grantedPermissions);
   const session: PluginWebviewSession = {
     pluginId,
     pluginName: record.manifest.name,
@@ -263,8 +319,11 @@ export async function interceptPluginCall(
     );
   }
   try {
+    // Enforce the LIVE grants, not the session's launch-time snapshot:
+    // a re-enable with fewer permissions must narrow what this frame
+    // may call even before any relaunch (Round 2 Issue 5, seq 469).
     const result = await dispatchPluginCommand(
-      { pluginId: session.pluginId, grantedPermissions: session.grantedPermissions },
+      { pluginId: session.pluginId, grantedPermissions: resolveLivePermissions(session) },
       command,
       () => host(command, args),
     );
