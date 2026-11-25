@@ -25,6 +25,7 @@ import { MAX_INFO_SHEETS, newInfoSheetData } from "../lib/info-sheets";
 import type { AnalysisParams, AnalysisPickerValue, AnalysisResult, AnalysisType } from "../stats/types";
 import { resolveAnalysis, type PluginAnalysisResult, type PluginParamValues } from "../plugins";
 import { TABLES } from "../views/tables";
+import { convertColumnToNested, type ConvertToNestedSpec } from "../views/tables/table-data";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions } from "../views/graphs";
 import type { TemplateKind } from "../lib/template";
 import { analysisTitle } from "../stats";
@@ -54,6 +55,7 @@ type Selector =
   | { kind: "wand"; tableId: string }
   | { kind: "clone-graph"; graphId: string }
   | { kind: "simulate-data"; tableId: string }
+  | { kind: "convert-to-nested"; tableId: string }
   // Sample size & power (seq 207): a guided calculator with no table and
   // no project — the selector carries no table id by design.
   | { kind: "sample-size-power" }
@@ -219,6 +221,12 @@ type Action =
    *  `setName` become orphaned — frozen results, re-pointable via seq 242 —
    *  as when their table is deleted. */
   | { type: "removeDataSet"; id: string; data: TableData; setName: string; label: string }
+  /** Rebuild a Column table as Nested (seq 450): `data` is the table after
+   *  the conversion (one undo step with the orphaning), and the analyses
+   *  that ran on the Column table become orphaned — frozen results,
+   *  re-pointable via seq 242 — as when their table is deleted: a column
+   *  test does not run on a nested table. */
+  | { type: "convertTableToNested"; id: string; data: TableData; label: string }
   | { type: "updateGraph"; id: string; options: GraphOptions; at: number }
   /** A graph's extra source tables (#48): the ids, in order; empty clears
    *  them (the graph goes back to its primary table alone). */
@@ -976,6 +984,78 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         : after.rootOrder;
       return { ...after, nodes, rootOrder, childOrder, isDirty: true };
     }
+    case "convertTableToNested": {
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "table" || node.frozen || node.tableType !== "column" || action.data === node.data)
+        return state;
+      // A table computed from this one keeps its values, which can be typed
+      // from then on — as when its source table is deleted outright. Detach
+      // before the table update, so the recompute doesn't blank the kept
+      // values first.
+      let detached = state;
+      if (Object.values(state.nodes).some((n) => n.transform?.from === action.id)) {
+        const nodes = { ...state.nodes };
+        for (const n of Object.values(nodes)) {
+          if (n.transform?.from === action.id) {
+            const { transform: _, ...rest } = n;
+            nodes[n.id] = rest;
+          }
+        }
+        detached = { ...state, nodes };
+      }
+      // One dispatch, one undo step: the table update (which follows the
+      // table's other children) plus the orphaning below — then the type
+      // flip, so the update funnel still sees the Column table it edits.
+      const after = applyAction(detached, {
+        type: "updateTable",
+        id: action.id,
+        data: action.data,
+        label: action.label,
+      });
+      const nodes: Record<string, ProjectNode> = { ...after.nodes };
+      const converted = nodes[action.id];
+      if (converted) nodes[action.id] = { ...converted, tableType: "nested" };
+      const newColumns = action.data.columns;
+      // The column analyses ran a column test, which does not run on a
+      // nested table — orphan them, frozen results, re-pointable (seq 242),
+      // and move them to the project root, like a deleted table's.
+      const orphanIds = new Set(
+        (after.childOrder[action.id] ?? []).filter((id) => after.nodes[id]?.type === "analysis"),
+      );
+      for (const id of orphanIds) {
+        const n = nodes[id];
+        if (n) nodes[id] = { ...n, parentId: null, orphaned: true, sourceTableName: node.name };
+      }
+      // A graph keeps drawing the converted table, but its sets named the
+      // old datasets, which are gone — drop those names, as removeDataSet
+      // drops the removed set; the graph redraws from the nested columns.
+      for (const n of Object.values(nodes)) {
+        if (n.type === "graph" && n.parentId === action.id && n.graphOptions) {
+          const graphOptions = { ...n.graphOptions };
+          if (graphOptions.sets) {
+            const sets = graphOptions.sets.filter((s) => newColumns.includes(s));
+            if (sets.length) graphOptions.sets = sets;
+            else delete graphOptions.sets;
+          }
+          if (graphOptions.series) {
+            const series = Object.fromEntries(
+              Object.entries(graphOptions.series).filter(([k]) => newColumns.includes(k)),
+            );
+            if (Object.keys(series).length) graphOptions.series = series;
+            else delete graphOptions.series;
+          }
+          nodes[n.id] = { ...n, graphOptions };
+        }
+      }
+      const childOrder: Record<string, string[]> = { ...after.childOrder };
+      if (orphanIds.size) {
+        childOrder[action.id] = (childOrder[action.id] ?? []).filter((id) => !orphanIds.has(id));
+      }
+      const rootOrder = orphanIds.size
+        ? [...after.rootOrder.filter((id) => !orphanIds.has(id)), ...orphanIds]
+        : after.rootOrder;
+      return { ...after, nodes, rootOrder, childOrder, isDirty: true };
+    }
     case "updateGraph": {
       const node = state.nodes[action.id];
       if (!node || node.type !== "graph") return state;
@@ -1222,6 +1302,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "arrangeDrawingObjects",
   "updateTable",
   "removeDataSet",
+  "convertTableToNested",
   "updateGraph",
   "setGraphSources",
   "updateGraphs",
@@ -1303,6 +1384,8 @@ function changeName(action: Action): string {
       return action.label;
     case "removeDataSet":
       return "Remove Data Set";
+    case "convertTableToNested":
+      return "Convert to Nested";
     case "updateGraph":
       return "Format Change";
     case "setGraphSources":
@@ -1508,6 +1591,12 @@ interface ProjectActions {
    *  the removal, `setName` the removed set — the analyses that ran on it
    *  become orphaned, in the same undo step. */
   removeDataSet: (id: string, data: TableData, setName: string, label: string) => void;
+  /** Rebuild a Column table as Nested (seq 450): each dataset becomes a
+   *  group, its rows splitting into `spec`'s subgroups in order. The
+   *  table's column analyses orphan, in the same undo step. Throws a
+   *  plain-language error when the table is not a Column table, is frozen,
+   *  or the rows don't tile into the subgroups. */
+  convertTableToNested: (id: string, spec: ConvertToNestedSpec) => void;
   updateGraph: (id: string, options: GraphOptions) => void;
   /** An item's note (empty: none). */
   setNotes: (id: string, notes: string) => void;
@@ -1804,6 +1893,21 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: "arrangeDrawingObjects", nodeId, op, objectIds }),
       updateTable: (id, data, label, move) => dispatch({ type: "updateTable", id, data, label, move }),
       removeDataSet: (id, data, setName, label) => dispatch({ type: "removeDataSet", id, data, setName, label }),
+      convertTableToNested: (id, spec) => {
+        const node = latest.current.nodes[id];
+        if (!node || node.type !== "table") throw new Error(`no table with id “${id}” in this project.`);
+        if (node.tableType !== "column")
+          throw new Error(
+            `only a Column table converts to Nested — “${node.name}” is a ${TABLES[node.tableType!].label} table.`,
+          );
+        if (node.frozen) throw new Error(`table “${node.name}” is frozen — unfreeze it before converting it.`);
+        dispatch({
+          type: "convertTableToNested",
+          id,
+          data: convertColumnToNested(node.data!, spec),
+          label: "Convert to Nested",
+        });
+      },
       updateGraph: (id, options) => dispatch({ type: "updateGraph", id, options, at: Date.now() }),
       setNotes: (id, notes) => dispatch({ type: "setNotes", id, notes, at: Date.now() }),
       setTags: (id, tags) => dispatch({ type: "setTags", id, tags }),
