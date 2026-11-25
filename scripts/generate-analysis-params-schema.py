@@ -119,10 +119,12 @@ ENUM_OVERRIDES = {
     ("rm-anova", "posthoc"): POSTHOCS,
     ("two-way-anova", "posthoc"): TWO_WAY_POSTHOCS,
     # Three-way / nested / multifactor ANOVA runners refuse every posthoc but these
-    # (types.ts ThreeWayAnovaParams / NestedAnovaParams / MultifactorAnovaParams comments).
+    # (types.ts ThreeWayAnovaParams / NestedAnovaParams / MultifactorAnovaParams comments) —
+    # plus "none" (no posthoc), which all three accept: nested-anova's DEFAULTS
+    # is { posthoc: "none" } and multifactor-anova falls back with `?? "none"`.
     ("three-way-anova", "posthoc"): ARRAYS["THREE_WAY_POSTHOCS"],
-    ("nested-anova", "posthoc"): ["tukey", "bonferroni"],
-    ("multifactor-anova", "posthoc"): ["tukey", "bonferroni"],
+    ("nested-anova", "posthoc"): ["none", "tukey", "bonferroni"],
+    ("multifactor-anova", "posthoc"): ["none", "tukey", "bonferroni"],
     # The merged `correction` PARAMS list admits every family's values (seq
     # 193 widened it for multiple-t-tests), so each family's enum is narrowed
     # here: survival only offers holm/fdr/none, multiple-t-tests the full
@@ -439,6 +441,9 @@ for f in (ROOT / "src/stats").rglob("*.ts"):
 #  poisson-regression.ts: `params?.quasi ?? false`
 #  three-way-anova.ts: `params?.posthoc ?? "none"`
 #  multifactor-anova.ts: `params?.posthoc ?? "none"`
+#  two-way-anova.ts: runTwoWayAnova defaults posthoc "none" /
+#    posthocTarget "groups" (BUG-REPORT #26: a partial params object runs)
+#  rm-anova.ts: posthocIn() returns "none" when posthoc is omitted
 #  effectSizes (seq 161): every runner reports them unless
 #    `params?.effectSizes === false` (column specs via the raw params;
 #    anova / compare-two-groups / one-sample-t also carry it in DEFAULTS).
@@ -484,6 +489,9 @@ RUNNER_FALLBACKS = {
     ("chi-square-gof", "expectedMode"): "equal",
     ("binomial-test", "expectedProportion"): 0.5,
     ("multifactor-anova", "posthoc"): "none",
+    ("two-way-anova", "posthoc"): "none",
+    ("two-way-anova", "posthocTarget"): "groups",
+    ("rm-anova", "posthoc"): "none",
 }
 
 # Numeric limits the PARAMS table does not carry.
@@ -596,7 +604,10 @@ for typ, keys in sorted(KEYS_BY_TYPE.items()):
     out = {
         "label": entry["label"],
         "min_columns": entry["min_columns"],
-        "offered_on": sorted(OFFERED.get(typ, [])),
+        # A set, not a list: the XY picker lists both "nonlinear-regression"
+        # and the "interpolate" meta entry (which resolves to it), so the
+        # expansion would otherwise offer it on xy twice.
+        "offered_on": sorted(set(OFFERED.get(typ, []))),
         "params": params,
     }
     if entry["packages"]:
