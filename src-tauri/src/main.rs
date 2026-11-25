@@ -528,6 +528,58 @@ fn check_extension(path: &str, allowed: &[&str]) -> Result<(), String> {
     }
 }
 
+/// An AppleScript string literal: backslashes and quotes escaped, line
+/// breaks flattened — a literal line break inside "..." is a syntax
+/// error in AppleScript. The shell builds every AppleScript it runs from
+/// a fixed template with values passed through here, so no IPC string
+/// ever reaches osascript as code. Mirrors `appleScriptString` in
+/// src/lib/office-export.ts.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn escape_applescript_string(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\r' | '\n' => out.push(' '),
+            _ => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// An AppleScript number: integers bare, fractions to two decimals —
+/// never locale-formatted, never scientific. Mirrors
+/// `appleScriptNumber` in src/lib/office-export.ts.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn applescript_number(value: f64) -> String {
+    let rounded = (value * 100.0).round() / 100.0;
+    if rounded.fract() == 0.0 {
+        format!("{}", rounded as i64)
+    } else {
+        format!("{rounded:.2}").trim_end_matches('0').to_string()
+    }
+}
+
+/// A path the shell may hand to osascript or delete: it must be a file
+/// this app wrote to its own temp dir — canonicalized (symlinks
+/// resolved) and confined under `temp_dir()`, with one of the given
+/// extensions. Anything else is refused, so a compromised page can't
+/// point a clipboard or Keynote command at — or delete — an arbitrary
+/// file on disk.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn canonicalize_in_temp_dir(path: &str, allowed: &[&str]) -> Result<PathBuf, String> {
+    check_extension(path, allowed)?;
+    let temp_dir = std::env::temp_dir().canonicalize().map_err(|e| e.to_string())?;
+    let canonical = Path::new(path).canonicalize().map_err(|e| e.to_string())?;
+    if !canonical.starts_with(&temp_dir) {
+        return Err(format!("Titer can't access {path}"));
+    }
+    Ok(canonical)
+}
+
 /// A file's text, with a leading UTF-8 BOM stripped (FF-F11): a BOM `.hlx`
 /// used to fail JSON parsing as "damaged", and a non-UTF-8 file used to fail
 /// `read_to_string` with the same bare I/O error as a missing file — so the
@@ -676,6 +728,10 @@ async fn move_file(from: String, to: String) -> Result<(), String> {
 }
 
 fn move_file_blocking(from: &str, to: &str) -> Result<(), String> {
+    // Gated like every other file command: only a file type Titer itself
+    // reads or writes may move — the extension-equality check below then
+    // keeps the format across the rename.
+    check_extension(from, WRITE_FILE_EXTENSIONS)?;
     let from_path = Path::new(from);
     let to_path = Path::new(to);
     if !from_path.exists() {
@@ -699,57 +755,128 @@ fn move_file_blocking(from: &str, to: &str) -> Result<(), String> {
     }
 }
 
-/// Send to Keynote (seq 217): runs the AppleScript the page built
-/// (`buildKeynoteScript` in src/lib/office-export.ts) in Keynote via
-/// `osascript`, so Keynote makes the presentation and saves the real .key
-/// at `path`. macOS only — anywhere else this refuses outright, before
-/// touching anything (the menu hides the item there, and the MCP tool
-/// refuses the target there first). The script goes in a temp file, not
-/// an `osascript -e` argument, so no shell quoting is involved; the temp
-/// script and the temp PNG the page wrote are deleted once osascript
-/// finishes, whatever it reports. Async, on the blocking pool: osascript
-/// can take seconds while Keynote launches, and a save into ~/Documents
-/// or ~/Desktop can block on a macOS TCC consent prompt (same class as
-/// seq 248's `write_file`).
+/// The AppleScript that makes the Keynote presentation: a new document,
+/// its first slide carrying the title as a text item at the top and the
+/// PNG centred below it at its physical size (fitted inside the slide,
+/// never cropped), saved to `out_path`. The shell's own fixed template —
+/// the same text `buildKeynoteScript` builds in
+/// src/lib/office-export.ts, which the suite pins — with only the three
+/// values interpolated, each through `escape_applescript_string`: the
+/// webview passes data (paths, title, size), never a script, so no IPC
+/// string ever reaches osascript as code. The slide size is read from the
+/// document itself, so any theme — widescreen or 4:3 — lays out right.
+/// Keynote stays open on the new presentation, as Prism leaves it: the
+/// user continues there. No font styling is set — Keynote's default text
+/// item — because the script dictionary's text styling was not verified
+/// against a real Keynote in this lane; the Mac proof batch may add it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn build_keynote_script(png_path: &str, out_path: &str, title: &str, width_pt: f64, height_pt: f64) -> String {
+    let png = escape_applescript_string(png_path);
+    let out = escape_applescript_string(out_path);
+    let title = escape_applescript_string(title);
+    let img_w = applescript_number(width_pt);
+    let img_h = applescript_number(height_pt);
+    [
+        "tell application \"Keynote\"".to_string(),
+        "\tactivate".to_string(),
+        format!("\tset pngFile to POSIX file {png}"),
+        format!("\tset outFile to POSIX file {out}"),
+        "\tset doc to make new document".to_string(),
+        "\tset slideW to width of doc".to_string(),
+        "\tset slideH to height of doc".to_string(),
+        "\tset mySlide to slide 1 of doc".to_string(),
+        format!("\tset imgW to {img_w}"),
+        format!("\tset imgH to {img_h}"),
+        "\tset maxW to slideW - 72".to_string(),
+        "\tset maxH to slideH - 108".to_string(),
+        "\tif imgW > maxW then".to_string(),
+        "\t\tset imgH to imgH * maxW / imgW".to_string(),
+        "\t\tset imgW to maxW".to_string(),
+        "\tend if".to_string(),
+        "\tif imgH > maxH then".to_string(),
+        "\t\tset imgW to imgW * maxH / imgH".to_string(),
+        "\t\tset imgH to maxH".to_string(),
+        "\tend if".to_string(),
+        "\ttell mySlide".to_string(),
+        format!("\t\tset titleBox to make new text item with properties {{object text: {title}}}"),
+        "\t\tset position of titleBox to {36, 18}".to_string(),
+        "\t\tset size of titleBox to {slideW - 72, 36}".to_string(),
+        "\t\tset newImage to make new image with properties {file: pngFile}".to_string(),
+        "\t\tset position of newImage to {(slideW - imgW) / 2, 72 + (maxH - imgH) / 2}".to_string(),
+        "\t\tset size of newImage to {imgW, imgH}".to_string(),
+        "\tend tell".to_string(),
+        "\tsave doc in outFile".to_string(),
+        "end tell".to_string(),
+    ]
+    .join("\n")
+}
+
+/// Send to Keynote (seq 217): the shell builds the AppleScript itself
+/// from the values the page passes — the PNG's temp path, the .key
+/// destination, the title, the image size in points — and runs it in
+/// Keynote via `osascript`, so Keynote makes the presentation and saves
+/// the real .key at `path`. The page never hands the shell a script
+/// string: a compromised page could otherwise run arbitrary AppleScript
+/// — including `do shell script` — in the shell's process. macOS only —
+/// anywhere else this refuses outright, before touching anything (the
+/// menu hides the item there, and the MCP tool refuses the target there
+/// first). The script goes in a temp file, not an `osascript -e`
+/// argument, so no shell quoting is involved; the temp script and the
+/// temp PNG the page wrote are deleted once osascript finishes, whatever
+/// it reports — but only after the PNG is proven to be this app's own
+/// temp file (see `canonicalize_in_temp_dir`). Async, on the blocking
+/// pool: osascript can take seconds while Keynote launches, and a save
+/// into ~/Documents or ~/Desktop can block on a macOS TCC consent
+/// prompt (same class as seq 248's `write_file`).
 #[tauri::command]
-async fn send_to_keynote(script: String, png_path: String, path: String) -> Result<String, String> {
+async fn send_to_keynote(png_path: String, path: String, title: String, width_pt: f64, height_pt: f64) -> Result<String, String> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (&script, &png_path, &path);
+        let _ = (&png_path, &path, &title, &width_pt, &height_pt);
         return Err("Send to Keynote needs macOS with Keynote installed — this build cannot drive Keynote.".to_string());
     }
     #[cfg(target_os = "macos")]
     {
-        tokio::task::spawn_blocking(move || send_to_keynote_blocking(&script, &png_path, &path))
+        tokio::task::spawn_blocking(move || send_to_keynote_blocking(&png_path, &path, &title, width_pt, height_pt))
             .await
             .map_err(|e| e.to_string())?
     }
 }
 
 #[cfg(target_os = "macos")]
-fn send_to_keynote_blocking(script: &str, png_path: &str, path: &str) -> Result<String, String> {
+fn send_to_keynote_blocking(png_path: &str, path: &str, title: &str, width_pt: f64, height_pt: f64) -> Result<String, String> {
     use std::io::Write;
+    // The PNG is one this app wrote to its own temp dir, and the .key
+    // destination is a file Titer may write — both gated before anything
+    // runs, so a compromised page can't point Keynote at, or delete, an
+    // arbitrary file. The AppleScript is the shell's own fixed template
+    // (`build_keynote_script`), never a string from the page.
+    let png_path = canonicalize_in_temp_dir(png_path, &["png"])?;
+    check_extension(path, &["key"])?;
+    if !(width_pt > 0.0 && height_pt > 0.0) {
+        return Err("Send to Keynote needs a positive image size.".into());
+    }
+    let applescript = build_keynote_script(&png_path.to_string_lossy(), path, title, width_pt, height_pt);
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let script_path = std::env::temp_dir().join(format!("titer-keynote-{stamp}.applescript"));
+    let applescript_path = std::env::temp_dir().join(format!("titer-keynote-{stamp}.applescript"));
     // Write through a handle so a short write is retried, not silent.
     let out = (|| -> Result<std::process::Output, String> {
-        let mut script_file = std::fs::File::create(&script_path)
+        let mut file = std::fs::File::create(&applescript_path)
             .map_err(|e| format!("Couldn't write the Keynote script: {e}"))?;
-        script_file
-            .write_all(script.as_bytes())
-            .and_then(|()| script_file.sync_all())
+        file.write_all(applescript.as_bytes())
+            .and_then(|()| file.sync_all())
             .map_err(|e| format!("Couldn't write the Keynote script: {e}"))?;
-        drop(script_file);
+        drop(file);
         std::process::Command::new("osascript")
-            .arg(&script_path)
+            .arg(&applescript_path)
             .output()
             .map_err(|e| format!("Couldn't run osascript (is Keynote installed?): {e}"))
     })();
-    let _ = std::fs::remove_file(&script_path);
-    let _ = std::fs::remove_file(png_path);
+    let _ = std::fs::remove_file(&applescript_path);
+    let _ = std::fs::remove_file(&png_path);
     let out = out?;
     if !out.status.success() {
         let detail = String::from_utf8_lossy(&out.stderr);
@@ -790,15 +917,19 @@ async fn copy_png_to_clipboard(png_path: String) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 fn copy_png_to_clipboard_blocking(png_path: &str) -> Result<(), String> {
     use std::io::Write;
+    // The PNG is one this app wrote to its own temp dir
+    // (canonicalize_in_temp_dir resolves symlinks and confines it under
+    // temp_dir) — a compromised page can't point the clipboard at, or
+    // delete, an arbitrary file. The path reaches the script only as an
+    // escaped literal, never interpolated raw.
+    let png_path = canonicalize_in_temp_dir(png_path, &["png"])?;
+    let png_literal = escape_applescript_string(&png_path.to_string_lossy());
+    let script = format!("set the clipboard to (read POSIX file {png_literal} as «class PNGf»)");
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let script_path = std::env::temp_dir().join(format!("titer-clipboard-{stamp}.applescript"));
-    // The PNG path is one this app wrote to its own temp dir under a
-    // generated name — no user text reaches the script — so embedding it
-    // in the `POSIX file` literal needs no escaping.
-    let script = format!("set the clipboard to (read POSIX file \"{png_path}\" as «class PNGf»)");
     let out = (|| -> Result<std::process::Output, String> {
         let mut script_file = std::fs::File::create(&script_path)
             .map_err(|e| format!("Couldn't write the clipboard script: {e}"))?;
@@ -813,7 +944,7 @@ fn copy_png_to_clipboard_blocking(png_path: &str) -> Result<(), String> {
             .map_err(|e| format!("Couldn't run osascript: {e}"))
     })();
     let _ = std::fs::remove_file(&script_path);
-    let _ = std::fs::remove_file(png_path);
+    let _ = std::fs::remove_file(&png_path);
     let out = out?;
     if !out.status.success() {
         let detail = String::from_utf8_lossy(&out.stderr);
@@ -856,17 +987,23 @@ async fn copy_pdf_to_clipboard(pdf_path: String, png_path: String) -> Result<(),
 #[cfg(target_os = "macos")]
 fn copy_pdf_to_clipboard_blocking(pdf_path: &str, png_path: &str) -> Result<(), String> {
     use std::io::Write;
+    // Both files are ones this app wrote to its own temp dir
+    // (canonicalize_in_temp_dir resolves symlinks and confines them
+    // under temp_dir) — a compromised page can't point the clipboard at,
+    // or delete, arbitrary files. The paths reach the script only as
+    // escaped literals, never interpolated raw.
+    let pdf_path = canonicalize_in_temp_dir(pdf_path, &["pdf"])?;
+    let png_path = canonicalize_in_temp_dir(png_path, &["png"])?;
+    let pdf_literal = escape_applescript_string(&pdf_path.to_string_lossy());
+    let png_literal = escape_applescript_string(&png_path.to_string_lossy());
+    let script = format!(
+        "set the clipboard to {{(read POSIX file {pdf_literal} as «class PDF »), (read POSIX file {png_literal} as «class PNGf»)}}"
+    );
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let script_path = std::env::temp_dir().join(format!("titer-clipboard-pdf-{stamp}.applescript"));
-    // Both paths are ones this app wrote to its own temp dir under
-    // generated names — no user text reaches the script — so embedding
-    // them in the `POSIX file` literals needs no escaping.
-    let script = format!(
-        "set the clipboard to {{(read POSIX file \"{pdf_path}\" as «class PDF »), (read POSIX file \"{png_path}\" as «class PNGf»)}}"
-    );
     let out = (|| -> Result<std::process::Output, String> {
         let mut script_file = std::fs::File::create(&script_path)
             .map_err(|e| format!("Couldn't write the clipboard script: {e}"))?;
@@ -881,8 +1018,8 @@ fn copy_pdf_to_clipboard_blocking(pdf_path: &str, png_path: &str) -> Result<(), 
             .map_err(|e| format!("Couldn't run osascript: {e}"))
     })();
     let _ = std::fs::remove_file(&script_path);
-    let _ = std::fs::remove_file(pdf_path);
-    let _ = std::fs::remove_file(png_path);
+    let _ = std::fs::remove_file(&pdf_path);
+    let _ = std::fs::remove_file(&png_path);
     let out = out?;
     if !out.status.success() {
         let detail = String::from_utf8_lossy(&out.stderr);
@@ -2297,6 +2434,76 @@ mod tests {
         .expect_err("a changed extension must be an error");
         assert!(err.contains("extension"), "the error should say the extension stays: {err}");
         assert!(from.exists(), "a refused move leaves the source alone");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn move_file_refuses_an_ungated_extension() {
+        // BUG-REPORT Round 2 Issue 1: move_file checked only extension
+        // equality and never called the check_extension gate its sibling
+        // commands use — a compromised page could move any file on disk.
+        let dir = move_scratch_dir("gate");
+        let from = dir.join("Setup.exe");
+        fs::write(&from, b"mine").expect("fixture");
+        let err = move_file_blocking(&from.to_string_lossy(), &dir.join("Setup 2.exe").to_string_lossy())
+            .expect_err("an ungated extension must be refused");
+        assert!(err.contains("can't access"), "the error should name the refusal: {err}");
+        assert!(from.exists(), "a refused move leaves the source alone");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // BUG-REPORT Round 2 Issue 1: the shell's Keynote script is its own
+    // fixed template now — the webview passes data, never a script — so
+    // this pins the shell-built text against the same shape the suite
+    // pins for `buildKeynoteScript` in src/lib/office-export.ts.
+    #[test]
+    fn build_keynote_script_matches_the_pinned_shape() {
+        let script = build_keynote_script(
+            "/tmp/titer-keynote-1.png",
+            "/Users/smit/Desktop/Dose response.key",
+            "Dose response",
+            576.0,
+            288.0,
+        );
+        assert!(script.contains("tell application \"Keynote\""), "{script}");
+        assert!(script.contains("POSIX file \"/tmp/titer-keynote-1.png\""), "{script}");
+        assert!(script.contains("POSIX file \"/Users/smit/Desktop/Dose response.key\""), "{script}");
+        assert!(script.contains("set imgW to 576") && script.contains("set imgH to 288"), "{script}");
+        assert!(script.contains("make new image with properties {file: pngFile}"), "{script}");
+        assert!(script.contains("save doc in outFile"), "{script}");
+        assert!(!script.contains("pptx") && !script.contains("docx"), "{script}");
+        // No IPC string survives as code: a hostile title is escaped,
+        // never spliced raw into the script.
+        let hostile = build_keynote_script("/tmp/a.png", "/tmp/b.key", "x\" \n tell application \"Finder\" to delete", 100.0, 50.0);
+        assert!(!hostile.contains("tell application \"Finder\""), "{hostile}");
+        assert!(hostile.contains("\\\""), "{hostile}");
+    }
+
+    #[test]
+    fn escape_applescript_string_escapes_quotes_backslashes_and_newlines() {
+        // Mirrors the suite pin for `buildKeynoteScript`'s escaping.
+        let escaped = escape_applescript_string("He said \"hi\" \\ bye\nSecond line");
+        assert_eq!(escaped, "\"He said \\\"hi\\\" \\\\ bye Second line\"", "{escaped}");
+    }
+
+    #[test]
+    fn canonicalize_in_temp_dir_confines_to_the_temp_dir() {
+        // A real temp file with a gated extension is accepted, canonicalized.
+        let dir = move_scratch_dir("temp-gate");
+        let png = dir.join("clipboard.png");
+        fs::write(&png, b"fake png").expect("fixture");
+        let got = canonicalize_in_temp_dir(&png.to_string_lossy(), &["png"]).expect("own temp file should pass");
+        assert_eq!(got, fs::canonicalize(&png).unwrap(), "the gate returns the canonical path");
+        // Wrong extension is refused before anything is read or deleted.
+        let err = canonicalize_in_temp_dir(&png.to_string_lossy(), &["pdf"]).expect_err("a .png is not a .pdf");
+        assert!(err.contains("can't access"), "{err}");
+        // A missing file is refused (canonicalize has nothing to resolve).
+        let err = canonicalize_in_temp_dir(&dir.join("gone.png").to_string_lossy(), &["png"]).expect_err("a missing file must fail");
+        assert!(!err.contains("can't access"), "a missing file is an I/O error, not a refusal: {err}");
+        // A real file outside the temp dir is refused even with a gated extension.
+        let outside = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let err = canonicalize_in_temp_dir(&outside.to_string_lossy(), &["toml"]).expect_err("a file outside temp_dir must fail");
+        assert!(err.contains("can't access"), "{err}");
         let _ = fs::remove_dir_all(&dir);
     }
 }
