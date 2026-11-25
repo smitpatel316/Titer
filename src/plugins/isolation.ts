@@ -17,13 +17,19 @@
 // ── What this is, and what it is not ─────────────────────────────────────
 // The frame is a sandboxed `<iframe sandbox="allow-scripts">` (no
 // `allow-same-origin`, so the frame has an opaque origin and no DOM
-// access to the app) whose document holds the plugin's entry source plus
-// a small bridge. The bridge exposes `window.titer` — `call` plus one
-// method per command in the closed catalogue — and each method only
-// `postMessage`s the call to the host. The host side — the IPC
-// interceptor `interceptPluginCall` — is the Tauri Isolation pattern's
-// inspection point: it checks the call before it reaches Rust, and only
-// forwards it when the guard allows it.
+// access to the app) whose document is the bundled static asset
+// `public/plugin-isolation.html` (PLUGIN_WEBVIEW_FRAME_URL). The asset
+// holds the bridge — NO inline `<script>`: the release CSP
+// (tauri.conf.json `script-src 'self' ...`, no `'unsafe-inline'`) blocks
+// inline scripts in an iframe document, so the old `srcDoc` document
+// never ran in production (seq 475). The plugin's entry source arrives
+// afterwards by `postMessage` (`buildPluginWebviewInit`) and runs via
+// `new Function`, allowed by the CSP's `'unsafe-eval'`. The bridge
+// exposes `window.titer` — `call` plus one method per command in the
+// closed catalogue — and each method only `postMessage`s the call to the
+// host. The host side — the IPC interceptor `interceptPluginCall` — is
+// the Tauri Isolation pattern's inspection point: it checks the call
+// before it reaches Rust, and only forwards it when the guard allows it.
 //
 // What it does:
 //   - runs plugin JS in a separate frame, never in the app's own window;
@@ -67,7 +73,12 @@
 // disable path can leave a frame running (Round 2 Issue 5, seq 469);
 // the interceptor also re-checks liveness against the live registry on
 // every call, so a frame whose plugin was disabled without the hook
-// still denies on its next call and tears itself down.
+// still denies on its next call and tears itself down. The view
+// component (isolation-view.tsx) owns NO teardown: its effect cleanup
+// only drops the `message` listener, so React StrictMode's mount →
+// cleanup → remount never mutates the externally owned session
+// (seq 475) — teardown belongs to the launcher / disable / uninstall
+// paths, never to a component cleanup that React may run speculatively.
 
 import { dispatchPluginCommand } from "./ipc-guard";
 import { checkCapability, CapabilityDeniedError, KNOWN_COMMANDS, type TiterCommand } from "./capabilities";
@@ -99,6 +110,53 @@ export function pluginListingSafetyLine(name: string): string {
  * `postMessage` bridge to `interceptPluginCall`.
  */
 export const PLUGIN_WEBVIEW_SANDBOX = "allow-scripts";
+
+/**
+ * The Isolation frame's URL: the bundled static asset
+ * `public/plugin-isolation.html`. Vite copies `public/` into `dist`, so
+ * this is same-origin in dev (the Vite server) and in release (the Tauri
+ * asset protocol), and its external script is allowed by the release CSP
+ * (`script-src 'self'`). The frame is NOT a `srcDoc` document: `srcDoc`
+ * inline `<script>`s are blocked by that CSP (no `'unsafe-inline'`).
+ */
+export const PLUGIN_WEBVIEW_FRAME_URL = "/plugin-isolation.html";
+
+/** Host → frame: deliver the plugin id, entry source, and command
+ *  catalogue. The frame builds `window.titer` from `commands` and runs
+ *  `source` via `new Function`. */
+export const PLUGIN_WEBVIEW_INIT_TYPE = "titer-plugin-init";
+
+/** Frame → host: the frame's script has loaded and is waiting for init.
+ *  The host answers with a `PLUGIN_WEBVIEW_INIT_TYPE` message (and also
+ *  posts init on the iframe's load event — whichever lands first wins;
+ *  the frame ignores a duplicate init). */
+export const PLUGIN_WEBVIEW_READY_TYPE = "titer-plugin-ready";
+
+/** The host → frame init payload (see `PLUGIN_WEBVIEW_INIT_TYPE`). */
+export interface PluginWebviewInit {
+  type: typeof PLUGIN_WEBVIEW_INIT_TYPE;
+  pluginId: string;
+  /** The plugin's entry source, delivered verbatim — never embedded in
+   *  HTML, so it needs no `<script>` escaping at all. */
+  source: string;
+  /** The closed command catalogue: the frame builds one `window.titer`
+   *  method per command, so the catalogue stays defined once, here. */
+  commands: readonly string[];
+}
+
+/**
+ * Build the init payload for a frame: the plugin id, its entry source
+ * verbatim, and the closed command catalogue. Pure — the view posts the
+ * result to the frame on load / on `titer-plugin-ready`.
+ */
+export function buildPluginWebviewInit(source: string, pluginId: string): PluginWebviewInit {
+  return {
+    type: PLUGIN_WEBVIEW_INIT_TYPE,
+    pluginId,
+    source,
+    commands: [...KNOWN_COMMANDS],
+  };
+}
 
 /** One running plugin frame: the plugin, what it was granted, and whether
  *  it is still alive. `calls` / `denied` are counters for the frame's
@@ -386,6 +444,12 @@ export function escapePluginSource(source: string): string {
  * frame exposes no host seam: no Tauri bridge, no dispatch seam, no
  * direct file or network access — a call that is not in the catalogue
  * has no method and no path to the host.
+ *
+ * @deprecated The release CSP blocks inline `<script>`s, so a `srcDoc`
+ * document built by this function never runs in production (seq 475).
+ * Kept only for the M5 pin and any existing importers — new code must
+ * use the bundled asset (`PLUGIN_WEBVIEW_FRAME_URL`) plus
+ * `buildPluginWebviewInit`. Do not render its output in an iframe.
  */
 export function buildPluginWebviewSrcDoc(source: string, pluginId: string): string {
   const methods = KNOWN_COMMANDS.map((c) => {

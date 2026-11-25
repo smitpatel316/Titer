@@ -44746,6 +44746,94 @@ check("plugin-m5 seam: the interceptor never calls executeJob or Tauri invoke di
 });
 
 
+// ── R2: plugin isolation — StrictMode teardown + release CSP (seq 475) ──
+// Pre-fix, PluginIsolationWebview was non-functional in BOTH dev and
+// release: in dev, <StrictMode> (src/main.tsx) mount → cleanup → remount
+// tore the externally owned session down before the frame loaded
+// (status "torn-down", every titer.* call denied); in release, the
+// Tauri CSP (script-src 'self' …, no 'unsafe-inline') blocked both
+// inline <script> blocks of the srcDoc document. The fix moves teardown
+// ownership out of the component (cleanup drops only the message
+// listener; the session belongs to its launcher) and serves the frame
+// from a bundled static HTML/JS asset whose script is allowed by
+// script-src 'self' and whose plugin source arrives by postMessage and
+// runs via new Function (allowed by 'unsafe-eval') — the CSP is NOT
+// loosened. The pin fails on pre-fix code (no asset, no init builder,
+// view still tears down + uses srcDoc) and passes on the fix.
+check("plugin-isolation-r2 strictmode+csp: view owns no teardown; frame is a bundled static asset, not srcDoc", async () => {
+  const { PLUGIN_WEBVIEW_FRAME_URL, buildPluginWebviewInit, KNOWN_COMMANDS } = await import("../src/plugins/index");
+  // (a) The view never mutates the externally owned session, and
+  // re-keys on the session id (a session change remounts the frame
+  // instead of letting in-flight replies stamp the new id).
+  const view = readFileSync("src/plugins/isolation-view.tsx", "utf8");
+  ok(!/teardownPluginWebview\s*\(/.test(view), "the view must never call teardownPluginWebview (the session is externally owned)");
+  ok(!/srcDoc/.test(view), "the view must not use srcDoc — inline scripts are blocked by the release CSP");
+  ok(!/buildPluginWebviewSrcDoc/.test(view), "the view must not build a srcDoc document at all");
+  ok(/PLUGIN_WEBVIEW_FRAME_URL/.test(view), "the view loads the bundled isolation asset");
+  ok(/\[session\.pluginId[,\]]/.test(view), "the view's effect re-keys on session.pluginId");
+  ok(/key=\{session\.pluginId\}/.test(view), "the iframe is keyed on session.pluginId");
+  ok(
+    /const pluginId = sessionRef\.current\.pluginId/.test(view),
+    "replies stamp the plugin id captured when the call arrived, not the session current at reply time",
+  );
+  // (b) The bundled asset exists and holds no inline script: the frame
+  // document is plain HTML + one external script.
+  ok(existsSync("public/plugin-isolation.html"), "public/plugin-isolation.html must exist (Vite copies public/ into dist)");
+  ok(existsSync("public/plugin-isolation.js"), "public/plugin-isolation.js must exist");
+  const html = readFileSync("public/plugin-isolation.html", "utf8");
+  const noComments = html.replace(/<!--[\s\S]*?-->/g, "");
+  strictEqual(
+    [...noComments.matchAll(/<script(?![^>]*\bsrc=)[^>]*>/gi)].length,
+    0,
+    "the frame document must have no inline <script> (the release CSP blocks them)",
+  );
+  ok(/<script[^>]*\bsrc=["']\.\/plugin-isolation\.js["']/.test(html), "the frame document loads the external bridge script");
+  const js = readFileSync("public/plugin-isolation.js", "utf8");
+  ok(/titer-plugin-init/.test(js), "the frame script handles the host's init message");
+  ok(/titer-plugin-ready/.test(js), "the frame script announces it is ready for init");
+  ok(/new Function\(/.test(js), "the frame script runs the delivered entry source via new Function");
+  ok(!/\beval\s*\(/.test(js), "the frame script must not use direct eval — new Function is the one execution path");
+  ok(/postMessage/.test(js), "the frame script bridges plugin calls with postMessage");
+  // (c) The init payload: plugin id + entry source verbatim + the closed
+  // command catalogue. The source is never embedded in HTML, so the old
+  // </script> escape problem is gone by construction.
+  strictEqual(PLUGIN_WEBVIEW_FRAME_URL, "/plugin-isolation.html", "the frame URL is the bundled asset, same-origin in dev and release");
+  const evil = "</script><script>alert(1)</script>";
+  const init = buildPluginWebviewInit(evil, "example.evil");
+  strictEqual(init.type, "titer-plugin-init", "the init payload carries the init type");
+  strictEqual(init.pluginId, "example.evil", "the init payload carries the plugin id");
+  strictEqual(init.source, evil, "the init payload carries the entry source verbatim (no HTML embedding, no escaping)");
+  deepStrictEqual([...init.commands], [...KNOWN_COMMANDS], "the init payload carries the closed command catalogue");
+  // (d) The fix must NOT loosen the release CSP to allow inline scripts.
+  const conf = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8")) as {
+    app: { security: { csp: Record<string, string> } };
+  };
+  const scriptSrc = conf.app.security.csp["script-src"];
+  ok(!scriptSrc.includes("'unsafe-inline'"), `script-src must still have no 'unsafe-inline' (got: ${scriptSrc})`);
+  ok(scriptSrc.includes("'self'"), "script-src still allows the bundled asset script ('self')");
+  ok(scriptSrc.includes("'unsafe-eval'"), "script-src still allows new Function ('unsafe-eval')");
+  ok(
+    conf.app.security.csp["default-src"].includes("'self'"),
+    "default-src 'self' still covers the same-origin frame (frame-src falls back to it)",
+  );
+});
+
+check("plugin-isolation-r2 caps: default.json grants window hide + set-focus (seq 499)", () => {
+  const caps = JSON.parse(readFileSync("src-tauri/capabilities/default.json", "utf8")) as {
+    permissions: string[];
+  };
+  ok(caps.permissions.includes("core:window:allow-hide"), "default.json must grant core:window:allow-hide (quiesceBeforeClose hides the closing window)");
+  ok(
+    caps.permissions.includes("core:window:allow-set-focus"),
+    "default.json must grant core:window:allow-set-focus (non-macOS Window menu focuses the picked window)",
+  );
+  // The two call sites the capabilities unblock still exist.
+  const native = readFileSync("src/native.ts", "utf8");
+  ok(/quiesceBeforeClose/.test(native) && /\.hide\(\)/.test(native), "quiesceBeforeClose still hides the window it quiets");
+  ok(/\.setFocus\(\)/.test(native), "the Window menu still focuses the picked window");
+});
+
+
 check("feedback-loop-453: feedback reachable for every user, Discussions + support email, crash path, What's new, triage metadata", async () => {
   // (a) Help menu: Send Feedback (dialog, no AI needed), Contact Support
   // (mailto smit@muse.ai — the dead GitHub-issues support link is gone),
