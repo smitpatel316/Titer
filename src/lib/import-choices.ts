@@ -37,6 +37,8 @@
 //     out), 1-based, as Prism numbers them.
 import { detectDelimiter, parseDelimited } from "./tabular-import";
 import { fileTitle } from "./paths";
+import { newConstantId } from "./info-sheets";
+import type { InfoSheetData } from "../store/types";
 
 /** The five tabs, in Prism's order. */
 export const IMPORT_CHOICE_TABS = ["Source", "View", "Filter", "Placement", "Info & Notes"] as const;

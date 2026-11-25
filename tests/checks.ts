@@ -476,8 +476,10 @@ import {
   dataColumnLetter,
   defaultImportChoices,
   extractInfoSections,
+  mergeImportedInfo,
   parseImportText,
   resolveImportTableName,
+  resolveInfoImportTarget,
   type ImportChoices,
   type ImportOffer,
 } from "../src/lib/import-choices";
@@ -490,6 +492,7 @@ import {
 import {
   applyLinkedBlock,
   blocksEqual,
+  isLinkedSourcePath,
   linkedBlockOf,
   parseLinkedSource,
   readLinkedPaste,
@@ -37397,6 +37400,7 @@ check("import-429: the 5-tab Import dialog's choices parse, filter and place as 
       notesMode: "none",
       notesFromRow: 1,
       notesEndRow: "last",
+      importInto: "new",
     },
   });
   deepStrictEqual(IMPORT_CHOICE_TABS, ["Source", "View", "Filter", "Placement", "Info & Notes"]);
@@ -37706,6 +37710,117 @@ check("import-429: the 5-tab Import dialog's choices parse, filter and place as 
   ok(grid.includes("ImportDialog"), "the grid never shows the Import dialog");
   const shell = readFileSync("src/components/app-shell.tsx", "utf8");
   ok(shell.includes("ImportDialog"), "the shell never shows the Import dialog when no table is active");
+});
+
+// Seq 451a — .dat/.prn paste-link (follow-up to seq 427: import worked,
+// paste-link did not — isLinkedSourcePath's list stopped at .txt).
+check("import-451a: .dat and .prn files paste-link like the other text files", async () => {
+  ok(isLinkedSourcePath("assay.dat") && isLinkedSourcePath("assay.PRN"), ".dat/.prn not recognised as link sources");
+  ok(!isLinkedSourcePath("assay.pzfx") && !isLinkedSourcePath("assay.hlx"), "link gate takes a non-data file");
+  // A tab-delimited .dat parses as a link block, like a .txt does.
+  deepStrictEqual(await parseLinkedSource("assay.dat", "Sample\tControl\nS1\t1.5\nS2\t1.7\n"), [
+    ["Sample", "Control"],
+    ["S1", "1.5"],
+    ["S2", "1.7"],
+  ]);
+  // The gates that use it: the desktop pick and the web file input.
+  const linkedData = readFileSync("src/views/tables/linked-data.ts", "utf8");
+  ok(linkedData.includes(".dat") && linkedData.includes(".prn"), "web paste-link picker misses .dat/.prn");
+});
+
+// Seq 451b — the 429 dialog retired the old import prompt: importDataTable
+// was already gone, and native.askImportTarget is uncalled — delete it.
+check("import-451b: the dead import prompt is gone (askImportTarget removed)", () => {
+  const native = readFileSync("src/native.ts", "utf8");
+  ok(!native.includes("askImportTarget"), "native still exports the uncalled askImportTarget");
+  ok(!native.includes("importDataTable"), "native still names importDataTable");
+  const document = readFileSync("src/store/use-document.ts", "utf8");
+  ok(!document.includes("askImportTarget"), "use-document still calls askImportTarget");
+  ok(document.includes("confirmImport"), "the dialog's confirmImport is the import path");
+});
+
+// Seq 451c — the two omitted Import-dialog buttons (seq 429: "Open File to
+// Edit Data" and the View tab's "Open File" had no file-opener command).
+// The shell opens the file in its default app; the web build has no path,
+// so both buttons are disabled there.
+check("import-451c: the Import dialog's Open File buttons open the source file", () => {
+  const shell = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(shell.includes("fn open_file"), "shell has no open_file command");
+  ok(shell.includes("open_file,"), "open_file is not registered in the invoke handler");
+  ok(shell.includes('Command::new("open")'), "macOS opener is not `open`");
+  ok(shell.includes('Command::new("xdg-open")'), "Linux opener is not xdg-open");
+  ok(shell.includes("is_file()"), "open_file does not check the file exists");
+  const native = readFileSync("src/native.ts", "utf8");
+  ok(native.includes("openFileInDefaultApp"), "native has no openFileInDefaultApp wrapper");
+  ok(native.includes('"open_file"'), "native wrapper does not invoke open_file");
+  const dialog = readFileSync("src/views/tables/import-dialog.tsx", "utf8");
+  const dialogText = dialog.replace(/\s+/g, " ");
+  ok(dialogText.includes("> Open File to Edit Data <"), "Source tab has no Open File to Edit Data button");
+  ok(dialogText.includes("> Open File <"), "View tab has no Open File button");
+  ok(dialog.includes("openFileInDefaultApp(offer.path)"), "dialog buttons do not open the offered file");
+  ok(dialog.includes("disabled={offer.path === null}"), "Open File buttons are not disabled without a path");
+});
+
+// Seq 451d — the Info & Notes tab's "Import into:" popup (seq 429: the tab
+// always made a new info sheet). The popup names a new sheet, or an
+// existing one the import merges into.
+check("import-451d: Info & Notes imports into the sheet the popup names", () => {
+  const defaults = defaultImportChoices();
+  strictEqual(defaults.info.importInto, "new", "Import into does not default to a new info sheet");
+  // Resolution: a sheet that exists is named; anything else is a new sheet.
+  const sheets = [
+    { id: "info-1", name: "Info Sheet" },
+    { id: "info-2", name: "Assay notes" },
+  ];
+  strictEqual(resolveInfoImportTarget("info-2", sheets), "info-2");
+  strictEqual(resolveInfoImportTarget("new", sheets), "new");
+  strictEqual(resolveInfoImportTarget("info-gone", sheets), "new", "a deleted sheet does not strand the import");
+  strictEqual(resolveInfoImportTarget("info-1", []), "new", "no sheets means a new sheet");
+  // Merging: a same-named constant takes the imported value in place (its
+  // id kept, so hooks keep pointing at it); a new name appends; notes join
+  // after a blank line. A new sheet holds the imported constants alone.
+  const existing = {
+    constants: [
+      { id: "c1", name: "Date", value: "2026-01-08" },
+      { id: "c2", name: "Operator", value: "Smit" },
+    ],
+    notes: "Earlier run.",
+    linkedTableId: "table-1",
+  };
+  const merged = mergeImportedInfo(
+    existing,
+    [
+      { name: "date", value: "2026-01-09" },
+      { name: "Lot", value: "A42" },
+    ],
+    "Run 3, check baseline",
+  );
+  deepStrictEqual(
+    merged.constants.map((c) => ({ name: c.name, value: c.value })),
+    [
+      { name: "Date", value: "2026-01-09" },
+      { name: "Operator", value: "Smit" },
+      { name: "Lot", value: "A42" },
+    ],
+  );
+  strictEqual(merged.constants[0].id, "c1", "merge must keep the updated constant's id");
+  strictEqual(merged.constants[1].id, "c2", "merge must keep the untouched constant's id");
+  strictEqual(merged.notes, "Earlier run.\n\nRun 3, check baseline");
+  strictEqual(merged.linkedTableId, "table-1", "merging must not re-link the sheet");
+  const fresh = mergeImportedInfo(null, [{ name: "Date", value: "2026-01-09" }], "");
+  deepStrictEqual(
+    fresh.constants.map((c) => ({ name: c.name, value: c.value })),
+    [{ name: "Date", value: "2026-01-09" }],
+  );
+  strictEqual(fresh.notes, "");
+  strictEqual(fresh.linkedTableId, null);
+  // The dialog carries the popup, and the store honours the choice.
+  const dialog = readFileSync("src/views/tables/import-dialog.tsx", "utf8");
+  ok(dialog.includes("Import into:"), "Info & Notes tab has no Import into popup");
+  ok(dialog.includes("New info sheet"), "popup offers no new sheet");
+  const document = readFileSync("src/store/use-document.ts", "utf8");
+  ok(document.includes("resolveInfoImportTarget"), "confirmImport never resolves the Import into choice");
+  ok(document.includes("mergeImportedInfo"), "confirmImport never merges into the chosen sheet");
 });
 
 // ── 1.8 seq 226: automatic backup ────────────────────────────────────────
