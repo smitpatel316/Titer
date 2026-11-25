@@ -94,7 +94,7 @@ interface XmlNode {
 }
 
 function decodeEntities(s: string): string {
-  return s.replace(/&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g, (m, body: string) => {
+  return s.replace(/&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g, (_m, body: string) => {
     if (body === "amp") return "&";
     if (body === "lt") return "<";
     if (body === "gt") return ">";
