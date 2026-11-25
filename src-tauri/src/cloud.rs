@@ -531,7 +531,16 @@ pub fn ephemeral_loopback_port() -> Result<u16, CloudError> {
 // offline; a save uploads the cache's contents (the bytes the page holds).
 
 /// `…/cloud-cache/<provider>/<file_id>.<ext>` (ext from the remote name).
+/// The provider is allowlisted to the two known providers (`box`, `mock`):
+/// `Path::join` replaces the base for an absolute component and `..`
+/// traverses upward, so a raw provider (`../mcp`, `/etc`, …) would escape
+/// `cloud-cache` and read/write an arbitrary file. Anything else fails
+/// closed — no path — the same allowlist `validate_cloud_provider`
+/// enforces at the MCP edge and `cloud_provider` enforces for downloads.
 pub fn cache_path(app: &tauri::AppHandle, provider: &str, file_id: &str, name: &str) -> Option<std::path::PathBuf> {
+    if provider != PROVIDER_BOX && provider != PROVIDER_MOCK {
+        return None;
+    }
     let ext = std::path::Path::new(name).extension().and_then(|e| e.to_str()).unwrap_or("bin");
     let safe_id: String = file_id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
     app.path().app_data_dir().ok().map(|dir| dir.join("cloud-cache").join(provider).join(format!("{safe_id}.{ext}")))
