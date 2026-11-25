@@ -43,6 +43,13 @@ import {
   type BuiltInTemplate,
 } from "../src/lib/templates";
 import {
+  GUIDE_STEPS,
+  GUIDE_SUPPORT_EMAIL,
+  STARTUP_GUIDE_KEY,
+  parseGuideSeen,
+  shouldShowGuide,
+} from "../src/lib/startup-guide";
+import {
   extractMethod,
   formatMethodReport,
   isMethodPath,
@@ -33223,6 +33230,89 @@ check("the Welcome setting defaults to show, and only an explicit off hides it",
   strictEqual(shouldShowWelcome("false", false), false);
   strictEqual(shouldShowWelcome(null, true), false);
   strictEqual(shouldShowWelcome("false", true), false);
+});
+
+// seq 454 (first-run startup guide): the guide shows until it has been
+// seen, and only an explicit seen hides it — no record, a garbled record
+// or a refusal-shaped value never silently takes the tour away.
+check("seq 454: the startup guide shows until seen, and only an explicit seen hides it", () => {
+  strictEqual(STARTUP_GUIDE_KEY, "titer.startup-guide-seen");
+  strictEqual(parseGuideSeen("true"), true);
+  strictEqual(parseGuideSeen(true), true);
+  strictEqual(parseGuideSeen(null), false, "no stored setting shows the guide");
+  strictEqual(parseGuideSeen(undefined), false);
+  strictEqual(parseGuideSeen("false"), false);
+  strictEqual(parseGuideSeen(false), false);
+  strictEqual(parseGuideSeen("banana"), false, "a garbled setting shows the guide, never hides it");
+  strictEqual(parseGuideSeen(""), false);
+  strictEqual(shouldShowGuide(null), true);
+  strictEqual(shouldShowGuide("true"), false);
+  strictEqual(shouldShowGuide(true), false);
+  strictEqual(shouldShowGuide("false"), true);
+  strictEqual(shouldShowGuide("banana"), true);
+});
+
+// seq 454: the tour is a few short steps, not a manual — import, analysis,
+// graph, export, then help — and the help step names both ways to reach a
+// human: Help → Send Feedback and the support mailbox.
+check("seq 454: the startup guide covers the first-run path and names support", () => {
+  strictEqual(GUIDE_SUPPORT_EMAIL, "smit@muse.ai");
+  deepStrictEqual(
+    GUIDE_STEPS.map((s) => s.id),
+    ["welcome", "import", "analysis", "graph", "export", "help"],
+    "the tour walks import → analysis → graph → export → help",
+  );
+  for (const step of GUIDE_STEPS) {
+    ok(step.title.length > 0, `guide step ${step.id} has no title`);
+    ok(step.body.length > 0, `guide step ${step.id} has no body`);
+    ok(step.body.length <= 280, `guide step ${step.id} is a manual, not a tour step (${step.body.length} chars)`);
+  }
+  const help = GUIDE_STEPS.find((s) => s.id === "help")!;
+  ok(help.body.includes("Send Feedback"), "the help step never names Send Feedback");
+  ok(help.body.includes("User Guide"), "the help step never names the User Guide");
+  strictEqual(help.link?.href, `mailto:${GUIDE_SUPPORT_EMAIL}`, "the help step has no mailto link to support");
+  strictEqual(help.link?.label, GUIDE_SUPPORT_EMAIL, "the help step's support link shows the wrong address");
+  ok(!GUIDE_STEPS.some((s) => s.id !== "help" && s.link), "only the help step links out");
+});
+
+// seq 454: Help re-opens the guide on demand, and the guide waits behind
+// the Welcome dialog — a top-layer <dialog> open over the guide's plain
+// overlay would hide it (seq 397), so the auto-show only fires once the
+// Welcome dialog is closed, and opening the guide closes Welcome first.
+check("seq 454: Help re-opens the startup guide, and it waits behind the Welcome dialog", () => {
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(shell.includes("StartupGuideDialog"), "app-shell never mounts the startup guide dialog");
+  ok(
+    shell.includes("documentActions.guideOpen") && shell.includes("documentActions.closeGuide"),
+    "the guide dialog is not wired to the document actions",
+  );
+  const appMenu = readFileSync("src/app-menu.ts", "utf8");
+  ok(appMenu.includes(`{ text: "Startup Guide…"`), "no Help entry re-opens the startup guide");
+  ok(appMenu.includes("openGuide()"), "the Help entry never opens the guide");
+  const menus = readFileSync("src/menus.ts", "utf8");
+  ok(/setMenuBar\(menus: MenuItems, extraHelpItems: MenuItems = \[\]\)/.test(menus), "setMenuBar takes no extra Help items");
+  const tipsAt = menus.indexOf(`{ text: "Titer Tips"`);
+  const extraAt = menus.indexOf("...extraHelpItems");
+  ok(tipsAt > -1 && extraAt > tipsAt, "extra Help items do not land after Titer Tips");
+  const doc = readFileSync("src/store/use-document.ts", "utf8");
+  ok(doc.includes("guideOpen") && doc.includes("openGuide") && doc.includes("closeGuide"), "use-document has no guide open state");
+  ok(doc.includes("shouldShowGuide"), "the guide auto-show never checks the seen record");
+  const effect = doc.slice(doc.indexOf("guideDecided"));
+  ok(effect.includes("welcomeOpen"), "the guide auto-show does not wait behind the Welcome dialog");
+  const openGuideDef = doc.slice(doc.indexOf("const openGuide"));
+  ok(
+    openGuideDef.indexOf("setWelcomeOpen(false)") > -1 &&
+      openGuideDef.indexOf("setWelcomeOpen(false)") < openGuideDef.indexOf("setGuideOpen(true)"),
+    "opening the guide does not close Welcome first",
+  );
+  const dialog = readFileSync("src/components/startup-guide-dialog.tsx", "utf8");
+  // Strip comments first: the header comment itself names <dialog> (seq
+  // 397), so a raw substring check would trip on its own documentation.
+  const dialogCode = dialog.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  ok(!/<dialog[\s>]/.test(dialogCode), "the guide uses a native <dialog> element — pointer events fail on Mac WebKit (seq 397)");
+  ok(!dialogCode.includes(".showModal("), "the guide calls showModal() — pointer events fail on Mac WebKit (seq 397)");
+  ok(dialog.includes("fixed inset-0"), "the guide is not a plain fixed overlay");
+  ok(dialog.includes("Skip tour"), "the guide has no Skip control");
 });
 
 check("a template replaces the fresh window's untouched table, and only that one", () => {

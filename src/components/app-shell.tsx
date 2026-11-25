@@ -16,6 +16,7 @@ import { FeedbackConsentDialog } from "./feedback-consent-dialog";
 import { SendFeedbackDialog } from "./send-feedback-dialog";
 import { CrashReportDialog } from "./crash-report-dialog";
 import { WhatsNewDialog } from "./whats-new-dialog";
+import { StartupGuideDialog } from "./startup-guide-dialog";
 import { useMcpSnapshotPublisher } from "../store/mcp-publish";
 import { useMcpJobDispatcher } from "../store/mcp-dispatch";
 import { SavePromptDialog } from "./save-prompt-dialog";
@@ -417,6 +418,12 @@ export function AppShell() {
       <CrashReportDialog />
 
       <WhatsNewDialog />
+
+      {/* The startup guide (seq 454): the first-run tour, auto-shown once
+          per user on a fresh first window (use-document decides when) and
+          re-opened from Help ▸ Startup Guide…. Closing always marks it
+          seen, so it never reappears. */}
+      <StartupGuideDialog open={documentActions.guideOpen} onClose={documentActions.closeGuide} />
 
       <SavePromptDialog onChoose={(choice, remember) => documentActions.resolveSavePrompt(choice, remember)} />
 
