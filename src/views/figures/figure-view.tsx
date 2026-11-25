@@ -52,6 +52,7 @@ import { fitZoom } from "../../store/use-layout";
 import { GRAPHS } from "../graphs";
 import { DEFAULT_GRAPH_OPTIONS, clamp, type FigurePanel, type ProjectNode, type Resolution } from "../../store/types";
 import { PanelPlot } from "./panel-plot";
+import { frozenFigureNodes } from "./panel-figure";
 import { DrawingObjectsLayer } from "../../components/drawing-objects";
 import { copyFigureImage, saveFigureImage, sendFigureToOffice } from "./figure-export";
 import type { OfficeTarget } from "../../lib/office-export";
@@ -203,18 +204,14 @@ export function FigureView({ node }: { node: ProjectNode }) {
 
   // A frozen figure (seq 237) draws each panel from its snapshot: the
   // panels read their parent tables' data, so hand them the snapshot
-  // tables instead of the live ones. Exports still use the live data
+  // tables instead of the live ones — and the snapshot graphs instead of
+  // the live ones, so a graph re-frozen afterwards can't override the
+  // figure's snapshot (Issue #73). Exports still use the live data
   // (the exporters render from the project, not the view).
-  const figureNodes = React.useMemo(() => {
-    if (!node.frozen || !node.frozenDataByGraph) return nodes;
-    const next = { ...nodes };
-    for (const [graphId, data] of Object.entries(node.frozenDataByGraph)) {
-      const graph = nodes[graphId];
-      const parent = graph?.parentId ? nodes[graph.parentId] : undefined;
-      if (parent) next[parent.id] = { ...parent, data };
-    }
-    return next;
-  }, [nodes, node.frozen, node.frozenDataByGraph]);
+  const figureNodes = React.useMemo(
+    () => frozenFigureNodes(node, nodes),
+    [nodes, node.frozen, node.frozenDataByGraph],
+  );
 
   // Ctrl+scroll zooms by hand, as in the graph view (seq 239).
   React.useEffect(() => {
@@ -888,7 +885,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
                         ) : (
                           <>
                             <PanelPlot
-                              graph={graph}
+                              graph={figureNodes[panel.graphId] ?? graph}
                               nodes={figureNodes}
                               width={w}
                               height={h}

@@ -1035,6 +1035,11 @@ export interface ProjectNode {
   /** Graph nodes only: the parent table's data as it was when the graph was
    *  frozen — what a frozen graph draws. Omitted when unfrozen. */
   frozenData?: TableData;
+  /** Graph nodes only: each extra `sourceTableIds` table's data as it was
+   *  when the graph was frozen — what a frozen multi-table graph draws
+   *  for its secondary tables (Issue #17). Omitted when unfrozen (or
+   *  single-table). */
+  frozenDataByTable?: Record<string, TableData>;
   /** Figure nodes only: each panel graph's parent table data as it was when
    *  the figure was frozen, by graph id. Omitted when unfrozen. */
   frozenDataByGraph?: Record<string, TableData>;

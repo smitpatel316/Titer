@@ -245,7 +245,7 @@ const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1, transform: 1, notes: 1, tags: 1,
   analysisType: 1, analysisParams: 1, pluginAnalysisId: 1, pluginAnalysisParams: 1, cachedResult: 1, resultCellBackgrounds: 1, frozen: 1, orphaned: 1, sourceTableName: 1, orphanedDataSet: 1, graphType: 1, graphOptions: 1,
   sourceTableIds: 1,
-  frozenData: 1, frozenDataByGraph: 1, drawingObjects: 1,
+  frozenData: 1, frozenDataByGraph: 1, frozenDataByTable: 1, drawingObjects: 1,
   panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, figureBackground: 1, dpi: 1,
   info: 1,
 } satisfies Record<keyof ProjectNode, 1>);
@@ -2134,6 +2134,7 @@ function readNode(
       delete node.frozenDataByGraph;
     }
     delete node.frozenData;
+    delete node.frozenDataByTable;
     const figureObjects = readDrawingObjects(n.drawingObjects, node.name, issues);
     if (figureObjects) node.drawingObjects = figureObjects;
     else delete node.drawingObjects;
@@ -2169,6 +2170,12 @@ function readNode(
       delete node.frozen;
       delete node.frozenData;
     }
+    // A frozen graph's extra tables (Issue #17): their snapshots ride
+    // with the primary one — without a primary snapshot the graph is
+    // unfrozen on load, so a stray extras map is dropped with it.
+    const frozenByTable = frozenData ? readFrozenDataByGraph(n.frozenDataByTable) : undefined;
+    if (frozenByTable) node.frozenDataByTable = frozenByTable;
+    else delete node.frozenDataByTable;
     delete node.frozenDataByGraph;
     const graphObjects = readDrawingObjects(n.drawingObjects, node.name, issues);
     if (graphObjects) node.drawingObjects = graphObjects;
@@ -2184,6 +2191,7 @@ function readNode(
       if (type !== "table") delete node.frozen;
       delete node.frozenData;
       delete node.frozenDataByGraph;
+      delete node.frozenDataByTable;
       delete node.drawingObjects;
     }
     delete node.orphaned;

@@ -751,6 +751,16 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
           if (!parent?.data) return state; // nothing to freeze from
           next.frozen = true;
           next.frozenData = JSON.parse(JSON.stringify(parent.data));
+          // A multi-table graph (#48) snapshots its extra tables too —
+          // otherwise the frozen graph's secondary series still follow
+          // live edits (Issue #17 remainder).
+          const extraByTable: Record<string, TableData> = {};
+          for (const id of node.sourceTableIds ?? []) {
+            const table = state.nodes[id];
+            if (table?.data) extraByTable[id] = JSON.parse(JSON.stringify(table.data));
+          }
+          if (Object.keys(extraByTable).length) next.frozenDataByTable = extraByTable;
+          else delete next.frozenDataByTable;
           delete next.frozenDataByGraph;
         } else {
           const byGraph: Record<string, TableData> = {};
@@ -768,6 +778,7 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         delete next.frozen;
         delete next.frozenData;
         delete next.frozenDataByGraph;
+        delete next.frozenDataByTable;
       }
       return { ...state, nodes: { ...state.nodes, [action.id]: next }, isDirty: true };
     }

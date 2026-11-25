@@ -19,6 +19,28 @@ import { GRAPHS, graphSeriesDataset, plotColumns, type GraphFigure } from "../gr
 import { applyNumberFormats, paintOf } from "../graphs/plot-helpers";
 import { formatFigureLabels } from "../../lib/label-format";
 
+/** A frozen figure's nodes for drawing: each panel graph's parent table
+ *  is replaced by its snapshot, and the graph itself is re-pointed at
+ *  that snapshot — `mergedGraphData` / `buildGraphFigure` prefer
+ *  `graph.frozen && graph.frozenData` over the parent table, so handing
+ *  them the live graph would let a later re-freeze of the graph override
+ *  the figure's snapshot (Issue #73). Unfrozen figures pass `nodes`
+ *  through unchanged. */
+export function frozenFigureNodes(
+  figure: ProjectNode,
+  nodes: Record<string, ProjectNode>,
+): Record<string, ProjectNode> {
+  if (!figure.frozen || !figure.frozenDataByGraph) return nodes;
+  const next = { ...nodes };
+  for (const [graphId, data] of Object.entries(figure.frozenDataByGraph)) {
+    const graph = nodes[graphId];
+    const parent = graph?.parentId ? nodes[graph.parentId] : undefined;
+    if (parent) next[parent.id] = { ...parent, data };
+    if (graph) next[graph.id] = { ...graph, frozen: true, frozenData: data };
+  }
+  return next;
+}
+
 /** The panel's figure, or null when its graph has nothing to draw (no table,
  *  no numeric columns, or an unknown graph type). With `hideLegend`, the
  *  panel draws no legend of its own — a figure with a shared legend promises
