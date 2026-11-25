@@ -7156,8 +7156,12 @@ impl TiterMcpServer {
                 }
             }
             let (id, _snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
-            self.run_table_job(&id, "flow-population-stats", serde_json::json!({ "sample_id": args.sample_id, "populations": args.populations, "name": args.name }))
-                .await
+            self.run_table_job(
+                &id,
+                "flow-population-stats",
+                serde_json::json!({ "sample_id": args.sample_id, "populations": args.populations, "name": args.name }),
+            )
+            .await
         }
         .await;
         match outcome {
