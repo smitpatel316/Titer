@@ -249,9 +249,18 @@ class Parser {
   }
 
   private and(): Expr {
-    let left = this.cmp();
-    while (this.eatIdent("AND")) left = { kind: "binary", op: "AND", left, right: this.cmp() };
+    let left = this.not();
+    while (this.eatIdent("AND")) left = { kind: "binary", op: "AND", left, right: this.not() };
     return left;
+  }
+
+  /** NOT binds looser than a comparison but tighter than AND / OR: `NOT
+   *  C <= 14` is `NOT (C <= 14)`, not `(NOT C) <= 14` — the latter is
+   *  true for every non-zero C and silently includes rows a filter must
+   *  exclude (bug-report issue 21). */
+  private not(): Expr {
+    if (this.eatIdent("NOT")) return { kind: "unary", op: "NOT", expr: this.not() };
+    return this.cmp();
   }
 
   private cmp(): Expr {
@@ -291,7 +300,6 @@ class Parser {
 
   private unary(): Expr {
     if (this.eatOp("-")) return { kind: "unary", op: "-", expr: this.unary() };
-    if (this.eatIdent("NOT")) return { kind: "unary", op: "NOT", expr: this.unary() };
     return this.primary();
   }
 
@@ -1234,12 +1242,28 @@ function decimalsWithout(decimals: TableData["decimals"], name: string): TableDa
   return Object.keys(rest).length ? rest : undefined;
 }
 
+/** Whether a column name must be written bracketed in a formula: anything
+ *  that is not a plain identifier (spaces, punctuation), and any plain
+ *  identifier the parser would read as something else whatever follows
+ *  it — a constant (`E`, `PI`) or a logical operator (`AND` / `OR` /
+ *  `NOT`). Function and aggregate names (`SUM`, `MEAN`…) need no
+ *  brackets: a bare reference is never followed by `(`, and without one
+ *  the parser reads the word as a variable — `Sum * 2` stays `Sum * 2`,
+ *  as the rename test pins. */
+const RESERVED_FORMULA_WORDS = new Set([...Object.keys(CONSTANTS), "AND", "OR", "NOT"]);
+const needsBrackets = (name: string): boolean =>
+  !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || RESERVED_FORMULA_WORDS.has(name.toUpperCase());
+
 /** Renames the variable in a formula: a bare `Old` becomes `New`, and a
  *  bracketed `[Old]` becomes `[New]`. A function call named `Old` is left
  *  alone (a column is never a function), and so is text inside brackets
- *  that is not the whole name. */
+ *  that is not the whole name. A numeric literal is copied whole — the
+ *  `e` in `1e-5` is an exponent, not the column `e` — and a new name
+ *  that needs brackets gets them, so renaming to `Dose (mg)` or `E`
+ *  keeps the formula readable. */
 export function renameVariableInFormula(formula: string, oldName: string, newName: string): string {
   if (oldName === newName) return formula;
+  const replacement = needsBrackets(newName) ? `[${newName}]` : newName;
   let out = "";
   let i = 0;
   while (i < formula.length) {
@@ -1252,11 +1276,21 @@ export function renameVariableInFormula(formula: string, oldName: string, newNam
       i = close + 1;
       continue;
     }
+    if (/[0-9.]/.test(ch)) {
+      // A number, exponent included: `1e-5` is one literal, and its `e`
+      // is not a column reference. The tokenizer's number shape.
+      const m = /^[0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?/.exec(formula.slice(i));
+      if (m && m[0] !== ".") {
+        out += m[0];
+        i += m[0].length;
+        continue;
+      }
+    }
     if (/[A-Za-z_]/.test(ch)) {
       const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(formula.slice(i))!;
       const word = m[0];
       const after = formula[i + word.length];
-      out += word === oldName && after !== "(" ? newName : word;
+      out += word === oldName && after !== "(" ? replacement : word;
       i += word.length;
       continue;
     }
