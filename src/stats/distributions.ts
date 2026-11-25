@@ -307,11 +307,12 @@ export function centralChiSquareQuantile(p: number, df: number): number {
  *  noncentrality delta — Algorithm AS 243 (Lenth 1989; R's pnt.c): a twin
  *  series over the incomplete beta, plus Φ(−δ). The twin series needs
  *  ~δ²/2 terms, so the iteration cap is 100,000 rather than R's 100: power
- *  analysis routinely carries δ past 10. Past |δ| ≈ 38 the first Poisson
- *  weight underflows to 0 and the series contributes nothing, leaving
- *  Φ(−δ) — the correct tail limit for power evaluation at a critical value
- *  (the CDF there is ~0), but not a general-purpose CDF at t ≈ δ. NaN
- *  outside its domain; δ = 0 is the central t. */
+ *  analysis routinely carries δ past 10. The first Poisson weight
+ *  ½·exp(−δ²/2) underflows to 0 past |δ| ≈ 38, so there the series
+ *  weights are carried in log space and exponentiated per term (the terms
+ *  that matter sit near the Poisson mode, far above the underflow floor)
+ *  — the CDF continues smoothly instead of cliffing to 0. NaN outside
+ *  its domain; δ = 0 is the central t. */
 export function noncentralTCdf(t: number, df: number, delta: number): number {
   if (!Number.isFinite(t) || !Number.isFinite(df) || !Number.isFinite(delta) || df <= 0) return NaN;
   if (delta === 0) return centralTCdf(t, df);
@@ -327,8 +328,29 @@ export function noncentralTCdf(t: number, df: number, delta: number): number {
   const x = (tt * tt) / (tt * tt + df);
   if (x > 0) {
     const lambda = del * del;
-    let p = 0.5 * Math.exp(-0.5 * lambda);
+    const mu = 0.5 * lambda;
+    // The twin-series weights are Poisson weights p_j = ½·e^(−μ)·μ^j/j!
+    // (and q_j ∝ p_j): the first weight underflows to 0 once μ ≳ 710
+    // (|δ| ≳ 37.7), which zeroes the whole series and cliffs the CDF to
+    // exactly 0 (bug 63, cycle 42). Past that point carry the weights in
+    // log space and exponentiate per term — the same log-space trick
+    // `poissonMixtureWeights` uses for the noncentral F / chi-square
+    // CDFs: the terms that matter sit near the Poisson mode j ≈ μ, where
+    // p_j is O(1/√μ), far above the underflow floor, while the underflowed
+    // far-tail terms contribute < 1e-300 and exponentiate to 0 harmlessly.
+    // Below the threshold the original linear recurrence runs unchanged
+    // (bit-identical results in the region that already worked).
+    const logWeights = mu > 700;
+    let logP = 0;
+    let logQ = 0;
+    let p = 0.5 * Math.exp(-mu);
     let q = (Math.SQRT2 / Math.sqrt(Math.PI)) * p * del;
+    if (logWeights) {
+      logP = Math.log(0.5) - mu;
+      logQ = Math.log(Math.SQRT2 / Math.sqrt(Math.PI)) + logP + Math.log(Math.abs(del));
+      p = logP > -745 ? Math.exp(logP) : 0;
+      q = logQ > -745 ? Math.sign(del) * Math.exp(logQ) : 0;
+    }
     let s = 0.5 - p;
     let a = 0.5;
     const b = 0.5 * df;
@@ -347,8 +369,15 @@ export function noncentralTCdf(t: number, df: number, delta: number): number {
       xeven -= geven;
       godd = (godd * x * (a + b - 1)) / a;
       geven = (geven * x * (a + b - 0.5)) / (a + 0.5);
-      p = (p * lambda) / (2 * en);
-      q = (q * lambda) / (2 * en + 1);
+      if (logWeights) {
+        logP += Math.log(mu) - Math.log(en);
+        logQ += Math.log(mu) - Math.log(en + 0.5);
+        p = logP > -745 ? Math.exp(logP) : 0;
+        q = logQ > -745 ? Math.sign(del) * Math.exp(logQ) : 0;
+      } else {
+        p = (p * lambda) / (2 * en);
+        q = (q * lambda) / (2 * en + 1);
+      }
       s -= p;
       en += 1;
       tnc += p * xodd + q * xeven;
