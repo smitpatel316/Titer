@@ -19351,6 +19351,35 @@ check("copy-446: graph/figure copy writes the vector PDF natively on macOS", asy
   );
 });
 
+// Seq 457 (proof batch #3): the seq 446 shell put real PDF + PNG bytes
+// on the pasteboard, but wrapped in ONE AppleScript list —
+// `set the clipboard to {pdf, png}` — so no other app could read them:
+// NSPasteboard.types showed only the list flavour, `pbpaste -Prefer pdf`
+// and `-Prefer png` returned 0 bytes, Preview's "New from Clipboard" was
+// disabled and TextEdit pasted nothing. The shell must write TWO
+// top-level pasteboard items (one NSPasteboardItem per flavour), never a
+// list. This pin binds to the blocking function so the seq 296 PNG-only
+// helper (a single item, correctly list-free) cannot satisfy it.
+check("copy-457: graph/figure copy writes two top-level pasteboard items, not an AppleScript list", () => {
+  const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
+  const start = mainRs.indexOf("fn copy_pdf_to_clipboard_blocking");
+  ok(start >= 0, "copy_pdf_to_clipboard_blocking exists");
+  const body = mainRs.slice(start, mainRs.indexOf("\n}\n", start));
+  ok(!/set the clipboard to \{/.test(body), "no AppleScript list on the clipboard — one item per flavour");
+  ok(!body.includes("«class PDF »"), "the list-form PDF flavour is gone");
+  ok(!body.includes("«class PNGf»"), "the list-form PNG flavour is gone");
+  ok(body.includes("NSPasteboardItem"), "each flavour gets its own pasteboard item");
+  ok(body.includes("writeObjects"), "the items are written as separate top-level items");
+  ok(body.includes("com.adobe.pdf"), "the PDF item carries the PDF pasteboard type");
+  ok(body.includes("public.png"), "the PNG item carries the PNG pasteboard type");
+  ok(body.includes("clearContents"), "the pasteboard is cleared before the write");
+  // Both copy paths still share this one native write (seq 446).
+  const graphSrc = readFileSync("src/views/graphs/graph-export.ts", "utf8");
+  ok(graphSrc.includes("writeVectorToClipboard(pdf, png)"), "copyGraphImage goes through the shared native write");
+  const figureSrc = readFileSync("src/views/figures/figure-export.ts", "utf8");
+  ok(figureSrc.includes("writeVectorToClipboard(pdf, png)"), "copyFigureImage goes through the shared native write");
+});
+
 check("seq 216: BMP is 24-bit bottom-up BGR with DPI in the header", () => {
   const bmp = bmpEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200);
   strictEqual(String.fromCharCode(bmp[0]!, bmp[1]!), "BM");
