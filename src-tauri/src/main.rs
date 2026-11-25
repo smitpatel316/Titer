@@ -7,6 +7,10 @@
 // xdg-open equivalents so the same commands keep their signatures.
 mod cloud;
 mod cloud_box;
+// FlowJo track, seq 440 (F0): FCS reading via the `flow-fcs` crate —
+// see src/flow.rs and docs/flow-fcs-evaluation.md. Test-only for now:
+// the smoke test pins the ADOPT; Phase 1 owns the import surface.
+mod flow;
 // Automatic backup (Plane seq 226, 1.8.0): the separate-copy store — see
 // backup.rs. The commands below are its frontend face.
 mod backup;

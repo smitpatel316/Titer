@@ -41086,6 +41086,60 @@ check("flow-f1a: columnar event store loads synthetic FCS-like data, stats + sum
   strictEqual((await fallback.sampleStats("w"))!.eventCount, 2);
 });
 
+// ── FlowJo track, seq 440 (F0) ────────────────────────────────────────────
+
+check("flow-f0: flow-fcs 0.6.0 evaluation verdict recorded + smoke parse of a real FCS file", () => {
+  // Seq 440: ADOPT-or-BUILD verdict for the `flow-fcs` crate as Titer's FCS
+  // reader, evaluated against a real-world public corpus (see
+  // docs/flow-fcs-evaluation.md). Pre-fix this fails: no verdict file, no
+  // fixtures, no wired dependency, no smoke test.
+  const evalPath = "docs/flow-fcs-evaluation.md";
+  ok(existsSync(evalPath), "docs/flow-fcs-evaluation.md must record the ADOPT-or-BUILD verdict");
+  const md = readFileSync(evalPath, "utf8");
+  ok(/^## Verdict: ADOPT$/m.test(md), "the verdict must be recorded as ADOPT (one line)");
+  ok(md.includes("flow-fcs 0.6.0"), "the verdict must name the evaluated version (0.6.0)");
+  ok(md.includes("logicle"), "the verdict must record the logicle/biexactness finding");
+
+  // The smoke fixture is a real FCS file (Gating-ML compliance corpus,
+  // FCS 3.0, big-endian int16). Re-derive $PAR/$TOT/params from its own
+  // bytes here, and require the verdict doc to record the same numbers —
+  // so the pin is self-validating, not a copy of a copied claim.
+  const fixture = "tests/testdata/fcs/int-10_events_6_parameters.fcs";
+  ok(existsSync(fixture), "the smoke fixture must be committed under tests/testdata/fcs/");
+  const buf = readFileSync(fixture);
+  strictEqual(buf.subarray(0, 6).toString("ascii"), "FCS3.0", "fixture must be an FCS 3.0 file");
+  const textStart = parseInt(buf.subarray(10, 18).toString("ascii").trim(), 10);
+  const textEnd = parseInt(buf.subarray(18, 26).toString("ascii").trim(), 10);
+  const delim = String.fromCharCode(buf[textStart]);
+  const parts = buf.subarray(textStart, textEnd + 1).toString("ascii").split(delim);
+  const kw: Record<string, string> = {};
+  for (let i = 1; i + 1 < parts.length; i += 2) kw[parts[i]] = parts[i + 1];
+  strictEqual(kw["$PAR"], "6", "fixture $PAR must be 6");
+  strictEqual(kw["$TOT"], "10", "fixture $TOT must be 10");
+  const params = [1, 2, 3, 4, 5, 6].map((n) => kw[`$P${n}N`]);
+  deepStrictEqual(params, ["AS", "BS", "CS", "DS", "ES", "FS"], "fixture params must be AS..FS");
+  ok(
+    md.includes("int-10_events_6_parameters.fcs: FCS3.0, $PAR 6, $TOT 10, params AS/BS/CS/DS/ES/FS"),
+    "the verdict doc must record the smoke-parse expectation for the primary fixture",
+  );
+
+  // A $SPILLOVER fixture must be committed too (the compensation path is
+  // part of the ADOPT case), with its matrix recorded in the verdict doc.
+  ok(existsSync("tests/testdata/fcs/synth-spill.fcs"), "the $SPILLOVER fixture must be committed");
+  ok(md.includes("synth-spill.fcs"), "the verdict doc must record the $SPILLOVER fixture");
+
+  // ADOPT means wired in: the crate must be a declared dependency and a
+  // headless Rust smoke test must open the fixture and assert $PAR/$TOT.
+  const cargo = readFileSync("src-tauri/Cargo.toml", "utf8");
+  ok(cargo.includes('flow-fcs'), "src-tauri/Cargo.toml must declare the flow-fcs dependency");
+  const smoke = readFileSync("src-tauri/src/flow.rs", "utf8");
+  ok(smoke.includes("int-10_events_6_parameters.fcs"), "the Rust smoke test must open the fixture");
+  ok(
+    smoke.includes("get_number_of_parameters") && smoke.includes("get_number_of_events"),
+    "the Rust smoke test must assert $PAR and $TOT",
+  );
+});
+
 
 // ── Run ──────────────────────────────────────────────────────────────────
 
