@@ -282,14 +282,76 @@ const csvEncode = (rows: (string | null)[][]): string =>
     )
     .join("\n") + (rows.length ? "\n" : "");
 
+/** A dataset's positional letter for an analysis inputDataSets `idx`:
+ *  A…Z, then AA, AB… — real Prism 11.2.0 rejects a numeric idx (seq 247,
+ *  J6), and a naive charCode past Z emits "[", "\\", "]" instead of
+ *  letters (R2-26). */
+const datasetLetterIdx = (i: number): string => {
+  let n = i + 1;
+  let s = "";
+  while (n > 0) {
+    const r = (n - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+};
+
 /** Split Titer Y columns into Prism datasets. `columns` are the data columns
  *  (Title and X already removed). Grouping rules, in order:
+ *  0. Titer colon groups ("A:Y1"… / "A:Mean", "A:SD", "A:N"): native XY
+ *     tables name subcolumns after the group, split at the LAST ":";
  *  1. summary suffix groups (`T_MEAN`/`T_SD`/`T_N` → one y_sd_n dataset);
  *  2. replicate groups (`T_1`…`T_n` → one y_replicates dataset);
  *  3. anything left is one y_single dataset per column. */
 function groupDatasets(columns: WriteColumn[]): WriteSet[] {
   const sets: WriteSet[] = [];
   const used = new Set<number>();
+  // 0. Titer colon groups: a summary set's suffixes are the summary
+  // format's subcolumn labels (the same labels summary-format.ts defines);
+  // replicates are "Y1"…"Yn" consecutive from 1. A lone "A:Y1" stays a
+  // single, like a lone "Base_1".
+  const colonSummary: { suffixes: string[]; dataFormat: string }[] = [
+    { suffixes: [":Mean", ":SD", ":N"], dataFormat: "y_sd_n" },
+    { suffixes: [":Mean", ":SEM", ":N"], dataFormat: "y_se_n" },
+    { suffixes: [":Mean", ":CV", ":N"], dataFormat: "y_cv_n" },
+    { suffixes: [":Mean", ":SD"], dataFormat: "y_sd" },
+    { suffixes: [":Mean", ":SEM"], dataFormat: "y_se" },
+    { suffixes: [":Mean", ":CV"], dataFormat: "y_cv" },
+    { suffixes: [":Mean", ":+error", ":−error"], dataFormat: "y_plus_minus" },
+    { suffixes: [":Mean", ":Upper limit", ":Lower limit"], dataFormat: "y_plus_minus" },
+  ];
+  for (let i = 0; i < columns.length; i++) {
+    if (used.has(i)) continue;
+    const sep = columns[i].name.lastIndexOf(":");
+    if (sep <= 0) continue;
+    const base = columns[i].name.slice(0, sep);
+    const first = columns[i].name.slice(sep + 1);
+    if (first === "") continue;
+    let matched = false;
+    for (const { suffixes, dataFormat } of colonSummary) {
+      if (suffixes[0].slice(1) !== first) continue;
+      const group = suffixes.map((s) => columns.findIndex((c, j) => !used.has(j) && c.name === base + s));
+      if (group.every((g) => g >= 0)) {
+        group.forEach((g) => used.add(g));
+        sets.push({ title: base, columns: group, dataFormat });
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+    if (first !== "Y1") continue;
+    const group = [i];
+    for (let n = 2; ; n++) {
+      const j = columns.findIndex((c, k) => !used.has(k) && c.name === `${base}:Y${n}`);
+      if (j < 0) break;
+      group.push(j);
+    }
+    if (group.length > 1) {
+      group.forEach((g) => used.add(g));
+      sets.push({ title: base, columns: group, dataFormat: "y_replicates", replicatesCount: group.length });
+    }
+  }
   // 1. Summary groups: exact suffix sets, same base.
   for (let i = 0; i < columns.length; i++) {
     if (used.has(i)) continue;
@@ -801,15 +863,23 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         // real Prism 11.2.0 rejects a numeric idx with "damaged or
         // truncated" (seq 247, J6). Input uids are positional too — the
         // title-keyed map collapses duplicate titles to one uid.
-        const letterIdx = (i: number) => String.fromCharCode(65 + i);
-        const yPos = yTitle ? info.datasetTitles.indexOf(yTitle) : -1;
+        // params.y names the dataset's GROUP ("A"), but the written
+        // datasets can be titled with their subcolumns ("A:Y1"…) — match
+        // the group title exactly, or as the prefix before the first ":"
+        // (R2-26). The matched dataset keeps its positional letter,
+        // never a hardcoded "A".
+        const yPos = yTitle
+          ? info.datasetTitles.indexOf(yTitle) >= 0
+            ? info.datasetTitles.indexOf(yTitle)
+            : info.datasetTitles.findIndex((t) => t.startsWith(yTitle + ":"))
+          : -1;
         const inputDataSets =
           yTitle && yPos >= 0
-            ? [{ uid: info.datasetUids[yPos] ?? "", title: yTitle, idx: "A" }]
+            ? [{ uid: info.datasetUids[yPos] ?? "", title: yTitle, idx: datasetLetterIdx(yPos) }]
             : info.datasetTitles.map((title, i) => ({
                 uid: info.datasetUids[i] ?? "",
                 title,
-                idx: letterIdx(i),
+                idx: datasetLetterIdx(i),
               }));
         const is4PLx = model === "sigmoidal-4pl-x";
         setJson(`analyses/${analysisUid}/sheet.json`, {
@@ -888,7 +958,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
           inputDataSets: info.datasetTitles.map((title, i) => ({
             uid: info.datasetUids[i] ?? "",
             title,
-            idx: String.fromCharCode(65 + i),
+            idx: datasetLetterIdx(i),
           })),
           resultSheets: [],
           isCalculated: false,
@@ -979,7 +1049,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
             reasons.push(`dataset “${title}” is not in table “${table.name}”`);
             continue;
           }
-          inputs.push({ uid: info.datasetUids[pos] ?? "", title, idx: String.fromCharCode(65 + pos) });
+          inputs.push({ uid: info.datasetUids[pos] ?? "", title, idx: datasetLetterIdx(pos) });
         }
         if (inputs.length === 2 && inputs[0].uid === inputs[1].uid)
           reasons.push(`datasets “${inputTitles[0]}” and “${inputTitles[1]}” resolve to the same dataset`);
