@@ -369,8 +369,17 @@ const BROWSER_ALLOWLIST: &[&str] = &[
 
 fn url_host(url: &str) -> Option<String> {
     let rest = url.strip_prefix("https://")?;
-    let host = rest.split(['/', '?', '#']).next()?;
-    let host = host.split(':').next()?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    // Fail closed on userinfo (BUG-REPORT.md Round 2 Issue 3): without
+    // this, `https://account.box.com:x@example.org/` parses to the
+    // allowlisted host `account.box.com` while the browser opens
+    // `example.org`. A userinfo (`@`) never appears in a provider-built
+    // authorize URL, so any authority carrying one is refused outright
+    // instead of trusting the host after the `@`.
+    if authority.contains('@') {
+        return None;
+    }
+    let host = authority.split(':').next()?;
     Some(host.to_ascii_lowercase())
 }
 
@@ -952,6 +961,35 @@ mod tests {
         };
         let shown = format!("{tokens:?}");
         assert!(!shown.contains("SECRET-ACCESS") && !shown.contains("SECRET-REFRESH"), "{shown}");
+    }
+
+    #[test]
+    fn url_host_rejects_userinfo_bypass() {
+        // BUG-REPORT.md Round 2 Issue 3: `https://account.box.com:x@`
+        // `example.org/` must not parse to the allowlisted host, and no
+        // userinfo-bearing URL may pass the allowlist at all.
+        assert_eq!(url_host("https://account.box.com:x@example.org/phish"), None);
+        assert_eq!(url_host("https://account.box.com:secret@evil.example/"), None);
+        assert_eq!(url_host("https://user@account.box.com/"), None);
+        // Controls: plain authorize URLs still parse, ports still strip,
+        // foreign hosts still parse (and the allowlist refuses them), and
+        // non-https never parses.
+        assert_eq!(
+            url_host("https://account.box.com/api/oauth2/authorize"),
+            Some("account.box.com".to_string())
+        );
+        assert_eq!(
+            url_host("https://account.box.com:443/api/oauth2/authorize"),
+            Some("account.box.com".to_string())
+        );
+        assert_eq!(url_host("https://example.org/phish"), Some("example.org".to_string()));
+        assert_eq!(url_host("http://account.box.com/"), None);
+        // An `@` in the query (e.g. login_hint) is not userinfo: the
+        // authority has none, so the URL still parses.
+        assert_eq!(
+            url_host("https://account.box.com/api/oauth2/authorize?login_hint=a@b.com"),
+            Some("account.box.com".to_string())
+        );
     }
 
     #[test]
