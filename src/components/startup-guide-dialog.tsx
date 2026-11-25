@@ -19,6 +19,7 @@
 import * as React from "react";
 import { Button } from "../ui/controls";
 import { GUIDE_STEPS } from "../lib/startup-guide";
+import { SendFeedbackButton } from "./send-feedback-dialog";
 
 export function StartupGuideDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [step, setStep] = React.useState(0);
@@ -100,6 +101,11 @@ export function StartupGuideDialog({ open, onClose }: { open: boolean; onClose: 
               <a className="underline" href={current.link.href}>
                 {current.link.label}
               </a>
+            </p>
+          )}
+          {current.id === "help" && (
+            <p className="text-regular">
+              <SendFeedbackButton />
             </p>
           )}
           <div className="flex justify-end gap-2">
