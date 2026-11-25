@@ -82,10 +82,12 @@ import {
   MONTE_CARLO_TARGETS,
   MULTIPLE_T_TEST_CORRECTIONS,
   NONLINEAR_MODELS,
+  NORMALITY_TESTS,
   NORMALIZE_HUNDRED_DEFS,
   NORMALIZE_METHODS,
   NORMALIZE_ZERO_DEFS,
   PLOT_FUNCTION_DISTRIBUTIONS,
+  POSTHOCS,
   POSTHOC_TARGETS,
   PRUNE_ROWS_CONDITIONS,
   P_VALUE_STACK_METHODS,
@@ -97,6 +99,7 @@ import {
   SELECT_TRANSFORM_OPERATORS,
   SMOOTH_DIFF_INT_OPERATIONS,
   TAILS,
+  THREE_WAY_POSTHOCS,
   THREE_WAY_POSTHOC_SCOPES,
   THREE_WAY_TERMS,
   TRANSFORM_ERROR_MODES,
@@ -969,14 +972,13 @@ const PARAM_DEFAULTS: Record<string, Record<string, unknown>> = {
  *  values: `posthoc: "dunn"` on a one-way ANOVA runs Dunnett's T3 math under
  *  a Dunn's label, `"tukey"`/`"bonferroni"` on Kruskal-Wallis or Friedman
  *  runs Dunn regardless, `method: "spline"|"lowess"` on a correlation is
- *  silently treated as Pearson. Restricted here, at load, to the list its
- *  own analysis offers; anything else is left out and falls back to the
- *  default above, with a warning. Analyses whose runner already refuses
- *  cross-family values with a clean error — nested-anova and three-way-anova
- *  posthoc, two-way-anova posthoc, spline-lowess method, repeated-measures
- *  ANOVA posthoc — are left alone: the error is the honest answer there.
- *  The merged `model` list is likewise safe (each runner validates and
- *  errors cleanly). */
+ *  silently treated as Pearson. Restricted here to the list its own analysis
+ *  offers (the per-analysis enums in analysis-params-schema.json): the MCP
+ *  validator rejects anything else, and the file reader leaves it out so the
+ *  usual default applies, with a warning. EXCEPT the pairs in
+ *  LOAD_KEPT_CHOICES, whose runner already refuses a cross-family value with
+ *  a clean error: the reader keeps those, so the error still reaches the
+ *  user instead of a silent fallback — only the validator rejects them. */
 const PARAM_CHOICES: Record<string, Record<string, readonly string[]>> = {
   anova: { posthoc: ANOVA_POSTHOCS },
   "kruskal-wallis": { posthoc: RANK_POSTHOCS },
@@ -988,6 +990,61 @@ const PARAM_CHOICES: Record<string, Record<string, readonly string[]>> = {
   // offers holm/fdr/none, multiple-t-tests the full Prism set (seq 193).
   survival: { correction: CORRECTIONS },
   "multiple-t-tests": { correction: MULTIPLE_T_TEST_CORRECTIONS },
+  // The merged `model` list admits every family's models: each runner fits
+  // only its own (binding/enzyme/dose-special refuse the rest cleanly; the
+  // nonlinear fitter refuses anything outside its library the same way).
+  "nonlinear-regression": { model: NONLINEAR_MODELS },
+  "binding-saturation": { model: BINDING_SATURATION_MODELS },
+  "binding-kinetics": { model: BINDING_KINETICS_MODELS },
+  "enzyme-inhibition": { model: ENZYME_INHIBITION_MODELS },
+  "dose-response-special": { model: DOSE_RESPONSE_SPECIAL_MODELS },
+  // The merged `test` list admits both families: the normality tests and
+  // the contingency tests. A cross-family test silently ran the wrong test
+  // (shapiro-wilk fell back; chi-square forced Yates' correction).
+  "shapiro-wilk": { test: NORMALITY_TESTS },
+  "chi-square": { test: CONTINGENCY_TESTS },
+  // The merged `method` list admits every family's methods: Monte Carlo
+  // only correlates (pearson/spearman); the P-value stack only adjusts.
+  "monte-carlo": { method: CORRELATION_METHODS },
+  "p-value-stack": { method: P_VALUE_STACK_METHODS },
+  // Linear regression weights without 1/SD², which needs the replicate SDs
+  // this runner never sees (the runner refuses it cleanly; anything else
+  // outside the five reaches R as an undefined weight).
+  "linear-regression": { weights: ["none", "1/y", "1/y2", "1/x", "1/x2"] },
+  // Plot a function plots the fitter's library minus the user-defined
+  // equation (it has no equation to plot), plus the distributions.
+  "plot-function": {
+    equation: [
+      ...NONLINEAR_MODELS.filter((m) => m !== "user-defined"),
+      ...PLOT_FUNCTION_DISTRIBUTIONS,
+    ],
+  },
+  // The merged `posthoc` list admits every family's comparisons: each ANOVA
+  // only offers its own. A cross-family posthoc silently ran as none on
+  // rm-anova; the other ANOVAs refuse it cleanly (see LOAD_KEPT_CHOICES).
+  "rm-anova": { posthoc: POSTHOCS },
+  "two-way-anova": { posthoc: THREE_WAY_POSTHOCS }, // same nine as three-way (POSTHOCS + dunnett + games-howell + fdr)
+  "three-way-anova": { posthoc: THREE_WAY_POSTHOCS },
+  "nested-anova": { posthoc: ["none", "tukey", "bonferroni"] },
+  "multifactor-anova": { posthoc: ["none", "tukey", "bonferroni"] },
+};
+
+/** Narrowings the file reader does NOT enforce (see PARAM_CHOICES): each of
+ *  these runners refuses a cross-family value with a clean error of its own,
+ *  so keeping the value lets that error reach the user instead of a fallback
+ *  to the default. The MCP validator still rejects them. */
+const LOAD_KEPT_CHOICES: Record<string, readonly string[]> = {
+  "nonlinear-regression": ["model"],
+  "binding-saturation": ["model"],
+  "binding-kinetics": ["model"],
+  "enzyme-inhibition": ["model"],
+  "dose-response-special": ["model"],
+  "plot-function": ["equation"],
+  "p-value-stack": ["method"],
+  "two-way-anova": ["posthoc"],
+  "three-way-anova": ["posthoc"],
+  "nested-anova": ["posthoc"],
+  "multifactor-anova": ["posthoc"],
 };
 
 /** A collection param, keeping its usable entries: one bad entry used to
@@ -1559,10 +1616,14 @@ function readParams(
   const sanitized = Object.fromEntries(Object.entries(p).map(([k, v]) => [k, read(k, v)]));
   // A choice from another test's family is left out (M7) — it would be
   // silently reinterpreted by this test's runner — and falls back to the
-  // default below, with a warning of its own (not the M5 one).
+  // default below, with a warning of its own (not the M5 one). Except the
+  // LOAD_KEPT_CHOICES pairs, whose runner refuses it with a clean error:
+  // those stay, so the error still reaches the user.
   const choices = (analysisType ? PARAM_CHOICES[analysisType] : undefined) ?? {};
+  const kept = (analysisType ? LOAD_KEPT_CHOICES[analysisType] : undefined) ?? [];
   const restricted = new Set<string>();
   for (const [key, allowed] of Object.entries(choices)) {
+    if (kept.includes(key)) continue;
     const value = sanitized[key];
     if (value !== undefined && !allowed.includes(value as string)) {
       issues.push({

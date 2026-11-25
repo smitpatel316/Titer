@@ -24,11 +24,19 @@ import {
   type ColumnTestSpec,
 } from "./base";
 
-/** Tukey, Bonferroni, Šídák, Holm–Šídák or LSD, else none (a file may name another). */
-const posthocIn = (params: RmAnovaParams | undefined) =>
-  params?.posthoc === "tukey" || (PAIR_CORRECTIONS as readonly string[]).includes(params?.posthoc ?? "")
-    ? (params!.posthoc as "tukey" | (typeof PAIR_CORRECTIONS)[number])
-    : "none";
+/** Tukey, Bonferroni, Šídák, Holm–Šídák or LSD, else none — a posthoc this
+ *  analysis doesn't offer is refused, never silently run as none (a file may
+ *  name another family's posthoc). */
+const posthocIn = (params: RmAnovaParams | undefined) => {
+  const posthoc = params?.posthoc ?? "none";
+  if (posthoc === "tukey" || (PAIR_CORRECTIONS as readonly string[]).includes(posthoc))
+    return posthoc as "tukey" | (typeof PAIR_CORRECTIONS)[number];
+  if (posthoc === "none") return "none" as const;
+  throw new Error(
+    `“${posthoc}” multiple comparisons are not available for repeated-measures one-way ANOVA — ` +
+      `choose Tukey, Bonferroni, Šídák, Holm–Šídák or Fisher's LSD.`,
+  );
+};
 
 /** Sphericity is assumed unless the params say it isn't (an analysis from before 1.0.7). */
 const corrected = (params: RmAnovaParams | undefined) => params?.sphericity === false;
