@@ -505,7 +505,9 @@ export function useDocument() {
    *  says so. A `.prism` file imports as a project that saves back as
    *  `.prism` — the open keeps its remote handle, unlike a local import,
    *  which starts untitled. Same for a `.pzfx` file. */
-  const loadRemote = async (handle: RemoteHandle): Promise<void> => {
+  /** Opens a remote project file in this window. Returns whether the
+   *  project actually loaded — see `load` (Issue 19). */
+  const loadRemote = async (handle: RemoteHandle): Promise<boolean> => {
     // A file is coming into this window — the Welcome dialog never auto-shows here.
     openedFile.current = true;
     const recent: RecentEntry = {
@@ -549,8 +551,7 @@ export function useDocument() {
     } catch (err) {
       report();
       if (isOfflineError(err)) {
-        await openOfflineCopy();
-        return;
+        return openOfflineCopy();
       }
       if (isNotAuthenticatedError(err)) {
         await native.alert(
@@ -558,11 +559,12 @@ export function useDocument() {
           "The Box sign-in expired or was revoked. Reconnect in Settings → Connected Storage to open this file.",
           "error",
         );
-        return;
+        return false;
       }
       // Gone since it was opened last: it leaves Open Recent too.
       setRecents((list) => list.filter((e) => recentKey(e) !== recentKey(recent)));
-      return sayGone(handle.path);
+      await sayGone(handle.path);
+      return false;
     }
     const next: RemoteHandle = makeRemoteHandle(
       handle.provider,
@@ -574,27 +576,27 @@ export function useDocument() {
       downloaded.modifiedAt ?? null,
     );
     if (handle.path.toLowerCase().endsWith(".prism")) {
-      if (!(await importPrismBytes(base64ToBytes(downloaded.base64), fileTitle(handle.path)))) return;
+      if (!(await importPrismBytes(base64ToBytes(downloaded.base64), fileTitle(handle.path)))) return false;
       // The project came from a `.prism` file: it saves back as `.prism`,
       // like a local file after Save as Prism — no format nudge.
       prismOrigin.current = false;
       setRemote(next);
       setUntitled(fileTitle(handle.path));
       addRecent(recent);
-      return;
+      return true;
     }
     if (handle.path.toLowerCase().endsWith(".pzfx")) {
       if (!(await importPrismText(new TextDecoder().decode(base64ToBytes(downloaded.base64)), fileTitle(handle.path))))
-        return;
+        return false;
       // The project came from a `.pzfx` file: it saves back as `.pzfx`,
       // like a local file after Save as .pzfx — no format nudge.
       prismOrigin.current = false;
       setRemote(next);
       setUntitled(fileTitle(handle.path));
       addRecent(recent);
-      return;
+      return true;
     }
-    await applyProjectText(
+    return applyProjectText(
       new TextDecoder().decode(base64ToBytes(downloaded.base64)),
       { filePath: null, untitled: false, displayName: handle.path },
       () => {
@@ -1191,14 +1193,28 @@ export function useDocument() {
    *  `.hlx` bytes), so the backup loads back through the normal reader.
    *  `target` overrides the window's current backup target — a save that
    *  just moved the project (Save As) passes its new path, since the ref
-   *  still holds the old one until the next render. Returns whether the
-   *  snapshot landed, and records the revision it holds, so the timer
-   *  knows the project is covered until the next edit. */
+   *  still holds the old one until the next render. `text` writes file
+   *  text verbatim instead of serializing the store: a revert writes the
+   *  disk text it just loaded, because the store still holds the
+   *  pre-revert project until React commits the load (Issue 19) — a
+   *  snapshot from the store would keep the discarded edits. Returns
+   *  whether the snapshot landed, and records the revision it holds, so
+   *  the timer knows the project is covered until the next edit. */
   const writeBackupSnapshot = async (
     target: { identity: string; displayName: string; sourcePath: string | null } = backupTargetRef.current,
+    text?: string,
   ): Promise<boolean> => {
     if (!native.isNative) return false;
     if (!target.identity) return false;
+    if (text !== undefined) {
+      try {
+        const base64 = bytesToBase64(new TextEncoder().encode(text));
+        await native.backupWrite(target.identity, target.displayName, target.sourcePath, base64);
+        return true;
+      } catch {
+        return false;
+      }
+    }
     const s = latest.current.get();
     const revision = s.revision;
     try {
@@ -1510,22 +1526,59 @@ export function useDocument() {
     }
   };
 
+  /** Wait until a dispatch has committed — `latest.current` is only
+   *  refreshed when React re-renders, so reading it straight after a
+   *  dispatch sees the pre-dispatch project (Issue 19). The commit is
+   *  recognised by the state itself, not by a bare sleep: the revision
+   *  must have moved past the pre-dispatch value AND the store must hold
+   *  the dispatched content (by reference — `applyScript` stores the
+   *  doc's own nodes object), so an unrelated commit landing first
+   *  cannot end the wait early. Bounded: a commit that never lands
+   *  degrades to the old behaviour, never a hang. */
+  const waitForScriptCommit = async (doc: ScriptDoc, beforeRevision: number): Promise<void> => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 1000) {
+      const s = latest.current;
+      if (s.revision > beforeRevision && s.nodes === doc.nodes) return;
+      await quitSleep(10);
+    }
+  };
+
+  /** Wait until the store holds the reverted project — a `load` dispatch
+   *  also lands only on React's commit — or the bound runs out. The
+   *  reverted load is clean (unless the file itself needed repair), so a
+   *  settled dirty flag is the signal; a file that reopens edited stays
+   *  dirty, and the wait simply expires. */
+  const waitForRevertCommit = async (): Promise<void> => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 1000) {
+      if (!latest.current.isDirty) return;
+      await quitSleep(10);
+    }
+  };
+
   /** Run the project's saved scripts for a hook (seq 228): on open, after
    *  the project loads; on close, before the save question. Each script runs
    *  through the same engine + effects as the dialog's Run, in the order the
    *  scripts are saved; a run that stops on an error changes nothing for
    *  that script (its log is reported) and the later scripts still run.
-   *  Returns false when any script stopped, so the caller can say so — for
-   *  a close, the window stays open. */
+   *  Returns whether every script finished (`ok`), whether any script
+   *  changed the project (`changed`), and the project after the last
+   *  script (`doc`) — the caller needs `doc` itself, because the dispatch
+   *  that applies it only lands in `latest.current` when React commits:
+   *  a caller that reads the store straight after this returns would see
+   *  the pre-script project (Issue 19). A script that stops calls the
+   *  close off — the window stays open. */
   const runSavedScripts = async (
     scripts: ProjectScript[] | undefined,
     hook: "runOnOpen" | "runOnClose",
     doc: ScriptDoc,
-  ): Promise<boolean> => {
+  ): Promise<{ ok: boolean; changed: boolean; doc: ScriptDoc }> => {
     const due = (scripts ?? []).filter((s) => s[hook]);
-    if (!due.length) return true;
+    if (!due.length) return { ok: true, changed: false, doc };
     let current = doc;
     let ok = true;
+    let changed = false;
     for (const entry of due) {
       const result = await runProjectScriptText(current, entry.text, () => void saveRef.current());
       if (result.stopped) {
@@ -1537,10 +1590,18 @@ export function useDocument() {
         );
         continue;
       }
-      if (JSON.stringify(result.doc) !== JSON.stringify(current)) latest.current.applyScript(result.doc);
+      if (JSON.stringify(result.doc) !== JSON.stringify(current)) {
+        const beforeRevision = latest.current.revision;
+        latest.current.applyScript(result.doc);
+        changed = true;
+        // Yield for the commit before the next script — or the caller —
+        // reads the store: without this the save/quit path below reads
+        // the pre-script project and the script's changes are lost.
+        await waitForScriptCommit(result.doc, beforeRevision);
+      }
       current = result.doc;
     }
-    return ok;
+    return { ok, changed, doc: current };
   };
 
   /** Close with autosave: one save attempt first (only when the toggle is
@@ -1562,17 +1623,22 @@ export function useDocument() {
       // in the project the quit-save then writes. A script that stops
       // calls the close off — the window stays open, with the log shown.
       const state = latest.current.get();
-      const closed = await runSavedScripts(state.scripts, "runOnClose", {
+      const run = await runSavedScripts(state.scripts, "runOnClose", {
         nodes: state.nodes,
         rootOrder: state.rootOrder,
         childOrder: state.childOrder,
         activeNodeId: state.activeNodeId,
         projectName: state.projectName,
       });
-      if (!closed) return false;
+      if (!run.ok) return false;
       const quitSaveAllowed = () =>
         isAutosaveEnabled() &&
-        latest.current.isDirty &&
+        // `run.changed` covers a script change whose commit is still in
+        // flight after the bounded wait: the project IS dirty, even if
+        // `latest.current` has not caught up yet. The save below then
+        // reads the store, and the settle + second save after it covers
+        // a commit that lands in between.
+        (run.changed || latest.current.isDirty) &&
         (latest.current.filePath || remoteRef.current) &&
         !conflictRef.current &&
         !autosaveWouldPrompt();
@@ -1708,8 +1774,12 @@ export function useDocument() {
     }
   };
 
-  /** Opens a project file in this window; `untitled`, as a new document named after it. */
-  const load = async (path: string, untitled: boolean) => {
+  /** Opens a project file in this window; `untitled`, as a new document named after it.
+   *  Returns whether the project actually loaded, so a caller that must act
+   *  on the loaded project (Revert to Saved, Issue 19) can tell a landed
+   *  load from a failed open — without reading the store, which still holds
+   *  the pre-load project until React commits. */
+  const load = async (path: string, untitled: boolean): Promise<boolean> => {
     // A file is coming into this window — the Welcome dialog never auto-shows here.
     openedFile.current = true;
     let text: string;
@@ -1728,14 +1798,16 @@ export function useDocument() {
           openError: `“${fileName(path)}” couldn't be found. It may have been moved or deleted.`,
         });
         setRecents((list) => list.filter((e) => !(e.kind === "local" && e.path === path)));
-        return sayGone(path);
+        await sayGone(path);
+        return false;
       }
       // A Prism file opened straight from the Finder (FF-F15): Titer can't
       // open it as a project — point at the import / converter instead.
       if (isPrismFile(path)) {
         latest.current.setOpenError(prismFileOpenMessage(fileName(path)));
         await publishMcpSnapshotNow({ ...latest.current.get(), openError: prismFileOpenMessage(fileName(path)) });
-        return native.alert("Couldn't Open Project", prismFileOpenMessage(fileName(path)), "error");
+        await native.alert("Couldn't Open Project", prismFileOpenMessage(fileName(path)), "error");
+        return false;
       }
       latest.current.setOpenError(
         `“${fileName(path)}” couldn't be read. It may be damaged, or in an encoding Titer can't read.`,
@@ -1744,11 +1816,12 @@ export function useDocument() {
         ...latest.current.get(),
         openError: `“${fileName(path)}” couldn't be read. It may be damaged, or in an encoding Titer can't read.`,
       });
-      return native.alert(
+      await native.alert(
         "Couldn't Open Project",
         `“${fileName(path)}” couldn't be read. It may be damaged, or in an encoding Titer can't read. It stays in Open Recent.`,
         "error",
       );
+      return false;
     }
     // The baseline for Revert's external-change check (seq 306): the text
     // on disk as this window read it. Untitled (the sample) has no file to
@@ -1756,7 +1829,7 @@ export function useDocument() {
     // disk is still this text, and a failed open leaves the project as is.
     if (!untitled) lastSavedTextRef.current = text;
     setRemote(null);
-    await applyProjectText(
+    return applyProjectText(
       text,
       { filePath: untitled ? null : path, untitled, displayName: path },
       () => {
@@ -1804,21 +1877,35 @@ export function useDocument() {
       ? await native.confirmRevert(revertExternalChangeTitle(name), revertExternalChangeDetail(name))
       : await native.confirmRevert(REVERT_CONFIRM_TITLE, REVERT_CONFIRM_DETAIL);
     if (!confirmed) return;
-    if (path) await load(path, false);
-    else if (handle) await loadRemote(handle);
-    // A failed open leaves the store untouched (still dirty, same path):
-    // only a revert that actually landed refreshes the baseline and the
-    // backup, so a stale snapshot of the discarded edits is never offered
-    // back. A snapshot still in flight owns the file first, like the close
+    // Whether the reload actually landed: `load` / `loadRemote` report
+    // it, so a failed open never refreshes the baseline or the backup.
+    // Reading the store here would lie — `latest.current` still holds
+    // the pre-revert project until React commits the load (Issue 19):
+    // the old `!after.isDirty` check saw the stale dirty flag and
+    // skipped the backup refresh, leaving the discarded edits in the
+    // backup file on disk.
+    const loaded = path ? await load(path, false) : handle ? await loadRemote(handle) : false;
+    if (!loaded) return;
+    // A snapshot still in flight owns the file first, like the close
     // path's delete does.
-    const after = latest.current;
-    if (!after.isDirty && after.filePath === path) {
-      if (diskText !== null) lastSavedTextRef.current = diskText;
-      try {
-        await backupFlight.current?.catch(() => undefined);
-      } catch {
-        // Ignore: the backup is best-effort, never a revert failure.
-      }
+    try {
+      await backupFlight.current?.catch(() => undefined);
+    } catch {
+      // Ignore: the backup is best-effort, never a revert failure.
+    }
+    // `load` already refreshed the revert baseline from the text it read
+    // (a remote load cleared it — no local disk text to compare). The
+    // backup is written from that same disk text, not from the store:
+    // the store still holds the discarded edits until the load commits,
+    // so a snapshot from the store would offer them back on the next
+    // launch.
+    const savedText = lastSavedTextRef.current;
+    if (savedText !== null) {
+      await writeBackupSnapshot(undefined, savedText);
+    } else {
+      // Remote: no disk text — wait for the load to commit, then snapshot
+      // the store, which by then holds the reverted project.
+      await waitForRevertCommit();
       void writeBackupSnapshot();
     }
   };

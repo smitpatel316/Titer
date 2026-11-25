@@ -27,7 +27,7 @@ import { resolveAnalysis, type PluginAnalysisResult, type PluginParamValues } fr
 import { TABLES } from "../views/tables";
 import { convertColumnToNested, type ConvertToNestedSpec } from "../views/tables/table-data";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions } from "../views/graphs";
-import type { TemplateKind } from "../lib/template";
+import { GRAPH_ANALYSIS_ID_KEYS, type TemplateKind } from "../lib/template";
 import { analysisTitle } from "../stats";
 import { followTable, type TableMove } from "./references";
 import { pushHistory } from "../lib/sheet-navigation";
@@ -628,20 +628,47 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       // fresh id and re-parented to the copy; its params/options are deep
       // copies, so editing the copy's family never touches the source's.
       const childIds = state.childOrder[action.id] ?? [];
+      // Pass 1 — fresh ids for every child, before any link is remapped: a
+      // graph's link may point at an analysis cloned later in the order.
+      const idMap: Record<string, string> = {};
+      for (const childId of childIds) {
+        const child = state.nodes[childId];
+        if (child) idMap[childId] = genId(child.type);
+      }
       const clonedChildren: ProjectNode[] = childIds.flatMap((childId) => {
         const child = state.nodes[childId];
         if (!child) return [];
+        // A cloned graph's analysis links re-point at the cloned analyses
+        // (Issue 18): without this the copy plots the new table's points
+        // under the ORIGINAL table's regression line, significance stars,
+        // PCA biplot or clusters — and deleting the original then leaves
+        // dangling links. A link to an analysis outside this family was
+        // not cloned, so it keeps pointing at the original: the analysis
+        // still exists, exactly as Clone Graph does.
+        let graphOptions = child.graphOptions
+          ? JSON.parse(JSON.stringify(child.graphOptions))
+          : undefined;
+        if (graphOptions) {
+          const options = graphOptions as Record<string, unknown>;
+          for (const key of GRAPH_ANALYSIS_ID_KEYS) {
+            const id = options[key];
+            if (typeof id === "string" && idMap[id]) options[key] = idMap[id];
+          }
+          if (Array.isArray(options.sigAnalysisIds)) {
+            options.sigAnalysisIds = (options.sigAnalysisIds as unknown[]).map((id) =>
+              typeof id === "string" && idMap[id] ? idMap[id] : id,
+            );
+          }
+        }
         return [
           {
             ...child,
-            id: genId(child.type),
+            id: idMap[childId],
             parentId: newTableId,
             analysisParams: child.analysisParams
               ? JSON.parse(JSON.stringify(child.analysisParams))
               : undefined,
-            graphOptions: child.graphOptions
-              ? JSON.parse(JSON.stringify(child.graphOptions))
-              : undefined,
+            graphOptions,
             floatingNotes: child.floatingNotes
               ? JSON.parse(JSON.stringify(child.floatingNotes))
               : undefined,
