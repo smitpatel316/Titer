@@ -19,6 +19,16 @@
 //   by one CTM (`0.75 0 0 -0.75 0 H cm`); text re-flips inside `BT…ET`
 //   (`1 0 0 -1 x y Tm`) so glyphs stand upright. EPS uses the same flip
 //   (`0 H translate 0.75 -0.75 scale`) and `stringwidth` for anchoring.
+//   Text encoding (seq 546): a base-14 Type1 font has no Unicode — its
+//   glyphs are single-byte codes in the font's own encoding — so text is
+//   split into runs: WinAnsi characters (ASCII + Latin-1 + WinAnsi
+//   punctuation such as – — • ± ° × µ) draw in the label's own font with
+//   `/Encoding /WinAnsiEncoding`, and Greek (Α–Ω, α–ω, ς) draws in the
+//   base-14 /Symbol font, whose built-in encoding maps the Latin letters
+//   to the Greek alphabet (γ is Symbol's byte for 'g'), with a /ToUnicode
+//   CMap so copy-paste still reads γ/α. Anything no base-14 font owns
+//   throws VectorExportError, and the callers fall back to the raster
+//   PDF — a vector file that silently dropped glyphs would be worse.
 // - Colour: RGB is the native mode. Grayscale maps every colour to its
 //   luminance (0.299/0.587/0.114). CMYK is the naive print conversion
 //   (K = 1 − max, no ICC profile — documented in the tool text); it is
@@ -976,7 +986,7 @@ function textContent(node: SvgNode): string {
 
 // ── PDF backend ──────────────────────────────────────────────────────────
 
-type PdfFontKey = "F1" | "F2" | "F3" | "F4" | "F5" | "F6";
+type PdfFontKey = "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7";
 const PDF_FONTS: Record<PdfFontKey, string> = {
   F1: "Helvetica",
   F2: "Helvetica-Bold",
@@ -984,6 +994,9 @@ const PDF_FONTS: Record<PdfFontKey, string> = {
   F4: "Times-Bold",
   F5: "Courier",
   F6: "Courier-Bold",
+  // F7 is the Symbol font (see the PDF text encoding note below): the
+  // base-14 font that owns the Greek alphabet. It has no bold face.
+  F7: "Symbol",
 };
 
 function pdfFontKey(family: string, bold: boolean): PdfFontKey {
@@ -993,20 +1006,163 @@ function pdfFontKey(family: string, bold: boolean): PdfFontKey {
   return bold ? "F2" : "F1";
 }
 
-function pdfEscape(text: string): string {
-  if (/^[\x20-\x7e]*$/.test(text))
-    return `(${text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)")})`;
-  const bytes: number[] = [0xfe, 0xff];
+// ── PDF text encoding (seq 546) ──────────────────────────────────────────
+// A base-14 Type1 font has no Unicode: a string's bytes are single-byte
+// codes in the font's own encoding. The old `pdfEscape` wrote every
+// non-ASCII string as a UTF-16BE hex string (`<feff…>`) for such a font,
+// so the bytes came back as unrelated codes and Greek (γ, α, …) — and
+// every other non-ASCII glyph — silently dropped from the vector PDF,
+// while the UI and PNG renders (system font) were fine. Text is
+// therefore split into runs, each drawn in a font that owns its glyphs.
+//
+// - WinAnsi (Latin) runs: ASCII + Latin-1 + the WinAnsi punctuation in
+//   the U+0080–U+009F slots (€ ‚ ƒ „ … † ‡ ˆ ‰ Š ‹ Œ Ž ‘’ “” • – — ˜ ™
+//   š › œ ž Ÿ), drawn in the label's own Helvetica/Times/Courier with
+//   `/Encoding /WinAnsiEncoding`, one byte per character.
+// - Greek runs: Α–Ω, α–ω, ς, plus the variant forms ϑ (U+03D1) and
+//   ϕ (U+03D5), drawn in /Symbol, whose built-in encoding maps the
+//   Latin letters to the Greek alphabet (γ is Symbol's byte for 'g',
+//   α for 'a'). A /ToUnicode CMap (built from the same table, so it
+//   cannot drift) maps those bytes back to the Greek code points, so
+//   copy-paste and text extraction still read γ/α. Symbol has no bold
+//   face, so a bold label's Greek runs draw at regular weight.
+// - Anything else (Cyrillic, CJK, maths beyond the WinAnsi set, …)
+//   throws VectorExportError: the callers fall back to the raster PDF,
+//   which keeps the glyphs, rather than a vector file that dropped
+//   them. The one exception is U+2212 MINUS SIGN, which draws as an
+//   ASCII hyphen — the minus labels use.
+
+/** WinAnsi (CP1252) punctuation: the byte each of these code points takes. */
+// U+0081, U+008D, U+008F, U+0090 and U+009D have no WinAnsi byte.
+const WINANSI_PUNCT: Record<number, number> = {
+  0x20ac: 0x80, 0x201a: 0x82, 0x0192: 0x83, 0x201e: 0x84, 0x2026: 0x85,
+  0x2020: 0x86, 0x2021: 0x87, 0x02c6: 0x88, 0x2030: 0x89, 0x0160: 0x8a,
+  0x2039: 0x8b, 0x0152: 0x8c, 0x017d: 0x8e, 0x2018: 0x91, 0x2019: 0x92,
+  0x201c: 0x93, 0x201d: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97,
+  0x02dc: 0x98, 0x2122: 0x99, 0x0161: 0x9a, 0x203a: 0x9b, 0x0153: 0x9c,
+  0x017e: 0x9e, 0x0178: 0x9f,
+};
+
+function winAnsiByte(code: number): number | null {
+  if (code >= 0x20 && code <= 0x7e) return code;
+  if (code >= 0xa0 && code <= 0xff) return code;
+  return WINANSI_PUNCT[code] ?? null;
+}
+
+/** Symbol bytes for U+0391–U+03A9 (skipping unassigned U+03A2). */
+const GREEK_ALPHABET_UPPER = "ABGDEZHQIKLMNXOPRSTUFCYW";
+/** Symbol bytes for U+03B1–U+03C1 and U+03C3–U+03C9. */
+const GREEK_ALPHABET_LOWER = "abgdezhqiklmnxoprstufcyw";
+/** Variant Greek forms Symbol also owns: ς, ϑ, ϕ. */
+const GREEK_EXTRA: Record<number, number> = { 0x03c2: 0x76, 0x03d1: 0x4a, 0x03d5: 0x6a };
+
+function symbolByte(code: number): number | null {
+  if (code >= 0x391 && code <= 0x3a9 && code !== 0x3a2) {
+    const idx = code - 0x391 - (code > 0x3a2 ? 1 : 0);
+    return GREEK_ALPHABET_UPPER.charCodeAt(idx);
+  }
+  if (code >= 0x3b1 && code <= 0x3c9 && code !== 0x3c2) {
+    const idx = code - 0x3b1 - (code > 0x3c2 ? 1 : 0);
+    return GREEK_ALPHABET_LOWER.charCodeAt(idx);
+  }
+  return GREEK_EXTRA[code] ?? null;
+}
+
+type PdfTextRun = { symbol: boolean; text: string; bytes: number[] };
+
+function pdfTextRuns(text: string): PdfTextRun[] {
+  const runs: PdfTextRun[] = [];
   for (const ch of text) {
     const code = ch.codePointAt(0)!;
-    bytes.push((code >> 8) & 0xff, code & 0xff);
+    let byte: number | null;
+    let symbol: boolean;
+    const s = symbolByte(code);
+    if (s !== null) {
+      byte = s;
+      symbol = true;
+    } else if (code === 0x2212) {
+      byte = 0x2d;
+      symbol = false;
+    } else {
+      const w = winAnsiByte(code);
+      if (w === null) {
+        throw new VectorExportError(
+          `The label contains “${ch}” (U+${code.toString(16).toUpperCase().padStart(4, "0")}), which the vector PDF's fonts cannot draw — export it as a raster PDF instead.`,
+        );
+      }
+      byte = w;
+      symbol = false;
+    }
+    const last = runs[runs.length - 1];
+    if (last && last.symbol === symbol) {
+      last.text += ch;
+      last.bytes.push(byte);
+    } else {
+      runs.push({ symbol, text: ch, bytes: [byte] });
+    }
   }
-  return `<${bytes.map((b) => b.toString(16).padStart(2, "0")).join("")}>`;
+  return runs;
+}
+
+/** A run's bytes as a PDF literal string: parens/backslash escaped, bytes
+ *  ≥ 0x80 as octal escapes (unambiguous in a literal string). */
+function pdfLiteral(bytes: number[]): string {
+  let out = "(";
+  for (const b of bytes) {
+    if (b === 0x28) out += "\\(";
+    else if (b === 0x29) out += "\\)";
+    else if (b === 0x5c) out += "\\\\";
+    else if (b >= 0x20 && b < 0x7f) out += String.fromCharCode(b);
+    else out += `\\${b.toString(8).padStart(3, "0")}`;
+  }
+  return `${out})`;
+}
+
+/** The Symbol font's /ToUnicode CMap: every Symbol byte it draws back to
+ *  its Greek code point, generated from the same table as `symbolByte`. */
+function symbolToUnicodeCmap(): string {
+  const entries: [number, number][] = [];
+  for (let code = 0x391; code <= 0x3a9; code++) {
+    if (code === 0x3a2) continue;
+    entries.push([symbolByte(code)!, code]);
+  }
+  for (let code = 0x3b1; code <= 0x3c9; code++) {
+    if (code === 0x3c2) continue;
+    entries.push([symbolByte(code)!, code]);
+  }
+  for (const [code, byte] of Object.entries(GREEK_EXTRA)) entries.push([byte, Number(code)]);
+  entries.sort((a, b) => a[0] - b[0]);
+  const lines = entries.map(
+    ([byte, code]) =>
+      `<${byte.toString(16).padStart(2, "0").toUpperCase()}> <${code.toString(16).padStart(4, "0").toUpperCase()}>`,
+  );
+  return [
+    "/CIDInit /ProcSet findresource begin",
+    "12 dict begin",
+    "begincmap",
+    "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def",
+    "/CMapName /Adobe-Identity-UCS def",
+    "/CMapType 2 def",
+    "1 begincodespacerange",
+    "<00> <FF>",
+    "endcodespacerange",
+    `${lines.length} beginbfchar`,
+    ...lines,
+    "endbfchar",
+    "endcmap",
+    "CMapName currentdict /CMap defineresource pop",
+    "end",
+    "end",
+    "",
+  ].join("\n");
 }
 
 class PdfBackend implements Backend {
   ops: string[] = [];
   fonts = new Set<PdfFontKey>();
+  /** True once a Greek run drew in /Symbol: the PDF then carries the
+   *  Symbol /ToUnicode CMap as its last object (seq 546). */
+  usesSymbol = false;
   gsStates: { fill: number; stroke: number }[] = [];
   private gsIndex(fill: number, stroke: number): number {
     const found = this.gsStates.findIndex((g) => g.fill === fill && g.stroke === stroke);
@@ -1075,21 +1231,40 @@ class PdfBackend implements Backend {
     x: number, y: number, text: string, size: number, family: string, bold: boolean,
     anchor: "start" | "middle" | "end", fill: Paint, opacity: number,
   ): void {
-    const key = pdfFontKey(family, bold);
-    this.fonts.add(key);
-    const width = measureTextWidth(text, size, family, bold);
-    const tx = anchor === "middle" ? x - width / 2 : anchor === "end" ? x - width : x;
+    // Runs split the text by the font that owns each glyph (seq 546);
+    // each run draws in its own font at the x the previous runs ended.
+    // A Greek run measures in Symbol (no bold face exists for it).
+    const runs = pdfTextRuns(text);
+    const widths = runs.map((r) =>
+      measureTextWidth(r.text, size, r.symbol ? "Symbol" : family, r.symbol ? false : bold),
+    );
+    const total = widths.reduce((a, b) => a + b, 0);
+    const tx = anchor === "middle" ? x - total / 2 : anchor === "end" ? x - total : x;
     this.ops.push("q");
     this.opacityOp(opacity, opacity);
     this.ops.push(this.colorOp(fill, false));
-    this.ops.push(`BT /${key} ${fmt(size)} Tf 1 0 0 -1 ${fmt(tx)} ${fmt(y)} Tm ${pdfEscape(text)} Tj ET`);
+    let rx = tx;
+    runs.forEach((run, i) => {
+      const key = run.symbol ? "F7" : pdfFontKey(family, bold);
+      this.fonts.add(key);
+      if (run.symbol) this.usesSymbol = true;
+      this.ops.push(`BT /${key} ${fmt(size)} Tf 1 0 0 -1 ${fmt(rx)} ${fmt(y)} Tm ${pdfLiteral(run.bytes)} Tj ET`);
+      rx += widths[i]!;
+    });
     this.ops.push("Q");
   }
   content(): string {
     return this.ops.join("\n");
   }
-  resources(): string {
-    const fonts = [...this.fonts].map((k) => `/${k} << /Type /Font /Subtype /Type1 /BaseFont /${PDF_FONTS[k]} >>`).join(" ");
+  resources(toUnicodeObj: number): string {
+    const fonts = [...this.fonts]
+      .map((k) => {
+        if (k === "F7") {
+          return `/F7 << /Type /Font /Subtype /Type1 /BaseFont /Symbol${toUnicodeObj ? ` /ToUnicode ${toUnicodeObj} 0 R` : ""} >>`;
+        }
+        return `/${k} << /Type /Font /Subtype /Type1 /BaseFont /${PDF_FONTS[k]} /Encoding /WinAnsiEncoding >>`;
+      })
+      .join(" ");
     const gs = this.gsStates
       .map((g, i) => `/GS${i} << /Type /ExtGState /ca ${fmt(g.fill)} /CA ${fmt(g.stroke)} >>`)
       .join(" ");
@@ -1135,14 +1310,18 @@ export function svgToPdf(svg: string, opts?: { colorMode?: ColorMode }): Uint8Ar
   backend.ops.push("Q");
   const content = new TextEncoder().encode(backend.content());
   const compressed = deflate(content);
+  // The Symbol /ToUnicode CMap rides as the last object, only when a
+  // Greek run used /Symbol (seq 546); its number is therefore 5.
+  const cmap = backend.usesSymbol ? new TextEncoder().encode(symbolToUnicodeCmap()) : null;
   const objects: { head: string; stream?: Uint8Array }[] = [
     { head: "<< /Type /Catalog /Pages 2 0 R >>" },
     { head: "<< /Type /Pages /Kids [3 0 R] /Count 1 >>" },
     {
-      head: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${fmt(wPt)} ${fmt(hPt)}] /Resources ${backend.resources()} /Contents 4 0 R >>`,
+      head: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${fmt(wPt)} ${fmt(hPt)}] /Resources ${backend.resources(cmap ? 5 : 0)} /Contents 4 0 R >>`,
     },
     { head: `<< /Length ${compressed.length} /Filter /FlateDecode >>`, stream: compressed },
   ];
+  if (cmap) objects.push({ head: `<< /Length ${cmap.length} >>`, stream: cmap });
   const parts: Uint8Array[] = [new TextEncoder().encode("%PDF-1.4\n")];
   const offsets = [0];
   objects.forEach((obj, i) => {
