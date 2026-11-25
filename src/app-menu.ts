@@ -860,7 +860,12 @@ export function useAppMenu(doc: DocumentActions) {
           { item: "Fullscreen" },
         ],
       },
-    ]);
+    ],
+    // Help ▸ Startup Guide… (seq 454): the first-run tour, re-openable on
+    // demand. It opens through the document actions (like File ▸ Welcome…),
+    // so the menu reads the live state when clicked.
+    [{ text: "Startup Guide…", action: () => latest.current.doc.openGuide() }],
+  );
   }, [
     focused,
     tableType,

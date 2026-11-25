@@ -15,6 +15,7 @@ import {
   type TemplateKind,
 } from "../lib/template";
 import { WELCOME_KEY, planTemplateApply, shouldShowWelcome, templateById } from "../lib/templates";
+import { markGuideSeen, readGuideSeen, shouldShowGuide } from "../lib/startup-guide";
 import { parsePzfx, type PzfxImport } from "../lib/pzfx";
 import { parsePzf } from "../lib/pzf";
 import { writePzfx } from "../lib/pzfx-write";
@@ -129,6 +130,21 @@ export function useDocument() {
   const welcomeDecided = React.useRef(false);
   const openWelcome = () => setWelcomeOpen(true);
   const closeWelcome = () => setWelcomeOpen(false);
+  // The startup guide (seq 454): whether the tour is showing. Closing is
+  // always "seen" — finished, skipped or dismissed all mark the record,
+  // so the tour never reappears. Opening closes the Welcome dialog first:
+  // the guide is a plain overlay (seq 397), and a top-layer <dialog> open
+  // over it would hide it.
+  const [guideOpen, setGuideOpen] = React.useState(false);
+  const guideDecided = React.useRef(false);
+  const openGuide = () => {
+    setWelcomeOpen(false);
+    setGuideOpen(true);
+  };
+  const closeGuide = () => {
+    markGuideSeen();
+    setGuideOpen(false);
+  };
   // The "Prism File Imported" notice, shown in-app rather than as a native
   // dialog: the native alert's OK button could not dismiss it on macOS
   // (v1.6.0 Mac proof) — it is the second native sheet on the window in
@@ -2687,6 +2703,28 @@ export function useDocument() {
     return () => clearTimeout(timer);
   }, []);
 
+  // ── Startup guide auto-show (seq 454) ─────────────────────────────────
+  // Decided once, like Welcome: only the first project window, only while
+  // the project is still blank, and only while the seen record says unseen.
+  // It waits behind the Welcome dialog — the guide is a plain overlay (seq
+  // 397), and a top-layer <dialog> open over it would hide it — so the
+  // effect re-runs when Welcome closes: a 900 ms timer (past Welcome's own
+  // 500 ms decision) opens the tour when Welcome never shows, and the same
+  // decision runs again once Welcome closes. A file window never sees it.
+  React.useEffect(() => {
+    if (guideDecided.current || welcomeOpen) return;
+    const timer = setTimeout(() => {
+      if (guideDecided.current) return;
+      guideDecided.current = true;
+      const firstWindow = !native.isNative || native.windowLabel() === "project-1";
+      const s = latest.current.get();
+      if (firstWindow && shouldShowGuide(readGuideSeen()) && !s.filePath && !s.isDirty) {
+        setGuideOpen(true);
+      }
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [welcomeOpen]);
+
   return {
     save,
     saveCopy,
@@ -2700,6 +2738,9 @@ export function useDocument() {
     welcomeOpen,
     openWelcome,
     closeWelcome,
+    guideOpen,
+    openGuide,
+    closeGuide,
     title,
     filePath,
     recents,

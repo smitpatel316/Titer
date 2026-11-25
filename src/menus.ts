@@ -119,8 +119,11 @@ export function projectItems(
   ];
 }
 
-/** Sets the app's menu bar: the Titer menu, `menus`, then Window and Help. */
-export function setMenuBar(menus: MenuItems) {
+/** Sets the app's menu bar: the Titer menu, `menus`, then Window and Help.
+ *  `extraHelpItems` (a project window's own Help entries, e.g. the startup
+ *  guide — seq 454) land right after Titer Tips, with the rest of the
+ *  in-app help; the engine window passes none. */
+export function setMenuBar(menus: MenuItems, extraHelpItems: MenuItems = []) {
   const titer = {
     text: "Titer",
     items: [
@@ -157,6 +160,7 @@ export function setMenuBar(menus: MenuItems) {
       { text: "Prism Curve Fitting Guide", action: () => openLink("curve-fitting") },
       { text: "Prism Statistics Guide", action: () => openLink("statistics") },
       { text: "Titer Tips", action: () => void showTips() },
+      ...extraHelpItems,
       separator,
       { text: "How to Cite Titer", action: () => void showCitation() },
       separator,
