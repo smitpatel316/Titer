@@ -970,11 +970,13 @@ const ROWS: Row[] = [
     item: "195",
     title: "Chi-square + binomial",
     status: "covered",
-    note: "Merged on check/v18 as analysis type binomial-test (offered on Column); chi-square-gof was already on tip. ('binomial' elsewhere in types.ts is only a simulate-data distribution.)",
+    note: "Merged on check/v18 as analysis type binomial-test (offered on Column); chi-square-gof was already on tip. ('binomial' elsewhere in types.ts is only a simulate-data distribution.) Seq 195: both offered on Parts of Whole too (Prism's 'Parts of whole analyses' entry) — same runners, same results as Column.",
     checks: [
       { kind: "analysis", type: "binomial-test" },
       { kind: "analysis", type: "chi-square-gof" },
       { kind: "analysisOffering", table: "column", type: "binomial-test" },
+      { kind: "analysisOffering", table: "parts-of-whole", type: "binomial-test" },
+      { kind: "analysisOffering", table: "parts-of-whole", type: "chi-square-gof" },
     ],
   },
   {
