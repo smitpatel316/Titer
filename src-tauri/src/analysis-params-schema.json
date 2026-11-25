@@ -1700,7 +1700,7 @@
           "none"
         ],
         "required": false,
-        "description": "How a difficult fit is handled (seq 323): identify unstable parameters (default), identify ambiguous fits (seq 387, Prism's older method — a parameter whose dependency exceeds 0.9999 is flagged, with ~ values and very wide CIs), or report best-fit values no matter what."
+        "description": "How a difficult fit is handled (seq 323): identify unstable parameters (default), identify ambiguous fits (seq 387, Prism's older method), or report best-fit values no matter what."
       },
       {
         "name": "reportDependency",
@@ -3226,6 +3226,7 @@
           "log2",
           "sqrt",
           "reciprocal",
+          "lineweaver-burk",
           "exp",
           "square",
           "y-plus-k",
@@ -3257,11 +3258,10 @@
           "y-times-x",
           "x-minus-y",
           "eadie-hofstee",
-          "user-defined",
-          "hill-plot",
-          "scatchard",
           "hanes-woolf",
-          "lineweaver-burk"
+          "scatchard",
+          "user-defined",
+          "hill-plot"
         ],
         "default": "log10",
         "required": false
@@ -3294,6 +3294,7 @@
           "log2",
           "sqrt",
           "reciprocal",
+          "lineweaver-burk",
           "exp",
           "square",
           "y-plus-k",
@@ -3325,10 +3326,9 @@
           "y-times-x",
           "x-minus-y",
           "eadie-hofstee",
-          "hill-plot",
-          "scatchard",
           "hanes-woolf",
-          "lineweaver-burk"
+          "scatchard",
+          "hill-plot"
         ],
         "required": false,
         "description": "The function applied to the X values (XY tables); omitted: X passes through unchanged (seq 341)."
@@ -3409,7 +3409,8 @@
           "repeated-measures",
           "nonparametric"
         ],
-        "required": true
+        "default": "ordinary",
+        "required": false
       },
       {
         "name": "posthoc",

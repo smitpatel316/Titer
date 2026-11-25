@@ -25,7 +25,7 @@ import type {
   MonteCarloTarget,
   StatRow,
 } from "../types";
-import { MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, TAILS } from "../types";
+import { CORRELATION_METHODS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, TAILS } from "../types";
 import { dataGroups, describe, rAlt } from "../column/base";
 import { evalNumericVector } from "../webr";
 import { computeFrequencyBins } from "../column/frequency-distribution";
@@ -197,6 +197,13 @@ export async function runMonteCarlo(
   if (!(TAILS as readonly string[]).includes(tails)) {
     return { error: `“${tails}” is not a tails choice — use “two-sided”, “less” or “greater”.` };
   }
+  // The correlation method (BUG-REPORT #34): only the correlation target
+  // reads it, and R's cor() knows just pearson/spearman — a cross-family
+  // value (e.g. "bonferroni") used to reach R and fail opaquely there.
+  const method = params?.method;
+  if (method !== undefined && !(CORRELATION_METHODS as readonly string[]).includes(method)) {
+    return { error: `“${method}” is not a correlation method — use “pearson” or “spearman”.` };
+  }
   // The simulation distribution (seq 204): Gaussian, or Student's t with
   // df degrees of freedom. At df ≤ 2 the t has no finite SD, so the SD
   // the wizard asks for would be meaningless — refuse, don't simulate.
@@ -331,7 +338,7 @@ export async function runMonteCarlo(
       x,
       equalVariance: params?.equalVariance,
       hypotheticalValue: params?.hypotheticalValue,
-      method: params?.method,
+      method,
       alternative: rAlt(tails),
       simulationDistribution,
       simulationDf,

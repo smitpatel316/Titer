@@ -441,8 +441,9 @@ for f in (ROOT / "src/stats").rglob("*.ts"):
 #  poisson-regression.ts: `params?.quasi ?? false`
 #  three-way-anova.ts: `params?.posthoc ?? "none"`
 #  multifactor-anova.ts: `params?.posthoc ?? "none"`
-#  two-way-anova.ts: runTwoWayAnova defaults posthoc "none" /
-#    posthocTarget "groups" (BUG-REPORT #26: a partial params object runs)
+#  two-way-anova.ts: runTwoWayAnova defaults design "ordinary" /
+#    posthoc "none" / posthocTarget "groups" (BUG-REPORT #26: a partial
+#    params object runs; #49: design was missing its default in the schema)
 #  rm-anova.ts: posthocIn() returns "none" when posthoc is omitted
 #  effectSizes (seq 161): every runner reports them unless
 #    `params?.effectSizes === false` (column specs via the raw params;
@@ -491,6 +492,7 @@ RUNNER_FALLBACKS = {
     ("multifactor-anova", "posthoc"): "none",
     ("two-way-anova", "posthoc"): "none",
     ("two-way-anova", "posthocTarget"): "groups",
+    ("two-way-anova", "design"): "ordinary",
     ("rm-anova", "posthoc"): "none",
 }
 

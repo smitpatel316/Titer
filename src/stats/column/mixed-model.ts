@@ -87,14 +87,26 @@ export async function runMixedModel(columns: Column[], params: RmAnovaParams | u
   if (groups.every((c) => identical(c.values)))
     return { error: "Each group's values are identical: there is no scatter within the groups to compare them on." };
 
-  const method: Method | "none" =
-    params?.posthoc === "tukey" ||
-    params?.posthoc === "bonferroni" ||
-    params?.posthoc === "sidak" ||
-    params?.posthoc === "holm-sidak" ||
-    params?.posthoc === "lsd"
-      ? params.posthoc
-      : "none";
+  // Tukey, Bonferroni, Šídák, Holm–Šídák or LSD, else none — a posthoc this
+  // model doesn't offer is refused, never silently run as none (a file may
+  // name another family's posthoc; BUG-REPORT #34). Mirrors rm-anova's
+  // posthocIn, which refuses the same way.
+  const posthoc = params?.posthoc ?? "none";
+  if (
+    posthoc !== "none" &&
+    posthoc !== "tukey" &&
+    posthoc !== "bonferroni" &&
+    posthoc !== "sidak" &&
+    posthoc !== "holm-sidak" &&
+    posthoc !== "lsd"
+  ) {
+    return {
+      error:
+        `“${posthoc}” multiple comparisons are not available for the mixed-effects model — ` +
+        `choose Tukey, Bonferroni, Šídák, Holm–Šídák or Fisher's LSD.`,
+    };
+  }
+  const method: Method | "none" = posthoc;
   // R's correction calls the uncorrected one `fisher`; Titer's name is `lsd`.
   const how = method === "lsd" ? "fisher" : method;
   const pairs: [number, number][] =

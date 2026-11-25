@@ -513,7 +513,7 @@ import {
 } from "../src/lib/vector-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
 import { formatFigureLabels, formatLabelForPlotly, labelRuns } from "../src/lib/label-format";
-import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnalysisType, AnovaParams, ChiSquareGofParams, ComparedCell, DoseResponseSpecialParams, GroupDescriptives, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, RemoveBaselineParams, SimulationSpec, ThreeWayAnovaParams } from "../src/stats/types";
+import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnalysisType, AnovaParams, ChiSquareGofParams, ComparedCell, DoseResponseSpecialParams, GroupDescriptives, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, RemoveBaselineParams, RmAnovaParams, SimulationSpec, ThreeWayAnovaParams } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
@@ -32807,6 +32807,80 @@ check("Monte Carlo repeats a paired t test and a one-way ANOVA (seq 204)", async
         "Monte Carlo needs at least 2 paired rows — rows where both data sets hold a value — to repeat a paired t test.",
     },
   );
+});
+
+check("BUG-REPORT #34 remainder: PARAM_CHOICES narrows spline-lowess.method and transform-data.xFunction", () => {
+  // Both narrowings live in the generator's ENUM_OVERRIDES but were missing
+  // from PARAM_CHOICES, so a cross-family value sailed through validation.
+  const spline = validateAnalysisParams("spline-lowess", { method: "pearson" });
+  strictEqual(spline.errors.length, 1);
+  ok(spline.errors[0].includes("spline, lowess"));
+  const xFn = validateAnalysisParams("transform-data", { xFunction: "user-defined" });
+  strictEqual(xFn.errors.length, 1);
+  ok(xFn.errors[0].includes("user-defined"));
+  // Each analysis's own values still pass.
+  deepStrictEqual(validateAnalysisParams("spline-lowess", { method: "spline" }).errors, []);
+  deepStrictEqual(validateAnalysisParams("spline-lowess", { method: "lowess" }).errors, []);
+  deepStrictEqual(validateAnalysisParams("transform-data", { xFunction: "log10" }).errors, []);
+});
+
+check("BUG-REPORT #34 remainder: runMonteCarlo refuses a cross-family method", async () => {
+  // Direct calls bypass validateAnalysisParams: correlation + "bonferroni"
+  // used to reach R's cor() and fail opaquely there.
+  const xy: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      ["", "1", "2"],
+      ["", "2", "4"],
+      ["", "3", "5"],
+      ["", "4", "4"],
+      ["", "5", "6"],
+    ],
+  };
+  deepStrictEqual(
+    await runAnalysis("monte-carlo", xy, {
+      targetAnalysis: "correlation",
+      repeats: 10,
+      seed: 42,
+      method: "bonferroni",
+    } as unknown as MonteCarloParams),
+    { error: "“bonferroni” is not a correlation method — use “pearson” or “spearman”." },
+  );
+});
+
+check("BUG-REPORT #34 remainder: runMixedModel refuses a cross-family posthoc", async () => {
+  // Direct calls bypass validateAnalysisParams: "dunnett" used to coerce
+  // silently to "none", running with no comparisons at all.
+  const table: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      ["", "1", "2", "3"],
+      ["", "2", "3", "5"],
+      ["", "3", "4", "6"],
+    ],
+  };
+  deepStrictEqual(
+    await runAnalysis("rm-anova", table, {
+      mixed: true,
+      posthoc: "dunnett",
+    } as unknown as RmAnovaParams),
+    {
+      error:
+        "“dunnett” multiple comparisons are not available for the mixed-effects model — choose Tukey, Bonferroni, Šídák, Holm–Šídák or Fisher's LSD.",
+    },
+  );
+});
+
+check("BUG-REPORT #49 remainder: two-way-anova.design defaults to ordinary in the generated schema", () => {
+  // runTwoWayAnova defaults design to "ordinary", but the generator had no
+  // entry for it, so the schema marked it required with no default.
+  const schema = JSON.parse(
+    readFileSync(new URL("../src-tauri/src/analysis-params-schema.json", import.meta.url), "utf8"),
+  ) as Record<string, { params: { name: string; default?: unknown; required: boolean }[] }>;
+  const design = schema["two-way-anova"].params.find((p) => p.name === "design");
+  ok(design, "two-way-anova must list a design param");
+  strictEqual(design.default, "ordinary");
+  strictEqual(design.required, false);
 });
 
 check("Monte Carlo is offered on column and XY tables only, with its histogram graph", () => {
