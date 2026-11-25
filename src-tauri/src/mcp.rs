@@ -2,9 +2,9 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 78 tools: 21 read-only (list/read/job/
+// Settings → AI connections. 79 tools: 21 read-only (list/read/job/
 // activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list + refresh-linked-data + the plugin list)
-// and 57 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool + the 1.9 cell-background tool + the plugin run tool), via the L0 Rust→frontend dispatch + job queue —
+// and 58 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool + the 1.9 cell-background tool + the plugin run tool + the FlowJo import-fcs tool), via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 //
 // Why rmcp, not tauri-plugin-mcp-commands — see the lane log
@@ -43,7 +43,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 78 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 79 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -1477,6 +1477,12 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
             "titer_run_script",
         ],
     },
+    AllowlistGroup {
+        id: "flow",
+        label: "Flow cytometry (FlowJo)",
+        description: "Import FCS files as flow samples (FlowJo module, seq 443). The module is opt-in — off by default — so this tool only runs when the flow toggle is on, even when this group is enabled.",
+        tools: &["titer_import_fcs"],
+    },
 ];
 
 /// The group a tool belongs to, if it is a real tool at all.
@@ -2200,7 +2206,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 78 tools. Returns the new header value, or `None` when the type is
+/// 79 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -2772,6 +2778,24 @@ pub struct ImportDataFileArgs {
     /// A local file path (.csv, .tsv, .txt, .dat, .prn or .xlsx). Never a URL.
     pub path: String,
     /// The new table's name. Omit to name it for the file.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// A local FCS file to import as a flow sample (FlowJo module, seq 443).
+/// Never a URL. The reader (flow-fcs 0.6.0) parses FCS 2.0–3.2 into the
+/// event store; the result is a summary only — never event arrays.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ImportFcsArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// A local FCS file path (.fcs). Never a URL.
+    pub path: String,
+    /// The new sample's id. Omit to derive it from the file name.
+    #[serde(default)]
+    pub sample_id: Option<String>,
+    /// The new sample's name. Omit to name it for the file.
     #[serde(default)]
     pub name: Option<String>,
 }
@@ -5808,6 +5832,64 @@ impl TiterMcpServer {
             }
             Err(e) => {
                 self.state.log_call("titer_import_data_file", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Import an FCS file (2.0–3.2) as a new flow sample in the open project
+    /// (FlowJo module, seq 443) — the reader parses it into the event store
+    /// and the frontend adds the sample node. The result is a summary only
+    /// (counts, parameter names, spillover presence, normalisations,
+    /// warnings) — never event arrays. Opt-in: the frontend refuses while
+    /// the flow toggle is off, and this tool is not in the default read
+    /// set (it lives in the `flow` allowlist group). The sample is named
+    /// for the file (or `name`); the sample id comes from `sample_id` or
+    /// the file name.
+    #[tool(
+        name = "titer_import_fcs",
+        description = "Import an FCS file (2.0-3.2) as a new flow sample in the open project (FlowJo module, opt-in — off by default). The reader parses it into the event store and the frontend adds the sample node. The result is a summary only (event count, parameter names, spillover presence, normalisations, warnings) — never event arrays. The sample is named for the file (or name); the sample id comes from sample_id or the file name.",
+        annotations(
+            title = "Import FCS file",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn import_fcs(
+        &self,
+        Parameters(args): Parameters<ImportFcsArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({ "project_id": args.project_id, "path": args.path, "sample_id": args.sample_id, "name": args.name });
+        let outcome: Result<serde_json::Value, String> = async {
+            if let Some(name) = &args.name {
+                if name.trim().is_empty() {
+                    return Err("The sample name must not be empty.".into());
+                }
+            }
+            if let Some(sample_id) = &args.sample_id {
+                if sample_id.trim().is_empty() {
+                    return Err("The sample id must not be empty.".into());
+                }
+            }
+            if !std::path::Path::new(&args.path).is_file() {
+                return Err(format!("No file at “{}” — check the path and ask again.", args.path));
+            }
+            let (id, _snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            self.run_table_job(&id, "import-fcs", serde_json::json!({ "path": args.path, "sample_id": args.sample_id, "name": args.name }))
+                .await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_import_fcs", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_import_fcs", log_args, false, Some(&e));
                 Err(e)
             }
         }
@@ -9251,10 +9333,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 78 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 79 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 6 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                21 of the 78 are read-only and 57 change the open project. \
+                21 of the 79 are read-only and 58 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -11599,7 +11681,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 78 tools, so it enables every group first.
+        // this test drives all 79 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -11652,8 +11734,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            78,
-            "seven read tools + four read-more tools + three discovery tools + seven project tools + ten table tools + fourteen analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools: {names:?}"
+            79,
+            "seven read tools + four read-more tools + three discovery tools + seven project tools + ten table tools + fourteen analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools + one flow tool: {names:?}"
         );
         for name in ["titer_list_backups"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -11673,6 +11755,7 @@ mod tests {
             "titer_save_project",
             "titer_import_prism",
             "titer_import_data_file",
+            "titer_import_fcs",
             "titer_merge_project",
             "titer_close_project",
         ] {
@@ -11972,6 +12055,62 @@ mod tests {
         assert_eq!(call_text(&imported)["rows"], 2);
         assert_eq!(call_text(&imported)["data_columns"], 2);
         let _ = std::fs::remove_file("/tmp/titer-mcp-import-data.csv");
+        // import-fcs (seq 443): a missing file fails before anything is
+        // enqueued; a blank name is refused; the round trip, with the
+        // frontend simulated in-test, returns the import summary.
+        let (import_fcs_missing, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(105, "titer_import_fcs", json!({ "path": "/tmp/no-such-sample.fcs" })),
+        )
+        .await;
+        assert_eq!(import_fcs_missing["result"]["isError"], true);
+        assert!(
+            call_raw_text(&import_fcs_missing).contains("No file at"),
+            "import-fcs missing: {}",
+            call_raw_text(&import_fcs_missing)
+        );
+        std::fs::copy("../tests/testdata/fcs/f1c-f32-3.2.fcs", "/tmp/titer-mcp-import.fcs").expect("fcs fixture");
+        let (import_fcs_bad_name, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(106, "titer_import_fcs", json!({ "path": "/tmp/titer-mcp-import.fcs", "name": "  " })),
+        )
+        .await;
+        assert_eq!(import_fcs_bad_name["result"]["isError"], true);
+        assert!(
+            call_raw_text(&import_fcs_bad_name).contains("must not be empty"),
+            "import-fcs blank name: {}",
+            call_raw_text(&import_fcs_bad_name)
+        );
+        let importer = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in importer.take_jobs("project-1") {
+                assert_eq!(job.action, "import-fcs");
+                let _ = importer.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "project_id": "project-1", "sample_id": "fcs-f1c-f32-3-2", "name": "f1c-f32-3.2", "source_path": "/tmp/titer-mcp-import.fcs", "version": "FCS3.2", "event_count": 4, "parameters": ["FSC-A", "SSC-A"], "datasets": [{ "index": 0, "parameters": 2, "events": 4 }], "has_spillover": false, "normalisations": [], "warnings": [] })),
+                    None,
+                    None,
+                );
+            }
+        });
+        let (imported_fcs, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(107, "titer_import_fcs", json!({ "path": "/tmp/titer-mcp-import.fcs" })),
+        )
+        .await;
+        assert_eq!(call_text(&imported_fcs)["sample_id"], "fcs-f1c-f32-3-2");
+        assert_eq!(call_text(&imported_fcs)["event_count"], 4);
+        assert_eq!(call_text(&imported_fcs)["version"], "FCS3.2");
+        let _ = std::fs::remove_file("/tmp/titer-mcp-import.fcs");
         let (save_bad_format, _) = mcp_post(
             &client,
             &url,
@@ -12863,7 +13002,7 @@ mod tests {
 
     #[test]
     fn allowlist_groups_cover_all_tools_once() {
-        // The inventory pin: every tool in exactly one group, 75 total.
+        // The inventory pin: every tool in exactly one group, 79 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
         // The count alone did not catch that (four tools shipped ungrouped
@@ -12871,7 +13010,7 @@ mod tests {
         // the part that actually catches it.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 78, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 79, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -12997,7 +13136,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 78, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 79, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema

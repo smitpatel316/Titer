@@ -35,6 +35,7 @@ import { dependentAnalyses } from "../lib/dataset-manager";
 import { applyWand as planWand, type WandReport } from "../lib/wand";
 import type { CellBackgroundColor } from "../lib/cell-colors";
 import { cloneGraphPlan, type CloneOptions, type ClonePlan } from "../lib/clone-graph";
+import { createSampleNode, type FlowSampleRef } from "../flow/sample";
 import { DEFAULT_FIGURE_DPI, DEFAULT_FIGURE_SIZE, DEFAULT_LABEL_STYLE, newFigurePanels } from "../lib/figure";
 import { clearRegenPlans } from "../lib/prism-graph-regen";
 import type { FigureGrid, FigureLabelStyle, FigurePanel, FigureSize, Resolution, SharedLegend } from "./types";
@@ -1395,6 +1396,10 @@ interface ProjectActions {
   /** A table computed from `from`'s values (Transform or Normalize). */
   createTransformed: (from: string, transform: Omit<Transform, "from">) => void;
   createAnalysis: (parentId: string, analysisType: AnalysisType, analysisParams?: AnalysisParams) => string;
+  /** Create a flow sample node from an imported FCS file (seq 443):
+   *  the node id and the sample id are the same by convention, so the
+   *  reference's `sampleId` is the node's id. Returns the node id. */
+  createFlowSample: (ref: FlowSampleRef) => string;
   /** A plugin analysis node on a table: named for the plugin analysis, and
    *  carrying its namespaced id + params instead of an `AnalysisType`. */
   createPluginAnalysis: (parentId: string, pluginId: string, pluginParams?: PluginParamValues) => string;
@@ -1678,6 +1683,18 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
             analysisType,
             analysisParams,
           },
+        });
+        return id;
+      },
+      // A flow sample node from an imported FCS file (seq 443): the node
+      // id and the sample id are the same by convention (seq 441), so the
+      // reference's sampleId is the node's id. The events live in the
+      // Rust store, never on this node.
+      createFlowSample: (ref) => {
+        const id = ref.sampleId;
+        dispatch({
+          type: "create",
+          node: createSampleNode(id, ref.name, ref),
         });
         return id;
       },

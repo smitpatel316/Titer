@@ -90,6 +90,7 @@ import {
   type ExportIo,
   type ExportJobDeps,
 } from "./mcp-export";
+import { executeImportFcs, type FlowJobDeps } from "./mcp-flow";
 import {
   cancelR,
   isNative,
@@ -106,6 +107,7 @@ import { useProjectActions, useProjectStore } from "./use-project-store";
 import type { ProjectNode, RowGroup, TableData, TableType } from "./types";
 import type { TableMove } from "./references";
 import { groupsOf, isGrouped, isNested, leadOf, readTable, setColumns } from "../lib/dataset";
+import type { FlowSampleRef } from "../flow/sample";
 import {
   addCalculatedVariable,
   isCalculatedColumn,
@@ -193,6 +195,9 @@ export interface JobDeps {
   runPluginAnalysis?: (id: string, data: TableData, params?: PluginParamValues) => Promise<PluginAnalysisOutcome>;
   /** Create an analysis node on a table (default: the real store action). */
   createAnalysis?: (parentId: string, analysisType: AnalysisType, analysisParams?: AnalysisParams) => string;
+  /** Create a flow sample node from an imported FCS file (seq 443;
+   *  default: the real store action). */
+  createFlowSample?: (ref: FlowSampleRef) => string;
   /** Create a plugin analysis node on a table (default: the real store action). */
   createPluginAnalysis?: (parentId: string, pluginId: string, params?: PluginParamValues) => string;
   /** Rename any node (default: the real store action). */
@@ -357,6 +362,17 @@ function toMergeDeps(deps: JobDeps): MergeDeps {
         throw new Error("This window can't merge projects (no mergeProject).");
       }),
     io: deps.io ?? defaultDocumentIo,
+  };
+}
+
+/** The flow jobs' deps, from the job deps (seq 443) — the import job
+ *  needs the store's sample action plus the settle wait. */
+function toFlowDeps(deps: JobDeps): FlowJobDeps {
+  return {
+    getState: deps.getState,
+    createFlowSample: deps.createFlowSample,
+    flushUntilRevision: deps.flushUntilRevision,
+    flush: deps.flush,
   };
 }
 
@@ -1531,6 +1547,14 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         },
         created: { table_id: createdId },
       };
+    }
+    case "import-fcs": {
+      // FlowJo (seq 443, F1c): import one FCS file as a sample node.
+      // The Rust reader parses it into the event store; the executor
+      // only adds the node and returns the summary (never event arrays).
+      // Opt-in: the executor refuses while the flow toggle is off.
+      const args = (job.args ?? {}) as { path?: unknown; sample_id?: unknown; name?: unknown };
+      return executeImportFcs(toFlowDeps(deps), args, job.project_id);
     }
     case "merge-project": {
       // Seq 180: read another project file and append its sheets to this
@@ -2831,6 +2855,7 @@ export function useMcpJobDispatcher() {
   const getState = store.get;
   const cacheAnalysisResult = actions.cacheAnalysisResult;
   const createAnalysis = actions.createAnalysis;
+  const createFlowSample = actions.createFlowSample;
   const createPluginAnalysis = actions.createPluginAnalysis;
   const renameNode = actions.renameNode;
   const setAnalysisFrozen = actions.setAnalysisFrozen;
@@ -2910,6 +2935,7 @@ export function useMcpJobDispatcher() {
                 getState,
                 cacheAnalysisResult,
                 createAnalysis,
+                createFlowSample,
                 createPluginAnalysis,
                 renameNode,
                 setAnalysisFrozen,

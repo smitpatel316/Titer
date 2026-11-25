@@ -41140,6 +41140,128 @@ check("flow-f0: flow-fcs 0.6.0 evaluation verdict recorded + smoke parse of a re
   );
 });
 
+// ── FlowJo track, seq 443 (F1c) ────────────────────────────────────────────
+
+check("flow-f1c: FCS 2.0–3.2 reader (flow-fcs 0.6.0) into the event store + titer_import_fcs, with the offset guard", () => {
+  // Seq 443: the reader wiring the ADOPTED flow-fcs 0.6.0 crate into the
+  // F1a event store, implementing all six ADOPT conditions from
+  // docs/flow-fcs-evaluation.md. Pre-fix this fails: no reader, no
+  // fixtures, no tool, no dispatch branch. The runtime behaviour is
+  // covered by the Rust unit tests in src-tauri/src/flow.rs (real file
+  // loads, guard refusals, normalisations); this pin re-derives the
+  // fixtures' own ground truth from their bytes (like flow-f0) and pins
+  // the wiring surface on both sides of the bridge.
+  const fcsDir = "tests/testdata/fcs";
+  const readText = (name: string) => readFileSync(`${fcsDir}/${name}`);
+  // HEADER offsets (bytes 10..18 TEXT start, 18..26 TEXT end, 26..34 DATA
+  // start, 34..42 DATA end) + a TEXT keyword map, re-derived per file.
+  const headerOf = (buf: Buffer) => ({
+    textStart: parseInt(buf.subarray(10, 18).toString("ascii").trim(), 10),
+    textEnd: parseInt(buf.subarray(18, 26).toString("ascii").trim(), 10),
+    dataStart: parseInt(buf.subarray(26, 34).toString("ascii").trim(), 10),
+    dataEnd: parseInt(buf.subarray(34, 42).toString("ascii").trim(), 10),
+  });
+  const keywordsOf = (buf: Buffer): Record<string, string> => {
+    const { textStart, textEnd } = headerOf(buf);
+    const delim = String.fromCharCode(buf[textStart]);
+    const parts = buf.subarray(textStart, textEnd + 1).toString("ascii").split(delim);
+    const kw: Record<string, string> = {};
+    for (let i = 1; i + 1 < parts.length; i += 2) kw[parts[i]] = parts[i + 1];
+    return kw;
+  };
+
+  // 1. The committed fixtures all exist (a few KB each).
+  for (const name of [
+    "f1c-short-byteord.fcs",
+    "f1c-blank-analysis.fcs",
+    "f1c-bare-spill.fcs",
+    "f1c-offset-discrepancy.fcs",
+    "f1c-i24.fcs",
+    "f1c-ascii.fcs",
+    "f1c-f32-3.2.fcs",
+    "f1c-comp.fcs",
+    "f1c-multi-dataset.fcs",
+  ]) {
+    ok(existsSync(`${fcsDir}/${name}`), `the F1c fixture ${name} must be committed under ${fcsDir}/`);
+  }
+
+  // 2. The synthetic FCS 3.2 fixture is a real, decodable file — re-derive
+  // its ground truth from its own bytes (F32 LE, 2 params, 4 events), the
+  // numbers the Rust reader test asserts after loading it into the store.
+  const f32 = readText("f1c-f32-3.2.fcs");
+  strictEqual(f32.subarray(0, 6).toString("ascii"), "FCS3.2", "the 3.2 fixture must be an FCS 3.2 file");
+  const f32kw = keywordsOf(f32);
+  strictEqual(f32kw["$PAR"], "2", "3.2 fixture $PAR must be 2");
+  strictEqual(f32kw["$TOT"], "4", "3.2 fixture $TOT must be 4");
+  strictEqual(f32kw["$P1N"], "FSC-A", "3.2 fixture $P1N must be FSC-A");
+  strictEqual(f32kw["$P2N"], "FL1-A", "3.2 fixture $P2N must be FL1-A");
+  strictEqual(f32kw["$DATATYPE"], "F", "3.2 fixture must be float data");
+  const f32DataStart = parseInt(f32kw["$BEGINDATA"], 10);
+  const firstEvent = [f32.readFloatLE(f32DataStart), f32.readFloatLE(f32DataStart + 4)];
+  deepStrictEqual(firstEvent, [10, 20], "3.2 fixture first event must be [10, 20]");
+  const lastEvent = [f32.readFloatLE(f32DataStart + 24), f32.readFloatLE(f32DataStart + 28)];
+  deepStrictEqual(lastEvent, [40, 80], "3.2 fixture last event must be [40, 80]");
+
+  // 3. The offset-discrepancy fixture really does disagree (HEADER DATA
+  // 5555 vs TEXT $BEGINDATA 6081) — so the guard has something to refuse —
+  // and the reader implements the guard (condition 6).
+  const disc = readText("f1c-offset-discrepancy.fcs");
+  const discHeader = headerOf(disc);
+  const discKw = keywordsOf(disc);
+  strictEqual(discHeader.dataStart, 5555, "discrepancy fixture HEADER DATA start must be 5555");
+  strictEqual(parseInt(discKw["$BEGINDATA"], 10), 6081, "discrepancy fixture TEXT $BEGINDATA must be 6081");
+  ok(discHeader.dataStart !== parseInt(discKw["$BEGINDATA"], 10), "the fixture's offsets must disagree");
+
+  // 4. The normalisation fixtures carry the forms they exercise.
+  strictEqual(keywordsOf(readText("f1c-short-byteord.fcs"))["$BYTEORD"], "2,1", "short-$BYTEORD fixture must use \"2,1\"");
+  const blank = readText("f1c-blank-analysis.fcs");
+  ok(blank.subarray(42, 50).toString("ascii").trim() === "", "blank-ANALYSIS fixture HEADER ANALYSIS start must be spaces");
+  ok(keywordsOf(readText("f1c-bare-spill.fcs"))["SPILL"] !== undefined, "bare-SPILL fixture must carry a bare SPILL keyword");
+  ok(keywordsOf(readText("f1c-comp.fcs"))["$COMP"] !== undefined, "$COMP fixture must carry $COMP");
+  ok(parseInt(keywordsOf(readText("f1c-multi-dataset.fcs"))["$NEXTDATA"], 10) > 0, "multi-dataset fixture must carry a non-zero $NEXTDATA");
+  strictEqual(keywordsOf(readText("f1c-i24.fcs"))["$P1B"], "24", "i24 fixture must be 24-bit int data");
+  strictEqual(keywordsOf(readText("f1c-ascii.fcs"))["$DATATYPE"], "A", "ascii fixture must be ASCII data");
+
+  // 5. The reader implements every ADOPT condition in Rust.
+  const reader = readFileSync("src-tauri/src/flow.rs", "utf8");
+  ok(reader.includes("fn read_fcs_sample"), "flow.rs must expose read_fcs_sample (store-free, for tests)");
+  ok(reader.includes("fn import_fcs_file"), "flow.rs must expose import_fcs_file (reader → store)");
+  ok(reader.includes("flow_import_fcs"), "flow.rs must expose the flow_import_fcs Tauri command");
+  ok(reader.includes("disagrees"), "condition 6: the offset guard must refuse on HEADER-vs-TEXT disagreement");
+  ok(reader.includes('"1,2"') && reader.includes('"1,2,3,4"'), "condition 5: short $BYTEORD forms must be normalised");
+  ok(reader.includes("SPILL") && reader.includes("$SPILL"), "bare SPILL must be normalised to $SPILL");
+  ok(reader.includes("unsupported"), "condition 3: unsupported data types must be refused with a clear error");
+  ok(!reader.includes("logicle") || !/logicle\(/.test(reader), "condition 1: the reader must not call the crate's logicle transform");
+  ok(reader.includes("open_all") || reader.includes("$NEXTDATA"), "multi-dataset files must be walked via $NEXTDATA");
+  ok(reader.includes(".fcs"), "condition 2: the extension gate must be worked around by staging to a .fcs name");
+  ok(reader.includes("f1c-offset-discrepancy.fcs"), "the Rust tests must refuse the offset-discrepancy fixture");
+  ok(reader.includes("f1c-f32-3.2.fcs"), "the Rust tests must load the FCS 3.2 fixture");
+  ok(reader.includes("coulter"), "the Rust tests must spot-check the real coulter.lmd corpus file");
+  ok(readFileSync("src-tauri/src/main.rs", "utf8").includes("flow::flow_import_fcs"), "main.rs must register flow_import_fcs");
+
+  // 6. The MCP slice: titer_import_fcs + the flow allowlist group, off by
+  // default (not in the default read set).
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes("titer_import_fcs"), "mcp.rs must define the titer_import_fcs tool");
+  ok(mcp.includes("ImportFcsArgs"), "mcp.rs must define the ImportFcsArgs schema");
+  ok(mcp.includes("import-fcs"), "mcp.rs must dispatch the import-fcs job action");
+  ok(mcp.includes('id: "flow"'), "mcp.rs must define the flow allowlist group");
+  ok(!/ALLOWLIST_DEFAULT_GROUPS: &\[&str\] = &\["read", "flow"\]/.test(mcp), "the flow group must not be in the default allowlist");
+
+  // 7. The TS side: import client + executor + dispatch branch + store action.
+  const fcs = readFileSync("src/flow/fcs.ts", "utf8");
+  ok(fcs.includes("importFcs") && fcs.includes("flow_import_fcs"), "src/flow/fcs.ts must invoke the flow_import_fcs command");
+  ok(fcs.includes("buildFlowSampleRef"), "src/flow/fcs.ts must build the sample node reference from the summary");
+  ok(readFileSync("src/store/mcp-flow.ts", "utf8").includes("executeImportFcs"), "src/store/mcp-flow.ts must execute the import-fcs job");
+  const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
+  ok(dispatch.includes('case "import-fcs"'), "mcp-dispatch.ts must have the import-fcs branch");
+  ok(dispatch.includes("createFlowSample"), "mcp-dispatch.ts must pass createFlowSample to the job");
+  ok(readFileSync("src/store/use-project-store.tsx", "utf8").includes("createFlowSample"), "the store must provide a createFlowSample action");
+
+  // 8. Opt-in, off by default: the module stays off until the toggle.
+  strictEqual(isFlowEnabled(), false);
+});
+
 
 // ── Run ──────────────────────────────────────────────────────────────────
 

@@ -1887,7 +1887,8 @@ fn main() {
             flow_store::flow_list_samples,
             flow_store::flow_unload_sample,
             flow_store::flow_sample_stats,
-            flow_store::flow_store_status
+            flow_store::flow_store_status,
+            flow::flow_import_fcs
         ])
         .build(tauri::generate_context!())
         .expect("failed to start Titer")

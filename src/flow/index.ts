@@ -31,3 +31,11 @@ export {
   createSummaryTableNode,
   formatFlowValue,
 } from "./summary";
+// FlowJo track, seq 443 (F1c): the FCS import surface.
+export type {
+  FcsImportDataset,
+  FcsImportParameter,
+  FcsImportSpillover,
+  FcsImportSummary,
+} from "./fcs";
+export { buildFlowSampleRef, importFcs } from "./fcs";
