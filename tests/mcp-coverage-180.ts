@@ -156,9 +156,9 @@ function optionsByTable(source: string, constName: string): Map<string, string[]
   const brace = source.indexOf("{", start);
   const end = source.indexOf("\n};", brace);
   const block = source.slice(brace, end < 0 ? undefined : end);
-  const heads = [...block.matchAll(/^ {2}(\w+):/gm)];
+  const heads = [...block.matchAll(/^ {2}(?:"([^"]+)"|(\w+)):/gm)];
   for (let i = 0; i < heads.length; i++) {
-    const table = heads[i][1];
+    const table = heads[i][1] ?? heads[i][2];
     const slice = block.slice(heads[i].index, i + 1 < heads.length ? heads[i + 1].index : undefined);
     const values: string[] = [];
     for (const arr of slice.matchAll(/optionsFor\(\[([\s\S]*?)\]\)/g)) {
