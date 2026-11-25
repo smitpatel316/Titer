@@ -183,7 +183,27 @@ export function ImportDialog({
   onChooseFile: () => void;
 }) {
   const [tab, setTab] = React.useState<ImportChoiceTab>("Source");
-  const [choices, setChoices] = React.useState<ImportChoices>(() => loadSavedImportChoices() ?? defaultImportChoices());
+  const [choices, setChoices] = React.useState<ImportChoices>(() => {
+    const loaded = loadSavedImportChoices() ?? defaultImportChoices();
+    // A fromRow range saved before the end row was initialized on switch
+    // (endRow "last") would still show the from row while consuming every
+    // row as Info/Notes — pin the end row to the from row, as the switch
+    // does below.
+    return {
+      ...loaded,
+      info: {
+        ...loaded.info,
+        infoEndRow:
+          loaded.info.infoMode === "fromRow" && loaded.info.infoEndRow === "last"
+            ? loaded.info.infoFromRow
+            : loaded.info.infoEndRow,
+        notesEndRow:
+          loaded.info.notesMode === "fromRow" && loaded.info.notesEndRow === "last"
+            ? loaded.info.notesFromRow
+            : loaded.info.notesEndRow,
+      },
+    };
+  });
   const [saveAsDefault, setSaveAsDefault] = React.useState(false);
   const panelRef = React.useRef<HTMLDivElement>(null);
 
@@ -225,7 +245,12 @@ export function ImportDialog({
   const confirm = () => {
     if (saveAsDefault) saveImportChoices(choices);
     const p = choices.placement;
-    if (p.target === "new") return onConfirm(choices, null);
+    // No table is active (a graph, analysis, or the Gallery is showing):
+    // the Placement tab shows "Create a new table" checked, so confirm
+    // must create one — passing the default "insert" target with a
+    // made-up { r: 0, c: 1 } would overwrite the parent table instead.
+    if (p.target === "new" || insertionPoint === null)
+      return onConfirm({ ...choices, placement: { ...p, target: "new" } }, null);
     if (p.useLiveInsertionPoint && insertionPoint) return onConfirm(choices, insertionPoint);
     return onConfirm(choices, { r: Math.max(1, p.insertRow) - 1, c: Math.max(1, p.insertCol) });
   };
@@ -245,6 +270,14 @@ export function ImportDialog({
       );
     }
   };
+  // The keydown listener is registered once (deps [] below), so it must
+  // reach the latest confirm/onCancel through refs: calling the closures
+  // directly would capture the initial choices and discard every edit
+  // the moment the user presses Enter.
+  const confirmRef = React.useRef(confirm);
+  const onCancelRef = React.useRef(onCancel);
+  confirmRef.current = confirm;
+  onCancelRef.current = onCancel;
 
   React.useEffect(() => {
     panelRef.current?.focus();
@@ -253,12 +286,12 @@ export function ImportDialog({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onCancel();
+        onCancelRef.current();
         return;
       }
       if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement) && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLSelectElement)) {
         e.preventDefault();
-        confirm();
+        confirmRef.current();
         return;
       }
       if (e.key !== "Tab" || !panelRef.current) return;
@@ -280,8 +313,9 @@ export function ImportDialog({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-    // confirm/onCancel are stable props from the store; the listener is
-    // re-registered only when the dialog re-opens (it unmounts on close).
+    // The listener is registered once (the dialog unmounts on close), and
+    // reaches the latest confirm/onCancel through confirmRef/onCancelRef
+    // above — never the closures captured on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -813,7 +847,7 @@ export function ImportDialog({
                   <Radio
                     name="import-info"
                     checked={choices.info.infoMode === "fromRow"}
-                    onChange={() => setInfo({ infoMode: "fromRow" })}
+                    onChange={() => setInfo({ infoMode: "fromRow", infoEndRow: choices.info.infoFromRow })}
                   >
                     Import starting at row
                   </Radio>
@@ -851,7 +885,7 @@ export function ImportDialog({
                   <Radio
                     name="import-notes"
                     checked={choices.info.notesMode === "fromRow"}
-                    onChange={() => setInfo({ notesMode: "fromRow" })}
+                    onChange={() => setInfo({ notesMode: "fromRow", notesEndRow: choices.info.notesFromRow })}
                   >
                     Import starting at row
                   </Radio>

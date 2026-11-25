@@ -38950,6 +38950,76 @@ check("import-451d: Info & Notes imports into the sheet the popup names", () => 
   ok(document.includes("mergeImportedInfo"), "confirmImport never merges into the chosen sheet");
 });
 
+// BUG-REPORT Issue 16 (wave-1b import-dialog, seq 476) — three defects in
+// ImportDialog, all in src/views/tables/import-dialog.tsx:
+//   1. insertionPoint === null showed "Create a new table" checked while
+//      choices.placement.target stayed "insert", so confirm() handed the
+//      store { r: 0, c: 1 } and silently overwrote the parent table.
+//   2. The keydown effect's [] deps captured the initial confirm closure,
+//      so Enter imported with the initial defaults, discarding all edits.
+//   3. Info & Notes fromRow showed end row 1 while infoEndRow/notesEndRow
+//      stayed "last", consuming every row as Info/Notes and failing with
+//      "has no rows left to import".
+check("import-476: ImportDialog creates a new table with no insertion point, Enter uses the latest choices, and fromRow pins its end row", () => {
+  const dialog = readFileSync("src/views/tables/import-dialog.tsx", "utf8");
+  // 1. confirm() treats a null insertion point like target "new": the
+  //    choices handed on carry placement.target "new" and a null insertion.
+  const confirmStart = dialog.indexOf("const confirm = () => {");
+  ok(confirmStart !== -1, "ImportDialog lost its confirm()");
+  const confirmBlock = dialog.slice(confirmStart, dialog.indexOf("\n  };", confirmStart));
+  ok(confirmBlock.includes("insertionPoint === null"), "confirm() never checks for a null insertion point");
+  ok(confirmBlock.includes('target: "new"'), 'confirm() never forces placement.target to "new" without a table');
+  ok(confirmBlock.includes(", null)"), "confirm() never passes a null insertion for a new table");
+  // 2. The once-registered keydown handler reaches the latest closures
+  //    through refs, not the ones captured on mount.
+  const keyStart = dialog.indexOf("const onKeyDown = (e: KeyboardEvent)");
+  ok(keyStart !== -1, "ImportDialog lost its keydown handler");
+  const keyHandler = dialog.slice(keyStart, dialog.indexOf("window.addEventListener", keyStart));
+  ok(keyHandler.includes("confirmRef.current()"), "Enter still calls the stale confirm closure");
+  ok(keyHandler.includes("onCancelRef.current()"), "Escape still calls the stale onCancel closure");
+  ok(!keyHandler.includes("confirm();"), "keydown still calls the stale bare confirm()");
+  ok(!keyHandler.includes("onCancel();"), "keydown still calls the stale bare onCancel()");
+  // 3. Switching Info/Notes to fromRow pins the end row to the from row —
+  //    the value the UI displays — so the range is one row, not all.
+  ok(
+    dialog.includes('infoMode: "fromRow", infoEndRow: choices.info.infoFromRow'),
+    "switching Info to fromRow never initializes infoEndRow",
+  );
+  ok(
+    dialog.includes('notesMode: "fromRow", notesEndRow: choices.info.notesFromRow'),
+    "switching Notes to fromRow never initializes notesEndRow",
+  );
+  // And the corrected fromRow state (1..1) leaves the other rows as data
+  // instead of failing "has no rows left to import".
+  const rows = [
+    ["A", "1"],
+    ["B", "2"],
+    ["C", "3"],
+    ["D", "4"],
+    ["E", "5"],
+  ];
+  const fromRowChoices = {
+    ...defaultImportChoices(),
+    info: { ...defaultImportChoices().info, infoMode: "fromRow" as const, infoFromRow: 1, infoEndRow: 1 as const },
+  };
+  deepStrictEqual(extractInfoSections(rows, fromRowChoices).infoRows, [["A", "1"]]);
+  strictEqual(extractInfoSections(rows, fromRowChoices).dataRows.length, 4);
+  strictEqual(
+    computeImport(
+      {
+        name: "t.csv",
+        path: null,
+        text: "A,1\nB,2\nC,3\nD,4\nE,5\n",
+        xlsxRows: null,
+        sheetName: null,
+        otherSheets: [],
+      },
+      fromRowChoices,
+    ).rows.length,
+    4,
+  );
+});
+
 // ── 1.8 seq 226: automatic backup ────────────────────────────────────────
 // Prism (FAQ 1520 + Prism 11 user guide, "Automatic back up of Prism
 // files"): backups are SEPARATE copies — written on a timer and/or on
