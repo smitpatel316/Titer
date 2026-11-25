@@ -13,6 +13,9 @@ import { ExportAllDialog } from "./export-all-dialog";
 import { AiConnectionsDialog } from "./ai-connections-dialog";
 import { MarketplaceDialog } from "./marketplace-dialog";
 import { FeedbackConsentDialog } from "./feedback-consent-dialog";
+import { SendFeedbackDialog } from "./send-feedback-dialog";
+import { CrashReportDialog } from "./crash-report-dialog";
+import { WhatsNewDialog } from "./whats-new-dialog";
 import { useMcpSnapshotPublisher } from "../store/mcp-publish";
 import { useMcpJobDispatcher } from "../store/mcp-dispatch";
 import { SavePromptDialog } from "./save-prompt-dialog";
@@ -405,6 +408,12 @@ export function AppShell() {
       <PreferencesDialog />
 
       <FeedbackConsentDialog />
+
+      <SendFeedbackDialog />
+
+      <CrashReportDialog />
+
+      <WhatsNewDialog />
 
       <SavePromptDialog onChoose={(choice, remember) => documentActions.resolveSavePrompt(choice, remember)} />
 

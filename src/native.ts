@@ -673,13 +673,46 @@ export const openLink = (
     | "statistics"
     | "support"
     | "support-policies"
+    | "discussions"
     | "site",
 ) => void invoke("open_link", { link });
 
-/** A pre-filled GitHub issue for one saved feedback entry, in the
- *  default browser. The shell only opens the fixed Titer issues/new
- *  address (see `open_github_issue`); anything else is refused. */
-export const openGithubIssue = (url: string) => invoke<void>("open_github_issue", { url });
+/** The support mailbox (seq 453): opens the user's mail app addressed
+ *  to smit@muse.ai, with the app version in the subject. The shell only
+ *  ever opens that one fixed `mailto:` address. */
+export const openSupportEmail = () => invoke<void>("open_support_email");
+
+/** Sends one feedback report straight from the UI (seq 453) — the Help ▸
+ *  Send Feedback dialog, no AI needed. Same local-first save and
+ *  consent-gated server copy as `titer_send_feedback`. Returns the
+ *  share result: `{ feedback_id, received, sent, ... }`. */
+export const mcpSendFeedback = (kind: "bug" | "missing-feature" | "other", summary: string, details: string) =>
+  invoke<{ feedback_id: string; received: boolean; sent: boolean; sharing?: string; note?: string; error?: string }>(
+    "mcp_send_feedback",
+    { kind, summary, details },
+  );
+
+/** Sends one SAVED feedback report to the team (seq 453) — Settings → AI
+ *  Connections. No duplicate save; the server copy is consent-gated. */
+export const mcpSendSavedFeedback = (feedbackId: string) =>
+  invoke<{ feedback_id: string; received: boolean; sent: boolean; sharing?: string; note?: string; error?: string }>(
+    "mcp_send_saved_feedback",
+    { feedbackId },
+  );
+
+/** How many unsent error-log entries a crash report would send (seq 453):
+ *  0 when the last run exited cleanly (or nothing was captured). */
+export const mcpCrashReportPending = () => invoke<number>("mcp_crash_report_pending");
+
+/** Sends the crash report (seq 453): the unsent error-log entries, as one
+ *  feedback entry. The dialog's Send click is the consent moment. */
+export const mcpSendCrashReport = () =>
+  invoke<{ feedback_id: string; received: boolean; sent: boolean; note?: string; error?: string }>(
+    "mcp_send_crash_report",
+  );
+
+/** Dismisses the crash report (seq 453): nothing is sent. */
+export const mcpDismissCrashReport = () => invoke<void>("mcp_dismiss_crash_report");
 
 // ── Updates ──────────────────────────────────────────────────────────────
 // The shell side lives in src-tauri/src/updater.rs.
