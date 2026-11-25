@@ -354,7 +354,8 @@ function usesGroupingSeparators(root: XmlNode): boolean {
 }
 
 /**
- * `1,5` (comma decimal) → `1.5`; anything else stays as typed — except in a
+ * `1,5` (comma decimal) → `1.5`, including scientific notation
+ * (`4,096e+007` → `4.096e+007`); anything else stays as typed — except in a
  * file whose own numbers prove dot decimals, where a grouped `1,000` is a
  * thousands separator, not a decimal comma, and the commas are stripped
  * (`1,000` → `1000`) instead of turning it into `1.000` (a 1000× error).
@@ -364,7 +365,7 @@ function usesGroupingSeparators(root: XmlNode): boolean {
 function normalizeNumber(value: string | null, groupingSeparators: boolean): string | null {
   if (value === null) return null;
   if (groupingSeparators && GROUPED_NUMBER.test(value)) return value.replace(/,/g, "");
-  if (/^-?\d+,\d+$/.test(value)) return value.replace(",", ".");
+  if (/^-?\d+,\d+([eE][+-]?\d+)?$/.test(value)) return value.replace(",", ".");
   return value;
 }
 

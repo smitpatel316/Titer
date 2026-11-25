@@ -130,14 +130,15 @@ export function daysBetween(start: string | null, end: string | null): string | 
   return Number.isInteger(days) ? String(days) : String(Number(days.toFixed(6)));
 }
 
-/** `1,5` → `1.5` in decimal mode; grouped numbers stripped of commas in
+/** `1,5` → `1.5` in decimal mode (including scientific notation:
+ *  `4,096e+007` → `4.096e+007`); grouped numbers stripped of commas in
  *  thousands mode, everything else left as typed. */
 export const normalizeNumber = (value: string | null, thousandsMode: boolean): string | null => {
   if (value === null) return null;
   if (thousandsMode) {
     return /^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(value) ? value.replace(/,/g, "") : value;
   }
-  return /^-?\d+,\d+$/.test(value) ? value.replace(",", ".") : value;
+  return /^-?\d+,\d+([eE][+-]?\d+)?$/.test(value) ? value.replace(",", ".") : value;
 };
 
 /** True when any parsed cell holds a number with 2+ comma digit-groups.

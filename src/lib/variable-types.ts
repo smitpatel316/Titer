@@ -15,9 +15,9 @@ export const isVariableType = (value: unknown): value is VariableType =>
   typeof value === "string" && (VARIABLE_TYPES as readonly string[]).includes(value);
 
 // A number as typed: integers, decimals, exponents, and Prism's decimal
-// comma ("1,23"). Anything else is text.
+// comma ("1,23", including scientific notation: "1,5e-3"). Anything else is text.
 const NUMERIC = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
-const COMMA_DECIMAL = /^[+-]?\d+,\d+$/;
+const COMMA_DECIMAL = /^[+-]?\d+,\d+([eE][+-]?\d+)?$/;
 const isNumericCell = (value: string) => {
   const v = value.trim();
   return NUMERIC.test(v) || COMMA_DECIMAL.test(v);

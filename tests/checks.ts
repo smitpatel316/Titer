@@ -178,6 +178,7 @@ import {
   clearDecimalsForRange,
   columnsBeyond,
   convertColumnToNested,
+  convertCommaDecimals,
   defaultRowGroups,
   deleteColumns,
   deleteRows,
@@ -365,6 +366,7 @@ import {
 } from "../src/components/backup-recovery-dialog";
 import type { BackupEntry } from "../src/native";
 import { convertPrism } from "../src/lib/prism";
+import { parseCell } from "../src/lib/numeric";
 import { yieldToPaint } from "../src/lib/yield-to-paint";
 import { fitWidths, fitZoom } from "../src/store/use-layout";
 import { clampZoom, zoomInStep, zoomOutStep, ZOOM_LIMITS } from "../src/store/use-zoom";
@@ -27624,6 +27626,39 @@ check(".pzfx import reads '1,000' as 1000 in a dot-decimal file — and keeps a 
   ]);
 });
 
+check(".pzfx import normalizes comma-decimal scientific notation (Issue 56)", () => {
+  // "4,096e+007" and "1,5e-3" used to stay un-normalized and parse as null:
+  // normalizeNumber's comma-decimal regex had no exponent group, so the
+  // comma survived and parseCell dropped the value. Plain "1,5" is the
+  // control — it already worked and must keep working.
+  const imported = parsePzfx(
+    `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">` +
+      `<Table ID="Table0" XFormat="none" TableType="OneWay" EVFormat="AsteriskAfterNumber">` +
+      `<Title>Data 1</Title>` +
+      `<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>Aa</Title><Subcolumn>` +
+      `<d>4,096e+007</d><d>1,5e-3</d><d>1,5</d>` +
+      `</Subcolumn></YColumn></Table></GraphPadPrismFile>`,
+  );
+  strictEqual(imported.tables.length, 1, "comma-decimal-exponent table imports");
+  const node = imported.project.nodes[imported.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("comma-decimal-exponent: no table node");
+  deepStrictEqual(node.data!.rows, [
+    [null, "4.096e+007"],
+    [null, "1.5e-3"],
+    [null, "1.5"],
+  ]);
+  strictEqual(parseCell("4.096e+007"), 40960000);
+  strictEqual(parseCell("1.5e-3"), 0.0015);
+  // The same exponent form converts through the table's right-click path.
+  deepStrictEqual(
+    convertCommaDecimals({
+      columns: ["Title", "Aa"],
+      rows: [[null, "1,5e-3"], [null, "4,096e+007"], [null, "1,5"]],
+    }).rows,
+    [[null, "1.5e-3"], [null, "4.096e+007"], [null, "1.5"]],
+  );
+});
+
 check(".pzfx import preserves duplicate column names exactly (BUG-4)", () => {
   // Two Y columns both titled "Control", plus a third already titled
   // "Control 2" and a third "Control" — the reader keeps every title
@@ -36211,6 +36246,11 @@ check("import-429: the 5-tab Import dialog's choices parse, filter and place as 
     ["A", "100.000"],
     ["B", "200.000"],
   ]);
+  // Decimal commas in scientific notation convert too (Issue 56).
+  deepStrictEqual(parseImportText("A\t1,5e-3\nB\t4,096e+007", "txt", withComma("decimal")), [
+    ["A", "1.5e-3"],
+    ["B", "4.096e+007"],
+  ]);
   // Source — spaces: "headings" keeps "A 1.5" one field; "separate" splits
   // on runs of spaces (quoted fields keep theirs).
   const withSpaces = (spaces: ImportChoices["source"]["spaces"]): ImportChoices => ({
@@ -37872,6 +37912,11 @@ const mv331 = (): TableData => ({
 check("seq 331: auto-detect classifies numeric, text, ID and empty columns (Prism's rule)", () => {
   strictEqual(detectVariableType(["34", "41", "29"]), "continuous");
   strictEqual(detectVariableType(["1,23", "4,56"]), "continuous", "a decimal comma is still a number");
+  strictEqual(
+    detectVariableType(["1,5e-3", "4,096e+007"]),
+    "continuous",
+    "a comma decimal in scientific notation is still a number (Issue 56)",
+  );
   strictEqual(detectVariableType(["1e3", "2.5E-2"]), "continuous", "scientific notation is still a number");
   strictEqual(detectVariableType(["Female", "Male"]), "categorical");
   strictEqual(detectVariableType(["12", "Male"]), "categorical", "mixed numbers and text are categorical");
