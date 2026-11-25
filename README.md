@@ -1,10 +1,17 @@
 # Titer
 
+[![Release](https://img.shields.io/github/v/release/smitpatel316/Titer)](https://github.com/smitpatel316/Titer/releases)
+[![License: GPL v3](https://img.shields.io/github/license/smitpatel316/Titer)](LICENSE)
+[![CodeQL](https://github.com/smitpatel316/Titer/actions/workflows/codeql.yml/badge.svg)](https://github.com/smitpatel316/Titer/actions/workflows/codeql.yml)
+[![Release](https://github.com/smitpatel316/Titer/actions/workflows/release.yml/badge.svg)](https://github.com/smitpatel316/Titer/actions/workflows/release.yml)
+[![GitHub stars](https://img.shields.io/github/stars/smitpatel316/Titer)](https://github.com/smitpatel316/Titer/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/smitpatel316/Titer/total)](https://github.com/smitpatel316/Titer/releases)
+
 **Scientific data analysis, simplified.**
 
 Organize, analyze and visualize scientific data, from raw numbers to publication-ready
-graphs. Titer is a free, open-source and private alternative to GraphPad Prism for Mac
-and Linux.
+graphs. Titer is a free, open-source and private alternative to GraphPad Prism for Mac,
+Linux, and Windows.
 
 Three engines do the work: a fast data grid built for Titer, **R**, the reference for
 statistics (through [webR](https://github.com/r-wasm/webr), R compiled to WebAssembly), and
@@ -16,30 +23,36 @@ statistics (through [webR](https://github.com/r-wasm/webr), R compiled to WebAss
 
 This is a modified fork of mickaphd/Helix,
 the original Helix by mickaphd (© 2026 mickaphd). On top of upstream it adds
-Prism-file import and write-back, a wider analysis catalogue, multi-panel figures, and bug
+Prism-file import and write-back, a wider analysis catalogue, multi-panel figures, a
+plugin marketplace, an interface for AI assistants, and bug
 fixes — see the [release notes](https://github.com/smitpatel316/Titer/releases)
 and the git history for what changed and when. Like upstream, it is licensed
 under the [GNU General Public License](LICENSE), version 3 or later.
 
 ## Download
 
-The latest release is **v1.6.2 for Mac** (Apple Silicon) and **v1.6.2 for Linux**.
-Get them from the [Releases page](https://github.com/smitpatel316/Titer/releases):
+The latest release is **v2.0.0 for Mac** (Apple Silicon), **v2.0.0 for Linux**, and
+**v2.0.0 for Windows**. Get them from the [Releases page](https://github.com/smitpatel316/Titer/releases):
 
 | Build | File | Size | SHA-256 |
 |---|---|---|---|
-| Mac — Apple Silicon (v1.6.2) | [`Titer-1.6.2-aarch64.dmg`](https://github.com/smitpatel316/Titer/releases/download/v1.6.2/Titer-1.6.2-aarch64.dmg) | 103,842,225 bytes (~99 MB) | `6c38bdee248cef4bcdbbba16cc0945b3a6dccac8072890e77e190ebbb62a5651` |
-| Linux (v1.6.2) | [`Titer-1.6.2-linux.AppImage`](https://github.com/smitpatel316/Titer/releases/download/v1.6.2/Titer-1.6.2-linux.AppImage) | 173,140,472 bytes (~165 MB) | `de78b6b726dc6ff61c675e6db209b82566f6c7ad5215cc73242586b2f985ef37` |
+| Mac — Apple Silicon (v2.0.0) | [`Titer-2.0.0-aarch64.dmg`](https://github.com/smitpatel316/Titer/releases/download/v2.0.0/Titer-2.0.0-aarch64.dmg) | 137,553,241 bytes (~131 MB) | `2a87b61be826e55e225b11f7e543f8f549ae80683dde26e0de73bdc87334126c` |
+| Linux (v2.0.0) | [`Titer-2.0.0-linux.AppImage`](https://github.com/smitpatel316/Titer/releases/download/v2.0.0/Titer-2.0.0-linux.AppImage) | 224,639,480 bytes (~214 MB) | `8831c6465f8c1f6049a90e22af136da9a644c9262adc3138770aaff4ca48e002` |
+| Windows (v2.0.0) | [`Titer-2.0.0-windows-x64.exe`](https://github.com/smitpatel316/Titer/releases/download/v2.0.0/Titer-2.0.0-windows-x64.exe) | 137,131,348 bytes (~131 MB) | `fef9341e8fc0a77c9695238203656ee2f01899ccf6abeb898de684827edecc9e` |
 | Mac — Intel (latest: v1.2.0) | [`Titer-1.2.0-x64.dmg`](https://github.com/smitpatel316/Titer/releases/download/v1.2.0/Titer-1.2.0-x64.dmg) | 101,712,108 bytes (~97 MB) | `d8b6fcf88ffa52044279a2a8938b00f6821ca8c4abe35ef715c951ae36889456` |
+
+The Mac update package, [`Titer-2.0.0.zip`](https://github.com/smitpatel316/Titer/releases/download/v2.0.0/Titer-2.0.0.zip)
+(137,190,059 bytes, SHA-256 `b04cbff806def5a34b2304ff2a5b6c5a76228366f7582be9959721d0e3af7875`),
+is the file the in-app updater downloads; it is also on the Releases page.
 
 Each release is cut from a tagged commit — the release notes name the exact
 commit the downloads were built from, so the source for any download is retrievable
 from this repo. Every download also includes a copy of the GNU GPL (`LICENSE`) and
 the third-party notices (`THIRD-PARTY-NOTICES.md`).
 
-Requires macOS 13.3 (Ventura) or later, or Ubuntu 22.04 or later for the Linux
+Requires macOS 13.3 (Ventura) or later, Ubuntu 22.04 or later for the Linux
 AppImage (which needs `libfuse2` — `libfuse.so.2` — or run it with
-`--appimage-extract-and-run`). On a Mac, open the DMG and drag **Titer** into the
+`--appimage-extract-and-run`), or Windows 10 or later (64-bit). On a Mac, open the DMG and drag **Titer** into the
 **Applications** folder. Titer is signed ad hoc (not notarized by Apple), so macOS may ask you to confirm the first time you open it.
 
 No Intel DMG ships in v1.3.0 or later — v1.2.0 above is the latest Intel build, and
@@ -47,7 +60,8 @@ it stays available for Intel Macs.
 
 When a new version is out, Titer tells you (Titer › Check for Updates…). On a Mac
 it downloads, verifies and installs the update for you, then relaunches with your
-projects. On Linux the updater stops at a manual download of the new AppImage.
+projects. On Linux and Windows the updater stops at a manual download of the new
+release — there is no auto-updater on those platforms yet.
 
 ## What Titer does
 
@@ -66,6 +80,7 @@ its data allow:
 - **Multiple Variables:** one row per subject, one column per variable
 - **Contingency:** counts of outcomes
 - **Survival:** one subject per row, its time, and whether the event happened
+- **Parts of Whole:** rows are the categories, one column per data set
 
 And a spreadsheet that feels like one:
 
@@ -80,11 +95,12 @@ And a spreadsheet that feels like one:
 
 ### Analyses
 
-**55 analyses**, covering all 56 analyses in GraphPad Prism 10's catalogue. That
-"56" is a catalogue mapping — every Prism 10 analysis has a Titer equivalent listed
-below — not a single test-suite score. The numbers themselves are checked against
-Prism's own saved results and against reference values: the frozen-tip suite passed
-527/527 at v1.6.2 (see [VALIDATION.md](VALIDATION.md)).
+**61 analyses**, together covering all 56 analyses in GraphPad Prism 10's catalogue —
+every test, fit, and model Prism lists has an equivalent here — and Titer adds a few of
+its own, like K-means clustering. The numbers themselves are checked against
+Prism's own saved results and against reference values: the test suite runs 701 checks
+(157 checks, 26 Prism-format, 5 Prism-write, 363 reference results — all matching —
+6 parity, 144 package), and is green (see [VALIDATION.md](VALIDATION.md)).
 
 - **Guided:** an assistant asks which data sets to analyze, whether they are
   paired and whether they follow a normal distribution (or checks it for you), then
@@ -208,11 +224,9 @@ without retyping data.
   date X, X error, summary subcolumns), and `.prism` round-trips cell-identical on the
   demo file with identical analysis parameters. Every written `.pzfx` file validates
   against the Prism 8 XSD.
-- **One thing not yet proven:** v1.6.2 fixed the two known ways real Prism rejected
-  files Titer wrote (a `.prism` open crash, a `.pzfx` XML-compliance warning), but
-  whether Prism itself opens a file Titer wrote is still being verified — the round-trips
-  above go through Titer's own importer, not through Prism, and the real-Prism check is
-  running now. Don't take "Prism opens Titer files" as given until that check is done.
+- **Honest beta notes:** saving back to `.prism` does not yet carry analyses or graphs,
+  and Prism 11 crashes opening Titer-written `.prism` files — work on a copy. Prism
+  coverage is 84.5% and climbing.
 - **Titer's own format** is plain JSON (`.hlx`), described in
   [FILE-FORMAT.md](FILE-FORMAT.md), so your data are never locked in. Open methods: how
   each analysis is computed and checked is in [METHODS.md](METHODS.md).
@@ -253,6 +267,19 @@ Connect with **your own Box app** (your client id and secret — there is a togg
 "Always use my own Box app"). The shared Titer Box app for one-click connect is not
 live yet, so bring-your-own is the working path for now. Dropbox, OneDrive and Google
 Drive are not connected yet.
+
+### Plugins
+
+Titer 2.0 adds a plugin marketplace: community analyses and tools that install from
+inside the app (Settings → Marketplace…). Every plugin is free — no paid plugins, no
+marketplace cut. Plugins run through the same automated gates as the rest of Titer,
+and anything flagged is labelled as such.
+
+### Feedback
+
+Found a bug, or want something Titer doesn't do yet? Help › Send Feedback sends it
+straight to the team — no account needed. Sharing is your choice: the first time, Titer
+asks whether to share feedback, and you can change that any time in Settings.
 
 ## Use Titer with your AI assistant (MCP)
 
@@ -324,10 +351,21 @@ to a small server that runs only on your machine.
 
 **Good to know:** the server only listens on your own machine (`127.0.0.1`) and never sends your
 data anywhere. It uses a private token — keep it private, and if you regenerate it in Settings,
-reconnect your assistant. It offers 51 tools: 14 only read, 37 can change your project (run an
+reconnect your assistant. It offers 80 tools: 22 only read, 58 can change your project (run an
 analysis, build a graph, export, save, delete) — your AI tool's own approval settings decide
 when it asks first. Box cloud tools need a Box account connected in Settings → Connected
 Storage; without one they tell you to connect first.
+
+## How to cite Titer
+
+If you use Titer in published work, cite the version you used. In your methods, you can write:
+
+> "Statistical analyses and graphs were made with Titer (version 2.0.0; https://github.com/smitpatel316/Titer), which computes its statistics with R."
+
+Replace 2.0.0 with the version you used (Titer › About Titer). Since every result comes from R,
+it's good practice to cite R too. A permanent DOI for Titer is coming with the 2.0.1 release —
+this section will be updated with it then. The same citation is in the app, under
+Help › How to Cite Titer.
 
 ## Privacy
 
