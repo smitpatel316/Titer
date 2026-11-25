@@ -11,7 +11,7 @@ import { Menu, Submenu, type MenuOptions } from "@tauri-apps/api/menu";
 import { message, open, save } from "@tauri-apps/plugin-dialog";
 import type { RVector } from "./stats/webr";
 import { cancelActiveEvals, interruptR, resetR, type EngineBootStatus } from "./stats/webr";
-import { buildKeynoteScript, keynoteSizePoints } from "./lib/office-export";
+import { keynoteSizePoints } from "./lib/office-export";
 import { isMacOs } from "./lib/channel";
 import {
   createEvalQueue,
@@ -154,19 +154,21 @@ export function writeFile(path: string, data: string | Uint8Array) {
   return invoke("write_file", bytes, { headers: { path: encodeURIComponent(path) } });
 }
 
-/** Runs the Keynote AppleScript in the shell (`send_to_keynote` in
- *  main.rs): Keynote makes the presentation and saves the .key at `path`.
- *  The shell deletes the temp PNG and its script file once osascript
- *  finishes; macOS-only — the shell refuses anywhere else. */
-export const sendToKeynote = (script: string, pngPath: string, path: string) =>
-  invoke<string>("send_to_keynote", { script, pngPath, path });
+/** Runs the Keynote handoff in the shell (`send_to_keynote` in
+ *  main.rs): the shell builds the AppleScript itself from these values —
+ *  the page never hands it a script string — Keynote makes the
+ *  presentation and saves the .key at `path`. The shell deletes the temp
+ *  PNG once osascript finishes; macOS-only — the shell refuses
+ *  anywhere else. */
+export const sendToKeynote = (pngPath: string, path: string, title: string, widthPt: number, heightPt: number) =>
+  invoke<string>("send_to_keynote", { pngPath, path, title, widthPt, heightPt });
 
 /** Hands a PNG to Keynote on macOS (seq 217): the PNG goes to a temp
- *  file, `buildKeynoteScript` writes the AppleScript for it, and the
- *  shell runs it in Keynote, which saves the real .key at `outPath` and
- *  stays open on it, as Prism leaves it. Returns the .key path. Throws
- *  on non-macOS — the menu hides the item there, and the MCP tool
- *  refuses the target there first. */
+ *  file, and the shell builds the AppleScript for it and runs it in
+ *  Keynote, which saves the real .key at `outPath` and stays open on it,
+ *  as Prism leaves it. Returns the .key path. Throws on non-macOS — the
+ *  menu hides the item there, and the MCP tool refuses the target there
+ *  first. */
 export async function handoffPngToKeynote(
   png: Uint8Array,
   title: string,
@@ -180,8 +182,7 @@ export async function handoffPngToKeynote(
   const pngPath = await join(tmp, `titer-keynote-${Date.now()}-${Math.random().toString(36).slice(2)}.png`);
   await writeFile(pngPath, png);
   const { widthPt, heightPt } = keynoteSizePoints(widthPx, heightPx, dpi);
-  const script = buildKeynoteScript({ pngPath, outPath, title, widthPt, heightPt });
-  return sendToKeynote(script, pngPath, outPath);
+  return sendToKeynote(pngPath, outPath, title, widthPt, heightPt);
 }
 
 /** Hands a PNG to the system clipboard on macOS (seq 296): the PNG goes

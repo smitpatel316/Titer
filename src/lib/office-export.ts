@@ -10,11 +10,13 @@
 // Apple never documented, so there is no file-side .key builder here (a
 // hand-rolled .key Keynote may refuse is worse than none — seq 217 scope,
 // Nov 2026). Prism itself never wrote a .key either: its Send to Keynote
-// is a live-app handoff via AppleScript, and that is what this module
-// builds — `buildKeynoteScript` writes the script, the shell's
-// `send_to_keynote` runs it in Keynote on macOS, and Keynote saves the
-// real .key. The builders here are pure: bytes in, bytes out, no dialogs,
-// so the suite can open the result with JSZip and check every part.
+// is a live-app handoff via AppleScript, and that is what the shell does
+// — `send_to_keynote` builds the script itself from the values the page
+// passes and runs it in Keynote on macOS, and Keynote saves the real
+// .key. The page never hands the shell a script string (BUG-REPORT
+// Round 2 Issue 1: a raw script from IPC was arbitrary AppleScript
+// execution); `buildKeynoteScript` below remains as the suite-pinned
+// shape reference for the exact script the shell builds.
 import JSZip from "jszip";
 
 export type OfficeTarget = "word" | "powerpoint" | "keynote";
@@ -162,11 +164,11 @@ async function buildPowerPoint(image: OfficeImage): Promise<Uint8Array> {
 
 /** The graph/layout as a real Word document or PowerPoint deck. Keynote
  *  has no file builder — a .key is written by Keynote itself, from the
- *  script `buildKeynoteScript` builds (see above); calling this with
- *  "keynote" is a caller bug, and it says so. */
+ *  script the shell builds (see above); calling this with "keynote" is a
+ *  caller bug, and it says so. */
 export function buildOfficeDocument(target: OfficeTarget, image: OfficeImage): Promise<Uint8Array> {
   if (target === "keynote")
-    throw new Error("Send to Keynote builds the presentation in Keynote itself (macOS), not as a file — use buildKeynoteScript + send_to_keynote.");
+    throw new Error("Send to Keynote builds the presentation in Keynote itself (macOS), not as a file — use handoffPngToKeynote.");
   return target === "word" ? buildWord(image) : buildPowerPoint(image);
 }
 
@@ -174,10 +176,13 @@ export function buildOfficeDocument(target: OfficeTarget, image: OfficeImage): P
 // Prism's mechanism, not a file format: AppleScript tells Keynote to make
 // a presentation, add a slide with the title and the graph image, and save
 // it as a .key. The script is pure text — the suite pins its shape — and
-// the shell runs it (src-tauri/src/main.rs, `send_to_keynote`) only on
-// macOS, where osascript and Keynote exist. Unverified on a real Mac in
-// this lane: the Linux container cannot run Keynote, so the Mac proof
-// batch owns the end-to-end check (script text, image placement, save).
+// the shell builds the same text itself from the values the page passes
+// (src-tauri/src/main.rs, `build_keynote_script` + `send_to_keynote`)
+// only on macOS, where osascript and Keynote exist. The page never hands
+// the shell a script string (BUG-REPORT Round 2 Issue 1). Unverified on
+// a real Mac in this lane: the Linux container cannot run Keynote, so the
+// Mac proof batch owns the end-to-end check (script text, image
+// placement, save).
 
 /** Points per inch — Keynote sizes and positions are in points. */
 const PT_PER_INCH = 72;
@@ -221,9 +226,13 @@ function appleScriptNumber(value: number): string {
  *  never cropped), saved to `outPath`. The slide size is read from the
  *  document itself, so any theme — widescreen or 4:3 — lays out right.
  *  Keynote stays open on the new presentation, as Prism leaves it: the
- *  user continues there. No font styling is set — Keynote's default text
- *  item — because the script dictionary's text styling was not verified
- *  against a real Keynote in this lane; the Mac proof batch may add it. */
+ *  user continues there. This is the suite-pinned shape reference for
+ *  the identical script the shell builds itself
+ *  (`build_keynote_script` in src-tauri/src/main.rs) — the page never
+ *  sends this text to the shell (BUG-REPORT Round 2 Issue 1). No font
+ *  styling is set — Keynote's default text item — because the script
+ *  dictionary's text styling was not verified against a real Keynote in
+ *  this lane; the Mac proof batch may add it. */
 export function buildKeynoteScript(input: KeynoteScriptInput): string {
   const { pngPath, outPath, title, widthPt, heightPt } = input;
   if (!(widthPt > 0 && heightPt > 0)) throw new Error("Send to Keynote needs a positive image size.");
