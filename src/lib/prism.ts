@@ -640,7 +640,8 @@ export function daysBetween(start: string | null, end: string | null): string | 
 /**
  * Number text → Titer text. Which rule applies is decided once per file
  * (see the thousands-mode pre-pass in convertPrism): decimal mode reads
- * a single comma as a decimal point (`1,5` → `1.5`); thousands mode
+ * a single comma as a decimal point (`1,5` → `1.5`, including scientific
+ * notation: `4,096e+007` → `4.096e+007`); thousands mode
  * strips commas from grouped numbers (`1,234,567` → `1234567`) and
  * leaves anything else — including a lone comma decimal like `45,5` —
  * as typed text, because in a thousands-locale file that comma is not a
@@ -651,7 +652,7 @@ const normalizeNumber = (value: string | null, thousandsMode = false): string | 
   if (thousandsMode) {
     return /^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(value) ? value.replace(/,/g, "") : value;
   }
-  return /^-?\d+,\d+$/.test(value) ? value.replace(",", ".") : value;
+  return /^-?\d+,\d+([eE][+-]?\d+)?$/.test(value) ? value.replace(",", ".") : value;
 };
 
 export function subcolumnNames(title: string, dataFormat: string, count: number): string[] {

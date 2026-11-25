@@ -201,8 +201,9 @@ export function dataColumnIndex(letters: string): number {
  *  numbers in one field, so it does NOT match — rewriting it would merge
  *  two values into one. */
 const THOUSANDS_NUMBER = /^[+-]?\d{1,3}(,\d{3})+(\.\d+)?([eE][+-]?\d+)?$/;
-/** A field that is one decimal-comma number ("100,000" = 100.000). */
-const DECIMAL_COMMA_NUMBER = /^[+-]?\d+,\d+$/;
+/** A field that is one decimal-comma number ("100,000" = 100.000), including
+ *  scientific notation ("1,5e-3" = 0.0015). */
+const DECIMAL_COMMA_NUMBER = /^[+-]?\d+,\d+([eE][+-]?\d+)?$/;
 
 /** The file's text as rows, read the way the Source tab says: commas as
  *  separators / thousands / decimal, spaces as headings-only / separators.

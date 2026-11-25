@@ -1231,8 +1231,9 @@ export function dataEdge(data: TableData, r: number, c: number, dr: number, dc: 
   return { r, c };
 }
 
-// A number written with a decimal comma ("1,23"): R only understands ".".
-const COMMA_DECIMAL = /^-?\d+,\d+$/;
+// A number written with a decimal comma ("1,23", including scientific
+// notation: "1,5e-3"): R only understands ".".
+const COMMA_DECIMAL = /^-?\d+,\d+([eE][+-]?\d+)?$/;
 
 export const hasCommaDecimals = (data: TableData) =>
   data.rows.some((row) => row.some((cell) => cell !== null && COMMA_DECIMAL.test(cell)));
