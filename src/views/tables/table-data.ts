@@ -1380,14 +1380,22 @@ function htmlCellText(inner: string): string | null {
 /** Parses an HTML `<table>` — Excel's HTML clipboard format — into a cell
  *  block, with no DOM (the suite runs in plain node). A cell's value is its
  *  shown text, unless `manyDigits` and the cell carries an `x:num` attribute,
- *  in which case the full-precision value wins. No `<table>` → no block. */
+ *  in which case the full-precision value wins. No `<table>` → no block.
+ *  A `<thead>` section is the table's header, not data: its rows are skipped
+ *  (bug-report 54 — a toHTMLTable round-trip otherwise pastes the column
+ *  names as row 0, and a foreign Excel-style thead is likewise kept as
+ *  data instead of being treated as a header). */
 export function parseClipboardHTML(html: string, manyDigits: boolean): Cell[][] {
   const table = /<table\b[^>]*>([\s\S]*?)<\/table\s*>/i.exec(html);
   if (!table) return [];
   const rows: Cell[][] = [];
+  // Drop every <thead> section first: the header row(s) it carries are
+  // column names, not pasted data — whether the table came from Titer's own
+  // toHTMLTable copy or from Excel / another app.
+  const body = table[1].replace(/<thead\b[^>]*>[\s\S]*?<\/thead\s*>/gi, "");
   const rowRe = /<tr\b[^>]*>([\s\S]*?)<\/tr\s*>/gi;
   let rowMatch: RegExpExecArray | null;
-  while ((rowMatch = rowRe.exec(table[1])) !== null) {
+  while ((rowMatch = rowRe.exec(body)) !== null) {
     const row: Cell[] = [];
     const cellRe = /<(?:td|th)\b([^>]*)>([\s\S]*?)<\/(?:td|th)\s*>/gi;
     let cellMatch: RegExpExecArray | null;

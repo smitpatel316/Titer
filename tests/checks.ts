@@ -8638,6 +8638,33 @@ check("copy-430: grid copy writes a real HTML table alongside the TSV text", () 
   );
 });
 
+// ── Paste Special spurious header row (bug-report 54) ───────────────────
+// toHTMLTable writes the column names in a <thead> header row; Paste
+// Special prefers the HTML clipboard, so parseClipboardHTML must treat
+// that thead as a header, not data — a round-trip otherwise pastes the
+// column names as row 0. A foreign Excel-style thead is likewise a header.
+check("paste-54: a thead header row is not pasted as data", () => {
+  const t: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "10", "20"],
+      ["r2", "30", "40"],
+    ],
+  };
+  deepStrictEqual(parseClipboardHTML(toHTMLTable(t, { r0: 0, r1: 1, c0: 0, c1: 2 }), false), [
+    ["r1", "10", "20"],
+    ["r2", "30", "40"],
+  ]);
+  // A thead from elsewhere (Excel-style HTML) is a header too.
+  deepStrictEqual(
+    parseClipboardHTML(
+      "<table><thead><tr><th>X</th><th>Y</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>",
+      false,
+    ),
+    [["1", "2"]],
+  );
+});
+
 check("seq 220: MCP update-graph accepts a number format and rejects a bad one", () => {
   const nodes: Record<string, ProjectNode> = {
     table_1: {
