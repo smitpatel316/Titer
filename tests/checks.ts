@@ -33273,6 +33273,11 @@ check("seq 454: the startup guide covers the first-run path and names support", 
   strictEqual(help.link?.href, `mailto:${GUIDE_SUPPORT_EMAIL}`, "the help step has no mailto link to support");
   strictEqual(help.link?.label, GUIDE_SUPPORT_EMAIL, "the help step's support link shows the wrong address");
   ok(!GUIDE_STEPS.some((s) => s.id !== "help" && s.link), "only the help step links out");
+  // The help step renders the in-app Send Feedback button (seq 453's
+  // SendFeedbackButton) alongside the mailbox link — the button the
+  // startup guide was written to render (cycle 43).
+  const dialog = readFileSync("src/components/startup-guide-dialog.tsx", "utf8");
+  ok(dialog.includes("SendFeedbackButton"), "the help step never renders the Send Feedback button");
 });
 
 // seq 454: Help re-opens the guide on demand, and the guide waits behind
