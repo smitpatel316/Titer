@@ -838,7 +838,10 @@ struct ClipboardFormats {
 /// users as well as synthetic input. The shell reads the pasteboard
 /// directly instead, mirroring the seq 296 write workaround
 /// (`copy_png_to_clipboard`): on macOS `pbpaste` gives the plain text and
-/// `pbpaste -Prefer html` the HTML flavour. A flavour that isn't there is
+/// `pbpaste -Prefer public.html` the HTML flavour. Seq 444: the flavour
+/// must be asked for by its full UTI — `pbpaste -Prefer html` returns
+/// PLAIN TEXT on macOS, so the old bare name left the html field holding
+/// TSV and the many-digits option could never fire. A flavour that isn't there is
 /// `None`, not an error — only a clipboard with neither form is
 /// "nothing to paste", which the page reports as such. Async, on the
 /// blocking pool: process spawn can block. macOS only — anywhere else
@@ -876,7 +879,7 @@ fn read_clipboard_formats_blocking() -> Result<ClipboardFormats, String> {
     }
     Ok(ClipboardFormats {
         text: flavour(&[]),
-        html: flavour(&["-Prefer", "html"]),
+        html: flavour(&["-Prefer", "public.html"]),
     })
 }
 

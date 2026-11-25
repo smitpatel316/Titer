@@ -743,9 +743,14 @@ check("paste-439: Paste Special reads the clipboard natively, not via the webvie
   );
   // The native read must return both formats Paste Special needs: the
   // plain text and the HTML table (Excel's x:num digits live in the HTML).
+  // Seq 444: the HTML flavour must be requested by its full UTI
+  // `public.html` — `pbpaste -Prefer html` returns PLAIN TEXT on macOS
+  // (verified twice by the post-1.9.0 proof batch), so the old bare name
+  // left the html field holding TSV and the many-digits option could
+  // never fire.
   ok(
-    mainRs.includes("pbpaste") && mainRs.includes('"-Prefer", "html"'),
-    "the native read must use pbpaste, with -Prefer html for the HTML flavour",
+    mainRs.includes("pbpaste") && mainRs.includes('"-Prefer", "public.html"'),
+    "the native read must use pbpaste, with -Prefer public.html for the HTML flavour",
   );
   ok(
     mainRs.includes("text:") && mainRs.includes("html:"),
@@ -777,6 +782,32 @@ check("paste-439: Paste Special reads the clipboard natively, not via the webvie
   ok(
     grid439.indexOf("readClipboardText") !== -1,
     "readClipboardText must still exist as the text fallback",
+  );
+});
+
+check("paste-444: the native clipboard read must ask pbpaste for public.html, not html", () => {
+  // The post-1.9.0 Mac proof batch showed Paste Special's "Paste as many
+  // digits as possible" never fires: read_clipboard_formats asked for the
+  // HTML flavour with `pbpaste -Prefer html`, and on macOS that returns
+  // PLAIN TEXT, not HTML — so the html field always held TSV and the
+  // x:num full-precision values were never there to take. Only the full
+  // UTI `public.html` returns the real HTML table. The bare name must not
+  // come back: a future edit reintroducing it would silently break the
+  // digits option again with no error anywhere.
+  const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(
+    mainRs.includes('"-Prefer", "public.html"'),
+    "read_clipboard_formats must request the HTML flavour as public.html",
+  );
+  ok(
+    !mainRs.includes('"-Prefer", "html"'),
+    "read_clipboard_formats must not request the HTML flavour as bare html (pbpaste returns plain text for that)",
+  );
+  // The doc comment above the command must say public.html too, so the
+  // next reader doesn't "fix" it back to the bare name.
+  ok(
+    mainRs.includes("pbpaste -Prefer public.html"),
+    "the read_clipboard_formats doc comment must name pbpaste -Prefer public.html",
   );
 });
 
