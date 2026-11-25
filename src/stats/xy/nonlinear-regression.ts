@@ -97,6 +97,14 @@ export const positiveYOnly = (model: NonlinearModel) =>
 const TERM_LABEL: Record<string, string> = { HillSlope: "Hill slope", S: "Asymmetry (S)" };
 export const termLabel = (term: string) => TERM_LABEL[term] ?? term;
 
+/** The label function for a fit's coefficients: built-in models rename
+ *  parameters for display, but a user-defined fit's parameters keep their
+ *  own names — renaming "HillSlope" to "Hill slope" would make the
+ *  fitted-curve overlay (which looks coefficients up by the equation's
+ *  parameter names) find nothing, and draw no curve. */
+const labelFor = (model: NonlinearModel): ((term: string) => string) =>
+  model === "user-defined" ? (t: string) => t : termLabel;
+
 // ── Plan 26: closed-form inverses ────────────────────────────────────────
 // The per-model invertibility table + closed-form inverse functions, exported
 // for plan 02's standard-curve-interpolation runner (the contract this plan
@@ -596,9 +604,12 @@ function computeWeights(
 
 /** A global fit's coefficients for one series: shared parameters as fitted,
  *  per-series parameters with their ` (Series)` suffix stripped, other
- *  series' parameters dropped. The overlays draw one curve per series from
- *  these. `sets` is the fit's series list (a display term like "Asymmetry
- *  (S)" ends in a parenthesis too, so only a suffix naming a series counts). */
+ *  series' parameters dropped. Multi-Y and curve-comparison fits name
+ *  per-series terms with a `Series — ` prefix instead ("Control — Top"):
+ *  the prefix is stripped the same way, and other series' prefixed terms
+ *  are dropped. The overlays draw one curve per series from these. `sets`
+ *  is the fit's series list (a display term like "Asymmetry (S)" ends in a
+ *  parenthesis too, so only a suffix naming a series counts). */
 export function coefficientsForSet(
   coefficients: RegressionCoefficient[],
   setName: string,
@@ -606,6 +617,12 @@ export function coefficientsForSet(
 ): RegressionCoefficient[] {
   const out: RegressionCoefficient[] = [];
   for (const c of coefficients) {
+    const prefix = `${setName} — `;
+    if (c.term.startsWith(prefix)) {
+      out.push({ ...c, term: c.term.slice(prefix.length) });
+      continue;
+    }
+    if (sets.some((s) => s !== setName && c.term.startsWith(`${s} — `))) continue;
     const own = ` (${setName})`;
     if (c.term.endsWith(own)) {
       out.push({ ...c, term: c.term.slice(0, -own.length) });
@@ -638,9 +655,12 @@ const isCompetition = (model: NonlinearModel) =>
   model === "inhibitor-3pl-logx" || isTwoSiteCompetition(model) || model === "homologous-competition-logx";
 
 /** A coefficient's estimate, looked up by its equation name ("HillSlope",
- *  "S") — results store the display name ("Hill slope", "Asymmetry (S)"). */
+ *  "S") — results store the display name ("Hill slope", "Asymmetry (S)"),
+ *  except a user-defined fit's parameters, which keep their own names. */
 const coefOf = (coefficients: RegressionCoefficient[], term: string) =>
-  coefficients.find((c) => c.term === termLabel(term))?.estimate ?? null;
+  coefficients.find((c) => c.term === term)?.estimate ??
+  coefficients.find((c) => c.term === termLabel(term))?.estimate ??
+  null;
 
 /** The fitted equation, from the fitted coefficients (4 significant figures,
  *  like the rest of Titer's display). Only the exponential models carry one —
@@ -2416,7 +2436,7 @@ export async function runNonlinearRegression(
         return { error: "Poisson fitting needs counts — all Y values must be 0 or more." };
       let fitted: NonlinearFit;
       try {
-        fitted = await fitModelSpec(prep.xs, prep.ys, spec, "", termLabel, setFitOpts);
+        fitted = await fitModelSpec(prep.xs, prep.ys, spec, "", labelFor(model), setFitOpts);
       } catch (err) {
         if (isTwoSiteCompetition(model)) return twoSiteError;
         const failed = fitError(err, model);
@@ -2430,7 +2450,7 @@ export async function runNonlinearRegression(
       // rows with no standard error (the single-fit path's precedent).
       for (const fixedName of fixedNames)
         fitted.coefficients.push({
-          term: termLabel(fixedName),
+          term: labelFor(model)(fixedName),
           estimate: fixed[fixedName]!,
           stdError: null,
           t: null,
@@ -2656,14 +2676,14 @@ export async function runNonlinearRegression(
     if (fitMethod === "poisson" && first.ys.some((y) => y < 0))
       return { error: "Poisson fitting needs counts — all Y values must be 0 or more." };
     try {
-      const fitted = await fitModelSpec(first.xs, first.ys, spec, "", termLabel, fitOpts);
+      const fitted = await fitModelSpec(first.xs, first.ys, spec, "", labelFor(model), fitOpts);
       retried = fitted.retried;
       retryMethod = fitted.retryMethod;
       // Fixed parameters are not in the fit — report them as coefficient
       // rows with no standard error, so the result names what was held.
       for (const name of fixedNames)
         fitted.coefficients.push({
-          term: termLabel(name),
+          term: labelFor(model)(name),
           estimate: fixed[name]!,
           stdError: null,
           t: null,
@@ -2686,12 +2706,12 @@ export async function runNonlinearRegression(
   // before the set-prefixing below, which renames the terms).
   const prefix = other ? ["a_", "b_"] : [""];
   const parsed = sets.map((s, i) => {
-    const p = parseFit(v, other ? spec : effSpec, s.xs.length, termLabel, prefix[i]);
+    const p = parseFit(v, other ? spec : effSpec, s.xs.length, labelFor(model), prefix[i]);
     const { condition } = applyUnstableFlags(
       p.coefficients,
       p.hessian,
       (other ? spec : effSpec).terms,
-      termLabel,
+      labelFor(model),
       params?.difficultFitHandling ?? "unstable",
       p.derived,
     );
@@ -2722,7 +2742,7 @@ export async function runNonlinearRegression(
     // Interpolation with fixed parameters: the fixed rows belong with the fit.
     for (const name of fixedNames)
       parsed[0].coefficients.push({
-        term: termLabel(name),
+        term: labelFor(model)(name),
         estimate: fixed[name]!,
         stdError: null,
         t: null,
