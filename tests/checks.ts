@@ -40908,24 +40908,35 @@ check("feedback-loop-453: feedback reachable for every user, Discussions + suppo
   ok(main.includes('fn open_support_email'), "the shell has an open_support_email command");
   ok(main.includes('mailto:smit@muse.ai?'), "the mail command only opens mailto:smit@muse.ai");
   ok(main.includes("open_support_email"), "open_support_email is registered as a command");
-  // (c) Crash path: one shared log-path constant (the same name seq 452's
-  // pin expects — the two lanes converge on it at merge), the scrubber,
-  // the clean-shutdown marker written on Exit, and the three commands.
+  // (c) Crash path (seq 452's interface, tip 5e0198e): one shared
+  // log-path constant, the scrubber, the log read + flush commands,
+  // and the panic hook — the two lanes converge on these exact names
+  // at merge. The offer signal is unsent entries (sent: false), not
+  // a crash marker: sharing off or a failed send leaves the same trace.
   const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
   ok(mcp.includes('ERROR_LOG_FILE'), "the shell owns the shared error-log file constant");
   ok(mcp.includes("fn scrub_error_text"), "the shell scrubs error text before storing or sending");
-  ok(mcp.includes("CRASH_MARKER_FILE"), "the shell owns the clean-shutdown marker");
-  ok(mcp.includes("fn mcp_crash_report_pending"), "the shell exposes the crash-pending check");
-  ok(mcp.includes("fn mcp_send_crash_report"), "the shell exposes the crash-report send");
-  ok(mcp.includes("fn mcp_dismiss_crash_report"), "the shell exposes the crash-report dismiss");
+  ok(mcp.includes("fn error_log_sharing_enabled"), "sending is gated on the error-log consent");
+  ok(mcp.includes("fn mcp_error_log("), "the shell exposes the error-log read (newest first)");
+  ok(mcp.includes("fn mcp_flush_error_log("), "the shell exposes the error-log flush");
+  ok(mcp.includes("fn mcp_log_error("), "the shell exposes the log-error command");
+  ok(mcp.includes("fn mcp_error_log_consent("), "the shell exposes the error-log consent read");
+  ok(mcp.includes("fn mcp_set_error_log_consent("), "the shell exposes the error-log consent write");
+  ok(mcp.includes("fn record_rust_panic"), "Rust panics are recorded to the local log");
   ok(mcp.includes("fn mcp_send_feedback"), "the shell exposes the direct UI feedback send");
   ok(mcp.includes("feedback_share_result(&dir, &feedback_server_url(), &entry)"), "the UI send shares through the feedback path (consent-gated)");
-  ok(mcp.includes("scrub_error_text_scrubs_paths"), "a Rust test pins the scrubber's behaviour");
-  ok(main.includes("RunEvent::Exit"), "the run loop handles Exit");
-  ok(main.includes("mark_clean_shutdown"), "Exit writes the clean-shutdown marker");
+  ok(mcp.includes("scrub_error_text_strips_user_paths_but_keeps_relative_ones"), "a Rust test pins the scrubber's behaviour");
+  ok(main.includes("set_hook"), "main.rs installs a panic hook");
+  ok(main.includes("record_rust_panic"), "the panic hook records to the error log");
+  ok(main.includes("mcp_flush_error_log,"), "main.rs registers mcp_flush_error_log");
+  ok(main.includes("mcp_error_log,"), "main.rs registers mcp_error_log");
+  // The startup flush + capture live in main.tsx / error-log.ts.
+  const mainSrc = readFileSync("src/main.tsx", "utf8");
+  ok(mainSrc.includes("installErrorCapture"), "main.tsx installs the global error capture");
+  ok(mainSrc.includes("mcpFlushErrorLog"), "main.tsx flushes unsent error entries on startup");
   // The frontend wrappers for the new commands.
   const native = readFileSync("src/native.ts", "utf8");
-  for (const fn of ["mcpSendFeedback", "mcpCrashReportPending", "mcpSendCrashReport", "mcpDismissCrashReport", "openSupportEmail"]) {
+  for (const fn of ["mcpSendFeedback", "mcpErrorLog", "mcpFlushErrorLog", "mcpErrorLogConsent", "mcpSetErrorLogConsent", "mcpLogError", "openSupportEmail"]) {
     ok(native.includes(fn), `native.ts exposes ${fn}`);
   }
   // (a) The dialog: three user-facing kinds, Question wired as "other"
@@ -40942,12 +40953,17 @@ check("feedback-loop-453: feedback reachable for every user, Discussions + suppo
     ok(bus.includes(fn), `the feedback bus exposes ${fn}`);
   }
   ok(bus.includes("smit@muse.ai"), "the bus owns the support address");
-  // (c) The crash offer only appears after a real unclean shutdown.
+  // (c) The crash offer reads the log (unsent entries are the signal —
+  // not proof of a crash, so the copy says so) and sends via the flush;
+  // sharing off gets an explicit opt-in instead of a silent no-op.
   const crash = readFileSync("src/components/crash-report-dialog.tsx", "utf8");
-  ok(crash.includes("mcpCrashReportPending"), "the crash dialog checks the pending state first");
-  ok(crash.includes("pending"), "the crash dialog only opens when a report is pending");
-  ok(crash.includes("mcpSendCrashReport"), "the crash dialog can send the report");
-  ok(crash.includes("mcpDismissCrashReport"), "the crash dialog can dismiss the report");
+  ok(crash.includes("mcpErrorLog"), "the crash dialog reads the error log first");
+  ok(crash.includes("!e.sent"), "the crash dialog offers only unsent entries");
+  ok(crash.includes("mcpFlushErrorLog"), "the crash dialog sends through the flush");
+  ok(crash.includes("mcpErrorLogConsent"), "the crash dialog reads the sharing choice");
+  ok(crash.includes("mcpSetErrorLogConsent"), "the crash dialog can turn sharing on to send");
+  ok(crash.includes("or a send failed"), "the copy admits unsent entries are not proof of a crash");
+  ok(crash.includes("Turn on sharing"), "sharing off offers an explicit opt-in, not a silent no-op");
   // (d) What's new: versioned entries seeded from the 1.9.0 release
   // notes, a once-per-version auto-show, mounted in the shell.
   const whatsNew = readFileSync("src/lib/whats-new.ts", "utf8");

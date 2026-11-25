@@ -1847,6 +1847,18 @@ fn main() {
         .manage(cloud::MockProvider::new())
         .manage(mcp::McpState::default())
         .setup(|app| {
+            // Opt-in anonymous error logging (seq 452): Rust panics are
+            // appended to the local error log — local only, never sent
+            // from the hook; the next launch's flush sends them if the
+            // user opted in to error-report sharing. The default hook
+            // still runs, so panics keep printing to stderr.
+            if let Ok(error_log_dir) = app.handle().path().app_data_dir().map(|d| d.join("mcp")) {
+                let prev_hook = std::panic::take_hook();
+                std::panic::set_hook(Box::new(move |info| {
+                    mcp::record_rust_panic(&error_log_dir, info);
+                    prev_hook(info);
+                }));
+            }
             ask_before_quitting(app.handle());
             show_menu_pictures();
             open_cli_args(app.handle());
@@ -1937,9 +1949,11 @@ fn main() {
             mcp::mcp_set_feedback_consent,
             mcp::mcp_send_feedback,
             mcp::mcp_send_saved_feedback,
-            mcp::mcp_crash_report_pending,
-            mcp::mcp_send_crash_report,
-            mcp::mcp_dismiss_crash_report,
+            mcp::mcp_log_error,
+            mcp::mcp_flush_error_log,
+            mcp::mcp_error_log,
+            mcp::mcp_error_log_consent,
+            mcp::mcp_set_error_log_consent,
             mcp::mcp_allowlist,
             mcp::mcp_set_allowlist,
             mcp::mcp_publish_snapshot,
@@ -2023,12 +2037,6 @@ fn main() {
                 tauri::async_runtime::spawn(async move {
                     let _ = new_window(&app, None);
                 });
-            }
-            // A clean exit writes the clean-shutdown marker (seq 453): a
-            // later launch that finds no marker knows this run crashed,
-            // and the crash-report dialog may offer to send the log.
-            RunEvent::Exit => {
-                mcp::mark_clean_shutdown(app);
             }
             _ => {}
         });

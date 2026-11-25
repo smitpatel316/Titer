@@ -1,37 +1,53 @@
 // Crash-report dialog (seq 453, 2.0 launch): the crash-on-startup
-// path, tied to the anonymous-logging lane (seq 452). On launch the
-// shell knows whether the previous run exited cleanly (the
-// clean-shutdown marker); this dialog asks the shell once on mount, and
-// opens ONLY when a report is pending — unsent errors in the log after
-// an unclean shutdown. A clean exit, or a crash with nothing captured,
-// never shows it.
+// path, on seq 452's error log. The log path lives only in the shell
+// (`<app_data>/mcp/error-log.jsonl`); the dialog reads it through
+// `mcp_error_log` (newest first) and sends through `mcp_flush_error_log`.
 //
-// Send posts the scrubbed log as one feedback entry (the Send click is
-// the consent moment); Don't send dismisses it and leaves the log as it
-// is. Either way the offer does not reappear this run.
+// The signal is unsent entries (`sent: false`) from a previous run —
+// NOT proof of a crash: sharing off or a failed send leaves the same
+// trace, so the copy says so plainly. main.tsx already flushes at
+// startup when sharing is on, so with sharing on this dialog normally
+// never opens (only a backlog past the flush batch, or a failed send,
+// reaches it). With sharing off, Send flushes nothing — the dialog
+// says so and offers to turn sharing on, an explicit opt-in, then
+// flushes again.
+//
+// Don't send leaves the entries unsent, so the offer reappears on the
+// next launch — there is no dismissed-ids record to remember the
+// choice (known limitation; a 452 follow-up could add one).
 import * as React from "react";
 import { Dialog } from "../ui/dialog";
 import { Button } from "../ui/controls";
-import { isNative, mcpCrashReportPending, mcpDismissCrashReport, mcpSendCrashReport } from "../native";
+import {
+  isNative,
+  mcpErrorLog,
+  mcpErrorLogConsent,
+  mcpFlushErrorLog,
+  mcpSetErrorLogConsent,
+} from "../native";
 
 export function CrashReportDialog() {
   const [open, setOpen] = React.useState(false);
   const [pending, setPending] = React.useState(0);
+  const [sharing, setSharing] = React.useState<boolean | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
-  const [sent, setSent] = React.useState<boolean | null>(null);
+  const [sent, setSent] = React.useState<number | null>(null);
+  const [sharingOff, setSharingOff] = React.useState(false);
 
-  // Ask once on mount: the shell's pending count already encodes both
-  // halves (unclean shutdown AND unsent errors), so the dialog only
-  // opens when a report is genuinely pending.
+  // Ask once on mount: unsent entries are the offer. The startup flush
+  // in main.tsx already ran, so this is the backlog / failed-send /
+  // sharing-off remainder.
   React.useEffect(() => {
     if (!isNative) return;
     let cancelled = false;
     void (async () => {
       try {
-        const count = await mcpCrashReportPending();
-        if (!cancelled && count > 0) {
-          setPending(count);
+        const [entries, consent] = await Promise.all([mcpErrorLog(), mcpErrorLogConsent()]);
+        const unsent = entries.filter((e) => !e.sent).length;
+        if (!cancelled && unsent > 0) {
+          setPending(unsent);
+          setSharing(consent);
           setOpen(true);
         }
       } catch {
@@ -47,7 +63,27 @@ export function CrashReportDialog() {
     setBusy(true);
     setError("");
     try {
-      const out = await mcpSendCrashReport();
+      const out = await mcpFlushErrorLog();
+      if (out.sharing === "disabled") {
+        setSharingOff(true);
+      } else {
+        setSent(out.sent);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const enableSharingAndSend = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await mcpSetErrorLogConsent(true);
+      setSharing(true);
+      setSharingOff(false);
+      const out = await mcpFlushErrorLog();
       setSent(out.sent);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -56,31 +92,25 @@ export function CrashReportDialog() {
     }
   };
 
-  const dismiss = async () => {
-    try {
-      await mcpDismissCrashReport();
-    } catch {
-      // The offer is gone for this run either way.
-    } finally {
-      setOpen(false);
-    }
+  const dismiss = () => {
+    setOpen(false);
   };
 
   return (
     <Dialog
       open={open}
-      onClose={() => void dismiss()}
-      title="Titer quit unexpectedly"
-      description={`The last run ended without shutting down cleanly. ${pending} error${pending === 1 ? "" : "s"} were captured — send the report to help fix it?`}
+      onClose={dismiss}
+      title="Unsent error reports from a previous run"
+      description={`Titer found ${pending} unsent error report${pending === 1 ? "" : "s"} from a previous run. Send them to help fix it?`}
       start={
-        <Button disabled={busy} onClick={() => void dismiss()}>
+        <Button disabled={busy} onClick={dismiss}>
           Don&apos;t send
         </Button>
       }
       footer={
         sent === null ? (
           <Button variant="accent" disabled={busy} onClick={() => void send()}>
-            Send report
+            Send reports
           </Button>
         ) : (
           <Button onClick={() => setOpen(false)}>Close</Button>
@@ -91,17 +121,36 @@ export function CrashReportDialog() {
         {sent === null ? (
           <>
             <p className="text-regular text-primary">
-              Only the error report is sent — error type, message, and a scrubbed stack. No file names with your
+              Only the error reports are sent — error type, message, and a scrubbed stack. No file names with your
               username, no file contents, no user data.
             </p>
             <p className="text-regular text-secondary">
-              The report is saved on this Mac either way; sending files it with the Titer team so the crash can be
-              fixed.
+              These may be from a crash — or from a run where error sharing was off or a send failed. Titer can&apos;t
+              tell which. The reports are saved on this Mac either way.
             </p>
+            {sharing === false && !sharingOff && (
+              <p className="text-regular text-secondary">
+                Error sharing is currently off, so these reports were not sent automatically. Sending will ask you to
+                turn sharing on first.
+              </p>
+            )}
+            {sharingOff && (
+              <>
+                <p className="text-regular text-primary">
+                  Error sharing is off, so nothing was sent yet. Turn it on to send these reports — future error
+                  reports will be shared too, until you turn it off in Settings → AI Connections.
+                </p>
+                <Button disabled={busy} onClick={() => void enableSharingAndSend()}>
+                  Turn on sharing &amp; send
+                </Button>
+              </>
+            )}
           </>
         ) : (
           <p className="text-regular text-primary">
-            {sent ? "Sent — thank you. The report is with the Titer team." : "The report couldn't be sent, but it is saved on this Mac — you can send it later from Settings → AI Connections."}
+            {sent > 0
+              ? `Sent ${sent} report${sent === 1 ? "" : "s"} — thank you. The reports are with the Titer team.`
+              : "The reports couldn't be sent, but they are saved on this Mac — you can send them later from Settings → AI Connections."}
           </p>
         )}
         {error && <p className="text-regular text-red-600">{error}</p>}

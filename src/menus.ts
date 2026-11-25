@@ -146,8 +146,8 @@ export function setMenuBar(menus: MenuItems) {
       // opens the in-app dialog (no AI, no browser); Contact Support
       // writes to smit@muse.ai; Ask the Community opens the repo's
       // GitHub Discussions; What's New shows what shipped from feedback.
-      // Personal Support… (a pre-filled GitHub issue, seq 432) is gone:
-      // GitHub Issues are off on the repo, so the link was dead.
+      // The pre-filled GitHub-issue entry (seq 432) is gone: GitHub
+      // Issues are off on the repo, so the link was dead.
       { text: "Titer on GitHub", action: () => openLink("github") },
       // The user guide lives in the repo's README (Help ▸ Titer User Guide,
       // seq 241): the same fixed address as the GitHub link, opened the
