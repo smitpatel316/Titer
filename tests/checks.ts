@@ -41288,6 +41288,56 @@ check("plugin-m4 wizard: plugin questions round-trip to the expected params", as
   clearPluginRegistry();
 });
 
+// R2-64 (seq 513): a plugin wizard `kind: "text"` question must carry a
+// `parse` that accepts free text, and MarketplaceDialog.startReview must
+// not pre-check permissions on a fresh install. Before the fix the text
+// question had no parse, so Steps fell back to parseUnknowns and rejected
+// every non-numeric answer; and `initial[p]` was true for every declared
+// permission (including "network") whenever grantedPermissions was empty.
+check("plugin-r2-64 wizard text questions accept free text; review grants nothing by default", async () => {
+  const { toWizardQuestions } = await import("../src/plugins/index");
+  const { parseUnknowns } = await import("../src/views/analyses/wizards");
+  const spec = {
+    id: "probe-text",
+    label: "Probe text",
+    tableTypes: ["column"],
+    minColumns: 1,
+    parameters: [{ kind: "text", key: "label", label: "Label", default: "" }],
+    questions: [
+      {
+        id: "label",
+        ask: "What label?",
+        kind: "text",
+        label: "Label",
+        initial: "",
+        placeholder: "My label",
+      },
+    ],
+    compute: { kind: "r", code: "c(x=1)" },
+  } as never;
+  const questions = toWizardQuestions(spec, ["Control"]);
+  const text = questions.find((q) => q.id === "label");
+  ok(text?.kind === "text", "the text question survives toWizardQuestions");
+  const parse = (text as { parse?: (t: string) => { error?: string } } | undefined)?.parse;
+  ok(typeof parse === "function", "a plugin text question must carry its own parse (else Steps falls back to parseUnknowns)");
+  strictEqual(parse!("Treatment").error, undefined, "a text answer such as “Treatment” must parse");
+  strictEqual(parse!("hello world").error, undefined, "free text must parse");
+  // The premise: without that parse, the fallback rejects the same text.
+  ok(parseUnknowns("Treatment").error !== undefined, "parseUnknowns rejects “Treatment” (the pre-fix behaviour)");
+  // Marketplace review: fresh install / zero-permission re-enable grants
+  // nothing by default — "network" must not start checked.
+  const dialog = readFileSync("src/components/marketplace-dialog.tsx", "utf8");
+  const startReview = dialog.slice(dialog.indexOf("const startReview"), dialog.indexOf("const startReview") + 1200);
+  ok(
+    !startReview.includes("grantedPermissions.length === 0"),
+    "startReview must not pre-check permissions when grantedPermissions is empty",
+  );
+  ok(
+    /initial\[p\] = record\.grantedPermissions\.includes\(p\);/.test(startReview),
+    "startReview must default each permission to exactly what was granted before",
+  );
+});
+
 check("plugin-m4 results view: accepts a PluginAnalysisResult", async () => {
   const { clearPluginRegistry, helloColumn, registerHelloPlugin, runPluginAnalysis } =
     await import("../src/plugins/index");

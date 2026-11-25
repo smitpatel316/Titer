@@ -446,6 +446,13 @@ export function toWizardQuestions(
           label: q.label,
           initial: q.initial,
           ...(q.placeholder ? { placeholder: q.placeholder } : {}),
+          // A text parameter is free text: without its own `parse`
+          // the wizard falls back to parseUnknowns and rejects every
+          // non-numeric answer (R2-64). Accept any string — the
+          // runner re-checks the type (parameters.ts: text must be
+          // a string), as first-party text questions do with their
+          // own parse.
+          parse: () => ({}),
         };
     }
   });
