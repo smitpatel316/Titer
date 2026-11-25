@@ -27702,9 +27702,17 @@ check(".pzfx import normalizes comma-decimal scientific notation (Issue 56)", ()
   deepStrictEqual(
     convertCommaDecimals({
       columns: ["Title", "Aa"],
-      rows: [[null, "1,5e-3"], [null, "4,096e+007"], [null, "1,5"]],
+      rows: [
+        [null, "1,5e-3"],
+        [null, "4,096e+007"],
+        [null, "1,5"],
+      ],
     }).rows,
-    [[null, "1.5e-3"], [null, "4.096e+007"], [null, "1.5"]],
+    [
+      [null, "1.5e-3"],
+      [null, "4.096e+007"],
+      [null, "1.5"],
+    ],
   );
 });
 
