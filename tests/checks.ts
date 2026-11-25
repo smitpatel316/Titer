@@ -40881,8 +40881,70 @@ check("plugin-m5 seam: the interceptor never calls executeJob or Tauri invoke di
   ok(!/\binvoke\s*\(/.test(src), "isolation.ts must never call Tauri invoke itself");
 });
 
+check("mac-e2e-driver: macOS AppleScript driver mirrors the xdotool surface + native menu clicks", async () => {
+  const mac = await import("../e2e/specs/helpers/mac-driver");
+  // The full xdotool-compatible surface, plus the Mac-only menu ops that
+  // xdotool cannot express (on macOS the menu bar items WORK, unlike Linux
+  // where the predefined Quit/Services items are disabled).
+  for (const name of [
+    "sleep", "osascript", "searchWindows", "countWindows", "waitForWindow", "waitForWindowGone",
+    "activateWindow", "key", "typeText", "typePathIntoChooser", "answerNativeDialog",
+    "windowGeometry", "clickDialogButtonAt", "pidsFor", "waitForProcessGone",
+    "clickMenuItem", "clickMenuPath", "menuItems", "menuItemEnabled", "activateApp", "closeWindow",
+  ]) {
+    strictEqual(typeof (mac as any)[name], "function", `mac-driver is missing ${name}`);
+  }
+  // Key translation: xdotool X keys -> JXA keyCode with macOS modifiers.
+  // Ctrl on Linux is Cmd on macOS (the specs' ctrl+n / ctrl+s / ctrl+q are
+  // the app's Cmd+N / Cmd+S / Cmd+Q accelerators there).
+  ok(mac.translateKey("ctrl+n").includes("keyCode(45"), "ctrl+n maps to key code 45 (N)");
+  ok(mac.translateKey("ctrl+n").includes('"command down"'), "ctrl becomes command down");
+  ok(mac.translateKey("ctrl+s").includes("keyCode(1"), "ctrl+s maps to key code 1 (S)");
+  ok(mac.translateKey("ctrl+q").includes("keyCode(12"), "ctrl+q maps to key code 12 (Q)");
+  ok(mac.translateKey("Return").includes("keyCode(36"), "Return maps to key code 36");
+  ok(mac.translateKey("Tab").includes("keyCode(48"), "Tab maps to key code 48");
+  ok(mac.translateKey("space").includes("keyCode(49"), "space maps to key code 49");
+  ok(mac.translateKey("Escape").includes("keyCode(53"), "Escape maps to key code 53");
+  ok(
+    mac.translateKey("ctrl+shift+g").includes("keyCode(5") &&
+      mac.translateKey("ctrl+shift+g").includes('"command down"') &&
+      mac.translateKey("ctrl+shift+g").includes('"shift down"'),
+    "ctrl+shift+g (Go to Folder) carries both modifiers",
+  );
+  // Menu clicks: one JXA script opens the menu AND clicks the leaf — the
+  // menu closes between separate osascript calls, so a two-call driver
+  // could never click anything (proven Nov 24).
+  const twoLevel = mac.buildMenuPathScript("Titer", ["Help", "Titer on GitHub"]);
+  ok(twoLevel.includes('menuBarItems.byName("Help")'), "menu script reaches the Help menu bar item");
+  ok(twoLevel.includes('menuItems.byName("Titer on GitHub")'), "menu script reaches the leaf item");
+  ok(twoLevel.includes(".click()"), "menu script clicks the leaf");
+  const threeLevel = mac.buildMenuPathScript("Titer", ["File", "Export", "Export Graph…"]);
+  ok(threeLevel.includes('menuItems.byName("Export")'), "submenu path walks the parent item");
+  ok(threeLevel.includes('menuItems.byName("Export Graph…")'), "submenu path reaches the leaf");
+  // Dialog answers click by BUTTON TITLE, not by position: NSAlert buttons
+  // enumerate left-to-right with the default action rightmost, so a
+  // positional "first" would hit Don't Save instead of Save.
+  const SAVE_PROMPT = "Do you want to save the changes you made to your project?";
+  strictEqual(mac.dialogButtonTitle(SAVE_PROMPT, "first"), "Save", "save prompt first = Save");
+  strictEqual(mac.dialogButtonTitle(SAVE_PROMPT, "second"), "Don't Save", "save prompt second = Don't Save");
+  strictEqual(mac.dialogButtonTitle(SAVE_PROMPT, "third"), "Cancel", "save prompt third = Cancel");
+  strictEqual(mac.dialogButtonTitle("Delete “Table 2”?", "first"), "Delete", "delete confirm first = Delete");
+  strictEqual(mac.dialogButtonTitle("Delete “Table 2”?", "second"), "Cancel", "delete confirm second = Cancel");
+  strictEqual(mac.dialogButtonTitle("Titer 1.9.1 is available", "first"), "Update Now", "update prompt first = Update Now");
+  strictEqual(mac.dialogButtonTitle("Titer 1.9.1 is available", "second"), "Later", "update prompt second = Later");
+  strictEqual(mac.dialogButtonTitle("Something else entirely", "first"), null, "unknown dialog falls back to positional");
+  // The Go-to-Folder leg of the chooser driver types the path into the
+  // Cmd+Shift+G sheet and confirms with Return.
+  const goTo = mac.buildGoToFolderScript("/tmp/q66-proj.hlx");
+  ok(goTo.includes("keyCode(5"), "Go to Folder uses Cmd+Shift+G");
+  ok(goTo.includes("/tmp/q66-proj.hlx"), "Go to Folder types the full path");
+  ok(goTo.includes("keyCode(36"), "Go to Folder confirms with Return");
+  // JXA strings are embedded with JSON.stringify, so quotes/backslashes
+  // cannot break out of the script.
+  ok(mac.buildMenuPathScript("Titer", ["Help", 'Say "hi"']).includes('\\"hi\\"'), "quotes in a menu title are escaped");
+});
 
-// ── Run ──────────────────────────────────────────────────────────────────
+
 
 // Descriptives are computed by R since the v1.0.7 rebase, so checks that run
 // an analysis need the engine — booted from the installed webR, as
