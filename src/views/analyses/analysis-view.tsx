@@ -30,7 +30,9 @@ function formatElapsed(ms: number): string {
  *  has taken half a second (R or a package loading): a quick one shows none.
  *  The elapsed time, the R queue position and a Cancel button ride along, so
  *  a long run can be watched — and stopped — instead of staring at a bare
- *  spinner. */
+ *  spinner. On native macOS the wheel lives in its own empty anchor above
+ *  the text and Cancel (Issue 74): `setSpinner` centers the 32×32 pt
+ *  NSProgressIndicator on that anchor, so it can never cover them. */
 function Running({
   elapsedMs,
   queue,
@@ -55,7 +57,10 @@ function Running({
     };
   }, []);
   return (
-    <div ref={ref} className="flex h-full flex-col items-center justify-center gap-3 text-regular text-secondary">
+    <div className="flex h-full flex-col items-center justify-center gap-3 text-regular text-secondary">
+      {isNative && (
+        <div ref={ref} className="h-9 w-9" aria-hidden="true" />
+      )}
       <p>
         Running… {formatElapsed(elapsedMs)}
         {rQueueStatusText(queue)}

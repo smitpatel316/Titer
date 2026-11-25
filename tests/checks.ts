@@ -33399,6 +33399,31 @@ check("a waiting view names the R queue instead of bare Running… (M17)", () =>
   deepStrictEqual(heard, [{ running: true, queued: 2 }]);
 });
 
+// Issue 74: the macOS native NSProgressIndicator used to be centered on the
+// whole Running container (~60 px tall: text + Cancel), so the 32×32 pt
+// wheel landed on top of the Running… text and the top of Cancel. The
+// spinner's ref now sits on a dedicated empty 36×36 anchor above them,
+// native-only, so setSpinner centers cleanly above the text and Cancel.
+check("Issue 74: the native spinner anchors above the Running… text and Cancel", () => {
+  const view = readFileSync("src/views/analyses/analysis-view.tsx", "utf8");
+  const start = view.indexOf("function Running(");
+  ok(start >= 0, "Running is gone from analysis-view.tsx");
+  const running = view.slice(start, view.indexOf("  );\n}", start));
+  const anchor = /<div ref=\{ref\} className="h-9 w-9" aria-hidden="true" \/>/.exec(running);
+  ok(anchor, "Running needs a dedicated empty h-9 w-9 anchor div carrying the spinner ref");
+  ok(anchor!.index < running.indexOf("<p>"), "the spinner anchor must sit above the Running… text");
+  ok(anchor!.index < running.indexOf(">Cancel</Button>"), "the spinner anchor must sit above the Cancel button");
+  ok(/\{isNative && \(/.test(running.slice(0, anchor!.index)), "the spinner anchor is native-only");
+  ok(
+    !/<div ref=\{ref\} className="flex h-full/.test(running),
+    "the ref must not sit on the flex container holding the text and Cancel",
+  );
+  ok(
+    /setSpinner\(\[left \+ width \/ 2, top \+ height \/ 2\]\)/.test(running),
+    "setSpinner must still center on the ref's bounding box",
+  );
+});
+
 check("the engine window answers R requests through the FIFO, and publishes its queue (M17)", () => {
   const native = readFileSync("src/native.ts", "utf8");
   ok(/createEvalQueue/.test(native), "serveR must dispatch through createEvalQueue");
