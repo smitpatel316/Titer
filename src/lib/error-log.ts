@@ -35,6 +35,15 @@ function isHomePrefix(text: string, i: number): boolean {
   );
 }
 
+/** A path only starts at a token boundary (start of text, whitespace, or
+ *  punctuation) — the `/` in a relative path like `src/lib/foo.ts` is a
+ *  separator mid-word, not an absolute path, and must survive. */
+const TOKEN_START_BEFORE = new Set([" ", "\t", "\n", "\r", '"', "'", "(", "[", "{", ",", ";", ":", "="]);
+
+function isTokenStart(text: string, i: number): boolean {
+  return i === 0 || TOKEN_START_BEFORE.has(text[i - 1]!);
+}
+
 function isWindowsAbsolute(text: string, i: number): boolean {
   const c = text[i];
   return (
@@ -54,17 +63,22 @@ export function scrubErrorText(text: string): string {
   let out = "";
   let i = 0;
   while (i < text.length) {
-    if (text.startsWith("file://", i)) {
+    if (text.startsWith("file://", i) && isTokenStart(text, i)) {
       out += "[path]";
       i = skipToken(text, i + "file://".length);
       continue;
     }
-    if (isHomePrefix(text, i) || isWindowsAbsolute(text, i)) {
+    if ((isHomePrefix(text, i) || isWindowsAbsolute(text, i)) && isTokenStart(text, i)) {
       out += "[path]";
-      i = skipToken(text, i);
+      // A Windows path starts with a drive letter (`C:`) — the token
+      // skip must start past that colon, or it stops there and leaks
+      // the rest of the path (`\Users\smit\...`). The `:line` suffix
+      // still ends the token, so it survives.
+      const afterDrive = text[i + 1] === ":" ? i + 2 : i;
+      i = skipToken(text, afterDrive);
       continue;
     }
-    if (text[i] === "/") {
+    if (text[i] === "/" && isTokenStart(text, i)) {
       const end = skipToken(text, i);
       if (text.slice(i + 1, end).includes("/")) {
         out += "[path]";

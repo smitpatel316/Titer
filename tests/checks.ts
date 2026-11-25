@@ -19383,7 +19383,9 @@ check("error-log-452: opt-in anonymous error logging via the feedback channel", 
   const logSrc = readFileSync("src/lib/error-log.ts", "utf8");
   ok(logSrc.includes('addEventListener("error"'), "uncaught exceptions are captured");
   ok(logSrc.includes('addEventListener("unhandledrejection"'), "unhandled rejections are captured");
-  ok(logSrc.includes('"mcp_log_error"'), "reports go through the mcp_log_error command");
+  ok(logSrc.includes("mcpLogError"), "reports go through the mcpLogError bridge");
+  const nativeSrc = readFileSync("src/native.ts", "utf8");
+  ok(nativeSrc.includes('"mcp_log_error"'), "the bridge invokes the mcp_log_error command");
   // The shell: scrub + local rotating log + consent-gated send through the
   // existing feedback endpoint, plus the MCP read tool.
   const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");

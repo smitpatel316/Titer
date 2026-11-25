@@ -1299,6 +1299,19 @@ fn error_token_end(text: &[char], mut i: usize) -> usize {
     i
 }
 
+/// A path only starts at a token boundary (start of text, whitespace, or
+/// punctuation) — the `/` in a relative path like `src/lib/foo.ts` is a
+/// separator mid-word, not an absolute path, and must survive.
+fn error_token_start(text: &[char], i: usize) -> bool {
+    if i == 0 {
+        return true;
+    }
+    matches!(
+        text[i - 1],
+        ' ' | '\t' | '\n' | '\r' | '"' | '\'' | '(' | '[' | '{' | ',' | ';' | ':' | '='
+    )
+}
+
 /// Strip user-identifying paths from error text before it is stored or
 /// sent. Home directories (`/Users/<name>/`, `/home/<name>/`,
 /// `C:\Users\<name>\`), `file://` URLs, and any other absolute path
@@ -1310,29 +1323,36 @@ fn scrub_error_text(text: &str) -> String {
     let mut i = 0;
     while i < chars.len() {
         let rest: String = chars[i..].iter().collect();
-        if rest.starts_with("file://") {
+        if rest.starts_with("file://") && error_token_start(&chars, i) {
             out.push_str("[path]");
             i = error_token_end(&chars, i + "file://".len());
             continue;
         }
-        if rest.starts_with("/Users/")
+        if (rest.starts_with("/Users/")
             || rest.starts_with("/home/")
             || rest.starts_with("C:\\Users\\")
-            || rest.starts_with("C:/Users/")
+            || rest.starts_with("C:/Users/"))
+            && error_token_start(&chars, i)
         {
             out.push_str("[path]");
-            i = error_token_end(&chars, i);
+            // A Windows path starts with a drive letter (`C:`) — the
+            // token skip must start past that colon, or it stops there
+            // and leaks the rest of the path (`\Users\smit\...`). The
+            // `:line` suffix still ends the token, so it survives.
+            let after_drive = if chars.get(i + 1) == Some(&':') { i + 2 } else { i };
+            i = error_token_end(&chars, after_drive);
             continue;
         }
         if chars[i].is_ascii_alphabetic()
             && chars.get(i + 1) == Some(&':')
             && (chars.get(i + 2) == Some(&'\\') || chars.get(i + 2) == Some(&'/'))
+            && error_token_start(&chars, i)
         {
             out.push_str("[path]");
-            i = error_token_end(&chars, i);
+            i = error_token_end(&chars, i + 2);
             continue;
         }
-        if chars[i] == '/' {
+        if chars[i] == '/' && error_token_start(&chars, i) {
             let end = error_token_end(&chars, i);
             if chars[i + 1..end].contains(&'/') {
                 out.push_str("[path]");
@@ -13674,6 +13694,29 @@ mod tests {
         );
         assert_eq!(seen.lock().expect("seen lock").len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scrub_error_text_strips_user_paths_but_keeps_relative_ones() {
+        // macOS / Linux home paths and any absolute path become [path];
+        // relative source paths survive — they name app code, not the user.
+        assert_eq!(
+            scrub_error_text("Cannot read /Users/smitpatel316/Documents/foo.prism: boom"),
+            "Cannot read [path]: boom"
+        );
+        assert_eq!(scrub_error_text("ENOENT /home/smit/work/data.csv"), "ENOENT [path]");
+        assert_eq!(
+            scrub_error_text("TypeError: x is not a function at src/lib/foo.ts:12:3"),
+            "TypeError: x is not a function at src/lib/foo.ts:12:3"
+        );
+        // A Windows home path: the token skip must start past the drive
+        // letter's colon, or it stops there and leaks `\Users\smit\...`
+        // (the `:line` suffix still survives).
+        assert_eq!(
+            scrub_error_text("failed at C:\\Users\\smit\\AppData\\x.js:1"),
+            "failed at [path]:1"
+        );
+        assert!(!scrub_error_text("at /Users/smitpatel316/x.ts").contains("smitpatel316"));
     }
 
     #[test]
