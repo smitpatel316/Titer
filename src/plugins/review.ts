@@ -13,7 +13,7 @@
 // to the loader is documented on that component —
 // `requestEnable` → review → `confirmEnable(record, granted, appVersion)`.
 
-import { describePermissions, manifestReviewLines, type PluginManifest, type PluginPermission } from "./manifest";
+import { PERMISSION_DESCRIPTIONS, manifestReviewLines, type PluginManifest, type PluginPermission } from "./manifest";
 
 export { manifestReviewLines };
 
@@ -25,16 +25,20 @@ export interface PermissionChoice {
   granted: boolean;
 }
 
-/** The manifest's permissions as review choices, in allowlist order,
- *  with `granted` pre-ticked (nothing ticked by default). */
+/** The manifest's permissions as review choices, in manifest order,
+ *  with `granted` pre-ticked (nothing ticked by default). Each
+ *  description is looked up per permission: `describePermissions`
+ *  returns descriptions in canonical KNOWN_PERMISSIONS order, so
+ *  zipping by index mislabels any manifest that lists permissions
+ *  in a different order (Issue 4 — a user could approve the wrong
+ *  capability). */
 export function permissionChoices(
   manifest: PluginManifest,
   granted: readonly PluginPermission[] = [],
 ): PermissionChoice[] {
-  const descriptions = describePermissions(manifest.permissions);
-  return manifest.permissions.map((permission, i) => ({
+  return manifest.permissions.map((permission) => ({
     permission,
-    description: descriptions[i] ?? permission,
+    description: PERMISSION_DESCRIPTIONS[permission] ?? permission,
     granted: granted.includes(permission),
   }));
 }

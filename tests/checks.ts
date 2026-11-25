@@ -529,6 +529,7 @@ import { addGeneratedCurves } from "../src/views/graphs/generated-curves";
 import { runPluginGates, scanPluginJsCode, scanPluginRCodeExtended } from "../src/plugins/gates";
 import { computeSafetyScorecard } from "../src/plugins/scorecard";
 import { grantSubsetIsValid, permissionChoices, splitGrant } from "../src/plugins/review";
+import { PERMISSION_DESCRIPTIONS } from "../src/plugins/manifest";
 import { checkPluginCommand, dispatchPluginCommand } from "../src/plugins/ipc-guard";
 import { CapabilityDeniedError } from "../src/plugins/capabilities";
 
@@ -40314,6 +40315,19 @@ check("m3 review: permission choices carry plain-language lines", () => {
   strictEqual(choices[0]?.permission, "read-table");
   ok(choices[0]?.description.includes("Read the open table"), "no raw permission string is shown alone");
   strictEqual(choices[0]?.granted, false, "nothing is granted by default");
+});
+
+check("m3 review: permission choices describe each permission in manifest order (Issue 4)", () => {
+  // A manifest listing permissions out of canonical order must still
+  // show each checkbox its own capability's description — zipping by
+  // index used to show the network row the read-table line and vice
+  // versa, so a user could approve the wrong permission.
+  const choices = permissionChoices(m3Manifest({ permissions: ["network", "read-table"] }) as never, []);
+  strictEqual(choices.length, 2);
+  strictEqual(choices[0]?.permission, "network");
+  strictEqual(choices[0]?.description, PERMISSION_DESCRIPTIONS["network"]);
+  strictEqual(choices[1]?.permission, "read-table");
+  strictEqual(choices[1]?.description, PERMISSION_DESCRIPTIONS["read-table"]);
 });
 
 check("m3 guard: a granted permission allows, an undeclared command denies, an ungranted declared permission denies", async () => {
