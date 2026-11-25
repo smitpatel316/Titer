@@ -956,7 +956,7 @@ fn copy_png_to_clipboard_blocking(png_path: &str) -> Result<(), String> {
 }
 
 /// Copy a vector PDF plus its PNG fallback to the system clipboard
-/// (seq 446, seq 457): the format panel's Copy button. The webview's
+/// (seq 446, seq 457; BUG-REPORT #68/#75): the format panel's Copy button. The webview's
 /// `ClipboardItem.supports("application/pdf")` is false on Mac WebKit
 /// (proof batch #2 verified twice: the pasteboard holds PNG only, no
 /// PDF, no error), so the web path can never write the PDF item — the
@@ -966,11 +966,16 @@ fn copy_png_to_clipboard_blocking(png_path: &str) -> Result<(), String> {
 /// ONE list item, and proof batch #3 showed Preview's "New from
 /// Clipboard" disabled and TextEdit pasting nothing, even though the
 /// bytes were on the board. The shell runs JavaScript for Automation
-/// (`osascript -l JavaScript`) against NSPasteboard instead: one
-/// NSPasteboardItem per flavour — the PDF under `com.adobe.pdf` (plus
-/// `public.pdf`) and the PNG under `public.png` — written with
-/// `writeObjects` as two top-level items, so an app that takes PDF
-/// pastes the vector and one that doesn't pastes the bitmap. macOS only
+/// (`osascript -l JavaScript`) against NSPasteboard instead: a SINGLE
+/// NSPasteboardItem carrying all three flavours — the PDF under
+/// `com.adobe.pdf` (plus `public.pdf`) and the PNG under `public.png` —
+/// written with `writeObjects($([item]))`, so an app that takes PDF
+/// pastes the vector and one that doesn't pastes the bitmap. One item,
+/// not one per flavour (BUG-REPORT #68): each NSPasteboardItem is a
+/// distinct copied object, so the seq 457 two-item write pasted TWO
+/// copies of the graph into multi-item apps (Keynote, Pages, Notes,
+/// Mail, TextEdit, Word) and left single-item readers with no PNG
+/// fallback on `pasteboardItems[0]`. macOS only
 /// — anywhere else this refuses outright, before touching anything.
 /// Same temp-file pattern as `copy_png_to_clipboard`: the script goes in
 /// a temp file, not an `osascript -e` argument; the temp script and both
@@ -1014,14 +1019,23 @@ fn copy_pdf_to_clipboard_blocking(pdf_path: &str, png_path: &str) -> Result<(), 
         .map_err(|e| format!("Couldn't encode the PDF path: {e}"))?;
     let png_json = serde_json::to_string(&png_path.to_string_lossy())
         .map_err(|e| format!("Couldn't encode the PNG path: {e}"))?;
-    // Two top-level pasteboard items (seq 457), via JavaScript for
-    // Automation: AppleScript's braced-list form of `set the clipboard to`
-    // stores ONE list item, which no consumer reads as PDF/PNG. Each flavour gets
-    // its own NSPasteboardItem — the PDF under `com.adobe.pdf` (plus the
-    // `public.pdf` alias some consumers ask for) and the PNG under
-    // `public.png` — and `writeObjects` puts both on the board at once.
+    // ONE pasteboard item (BUG-REPORT #68, superseding seq 457's two
+    // items), via JavaScript for Automation: AppleScript's braced-list
+    // form of `set the clipboard to` stores ONE list item, which no
+    // consumer reads as PDF/PNG — and one NSPasteboardItem per flavour
+    // is wrong the other way, because each item is a distinct copied
+    // object and multi-item apps paste two copies. So all three
+    // flavours live on a single item — the PDF under `com.adobe.pdf`
+    // (plus the `public.pdf` alias some consumers ask for) and the PNG
+    // under `public.png` — and `writeObjects($([item]))` puts that one
+    // multi-flavour item on the board.
     // A failed read or write throws, so osascript exits non-zero and the
     // caller reports it instead of silently leaving a stale clipboard.
+    // The read checks run BEFORE `pb.clearContents` (BUG-REPORT #75):
+    // a nil NSData is a truthy JXA function proxy, so a `!pdfData`
+    // truthiness test never fires and the old code cleared the user's
+    // clipboard before throwing inside `setDataForType`. `isNil()` is
+    // the real test.
     // JXA quirk (Mac proof batch #4, Nov 2026): zero-argument ObjC
     // methods must be read as bare properties — `pb.clearContents`,
     // `$.NSPasteboardItem.alloc.init` — never called with parens.
@@ -1029,21 +1043,22 @@ fn copy_pdf_to_clipboard_blocking(pdf_path: &str, png_path: &str) -> Result<(), 
     // `TypeError: Object is not a function`, so the whole native write
     // failed and the app silently fell back to PNG-only web copy.
     // Methods WITH arguments (`dataWithContentsOfFile`, `setDataForType`,
-    // `writeObjects`) keep their parens.
+    // `writeObjects`) keep their parens. `isNil()` is the JXA bridge's
+    // own nil test on the ObjC wrapper, not an ObjC method — it keeps
+    // its parens too.
     let script = format!(
         "ObjC.import('AppKit');\n\
         var pdfData = $.NSData.dataWithContentsOfFile({pdf_json});\n\
-        if (!pdfData) throw new Error('Could not read the PDF file for the clipboard');\n\
+        if (pdfData.isNil()) throw new Error('Could not read the PDF file for the clipboard');\n\
         var pngData = $.NSData.dataWithContentsOfFile({png_json});\n\
-        if (!pngData) throw new Error('Could not read the PNG file for the clipboard');\n\
+        if (pngData.isNil()) throw new Error('Could not read the PNG file for the clipboard');\n\
         var pb = $.NSPasteboard.generalPasteboard;\n\
         pb.clearContents;\n\
-        var pdfItem = $.NSPasteboardItem.alloc.init;\n\
-        pdfItem.setDataForType(pdfData, 'com.adobe.pdf');\n\
-        pdfItem.setDataForType(pdfData, 'public.pdf');\n\
-        var pngItem = $.NSPasteboardItem.alloc.init;\n\
-        pngItem.setDataForType(pngData, 'public.png');\n\
-        if (!pb.writeObjects($([pdfItem, pngItem]))) throw new Error('Could not write the PDF and PNG to the clipboard');\n"
+        var item = $.NSPasteboardItem.alloc.init;\n\
+        item.setDataForType(pdfData, 'com.adobe.pdf');\n\
+        item.setDataForType(pdfData, 'public.pdf');\n\
+        item.setDataForType(pngData, 'public.png');\n\
+        if (!pb.writeObjects($([item]))) throw new Error('Could not write the PDF and PNG to the clipboard');\n"
     );
     let out = (|| -> Result<std::process::Output, String> {
         let mut script_file = std::fs::File::create(&script_path)

@@ -20534,33 +20534,58 @@ check("error-log-452: opt-in anonymous error logging via the feedback channel", 
   ok(!/set_hook[\s\S]{0,800}post_feedback_entry/.test(mainRs), "the panic hook never posts — it only writes locally");
 });
 
-// Seq 457 (proof batch #3): the seq 446 shell put real PDF + PNG bytes
-// on the pasteboard, but wrapped in ONE AppleScript list —
-// `set the clipboard to {pdf, png}` — so no other app could read them:
-// NSPasteboard.types showed only the list flavour, `pbpaste -Prefer pdf`
-// and `-Prefer png` returned 0 bytes, Preview's "New from Clipboard" was
-// disabled and TextEdit pasted nothing. The shell must write TWO
-// top-level pasteboard items (one NSPasteboardItem per flavour), never a
-// list. This pin binds to the blocking function so the seq 296 PNG-only
-// helper (a single item, correctly list-free) cannot satisfy it.
-check("copy-457: graph/figure copy writes two top-level pasteboard items, not an AppleScript list", () => {
+// BUG-REPORT #68 + #75 (Nov 2026), superseding seq 457: the seq 457
+// shell put real PDF + PNG bytes on the pasteboard, but as TWO
+// top-level NSPasteboardItems — and each item is a distinct copied
+// object, so multi-item apps (Keynote, Pages, Notes, Mail, TextEdit,
+// Word) pasted TWO copies of the graph, while single-item readers
+// inspecting `pasteboardItems[0]` found no PNG fallback. The fix is
+// ONE multi-flavour item carrying all three UTIs. And the seq 457
+// `if (!pdfData)` / `if (!pngData)` guards were dead code: in JXA an
+// ObjC nil is a truthy function proxy, so a failed read sailed past
+// them, `pb.clearContents` erased the user's clipboard, and only then
+// did `setDataForType` throw. The guards must be `isNil()` checks,
+// and they must run BEFORE the clear. This pin binds to the blocking
+// function so the seq 296 PNG-only helper (a single item, correctly
+// list-free) cannot satisfy it.
+check("copy-68-75: graph/figure copy writes one multi-flavour pasteboard item, and a failed read throws before the clipboard is cleared", () => {
   const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
   const start = mainRs.indexOf("fn copy_pdf_to_clipboard_blocking");
   ok(start >= 0, "copy_pdf_to_clipboard_blocking exists");
   const body = mainRs.slice(start, mainRs.indexOf("\n}\n", start));
-  ok(!/set the clipboard to \{/.test(body), "no AppleScript list on the clipboard — one item per flavour");
+  ok(!/set the clipboard to \{/.test(body), "no AppleScript list on the clipboard");
   ok(!body.includes("«class PDF »"), "the list-form PDF flavour is gone");
   ok(!body.includes("«class PNGf»"), "the list-form PNG flavour is gone");
-  ok(body.includes("NSPasteboardItem"), "each flavour gets its own pasteboard item");
-  ok(body.includes("writeObjects"), "the items are written as separate top-level items");
-  ok(body.includes("com.adobe.pdf"), "the PDF item carries the PDF pasteboard type");
-  ok(body.includes("public.png"), "the PNG item carries the PNG pasteboard type");
-  ok(body.includes("clearContents"), "the pasteboard is cleared before the write");
+  // #68: exactly ONE pasteboard item, carrying all three flavours.
+  // Two items paste two copies into Keynote/Pages/Notes; one item per
+  // flavour was the seq 457 shape this fix supersedes. (Count the
+  // semicolon form: the JXA-quirk comment above the script names the
+  // bare property in prose without one.)
+  const itemCount = (body.match(/\$\.NSPasteboardItem\.alloc\.init;/g) ?? []).length;
+  strictEqual(itemCount, 1, "exactly one NSPasteboardItem is created (two items paste two copies)");
+  ok(!body.includes("pdfItem"), "no separate PDF pasteboard item");
+  ok(!body.includes("pngItem"), "no separate PNG pasteboard item");
+  ok(body.includes("item.setDataForType(pdfData, 'com.adobe.pdf')"), "the single item carries the PDF pasteboard type");
+  ok(body.includes("item.setDataForType(pdfData, 'public.pdf')"), "the single item carries the public.pdf alias");
+  ok(body.includes("item.setDataForType(pngData, 'public.png')"), "the single item carries the PNG fallback");
+  ok(/writeObjects\(\$\(\[item\]\)\)/.test(body), "writeObjects writes the single multi-flavour item");
+  ok(!/writeObjects\(\$\(\[[^\]]*,/.test(body), "writeObjects takes no second item");
+  // #75: the nil guards are isNil(), not truthiness — a nil NSData is
+  // a truthy JXA proxy, so `if (!pdfData)` never fires.
+  ok(body.includes("if (pdfData.isNil())"), "a failed PDF read is caught with isNil()");
+  ok(body.includes("if (pngData.isNil())"), "a failed PNG read is caught with isNil()");
+  ok(!body.includes("if (!pdfData)"), "the dead !pdfData check is gone");
+  ok(!body.includes("if (!pngData)"), "the dead !pngData check is gone");
+  // Both guards run BEFORE the clear, so a failed read throws with
+  // the user's clipboard still intact.
+  const pdfCheck = body.indexOf("if (pdfData.isNil())");
+  const pngCheck = body.indexOf("if (pngData.isNil())");
+  const clear = body.indexOf("pb.clearContents;");
+  ok(clear > pdfCheck && clear > pngCheck, "a failed read throws before the clipboard is cleared");
   // JXA quirk (Mac proof batch #4, Nov 2026): on this Mac's JXA,
   // zero-argument ObjC methods are bare properties — calling them with
   // parens throws `TypeError: Object is not a function`, which killed
   // the whole native write and silently fell back to PNG-only web copy.
-  // The seq 457 fix shipped with the parens and never worked on macOS.
   // (Scoped to the script literal: the comment above it names the
   // broken form in prose.)
   const scriptStart = body.indexOf("let script = format!(");
@@ -20569,7 +20594,7 @@ check("copy-457: graph/figure copy writes two top-level pasteboard items, not an
   ok(!script.includes("clearContents()"), "JXA: clearContents is a bare property, not a call");
   ok(!script.includes(".alloc.init()"), "JXA: alloc.init is a bare property, not a call");
   ok(body.includes("pb.clearContents;"), "the pasteboard is cleared via the bare property");
-  ok(body.includes("$.NSPasteboardItem.alloc.init;"), "pasteboard items are built via the bare property");
+  ok(body.includes("$.NSPasteboardItem.alloc.init;"), "the pasteboard item is built via the bare property");
   // Both copy paths still share this one native write (seq 446).
   const graphSrc = readFileSync("src/views/graphs/graph-export.ts", "utf8");
   ok(graphSrc.includes("writeVectorToClipboard(pdf, png)"), "copyGraphImage goes through the shared native write");
