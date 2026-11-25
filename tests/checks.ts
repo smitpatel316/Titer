@@ -1008,6 +1008,175 @@ check("a table created after a figure still opens unedited (R3 #22)", () => {
   strictEqual(updated, false);
 });
 
+// R2-20 (seq 479): a frozen graph/figure round-trips unedited, keeping its
+// snapshot's fields, and blank/image figure panels warn about nothing.
+// Before the fix serializeProjectFile dropped `frozen` from graphs/figures
+// while readNode re-derived it from the snapshot, readFrozenData stripped
+// the snapshot's metadata (variableTypes, labelVariable, levelOrder,
+// cellBackgrounds, rowGroups, calculated, linkedPaste, simulation), and the
+// figure missing-graph check flagged blank/image panels (graphId "") —
+// every frozen graph/figure reopened updated, with a false warning.
+check("a frozen graph/figure round-trips unedited, keeping its snapshot fields; blank/image panels warn nothing (R2-20)", () => {
+  const data = {
+    columns: ["Title", "X", "Y1", "Y2"],
+    rows: [
+      ["a", "1", "2.5", "5"],
+      ["b", "2", "3.5", "7"],
+    ],
+    variableTypes: { Y1: { type: "continuous", manual: false } },
+    labelVariable: "Y1",
+    levelOrder: { Y1: ["low", "high"] },
+    cellBackgrounds: { "0,2": "yellow" },
+    rowGroups: [{ name: "G1", count: 1 }],
+    calculated: [{ name: "Y2", formula: "Y1 * 2" }],
+    linkedPaste: { sourcePath: "/tmp/data.csv", sourceName: "data.csv", kind: "csv", row: 0, col: 0, rows: 2, cols: 2, autoUpdate: false },
+    simulation: { distribution: "gaussian", mean: 0, sd: 1, n: 3, datasets: 2, seed: 7, tableType: "column" },
+  } as const;
+  const tableNode: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Doses",
+    parentId: null,
+    tableType: "xy",
+    data: JSON.parse(JSON.stringify(data)),
+  };
+  const frozenGraph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Plot",
+    parentId: "t1",
+    graphType: "xy-scatter",
+    graphOptions: { ...newGraphOptions("xy-scatter"), title: "My Title" },
+    frozen: true,
+    frozenData: JSON.parse(JSON.stringify(data)),
+  };
+  const frozenFigure: ProjectNode = {
+    id: "f1",
+    type: "figure",
+    name: "Figure",
+    parentId: null,
+    panels: [
+      { graphId: "g1", graphName: "Plot", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 },
+      { graphId: "", kind: "blank", label: "B", title: "", row: 0, col: 1, rowSpan: 1, colSpan: 1 },
+      {
+        graphId: "",
+        kind: "image",
+        imageData: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        imageName: "gel.png",
+        label: "C",
+        title: "",
+        row: 0,
+        col: 2,
+        rowSpan: 1,
+        colSpan: 1,
+      },
+    ],
+    grid: { rows: 1, cols: 3 },
+    figureSize: { widthIn: 10, heightIn: 7.5 },
+    labelStyle: { position: "top-left", fontSizePt: 12, bold: true },
+    figureTitle: "",
+    sharedLegend: "none",
+    dpi: "600",
+    frozen: true,
+    frozenDataByGraph: { g1: JSON.parse(JSON.stringify(data)) },
+  } as ProjectNode;
+  const filePayload: ProjectFilePayload = {
+    nodes: { t1: tableNode, g1: frozenGraph, f1: frozenFigure },
+    rootOrder: ["t1", "f1"],
+    childOrder: { t1: ["g1"], f1: [] },
+    activeNodeId: "g1",
+  };
+  const roundTripped = read(serializeProjectFile(filePayload));
+  strictEqual(roundTripped.updated, false);
+  deepStrictEqual(roundTripped.issues, []);
+  strictEqual(roundTripped.project.nodes.g1.frozen, true);
+  strictEqual(roundTripped.project.nodes.f1.frozen, true);
+  for (const field of ["variableTypes", "labelVariable", "levelOrder", "cellBackgrounds", "rowGroups", "calculated", "linkedPaste", "simulation"] as const) {
+    deepStrictEqual(
+      (roundTripped.project.nodes.g1.frozenData as unknown as Record<string, unknown>)[field],
+      (data as Record<string, unknown>)[field],
+      `the frozen graph's snapshot keeps ${field}`,
+    );
+    deepStrictEqual(
+      (roundTripped.project.nodes.f1.frozenDataByGraph as unknown as Record<string, Record<string, unknown>>).g1[field],
+      (data as Record<string, unknown>)[field],
+      `the frozen figure's snapshot keeps ${field}`,
+    );
+  }
+  // A second save of the round-tripped project is identical.
+  const again = read(serializeProjectFile(roundTripped.project));
+  strictEqual(again.updated, false);
+  deepStrictEqual(again.project.nodes, roundTripped.project.nodes);
+});
+
+// R2-20 (seq 479): a table created after an info sheet goes before it (and
+// createTableWithGraph likewise), and a re-pointed analysis drops the
+// removed set it was orphaned over. Before the fix `create` only searched
+// for the first figure, so a table after an info sheet reopened updated,
+// and repointAnalysis kept orphanedDataSet while the reader drops it
+// whenever the analysis isn't orphaned — also reopening updated.
+check("a table created after an info sheet goes before it, and a re-pointed analysis drops its removed set (R2-20)", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, { type: "create", node: { id: "i1", type: "info", name: "Info", parentId: null, info: newInfoSheetData() } });
+  s = reducer(s, {
+    type: "create",
+    node: { id: "t2", type: "table", name: "Doses", parentId: null, tableType: "xy", data: { columns: ["Title", "X", "Y1"], rows: [["a", "1", "2.5"]] } },
+  });
+  deepStrictEqual(s.rootOrder, [t1, "t2", "i1"]);
+  const figure: ProjectNode = {
+    id: "f1",
+    type: "figure",
+    name: "Figure",
+    parentId: null,
+    panels: [],
+    grid: { rows: 1, cols: 1 },
+    figureSize: { widthIn: 10, heightIn: 7.5 },
+    labelStyle: { position: "top-left", fontSizePt: 12, bold: true },
+    figureTitle: "",
+    sharedLegend: "none",
+    dpi: "600",
+  } as ProjectNode;
+  s = reducer(s, { type: "create", node: figure });
+  s = reducer(s, {
+    type: "create",
+    node: { id: "t3", type: "table", name: "More", parentId: null, tableType: "xy", data: { columns: ["Title", "X", "Y1"], rows: [["a", "1", "2.5"]] } },
+  });
+  deepStrictEqual(s.rootOrder, [t1, "t2", "t3", "i1", "f1"]);
+  s = reducer(s, { type: "createTableWithGraph", tableType: "xy" });
+  const t4 = s.rootOrder.find((id) => !["t2", "t3", "i1", "f1"].includes(id) && id !== t1);
+  ok(t4, "createTableWithGraph adds a table");
+  deepStrictEqual(s.rootOrder, [t1, "t2", "t3", t4, "i1", "f1"]);
+  // The orphaned analysis, as the set-removal path leaves it: orphaned over
+  // the removed set "Y1" of its old table, re-pointable to the xy table t2.
+  const orphan: ProjectNode = {
+    id: "a1",
+    type: "analysis",
+    name: "Fit",
+    parentId: null,
+    analysisType: "linear-regression",
+    analysisParams: { y: "Y1", forceOrigin: true },
+    orphaned: true,
+    sourceTableName: "Table 1",
+    orphanedDataSet: "Y1",
+  };
+  s = { ...s, nodes: { ...s.nodes, a1: orphan }, rootOrder: [...s.rootOrder, "a1"] };
+  s = reducer(s, { type: "repointAnalysis", id: "a1", tableId: "t2" });
+  strictEqual(s.nodes.a1.orphaned, false);
+  strictEqual(s.nodes.a1.orphanedDataSet, undefined);
+  strictEqual(s.nodes.a1.sourceTableName, undefined);
+  strictEqual(s.nodes.a1.parentId, "t2");
+  const { updated } = read(
+    serializeProjectFile({
+      nodes: s.nodes,
+      rootOrder: s.rootOrder,
+      childOrder: s.childOrder,
+      activeNodeId: s.activeNodeId,
+    }),
+  );
+  strictEqual(updated, false);
+});
+
 // v2 item 4 (Duplicate a family): duplicating a data table copies it together
 // with its analyses and graphs, so the copy can take new data and its analyses
 // update (Prism 10 User Guide, "Repeating an analysis"). Before the fix the

@@ -380,24 +380,35 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       const name = pid === null && !from ? nextName(action.node.name, taken) : uniqueName(action.node.name, taken);
       const node = { ...action.node, name };
       const nodes = { ...state.nodes, [node.id]: node };
-      // A new table goes before the first figure at the project root:
-      // parseProjectFile reorders rootOrder tables-then-figures, so
-      // appending a table after a figure would mark every save/load
-      // round-trip as updated (#22). Figures still append at the end.
-      // An info sheet goes there too (tables, then info sheets, then figures).
+      // A new table goes before the first info sheet or figure at the
+      // project root: parseProjectFile reorders rootOrder
+      // tables-then-infos-then-figures, so a table after an info sheet or
+      // figure would mark every save/load round-trip as updated (#22).
+      // An info sheet goes before the first figure (after the tables).
+      // Figures still append at the end.
       // A table computed from another goes right after its source instead.
+      const firstInfo =
+        node.type === "table" ? state.rootOrder.findIndex((id) => state.nodes[id]?.type === "info") : -1;
       const firstFigure =
         node.type === "table" || node.type === "info"
           ? state.rootOrder.findIndex((id) => state.nodes[id]?.type === "figure")
           : -1;
+      const insertAt =
+        node.type === "table"
+          ? firstInfo === -1
+            ? firstFigure
+            : firstFigure === -1 || firstInfo < firstFigure
+              ? firstInfo
+              : firstFigure
+          : firstFigure;
       const afterSource = from ? state.rootOrder.indexOf(from) : -1;
       const rootOrder =
         pid === null
           ? afterSource >= 0
             ? [...state.rootOrder.slice(0, afterSource + 1), node.id, ...state.rootOrder.slice(afterSource + 1)]
-            : firstFigure === -1
+            : insertAt === -1
               ? [...state.rootOrder, node.id]
-              : [...state.rootOrder.slice(0, firstFigure), node.id, ...state.rootOrder.slice(firstFigure)]
+              : [...state.rootOrder.slice(0, insertAt), node.id, ...state.rootOrder.slice(insertAt)]
           : state.rootOrder;
       const childOrder =
         pid === null
@@ -565,8 +576,10 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       if (!table || table.type !== "table") return state;
       if (!repointCandidates(node, state.nodes).some((t) => t.id === action.tableId)) return state;
       // The saved results stay (the re-run lands on next view); the orphan
-      // flag is cleared explicitly and the source name goes away with it.
-      const { sourceTableName: _, ...kept } = node;
+      // flag is cleared explicitly and the source name and the removed set
+      // go away with it — the reader drops orphanedDataSet whenever the
+      // analysis isn't orphaned, so keeping it would reopen as updated.
+      const { sourceTableName: _, orphanedDataSet: _removed, ...kept } = node;
       const nodes = {
         ...state.nodes,
         [action.id]: { ...kept, parentId: action.tableId, orphaned: false },
@@ -688,11 +701,16 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         graphOptions: newGraphOptions(graphType, table.data?.errorFormat),
       };
       const nodes = { ...state.nodes, [tableId]: table, [graphId]: graph };
-      const firstFigure = state.rootOrder.findIndex((id) => state.nodes[id]?.type === "figure");
+      // The new table goes before the first info sheet or figure, like
+      // `create`: parseProjectFile orders tables-then-infos-then-figures,
+      // so a table after an info sheet would reopen as updated (#22).
+      const firstInfoOrFigure = state.rootOrder.findIndex(
+        (id) => state.nodes[id]?.type === "info" || state.nodes[id]?.type === "figure",
+      );
       const rootOrder =
-        firstFigure === -1
+        firstInfoOrFigure === -1
           ? [...state.rootOrder, tableId]
-          : [...state.rootOrder.slice(0, firstFigure), tableId, ...state.rootOrder.slice(firstFigure)];
+          : [...state.rootOrder.slice(0, firstInfoOrFigure), tableId, ...state.rootOrder.slice(firstInfoOrFigure)];
       const childOrder = { ...state.childOrder, [tableId]: [graphId] };
       return { ...state, nodes, rootOrder, childOrder, activeNodeId: graphId, isDirty: true };
     }
