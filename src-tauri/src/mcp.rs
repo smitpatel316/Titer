@@ -13767,14 +13767,14 @@ mod tests {
             let mut buf = String::new();
             loop {
                 match stream.chunk().await {
-                    Some(Ok(bytes)) => {
+                    Ok(Some(bytes)) => {
                         buf.push_str(&String::from_utf8_lossy(&bytes));
                         if buf.contains("notifications/tools/list_changed") {
                             break true;
                         }
                     }
-                    Some(Err(e)) => panic!("sse read failed: {e}"),
-                    None => break false,
+                    Err(e) => panic!("sse read failed: {e}"),
+                    Ok(None) => break false,
                 }
             }
         })
