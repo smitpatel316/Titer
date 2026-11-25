@@ -19499,6 +19499,16 @@ check("a save dialog's extensionless name gets the format extension (1.2.1)", ()
   strictEqual(ensureSaveExtension("/tmp/figure.", "png"), "/tmp/figure.png");
   // A different extension is the user's choice, not this bug's: left alone.
   strictEqual(ensureSaveExtension("/tmp/figure.jpg", "png"), "/tmp/figure.jpg");
+  // Issue 48: a dot that is not a real extension gains the extension.
+  strictEqual(ensureSaveExtension("/tmp/Fig 1.2", "png"), "/tmp/Fig 1.2.png");
+  strictEqual(ensureSaveExtension("/tmp/Fig 1.2", "pdf"), "/tmp/Fig 1.2.pdf");
+  strictEqual(
+    ensureSaveExtension("C:\\Users\\alice.smith\\Desktop\\plot", "png"),
+    "C:\\Users\\alice.smith\\Desktop\\plot.png",
+  );
+  // The target extension itself counts even when write_file would not
+  // accept it (Keynote .key — handed to Keynote, never to write_file).
+  strictEqual(ensureSaveExtension("/tmp/Talk.key", "key"), "/tmp/Talk.key");
   // Dots in a folder name are not an extension.
   strictEqual(ensureSaveExtension("/tmp/my.dir/figure", "png"), "/tmp/my.dir/figure.png");
   strictEqual(ensureSaveExtension("/tmp/project.hlx", "hlx"), "/tmp/project.hlx");
