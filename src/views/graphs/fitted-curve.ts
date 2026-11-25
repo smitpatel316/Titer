@@ -338,6 +338,17 @@ export function evaluate(
   }
 }
 
+/** A data set's center for a centered polynomial: its own mean X
+ *  (fit.centeredXs, parallel to fit.fit.sets), falling back to the
+ *  single scalar fit.centeredX for single-set fits and older files
+ *  (Round 2 Issue 62 — the old code passed fit.centeredX, the first
+ *  set's center, for every set). */
+function centerForSet(fit: AnalysisResult, setName: string): number | undefined {
+  const idx = (fit.fit?.sets ?? []).indexOf(setName);
+  if (idx >= 0 && fit.centeredXs?.[idx] != null) return fit.centeredXs[idx];
+  return fit.centeredX;
+}
+
 /** Evenly-spaced points across [xMin, xMax] tracing the fitted curve. */
 function fittedCurve(
   model: NonlinearModel,
@@ -421,7 +432,7 @@ export function addFittedCurves(
     if (!y || !xs.length || !coefficients.some((c) => c.estimate != null)) return [];
     const lines = curveLines(fit, i, coefficients);
     notes.push(many ? `${name}: ${lines.join(", ")}` : lines.join("<br>"));
-    const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation, fit.centeredX);
+    const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation, centerForSet(fit, name));
     return [
       {
         type: "scatter",
@@ -465,7 +476,7 @@ export function addFittedCurve(
       const yCol = ys.find((c) => c.name === setName) ?? y;
       const xs = xyPoints(x, yCol).x.filter((v) => keepCurveX(model, v));
       if (!xs.length) continue;
-      const curve = fittedCurve(model, coefficientsForSet(coefficients, setName, sets), ...extent(xs), 100, fit.ligandConcentration, fit.customEquation, fit.centeredX);
+      const curve = fittedCurve(model, coefficientsForSet(coefficients, setName, sets), ...extent(xs), 100, fit.ligandConcentration, fit.customEquation, centerForSet(fit, setName));
       fig.data = [
         {
           type: "scatter",
@@ -483,7 +494,7 @@ export function addFittedCurve(
   }
   const xs = xyPoints(x, y).x.filter((v) => keepCurveX(model, v));
   if (!xs.length) return;
-  const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation, fit.centeredX);
+  const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation, centerForSet(fit, y.name));
   fig.data = [
     {
       type: "scatter",

@@ -137,13 +137,16 @@ export function evaluateEnzymeInhibitionModel(
  *  computed in TS from the data (see globalStarts) and inlined — nls
  *  "port" needs starts strictly inside the (0, ∞) bounds, and the plan's
  *  start rules are data-driven, not constants. AICc is a derived row:
- *  AIC(m) + 2k(k+1)/(n−k−1). */
+ *  AIC(m) + 2k(k+1)/(n−k−1), with k = p + 1 — the residual variance
+ *  counts as a parameter, matching AIC(m) (Round 2 Issue 62: the old
+ *  expression used k = p, miscomputing AICc by up to 16+ units at
+ *  small n). */
 function globalModelDef(
   model: EnzymeInhibitionModel,
   starts: { vmax: number; km: number; ki: number },
 ): GlobalModelDef {
   const { vmax, km, ki } = starts;
-  const aicc = { label: "AICc", expr: "AIC(m)+2*length(cf)*(length(cf)+1)/(length(y)-length(cf)-1)" };
+  const aicc = { label: "AICc", expr: "AIC(m)+2*(length(cf)+1)*(length(cf)+2)/(length(y)-length(cf)-2)" };
   const shared: GlobalModelDef["params"] = [
     { name: "Vmax", shared: true, start: () => vmax, lower: 0 },
     { name: "Km", shared: true, start: () => km, lower: 0 },
