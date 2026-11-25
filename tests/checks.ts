@@ -8790,6 +8790,24 @@ check("paste-54: a thead header row is not pasted as data", () => {
   );
 });
 
+// ── Paste Special malformed numeric entity (bug-report 54 remainder) ───
+// decodeHtmlEntities used to call String.fromCodePoint with no range
+// check, so a malformed entity (&#9999999;, &#x110000;, a lone surrogate
+// &#55296;) threw an uncaught RangeError and killed the whole paste.
+// Out-of-range code points now paste as U+FFFD, the same guard
+// decodeEntities in src/lib/pzfx.ts uses (Issue 55); valid entities
+// still decode.
+check("paste-54: a malformed numeric entity pastes as U+FFFD, not a RangeError", () => {
+  deepStrictEqual(
+    parseClipboardHTML(
+      "<table><tr><td>&#9999999;</td><td>&#x110000;</td><td>&#55296;</td><td>&#xD800;</td></tr></table>",
+      false,
+    ),
+    [["\uFFFD", "\uFFFD", "\uFFFD", "\uFFFD"]],
+  );
+  deepStrictEqual(parseClipboardHTML("<table><tr><td>&#65;&#x42;</td></tr></table>", false), [["AB"]]);
+});
+
 check("seq 220: MCP update-graph accepts a number format and rejects a bad one", () => {
   const nodes: Record<string, ProjectNode> = {
     table_1: {
@@ -28600,6 +28618,69 @@ check(".pzfx import normalizes comma-decimal scientific notation (Issue 56)", ()
       [null, "4.096e+007"],
       [null, "1.5"],
     ],
+  );
+});
+
+check("comma-decimal numbers with a leading + normalize (Issue 56 remainder)", async () => {
+  // The exponent form above already worked; a leading "+" did not: every
+  // comma-decimal pattern started ^-? while variable-types already
+  // classified "+1,5e-3" as numeric, so the value stayed un-normalized
+  // and parsed as null. The sign is kept (as "-" is) — only the comma
+  // is fixed — and parseCell reads the result.
+  const imported = parsePzfx(
+    `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">` +
+      `<Table ID="Table0" XFormat="none" TableType="OneWay" EVFormat="AsteriskAfterNumber">` +
+      `<Title>Data 1</Title>` +
+      `<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>Aa</Title><Subcolumn>` +
+      `<d>+4,096e+007</d><d>+1,5e-3</d><d>+1,5</d>` +
+      `</Subcolumn></YColumn></Table></GraphPadPrismFile>`,
+  );
+  const node = imported.project.nodes[imported.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("leading-plus: no table node");
+  deepStrictEqual(node.data!.rows, [[null, "+4.096e+007"], [null, "+1.5e-3"], [null, "+1.5"]]);
+  strictEqual(parseCell("+1.5e-3"), 0.0015);
+  deepStrictEqual(
+    convertCommaDecimals({
+      columns: ["Title", "Aa"],
+      rows: [
+        [null, "+1,5e-3"],
+        [null, "+4,096e+007"],
+        [null, "+1,5"],
+      ],
+    }).rows,
+    [
+      [null, "+1.5e-3"],
+      [null, "+4.096e+007"],
+      [null, "+1.5"],
+    ],
+  );
+  // The same leading + normalizes through the .prism reader, whose
+  // normalizeNumber had the same ^-? patterns.
+  const roundTripRows = async (rows: (string | null)[][]) => {
+    const base = parsePzfx(
+      `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">` +
+        `<Table ID="Table0" XFormat="none" TableType="OneWay"><Title>Data 1</Title>` +
+        `<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>Aa</Title><Subcolumn><d>1.</d><d>2.</d></Subcolumn></YColumn></Table></GraphPadPrismFile>`,
+    );
+    const baseNode = base.project.nodes[base.project.rootOrder[0]];
+    if (!baseNode || baseNode.type !== "table") throw new Error("leading-plus round-trip: no table node");
+    baseNode.data!.rows = rows;
+    const written = await writePrism(base.project, "1.7.0");
+    const back = await convertPrism(written.bytes, "round-trip.prism");
+    const backNode = Object.values(back.project.nodes).find((n) => n.type === "table");
+    if (!backNode || backNode.type !== "table") throw new Error("leading-plus round-trip: no table node after round-trip");
+    return backNode.data!.rows;
+  };
+  deepStrictEqual(
+    await roundTripRows([[null, "+1,5e-3"], [null, "+4,096e+007"], [null, "-1,5e-3"]]),
+    [[null, "+1.5e-3"], [null, "+4.096e+007"], [null, "-1.5e-3"]],
+  );
+  // Thousands mode likewise omitted the exponent: "1,234e+3" is a grouped
+  // number with an exponent, so its commas strip ("1,234,567" in the same
+  // file is what puts the reader in thousands mode).
+  deepStrictEqual(
+    await roundTripRows([[null, "1,234,567"], [null, "1,234e+3"], [null, "+1,234e+3"]]),
+    [[null, "1234567"], [null, "1234e+3"], [null, "+1234e+3"]],
   );
 });
 

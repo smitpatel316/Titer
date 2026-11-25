@@ -650,9 +650,9 @@ export function daysBetween(start: string | null, end: string | null): string | 
 const normalizeNumber = (value: string | null, thousandsMode = false): string | null => {
   if (value === null) return null;
   if (thousandsMode) {
-    return /^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(value) ? value.replace(/,/g, "") : value;
+    return /^[+-]?\d{1,3}(,\d{3})+(\.\d+)?([eE][+-]?\d+)?$/.test(value) ? value.replace(/,/g, "") : value;
   }
-  return /^-?\d+,\d+([eE][+-]?\d+)?$/.test(value) ? value.replace(",", ".") : value;
+  return /^[+-]?\d+,\d+([eE][+-]?\d+)?$/.test(value) ? value.replace(",", ".") : value;
 };
 
 export function subcolumnNames(title: string, dataFormat: string, count: number): string[] {
@@ -793,7 +793,7 @@ export async function convertPrism(
     const rows = parseCsv(await csvFile.async("string"));
     for (const row of rows) {
       for (const cell of row) {
-        if (/^-?\d{1,3}(,\d{3}){2,}(\.\d+)?$/.test(cell)) {
+        if (/^[+-]?\d{1,3}(,\d{3}){2,}(\.\d+)?([eE][+-]?\d+)?$/.test(cell)) {
           thousandsMode = true;
           thousandsExample = cell;
           break;

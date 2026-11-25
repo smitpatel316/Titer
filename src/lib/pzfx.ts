@@ -317,13 +317,13 @@ const SUBCOLUMN_SUFFIXES: Record<string, string[]> = {
  *  `0,9375`), or a comma decimal with an exponent (`4,096e+007`). A `N,NNN`
  *  value alone proves nothing — it is a decimal (`1,875` = 1.875 in the real
  *  SaturationBinding.pzfx) as readily as a thousands separator. */
-const COMMA_DECIMAL_EVIDENCE = /^-?\d+,\d{1,2}$|^-?\d+,\d{4,}$|^-?\d+,\d+[eE][+-]?\d+$/;
+const COMMA_DECIMAL_EVIDENCE = /^[+-]?\d+,\d{1,2}$|^[+-]?\d+,\d{4,}$|^[+-]?\d+,\d+[eE][+-]?\d+$/;
 /** A `<d>` value that proves the file's decimal separator is a dot: a dot
  *  decimal (`1.5`, `8887.`, `5.22929500342231`), exponent included. */
-const DOT_DECIMAL_EVIDENCE = /^-?\d+\.\d*([eE][+-]?\d+)?$|^-?\.\d+([eE][+-]?\d+)?$/;
+const DOT_DECIMAL_EVIDENCE = /^[+-]?\d+\.\d*([eE][+-]?\d+)?$|^[+-]?\.\d+([eE][+-]?\d+)?$/;
 /** A thousands-grouped value: `1,000`, `1,000,000`, `1,000.5` — groups of
  *  exactly three digits after the first comma. */
-const GROUPED_NUMBER = /^-?\d{1,3}(,\d{3})+(\.\d+)?([eE][+-]?\d+)?$/;
+const GROUPED_NUMBER = /^[+-]?\d{1,3}(,\d{3})+(\.\d+)?([eE][+-]?\d+)?$/;
 
 /** Every `<d>` text in the parsed file (data values and row titles alike). */
 function allDValues(node: XmlNode, out: string[] = []): string[] {
@@ -365,7 +365,7 @@ function usesGroupingSeparators(root: XmlNode): boolean {
 function normalizeNumber(value: string | null, groupingSeparators: boolean): string | null {
   if (value === null) return null;
   if (groupingSeparators && GROUPED_NUMBER.test(value)) return value.replace(/,/g, "");
-  if (/^-?\d+,\d+([eE][+-]?\d+)?$/.test(value)) return value.replace(",", ".");
+  if (/^[+-]?\d+,\d+([eE][+-]?\d+)?$/.test(value)) return value.replace(",", ".");
   return value;
 }
 
