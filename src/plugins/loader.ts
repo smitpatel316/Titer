@@ -33,7 +33,15 @@ import {
   type PluginPermission,
 } from "./manifest";
 import { validatePluginAnalysisSpec, type PluginAnalysisSpecJson } from "./analysis-spec";
-import { registerPluginAnalysesFromManifest, setPluginVersion, unregisterPlugin } from "./registry";
+import {
+  getPluginAnalysis,
+  pluginAnalysisId,
+  registerPluginAnalysesFromManifest,
+  registerPluginAnalysis,
+  setPluginVersion,
+  unregisterPlugin,
+  unregisterPluginAnalysis,
+} from "./registry";
 
 /** Install lifecycle state. */
 export type PluginStatus = "disabled" | "pending-review" | "enabled" | "incompatible";
@@ -240,6 +248,36 @@ export function recheckPluginCompatibility(record: PluginRecord, appVersion: str
   if (record.status === "incompatible") {
     return { ...record, status: "disabled", incompatibility: undefined };
   }
+  return record;
+}
+
+/**
+ * Startup rehydration (seq 461): re-register the analyses of an
+ * already-enabled plugin after an app restart. The install record
+ * survived in storage, but the in-memory registry did not — without
+ * this the plugin claims enabled while its analyses are unrunnable
+ * (MCP lists nothing, runs fail "Unknown plugin analysis").
+ * An incompatible plugin (the app updated past it) comes back
+ * "incompatible", never auto-enabled; a plugin whose analyses cannot
+ * register comes back "disabled" so the user can re-enable it.
+ * Analyses already registered (e.g. by the code path) are left alone,
+ * so rehydration is idempotent.
+ */
+export function rehydrateEnabledPlugin(record: PluginRecord, appVersion: string): PluginRecord {
+  const checked = recheckPluginCompatibility(record, appVersion);
+  if (checked.status !== "enabled") return checked;
+  const registered: string[] = [];
+  for (const spec of record.analyses) {
+    const id = pluginAnalysisId(record.manifest.id, spec.id);
+    if (getPluginAnalysis(id)) continue;
+    const result = registerPluginAnalysis(record.manifest.id, spec);
+    if ("errors" in result) {
+      for (const rid of registered) unregisterPluginAnalysis(rid);
+      return { ...record, status: "disabled" };
+    }
+    registered.push(result.id);
+  }
+  setPluginVersion(record.manifest.id, record.manifest.version);
   return record;
 }
 

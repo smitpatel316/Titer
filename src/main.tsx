@@ -6,6 +6,7 @@ import { AppShell } from "./components/app-shell";
 import { connectR } from "./stats/webr";
 import { accentColor, cancelR, evalR, isNative, onEngineReset, onFocusChange, setSpinner } from "./native";
 import { checkForUpdatesDaily } from "./updates";
+import { getMarketplaceStore } from "./marketplace/wiring";
 import "./styles.css";
 
 // Highlights take the accent color chosen in System Settings, read again whenever
@@ -27,6 +28,12 @@ if (isNative) setSpinner(null);
 
 // Whether a newer Titer is out, at most once a day.
 checkForUpdatesDaily();
+
+// The marketplace store is created at startup, not only when the dialog
+// opens: installed+enabled plugins re-register their analyses into the
+// registry on launch (seq 461), so the picker and MCP see them. A failure
+// here must never break startup — the dialog reports it plainly.
+void getMarketplaceStore().catch(() => undefined);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

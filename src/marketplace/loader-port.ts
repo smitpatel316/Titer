@@ -67,7 +67,9 @@ export interface PluginRecord {
  * The loader functions the store needs, with the documented signatures:
  * loadPluginFromZip is async (zip parsing); installPlugin is sync and
  * installs DISABLED by default; requestEnable → confirmEnable is the
- * review step; disablePlugin unregisters at once.
+ * review step; disablePlugin unregisters at once; rehydrateEnabledPlugin
+ * re-registers an already-enabled plugin's analyses after an app restart
+ * (seq 461) — the record survived in storage, the registry did not.
  */
 export interface PluginLoaderPort {
   loadPluginFromZip(
@@ -82,5 +84,9 @@ export interface PluginLoaderPort {
   requestEnable(record: PluginRecord): PluginRecord;
   confirmEnable(record: PluginRecord, granted: readonly PluginPermission[], appVersion: string): PluginRecord;
   disablePlugin(record: PluginRecord): PluginRecord;
+  /** Re-register an already-enabled plugin's analyses after a restart.
+   *  Returns the record, possibly downgraded to "disabled" (its analyses
+   *  cannot register) or "incompatible" (the app updated past it). */
+  rehydrateEnabledPlugin(record: PluginRecord, appVersion: string): PluginRecord;
   pluginReviewLines(record: PluginRecord): string[];
 }

@@ -40018,6 +40018,10 @@ function fakeLoaderPort(): PluginLoaderPort & { enabledIds: Set<string> } {
       enabledIds.delete(record.manifest.id);
       return { ...record, status: "disabled", incompatibility: undefined };
     },
+    rehydrateEnabledPlugin(record, _appVersion) {
+      enabledIds.add(record.manifest.id);
+      return record;
+    },
     pluginReviewLines(record) {
       const lines = [`“${record.manifest.name}” ${record.manifest.version} by ${record.manifest.author}.`];
       if (record.manifest.permissions.length) lines.push(`Asks for: ${record.manifest.permissions.join(", ")}.`);
@@ -40259,6 +40263,34 @@ check("plugin-registry-rehydrate-461: an enabled plugin's analyses survive a fre
   const reloaded2 = new MarketplaceStore(m2StoreDeps({ loader, storage }));
   strictEqual(reloaded2.getInstalled("example.hello-analysis")?.status, "disabled");
   ok(!loader.enabledIds.has("example.hello-analysis"), "a disabled plugin must stay unregistered after restart");
+
+  // The real loader, same story: rehydrate re-registers the analyses of
+  // an enabled record after the registry was emptied (fresh process).
+  const { clearPluginRegistry, listPluginAnalyses } = await import("../src/plugins/index");
+  const { confirmEnable, installPlugin, loadPluginFromZip, rehydrateEnabledPlugin, requestEnable } =
+    await import("../src/plugins/loader");
+  clearPluginRegistry();
+  const bytes = new Uint8Array(readFileSync(`${M2_FIXTURES}/hello-analysis-1.1.0.zip`));
+  const parsed = await loadPluginFromZip(bytes, "hello-analysis-1.1.0.zip");
+  if ("errors" in parsed) throw new Error(`hello fixture failed to parse: ${parsed.errors.join(" ")}`);
+  const installed = installPlugin(parsed.package, [], { kind: "zip", name: "hello-analysis-1.1.0.zip" });
+  if ("errors" in installed) throw new Error(`hello install failed: ${installed.errors.join(" ")}`);
+  let record = requestEnable(installed.record);
+  record = confirmEnable(record, ["read-table"], "1.9.0");
+  strictEqual(record.status, "enabled");
+  ok(
+    listPluginAnalyses().some((e) => e.id === "plugin:example.hello-analysis:hello-mean"),
+    "confirmEnable must register hello-mean",
+  );
+  clearPluginRegistry();
+  strictEqual(listPluginAnalyses().length, 0, "the restart simulation must empty the registry");
+  record = rehydrateEnabledPlugin(record, "1.9.0");
+  strictEqual(record.status, "enabled");
+  ok(
+    listPluginAnalyses().some((e) => e.id === "plugin:example.hello-analysis:hello-mean"),
+    "rehydrate must re-register hello-mean after a restart (seq 461)",
+  );
+  clearPluginRegistry();
 });
 
 check("M2-install: a hash mismatch refuses loudly and installs nothing", async () => {

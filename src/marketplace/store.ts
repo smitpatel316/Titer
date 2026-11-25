@@ -83,6 +83,20 @@ export class MarketplaceStore {
         const record = value as PluginRecord;
         if (typeof record?.manifest?.id === "string") this.installed.set(record.manifest.id, record);
       }
+      // Seq 461: the record survived, the registry did not — an enabled
+      // plugin's analyses must be re-registered on startup, or the plugin
+      // claims enabled while unrunnable (MCP lists nothing, runs fail).
+      // A plugin that cannot re-register comes back disabled/incompatible
+      // instead of enabled-but-empty; the stored record is left alone, so
+      // the next launch retries. One bad plugin never takes the rest down.
+      for (const record of this.installed.values()) {
+        if (record.status !== "enabled") continue;
+        try {
+          this.installed.set(record.manifest.id, this.loader.rehydrateEnabledPlugin(record, this.appVersion));
+        } catch {
+          this.installed.set(record.manifest.id, { ...record, status: "disabled" });
+        }
+      }
     } catch {
       // A corrupt installed list starts empty rather than breaking the store.
       this.installed.clear();
