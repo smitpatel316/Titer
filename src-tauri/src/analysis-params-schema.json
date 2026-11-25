@@ -1383,6 +1383,7 @@
         "name": "posthoc",
         "type": "string",
         "enum": [
+          "none",
           "tukey",
           "bonferroni"
         ],
@@ -1522,6 +1523,7 @@
         "name": "posthoc",
         "type": "string",
         "enum": [
+          "none",
           "tukey",
           "bonferroni"
         ],
@@ -1562,7 +1564,6 @@
     "min_columns": 2,
     "offered_on": [
       "multiple",
-      "xy",
       "xy"
     ],
     "params": [
@@ -2687,7 +2688,8 @@
           "holm-sidak",
           "lsd"
         ],
-        "required": true
+        "default": "none",
+        "required": false
       },
       {
         "name": "sphericity",
@@ -3423,7 +3425,8 @@
           "games-howell",
           "fdr"
         ],
-        "required": true
+        "default": "none",
+        "required": false
       },
       {
         "name": "posthocTarget",
@@ -3435,7 +3438,8 @@
           "group-means",
           "row-means"
         ],
-        "required": true
+        "default": "groups",
+        "required": false
       },
       {
         "name": "sphericity",
