@@ -1,6 +1,6 @@
 # MCP server contract — Titer (v1.6.0, Phase 2) ↔ stdio bridge
 
-**Status:** Phase 2 + v1.7.4 P0 + 1.8 backup list + 1.8.0 data-file import + 1.8.0 linked paste + 1.8.0 merge project + 1.8.0 menus batch B + 1.8.0 menus batch C + 1.8.2 graph regenerate + 1.8.3 copy-graph-image + 1.8.3 sample-size-power + 1.9 cell background color + marketplace M4 plugin analyses (78 tools: read, write, run, graph, export, cloud)
+**Status:** Phase 2 + v1.7.4 P0 + 1.8 backup list + 1.8.0 data-file import + 1.8.0 linked paste + 1.8.0 merge project + 1.8.0 menus batch B + 1.8.0 menus batch C + 1.8.2 graph regenerate + 1.8.3 copy-graph-image + 1.8.3 sample-size-power + 1.9 cell background color + marketplace M4 plugin analyses + seq 450 convert-to-nested (79 tools: read, write, run, graph, export, cloud)
 **Server branch:** `check/v16-mcp-phase2` (v1.6.0); the v1.7.4 P0 tools
 (`titer_project_summary`, `titer_search`, `titer_get_analysis_params`,
 `titer_rerun_analysis`, `await_result` on `titer_run_analysis`) were
@@ -123,11 +123,11 @@ SSE stream (`text/event-stream`). Lifecycle:
    `2025-06-18`), `capabilities`, `clientInfo`. Server answers with its
    own `protocolVersion` (the negotiated one — the highest both support),
    `capabilities: { "tools": {} }`, `serverInfo: { "name": "titer",
-    "version": "<app version>" }`, and `instructions` (the 78 tools:
+    "version": "<app version>" }`, and `instructions` (the 79 tools:
     read-only vs mutating, the job model, cloud/export notes — the full
     text lives in `get_info` in `src-tauri/src/mcp.rs`).
  2. `notifications/initialized` — client sends after `initialize`.
- 3. `tools/list` — returns all 78 tools in one page (`nextCursor`
+ 3. `tools/list` — returns all 79 tools in one page (`nextCursor`
    absent). No pagination.
 4. `tools/call` — `{ "name": "<tool>", "arguments": { … } }`.
 5. Sessions: 2025-11-25 clients use protocol-level sessions; the server
@@ -386,6 +386,7 @@ plainly ("couldn't read …") instead of silently skipping.
 | `titer_create_table` | `project_id?`, `table_type` (`column` \| `xy` \| `grouped` \| `nested` \| `multiple` \| `contingency` \| `survival`), `name?`, `columns?: string[]`, `rows?: (string \| number \| null)[][]` | `{ project_id, table_id, name, table_type, rows, data_columns }`. Without `columns`/`rows` creates the empty table of that type (same as Table ▸ New Table). Column 0 is the row-title column; short rows pad with blanks. |
 | `titer_write_table` | `project_id?`, `table_id`, `columns: string[]`, `rows: (string \| number \| null)[][]`, `label?`, `excluded?: string[]`, `cell_backgrounds?: { "row,col": color }` | `{ project_id, table_id, rows, data_columns }`. Whole-data replace via `updateTable` (the agent sends the whole table; cell-level edits are UI granularity). Validates shape against the table type and returns the validation error instead of writing a broken table. `rows` must be non-empty — a write with zero rows is refused (to empty a table use `titer_edit_table` delete-rows; to start an empty table use `titer_create_table` with no columns or rows). Excluded-cell marks (`"row,col"`) are preserved unless the call passes `excluded`, which replaces them. Cell background colors (`"row,col"` → one of the 8 colors, seq 325) follow the same convention: preserved unless the call passes `cell_backgrounds`, which replaces them (an empty map clears them). `label` is the Undo label ("Edit Table" when omitted). Destructive. |
 | `titer_edit_table` | `project_id?`, `table_id`, `op`, `...op_args` | `{ project_id, table_id, rows, data_columns }`. One tool for the grid-menu ops (`op` enum): `insert-rows { at, count? }`, `delete-rows { at, count? }`, `insert-columns { at, count? }`, `delete-columns { at, count? }`, `rename-column { column, name }`, `rename-group { column, name }`, `exclude-cells { cells: ["row,col", …] }`, `include-cells { cells: [...] }`, `set-cell-background { at_row, at_col, color }` (one of Prism's 8 cell colors, or null to clear — seq 325), `freeze-title { frozen }`, `convert-comma-decimals {}`, `add-calculated-variable { name, formula }`, `set-calculated-variable { name, formula }`, `remove-calculated-variable { name }`, `paste-link { source_path, row?, column?, auto_update? }`, `remove-link {}`. The calculated-variable ops only work on Multiple Variables tables (Prism 11, seq 156): whole-variable formulas (`=Dose * 2`), values recomputed live on every edit and usable in analyses like typed variables. `paste-link` pastes a data file (`.csv`, `.tsv`, `.txt` or `.xlsx`) as a link at (`row`, `column`) — the values land and stay linked, so `titer_refresh_linked_data` re-reads the file into the same region later; `auto_update` (default true) refreshes the link when the project opens. `remove-link` keeps the values and drops the link. Rows and columns are 0-based; column 0 holds the row titles; `count` defaults to 1. A frozen table is refused ("is frozen — unfreeze it"), as is a write. Destructive. |
+| `titer_convert_to_nested` | `project_id?`, `table_id`, `subgroups`, `replicates_per_subgroup`, `subgroup_labels?: string[]` | `{ project_id, table_id, name, table_type: "Nested", groups, subgroups, replicates, rows, data_columns }` — rebuilds a Column table as Nested (seq 450, same as Table ▸ Convert to Nested…): each dataset becomes a group, its rows splitting into `subgroups` subgroups of `replicates_per_subgroup` replicates each, in order; `subgroup_labels` names the subgroups, one per subgroup (omit for "S1", "S2"…). The rows must tile into subgroups × replicates exactly — a factorization that doesn't tile is refused, never lossy. Only a Column table converts; a frozen table is refused. The table's column analyses orphan, in the same undo step. |
 | `titer_freeze_table` | `project_id?`, `table_id`, `frozen` (boolean) | `{ project_id, table_id, frozen }`. A frozen table can't be edited (grid typing, `titer_edit_table`, `titer_write_table` are all refused) until unfrozen — Prism's Edit ▸ Freeze Sheet (seq 165). Undoable via `frozen: false` / `titer_undo`. Duplicating a frozen family leaves the copy editable. |
 | `titer_refresh_linked_data` | `project_id?`, `table_id` | `{ project_id, table_id, rows, data_columns, updated, dropped_columns }`. Re-reads the source file a `paste-link` block stays linked to into the same region (changed values replace, cells the source no longer covers are blanked, a larger source grows the table; a grouped table reports the source columns it had no room for as `dropped_columns`). `updated` is false when the source matches what is already there — no undo step, no dirty flag. Errors when the table has no linked paste, or the source file can't be read. A link with auto-update on already refreshes when its project opens. Destructive. |
 | `titer_duplicate_table_family` | `project_id?`, `table_id` | `{ project_id, table_id (new), children: { analyses, graphs } }` — table + its analyses/graphs cloned (same as Table ▸ Duplicate Family). The copy opens after the source table. |
@@ -604,7 +605,7 @@ is on, §6); everything else is `false`. `idempotent_hint` is per-tool (e.g. `ti
 `titer_rename_node`, `titer_reorder_nodes` are idempotent; create/undo/
 redo/run tools are not).
 
-The allowlist (§12) groups the 78 tools differently — by what the user
+The allowlist (§12) groups the 79 tools differently — by what the user
 turns on, not by what they do. The two groupings overlap (e.g. the
 `destructive` group holds the two tools that delete data or run
 scripts); §12 is the
@@ -618,7 +619,7 @@ The Phase 2 smoke runs against the **real server in a running Titer
 app** via a terminal CLI client (no Claude Desktop sign-in needed).
 It reads endpoint + token from `<app_data>/mcp/discovery.json`, speaks
 Streamable HTTP directly (initialize → tools/list → tools/call across
-all 78 tools), and prints a PASS/FAIL line per check; exit 0 only if
+all 79 tools), and prints a PASS/FAIL line per check; exit 0 only if
 every check passes. **Prerequisite:** in Titer, Settings → AI
 Connections, turn on every group under "What your AI can do" first —
 by default the server advertises only the 7 read tools (§12), and this
@@ -632,7 +633,7 @@ fixture for the Prism-import step:
    (default out dir: a fresh temp dir; exports/saves land there).
 3. `initialize` (`protocolVersion 2025-11-25`), then
    `notifications/initialized`, then `tools/list` — with every group on,
-   expect all 78 tools, nothing else (with only the default groups, §12
+   expect all 79 tools, nothing else (with only the default groups, §12
    says 7).
 4. Create a project → create an XY table → write data → summary with
    values → edit/rename/reorder/undo/redo/duplicate → simulate a
@@ -694,7 +695,7 @@ are expected to differ until the `buildGraphFigure` follow-up (§10.1).
 The in-process Rust smoke (`mcp_smoke_job_plumbing_over_http` in
 `src-tauri/src/mcp.rs`) is the other half: with every group enabled via
 its fixture allowlist record, it asserts `tools/list` returns exactly
- 78 tools and drives the job plumbing + project/table/
+ 79 tools and drives the job plumbing + project/table/
 analysis/cloud/graph/composite/export tools over real HTTP with a
 completer task standing in for the frontend dispatcher. A second
 in-process smoke (`mcp_smoke_allowlist_default_over_http`) covers §12:
@@ -787,7 +788,7 @@ tool must assign it a group, or the suite fails).
 | Read more (`read_more`) | `titer_read_figure`, `titer_read_info_sheet`, `titer_read_activity`, `titer_send_feedback` | no |
 | Discover projects and params (`discovery`) | `titer_project_summary`, `titer_search`, `titer_get_analysis_params` | no |
 | Open and save projects (`project`) | `titer_create_project`, `titer_open_project`, `titer_save_project`, `titer_close_project`, `titer_import_prism`, `titer_import_data_file`, `titer_merge_project` | no |
-| Edit tables (`tables`) | `titer_create_table`, `titer_write_table`, `titer_edit_table`, `titer_freeze_table`, `titer_refresh_linked_data`, `titer_duplicate_table_family`, `titer_rename_node`, `titer_reorder_nodes`, `titer_undo`, `titer_redo` | no |
+| Edit tables (`tables`) | `titer_create_table`, `titer_write_table`, `titer_edit_table`, `titer_convert_to_nested`, `titer_freeze_table`, `titer_refresh_linked_data`, `titer_duplicate_table_family`, `titer_rename_node`, `titer_reorder_nodes`, `titer_undo`, `titer_redo` | no |
 | Run analyses (`analyses`) | `titer_run_analysis`, `titer_rerun_analysis`, `titer_run_plugin_analysis`, `titer_freeze_analysis`, `titer_set_result_cell_background`, `titer_clone_analysis`, `titer_repoint_analysis`, `titer_simulate_data`, `titer_sample_size_power`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
 | Build graphs and figures (`graphs`) | `titer_build_graph`, `titer_update_graph`, `titer_clone_graph`, `titer_clone_figure`, `titer_freeze_graph`, `titer_freeze_figure`, `titer_add_drawing_object`, `titer_update_drawing_object`, `titer_delete_drawing_object`, `titer_arrange_drawing_objects`, `titer_create_figure`, `titer_update_figure`, `titer_create_info_sheet`, `titer_update_info_sheet`, `titer_list_regenerable_graphs`, `titer_regenerate_graphs` | no |
 | Export (`export`) | `titer_export_graph`, `titer_export_figure`, `titer_export_office`, `titer_export_table_data`, `titer_export_all_graphs`, `titer_copy_graph_image` | no |
@@ -842,5 +843,5 @@ the same human-only boundary as enable/token (D4).
   tools — the six plus `titer_list_plugin_analyses` — and Antigravity follows
   what the server advertises, so it shows seven. The config file format
   does not change.
-- The server still *has* 78 tools. The allowlist decides which subset
+- The server still *has* 79 tools. The allowlist decides which subset
   a given client sees — it does not remove tools from the server.

@@ -548,6 +548,13 @@ export function useAppMenu(doc: DocumentActions) {
             enabled: hasTable,
             action: run((l, id) => l.store.duplicateFamily(id)),
           },
+          {
+            // Column → Nested (seq 450): each dataset becomes a group, its
+            // rows splitting into subgroups the dialog asks for.
+            text: "Convert to Nested…",
+            enabled: hasTable && tableType === "column" && !activeTableFrozen,
+            action: run((l, id) => l.store.openSelector({ kind: "convert-to-nested", tableId: id })),
+          },
           deleteItem("table"),
         ],
       },

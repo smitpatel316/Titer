@@ -167,6 +167,7 @@ import {
   transposeBlock,
   writeBlock,
   xFormatOf,
+  type ConvertToNestedSpec,
 } from "../views/tables/table-data";
 import { TABLES } from "../views/tables/index";
 
@@ -255,6 +256,9 @@ export interface JobDeps {
     /** Remove one data set from a table (seq 309): the analyses that ran
      *  on it orphan in the same undo step. */
     removeDataSet: (id: string, data: TableData, setName: string, label: string) => void;
+    /** Rebuild a Column table as Nested (seq 450): each dataset becomes a
+     *  group, its rows splitting into `spec`'s subgroups in order. */
+    convertTableToNested: (id: string, spec: ConvertToNestedSpec) => void;
     duplicateFamily: (id: string) => void;
     /** Duplicate one sheet, nothing else (seq 236). */
     duplicateNode: (id: string) => void;
@@ -466,6 +470,16 @@ function argOptNumber(job: McpJob, args: unknown, key: string): number | undefin
 /** One arg, as an array of strings — missing or mistyped is an error. */
 function argStringArray(job: McpJob, args: unknown, key: string): string[] {
   const value = (args as Record<string, unknown> | null | undefined)?.[key];
+  if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) {
+    throw jobErr(job, `needs ${key} to be an array of strings.`);
+  }
+  return value as string[];
+}
+
+/** One optional arg, as an array of strings — present but mistyped is an error. */
+function argOptStringArray(job: McpJob, args: unknown, key: string): string[] | undefined {
+  const value = (args as Record<string, unknown> | null | undefined)?.[key];
+  if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) {
     throw jobErr(job, `needs ${key} to be an array of strings.`);
   }
@@ -2364,6 +2378,51 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           },
         },
         created: { table_id: createdId },
+      };
+    }
+    case "convert-to-nested": {
+      const actions = tableActions(job, deps);
+      const tableId = argString(job, job.args, "table_id");
+      const subgroups = argInt(job, job.args, "subgroups");
+      const replicates = argInt(job, job.args, "replicates_per_subgroup");
+      const labels = argOptStringArray(job, job.args, "subgroup_labels");
+      const node = tableNode(job, deps.getState(), tableId);
+      if (node.frozen) {
+        throw jobErr(job, `Table “${node.name}” is frozen — unfreeze it before converting it.`);
+      }
+      if (node.tableType !== "column") {
+        throw jobErr(
+          job,
+          `only a Column table converts to Nested — “${node.name}” is a ${TABLES[node.tableType!].label} table.`,
+        );
+      }
+      const beforeRevision = deps.getState().revision;
+      try {
+        actions.convertTableToNested(tableId, {
+          subgroups,
+          replicates,
+          ...(labels !== undefined ? { subgroupLabels: labels } : {}),
+        });
+      } catch (err) {
+        // The store action's plain-language refusal (rows that don't tile,
+        // a bad label) — the job reports it, not a bare throw.
+        throw jobErr(job, err instanceof Error ? err.message : String(err));
+      }
+      await settleAfterDispatch(deps, beforeRevision);
+      const after = deps.getState().nodes[tableId]!;
+      const data = after.data!;
+      return {
+        result: {
+          project_id: job.project_id,
+          table_id: tableId,
+          name: after.name,
+          table_type: TABLES["nested"].label,
+          groups: data.groups ?? 0,
+          subgroups: data.subgroups ?? 0,
+          replicates: data.replicates ?? 0,
+          rows: data.rows.length,
+          data_columns: (data.columns.length ?? 1) - 1,
+        },
       };
     }
     case "rename-node": {

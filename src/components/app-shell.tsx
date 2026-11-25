@@ -36,6 +36,7 @@ import { clearRecentAnalyses, loadRecentAnalyses, type RecentAnalysisEntry } fro
 import { AnalysisWizard } from "../views/analyses/analysis-wizard";
 import { WandDialog } from "./wand-dialog";
 import { SimulateDataDialog } from "./simulate-data-dialog";
+import { ConvertToNestedDialog } from "./convert-to-nested-dialog";
 import { SampleSizePowerDialog } from "./sample-size-power-dialog";
 import { CloneGraphDialog } from "./clone-graph-dialog";
 import { RegenerateGraphsDialog } from "./regenerate-graphs-dialog";
@@ -235,6 +236,8 @@ export function AppShell() {
       <WandDialog />
 
       <SimulateDataDialog />
+
+      <ConvertToNestedDialog />
 
       <SampleSizePowerDialog />
 

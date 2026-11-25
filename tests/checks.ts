@@ -170,6 +170,7 @@ import {
   changeXFormat,
   clearDecimalsForRange,
   columnsBeyond,
+  convertColumnToNested,
   defaultRowGroups,
   deleteColumns,
   deleteRows,
@@ -3124,6 +3125,18 @@ const mcpLaggingHarness = (withRevisionWait: boolean) => {
     createSimulatedTable: neverUnused,
     updateTable: (id, data, label, move) => dispatch({ type: "updateTable", id, data, label, move }),
     removeDataSet: (id, data, setName, label) => dispatch({ type: "removeDataSet", id, data, setName, label }),
+    convertTableToNested: (id, spec) => {
+      const node = s.nodes[id];
+      if (!node || node.type !== "table") throw new Error(`no table with id “${id}” in this project.`);
+      if (node.tableType !== "column") throw new Error(`only a Column table converts to Nested.`);
+      if (node.frozen) throw new Error(`table “${node.name}” is frozen — unfreeze it before converting it.`);
+      dispatch({
+        type: "convertTableToNested",
+        id,
+        data: convertColumnToNested(node.data!, spec),
+        label: "Convert to Nested",
+      });
+    },
     duplicateFamily: (id) => dispatch({ type: "duplicateFamily", id }),
     renameNode: (id, name) => dispatch({ type: "rename", id, name }),
     removeNode: (id) => dispatch({ type: "remove", id }),
@@ -9367,6 +9380,140 @@ check("fewer groups, subgroups or replicates ask first only when they hold value
   ok(renestLoses(t, 1, 3, 3)); // B
   ok(renestLoses(t, 3, 1, 3)); // A:S2, B:S2
   ok(renestLoses(t, 3, 3, 1)); // every R2
+});
+
+// ── Column → Nested conversion (seq 450) ──────────────────────────────────
+// Prism lets a Column table become a Nested table; Titer had no convert
+// path at all. An imported Column table carries no subgroup boundaries, so
+// the convert is a factorization the user defines: each Column dataset
+// becomes a group, and its rows split into equal subgroups in order (row r
+// of a group lands in subgroup ⌊r / replicates⌋, replicate r % replicates).
+// The pin drives the same conversion through the store action AND through
+// the MCP tool and requires identical results — same tableType, same data.
+const convert450Column = (): TableData => ({
+  columns: ["Title", "A", "B"],
+  rows: [
+    ["r1", "a1", "b1"],
+    ["r2", "a2", "b2"],
+    ["r3", "a3", "b3"],
+    ["r4", "a4", "b4"],
+    ["r5", "a5", "b5"],
+    ["r6", "a6", "b6"],
+  ],
+  excluded: ["0,1"], // a1 stays excluded, in its new slot
+});
+
+check("convert-450: a Column table converts to Nested via the store action AND via MCP with identical results", async () => {
+  // Pure factorization: 2 groups × 6 rows → 2 subgroups × 3 replicates.
+  const t = convertColumnToNested(convert450Column(), { subgroups: 2, replicates: 3, subgroupLabels: ["S1", "S2"] });
+  deepStrictEqual(t.columns, [
+    "Title",
+    "A:S1:R1",
+    "A:S1:R2",
+    "A:S1:R3",
+    "A:S2:R1",
+    "A:S2:R2",
+    "A:S2:R3",
+    "B:S1:R1",
+    "B:S1:R2",
+    "B:S1:R3",
+    "B:S2:R1",
+    "B:S2:R2",
+    "B:S2:R3",
+  ]);
+  deepStrictEqual([t.groups, t.subgroups, t.replicates], [2, 2, 3]);
+  // Every value stays in its group, in row order across the subgroups.
+  deepStrictEqual(t.rows[0], ["r1", "a1", null, null, null, null, null, "b1", null, null, null, null, null]);
+  deepStrictEqual(t.rows[3], ["r4", null, null, null, "a4", null, null, null, null, null, "b4", null, null]);
+  deepStrictEqual(t.rows[5], ["r6", null, null, null, null, null, "a6", null, null, null, null, null, "b6"]);
+  deepStrictEqual(t.excluded, ["0,1"]); // a1's new slot is still column 1
+  // A factorization that doesn't tile the rows is refused, never lossy.
+  throws(() => convertColumnToNested(convert450Column(), { subgroups: 4, replicates: 2 }), /6 rows.*4 subgroups/);
+  throws(() => convertColumnToNested(convert450Column(), { subgroups: 2, replicates: 3, subgroupLabels: ["S1"] }), /2 subgroup labels/);
+  throws(
+    () => convertColumnToNested({ columns: ["Title", "A:B"], rows: [["r1", "x"]] }, { subgroups: 1, replicates: 1 }),
+    /must not contain “:”/,
+  );
+
+  // Store action vs MCP, on identical source tables: identical results.
+  const viaStore = mcpLaggingHarness(true);
+  const madeStore = await viaStore.run("job-450-store-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B"],
+    rows: [
+      ["r1", "a1", "b1"],
+      ["r2", "a2", "b2"],
+      ["r3", "a3", "b3"],
+      ["r4", "a4", "b4"],
+      ["r5", "a5", "b5"],
+      ["r6", "a6", "b6"],
+    ],
+  });
+  const storeId = (madeStore.result as { table_id: string }).table_id;
+  viaStore.deps.actions!.convertTableToNested(storeId, { subgroups: 2, replicates: 3, subgroupLabels: ["S1", "S2"] });
+  viaStore.sync();
+  const storeNode = viaStore.state().nodes[storeId]!;
+
+  const viaMcp = mcpLaggingHarness(true);
+  const madeMcp = await viaMcp.run("job-450-mcp-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B"],
+    rows: [
+      ["r1", "a1", "b1"],
+      ["r2", "a2", "b2"],
+      ["r3", "a3", "b3"],
+      ["r4", "a4", "b4"],
+      ["r5", "a5", "b5"],
+      ["r6", "a6", "b6"],
+    ],
+  });
+  const mcpId = (madeMcp.result as { table_id: string }).table_id;
+  const converted = await viaMcp.run("job-450-mcp-convert", "convert-to-nested", {
+    table_id: mcpId,
+    subgroups: 2,
+    replicates_per_subgroup: 3,
+    subgroup_labels: ["S1", "S2"],
+  });
+  strictEqual((converted.result as { table_type: string }).table_type, "Nested");
+  const mcpNode = viaMcp.state().nodes[mcpId]!;
+  strictEqual(mcpNode.tableType, "nested");
+  strictEqual(storeNode.tableType, "nested");
+  deepStrictEqual(mcpNode.data, storeNode.data);
+
+  // The MCP path refuses what the store action refuses: a non-Column table,
+  // and a factorization that doesn't tile the rows.
+  await rejects(
+    viaMcp.run("job-450-mcp-again", "convert-to-nested", { table_id: mcpId, subgroups: 2, replicates_per_subgroup: 3 }),
+    /only a Column table/,
+  );
+  const madeUntiled = await viaMcp.run("job-450-mcp-untiled-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B"],
+    rows: [
+      ["r1", "a1", "b1"],
+      ["r2", "a2", "b2"],
+      ["r3", "a3", "b3"],
+      ["r4", "a4", "b4"],
+      ["r5", "a5", "b5"],
+      ["r6", "a6", "b6"],
+    ],
+  });
+  const untiledId = (madeUntiled.result as { table_id: string }).table_id;
+  await rejects(
+    viaMcp.run("job-450-mcp-untiled", "convert-to-nested", { table_id: untiledId, subgroups: 4, replicates_per_subgroup: 2 }),
+    /6 rows.*4 subgroups/,
+  );
+
+  // Wiring: the Table menu offers the convert, and the dialog is a plain
+  // fixed overlay (seq 397/429: a native <dialog> + showModal() takes no
+  // pointer events on Mac WebKit).
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(menu.includes('text: "Convert to Nested…"'), "Table menu must offer Convert to Nested…");
+  ok(menu.includes('openSelector({ kind: "convert-to-nested"'), "menu must open the convert-to-nested selector");
+  const dialog = readFileSync("src/components/convert-to-nested-dialog.tsx", "utf8");
+  ok(dialog.includes("fixed inset-0"), "convert dialog must be a plain fixed overlay");
+  ok(!dialog.includes("<dialog") && !dialog.includes("showModal"), "convert dialog must not use a native <dialog>");
+  ok(dialog.includes("convertTableToNested"), "convert dialog must call the store action");
 });
 
 check("renaming a subgroup renames it within its group only", () => {

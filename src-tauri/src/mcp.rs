@@ -2,9 +2,9 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 78 tools: 21 read-only (list/read/job/
+// Settings → AI connections. 79 tools: 21 read-only (list/read/job/
 // activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list + refresh-linked-data + the plugin list)
-// and 57 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool + the 1.9 cell-background tool + the plugin run tool), via the L0 Rust→frontend dispatch + job queue —
+// and 58 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool + the 1.9 cell-background tool + the plugin run tool + the seq 450 convert-to-nested tool), via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 //
 // Why rmcp, not tauri-plugin-mcp-commands — see the lane log
@@ -43,7 +43,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 78 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 79 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -1381,11 +1381,12 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "tables",
         label: "Edit tables",
-        description: "Create, write, edit, freeze, duplicate, rename and reorder tables; undo and redo.",
+        description: "Create, write, edit, convert, freeze, duplicate, rename and reorder tables; undo and redo.",
         tools: &[
             "titer_create_table",
             "titer_write_table",
             "titer_edit_table",
+            "titer_convert_to_nested",
             "titer_freeze_table",
             "titer_refresh_linked_data",
             "titer_duplicate_table_family",
@@ -2200,7 +2201,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 78 tools. Returns the new header value, or `None` when the type is
+/// 79 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -3028,6 +3029,27 @@ pub struct TableArgs {
     pub project_id: Option<String>,
     /// The table's id, as shown by titer_list_tables.
     pub table_id: String,
+}
+
+/// Args for `titer_convert_to_nested`: the Column table to rebuild as
+/// Nested, and the factorization — how many subgroups each group splits
+/// into, of how many replicates each, and what the subgroups are called
+/// (one label per subgroup, the same labels in every group; omit for
+/// "S1", "S2"…). The rows must tile into subgroups × replicates exactly.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ConvertToNestedArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table's id, as shown by titer_list_tables.
+    pub table_id: String,
+    /// Subgroups per group; at least 1.
+    pub subgroups: usize,
+    /// Replicates per subgroup; at least 1.
+    pub replicates_per_subgroup: usize,
+    /// The subgroup labels, one per subgroup; omit for "S1", "S2"….
+    #[serde(default)]
+    pub subgroup_labels: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -5290,6 +5312,89 @@ impl TiterMcpServer {
             }
             Err(e) => {
                 self.state.log_call("titer_duplicate_table_family", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Convert a Column table to a Nested table (seq 450): each Column
+    /// dataset becomes a group, and its rows split into `subgroups`
+    /// subgroups of `replicates_per_subgroup` replicates each, in order.
+    /// `subgroup_labels` names the subgroups, one label per subgroup, the
+    /// same labels in every group (omit for "S1", "S2"…). The rows must
+    /// tile into subgroups × replicates exactly — a factorization that
+    /// doesn't tile is refused, never lossy. Only a Column table converts.
+    #[tool(
+        name = "titer_convert_to_nested",
+        description = "Convert a Column table to a Nested table: each Column dataset becomes a group, and its rows split into subgroups subgroups of replicates_per_subgroup replicates each, in order. subgroup_labels names the subgroups, one label per subgroup, the same labels in every group (omit for \"S1\", \"S2\"…). The rows must tile into subgroups × replicates exactly — a factorization that doesn't tile is refused, never lossy. Only a Column table converts.",
+        annotations(
+            title = "Convert to Nested",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn convert_to_nested(
+        &self,
+        Parameters(args): Parameters<ConvertToNestedArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({
+            "project_id": args.project_id,
+            "table_id": args.table_id,
+            "subgroups": args.subgroups,
+            "replicates_per_subgroup": args.replicates_per_subgroup,
+            "subgroup_labels": args.subgroup_labels.as_ref().map(|l| l.len()),
+        });
+        let outcome: Result<serde_json::Value, String> = async {
+            let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            let snap = self.state.snapshot_for_node(&id, snap, &args.table_id).await;
+            let node = find_node(&snap, &args.table_id).ok_or_else(|| {
+                format!("No table with id “{}” in project {id}. Ask titer_list_tables for the ids.", args.table_id)
+            })?;
+            if node.get("type").and_then(|v| v.as_str()) != Some("table") {
+                return Err(format!(
+                    "“{}” is not a table (it is a {}).",
+                    args.table_id,
+                    node.get("type").and_then(|v| v.as_str()).unwrap_or("node")
+                ));
+            }
+            let table_type = node.get("tableType").and_then(|v| v.as_str()).unwrap_or("column");
+            if table_type != "column" {
+                let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                return Err(format!(
+                    "only a Column table converts to Nested — “{name}” is a {} table.",
+                    display_table_type(table_type)
+                ));
+            }
+            if args.subgroups < 1 {
+                return Err("needs at least 1 subgroup per group.".into());
+            }
+            if args.replicates_per_subgroup < 1 {
+                return Err("needs at least 1 replicate per subgroup.".into());
+            }
+            self.run_table_job(
+                &id,
+                "convert-to-nested",
+                serde_json::json!({
+                    "table_id": args.table_id,
+                    "subgroups": args.subgroups,
+                    "replicates_per_subgroup": args.replicates_per_subgroup,
+                    "subgroup_labels": args.subgroup_labels,
+                }),
+            )
+            .await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_convert_to_nested", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_convert_to_nested", log_args, false, Some(&e));
                 Err(e)
             }
         }
@@ -9251,10 +9356,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 78 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 79 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 6 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                21 of the 78 are read-only and 57 change the open project. \
+                21 of the 79 are read-only and 58 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -11599,7 +11704,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 78 tools, so it enables every group first.
+        // this test drives all 79 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -11652,8 +11757,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            78,
-            "seven read tools + four read-more tools + three discovery tools + seven project tools + ten table tools + fourteen analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools: {names:?}"
+            79,
+            "seven read tools + four read-more tools + three discovery tools + seven project tools + eleven table tools + fourteen analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools: {names:?}"
         );
         for name in ["titer_list_backups"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -11682,6 +11787,7 @@ mod tests {
             "titer_create_table",
             "titer_write_table",
             "titer_edit_table",
+            "titer_convert_to_nested",
             "titer_freeze_table",
             "titer_duplicate_table_family",
             "titer_rename_node",
@@ -12871,7 +12977,7 @@ mod tests {
         // the part that actually catches it.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 78, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 79, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -12997,7 +13103,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 78, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 79, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema
