@@ -800,10 +800,12 @@ fn build_keynote_script(png_path: &str, out_path: &str, title: &str, width_pt: f
         "\ttell mySlide".to_string(),
         format!("\t\tset titleBox to make new text item with properties {{object text: {title}}}"),
         "\t\tset position of titleBox to {36, 18}".to_string(),
-        "\t\tset size of titleBox to {slideW - 72, 36}".to_string(),
+        "\t\tset width of titleBox to slideW - 72".to_string(),
+        "\t\tset height of titleBox to 36".to_string(),
         "\t\tset newImage to make new image with properties {file: pngFile}".to_string(),
         "\t\tset position of newImage to {(slideW - imgW) / 2, 72 + (maxH - imgH) / 2}".to_string(),
-        "\t\tset size of newImage to {imgW, imgH}".to_string(),
+        "\t\tset width of newImage to imgW".to_string(),
+        "\t\tset height of newImage to imgH".to_string(),
         "\tend tell".to_string(),
         "\tsave doc in outFile".to_string(),
         "end tell".to_string(),
@@ -2513,6 +2515,18 @@ mod tests {
         assert!(script.contains("make new image with properties {file: pngFile}"), "{script}");
         assert!(script.contains("save doc in outFile"), "{script}");
         assert!(!script.contains("pptx") && !script.contains("docx"), "{script}");
+        // Seq 516: Keynote rejects `set size` as a {width, height} pair
+        // on text items and images (-10006; AppleEvent timeout -1712 on
+        // the live 2.0.1 Mac proof run) — width and height must be set
+        // separately. The seq 516 fix 2c961c95 changed only the TS
+        // `buildKeynoteScript`, which no app code calls — the live shell
+        // builder below still emitted the `set size` pairs, and the Mac
+        // proof gave NO-GO. This pins the LIVE builder, not the TS copy.
+        assert!(script.contains("set width of titleBox to slideW - 72"), "{script}");
+        assert!(script.contains("set height of titleBox to 36"), "{script}");
+        assert!(script.contains("set width of newImage to imgW"), "{script}");
+        assert!(script.contains("set height of newImage to imgH"), "{script}");
+        assert!(!script.contains("set size of"), "{script}");
         // No IPC string survives as code: a hostile title is escaped,
         // never spliced raw into the script.
         let hostile = build_keynote_script("/tmp/a.png", "/tmp/b.key", "x\" \n tell application \"Finder\" to delete", 100.0, 50.0);
