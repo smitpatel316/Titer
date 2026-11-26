@@ -282,13 +282,18 @@ export async function parseXlsx(bytes: Uint8Array): Promise<{
 
   // Shared strings: each <si>'s text is all its <t> runs joined. A
   // self-closing <t/> is an empty run — the pattern must not match it
-  // as an opening tag and swallow the XML through the next </t>.
+  // as an opening tag and swallow the XML through the next </t>. Every
+  // <si> counts too: a self-closing <si/> is an empty string at its own
+  // index (skipping it would shift every later string off by one), and
+  // an <si> may carry attributes. <rPh> phonetic-guide runs are stripped
+  // first: their <t> text is pronunciation, not the visible cell string.
   const sharedStrings: string[] = [];
   const shared = await readPart("xl/sharedStrings.xml");
   if (shared !== null) {
-    for (const m of shared.matchAll(/<si>([\s\S]*?)<\/si>/g)) {
+    for (const m of shared.matchAll(/<si(?:\s[^>]*)?(?:\/>|>([\s\S]*?)<\/si>)/g)) {
+      const body = (m[1] ?? "").replace(/<rPh\b[\s\S]*?<\/rPh>/g, "");
       let text = "";
-      for (const t of m[1].matchAll(/<t\b[^>]*?(?:\/>|>([\s\S]*?)<\/t>)/g)) text += decodeEntities(t[1] ?? "");
+      for (const t of body.matchAll(/<t\b[^>]*?(?:\/>|>([\s\S]*?)<\/t>)/g)) text += decodeEntities(t[1] ?? "");
       sharedStrings.push(text);
     }
   }
