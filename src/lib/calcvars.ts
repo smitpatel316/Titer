@@ -1192,19 +1192,37 @@ export function setCalculatedFormula(
 
 /** Removes a calculated variable and its column (its values go with it).
  *  Formulas that used it keep their text — they read as an error until
- *  they are edited or removed. */
+ *  they are edited or removed. The last data column stays: a table with
+ *  only its title column is not a table. */
 export function removeCalculatedVariable(data: TableData, name: string): TableData {
   const c = data.columns.indexOf(name);
   if (c < 1 || !isCalculatedColumn(data, name)) return data;
+  if (data.columns.length <= 2) return data;
+  const kept = (data.calculated ?? []).filter((v) => v.name !== name);
   return {
     ...data,
     columns: data.columns.filter((_, i) => i !== c),
     rows: data.rows.map((row) => row.filter((_, i) => i !== c)),
-    calculated: (data.calculated ?? []).filter((v) => v.name !== name),
+    calculated: kept.length ? kept : undefined,
     excluded: remapExcludedAfterDelete(data, c),
     cellBackgrounds: remapCellBackgroundsAfterDelete(data, c),
     widths: widthsWithout(data.widths, name),
     decimals: decimalsWithout(data.decimals, name),
+    variableTypes: variableTypesWithout(data.variableTypes, name),
+    // A deleted row-label source goes with its column.
+    labelVariable: data.labelVariable === name ? undefined : data.labelVariable,
+    levelOrder: levelOrderWithout(data.levelOrder, name),
+    // The link follows the deletion, as linkedPasteAfterDelete would shift
+    // it — inlined here, because table-data.ts already imports this module
+    // and importing it back would be a cycle: a link anchored in the
+    // deleted column goes, one past it shifts left by one.
+    linkedPaste: data.linkedPaste
+      ? data.linkedPaste.col === c
+        ? undefined
+        : data.linkedPaste.col > c
+          ? { ...data.linkedPaste, col: data.linkedPaste.col - 1 }
+          : data.linkedPaste
+      : undefined,
   };
 }
 
@@ -1239,6 +1257,21 @@ function widthsWithout(widths: TableData["widths"], name: string): TableData["wi
 function decimalsWithout(decimals: TableData["decimals"], name: string): TableData["decimals"] {
   if (!decimals || decimals[name] === undefined) return decimals;
   const { [name]: _, ...rest } = decimals;
+  return Object.keys(rest).length ? rest : undefined;
+}
+
+function variableTypesWithout(
+  types: TableData["variableTypes"],
+  name: string,
+): TableData["variableTypes"] {
+  if (!types || types[name] === undefined) return types;
+  const { [name]: _, ...rest } = types;
+  return Object.keys(rest).length ? rest : undefined;
+}
+
+function levelOrderWithout(orders: TableData["levelOrder"], name: string): TableData["levelOrder"] {
+  if (!orders || orders[name] === undefined) return orders;
+  const { [name]: _, ...rest } = orders;
   return Object.keys(rest).length ? rest : undefined;
 }
 

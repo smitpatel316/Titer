@@ -38,9 +38,28 @@ const PARAM_NAMES = [
   "stratifyBy",
   "response",
   "groupBy",
+  // Newer column-name fields (Round 2 Issue 52): the extract/rearrange
+  // variables, the remove-baseline / normalize controls and column math,
+  // multifactor's factors, mixed-effects' fixed factors, the
+  // transform-concentrations column, and select-transform's columns.
+  "controls",
+  "column",
+  "columnMathA",
+  "columnMathB",
+  "factors",
+  "fixedFactors",
+  "grouping",
+  "subject",
+  "rowTitles",
+  "rowFactor",
+  "columnFactor",
+  "rowVariable",
+  "outcome",
+  "count",
+  "columns",
 ] as const;
 // prettier-ignore
-const OPTION_NAMES = ["xVariable", "yVariable", "volcanoX", "volcanoY", "volcanoLabel", "volcanoGroupA", "volcanoGroupB", "rightYDataset", "sets"] as const;
+const OPTION_NAMES = ["xVariable", "yVariable", "volcanoX", "volcanoY", "volcanoLabel", "volcanoGroupA", "volcanoGroupB", "rightYDataset", "sets", "bubbleSizeVariable", "bubbleColorVariable"] as const;
 
 /** `node` following a table edit's `move`; `columns`: the table's columns after it (a
  *  point in a column that is gone loses its style). */

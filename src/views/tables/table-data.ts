@@ -423,6 +423,7 @@ export function permuteColumns(data: TableData, order: number[]): TableData {
     columns: order.map((c) => data.columns[c]),
     rows: data.rows.map((row) => order.map((c) => row[c] ?? null)),
     excluded: remapExcluded(data, (r, c) => [r, at(c)]),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => [r, at(c)]),
     linkedPaste: data.linkedPaste ? { ...data.linkedPaste, col: at(data.linkedPaste.col) } : undefined,
   };
 }
@@ -449,7 +450,16 @@ export function dropColumns(data: TableData, columns: number[]): TableData {
       const to = at(c);
       return to < 0 ? null : [r, to];
     }),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => {
+      const to = at(c);
+      return to < 0 ? null : [r, to];
+    }),
     widths: widthsOf(data.widths, nextColumns),
+    decimals: decimalsOf(data.decimals, nextColumns),
+    variableTypes: variableTypesOfColumns(data.variableTypes, nextColumns),
+    // A deleted row-label source goes with its column.
+    labelVariable: data.labelVariable !== undefined && nextColumns.includes(data.labelVariable) ? data.labelVariable : undefined,
+    levelOrder: levelOrderOfColumns(data.levelOrder, nextColumns),
     linkedPaste: data.linkedPaste
       ? at(data.linkedPaste.col) < 0
         ? undefined
