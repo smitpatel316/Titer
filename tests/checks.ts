@@ -2244,7 +2244,7 @@ check("73: a frozen figure keeps its snapshot when its graph is re-frozen (Issue
     type: "figure",
     name: "Figure",
     parentId: null,
-    panels: [{ graphId: "g1", row: 0, col: 0 }],
+    panels: [{ graphId: "g1", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 }],
     grid: { rows: 1, cols: 1 },
     figureSize: { widthIn: 10, heightIn: 7.5 },
     labelStyle: { position: "top-left", fontSizePt: 12, bold: true },
