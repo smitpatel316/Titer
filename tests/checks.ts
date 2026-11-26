@@ -21386,6 +21386,55 @@ check("copy-68-75: graph/figure copy writes one multi-flavour pasteboard item, a
   ok(figureSrc.includes("writeVectorToClipboard(pdf, png)"), "copyFigureImage goes through the shared native write");
 });
 
+// Round 2 Issue 46 (Medium): the auto-updater's `download_update` and
+// `apply_update` were synchronous #[tauri::command] fns — curl
+// --max-time 900 and the ditto extraction ran on macOS's main thread,
+// freezing the UI for the whole download — and `download_update(url,
+// sha256, size)` accepted any https:// URL with caller-supplied
+// hash/size while `apply_update` swapped any caller-supplied zip whose
+// own version stamp matched. The fix resolves the artifact strictly
+// inside Rust from CHANNEL_MANIFEST_URL (the page passes nothing),
+// restricts curl redirects to https, runs both commands on a
+// blocking-pool thread, and makes apply re-hash the staged zip against
+// the manifest — a merely self-stamped zip no longer swaps over
+// Titer.app. Releases are unsigned, so there is no codesign check to
+// require; the manifest hash is the verification.
+check("updater-46: auto-updater resolves the artifact from the channel manifest and never blocks the main thread", () => {
+  const updater = readFileSync("src-tauri/src/updater.rs", "utf8");
+  // Both commands are async: the blocking work runs on a blocking-pool
+  // thread, so curl --max-time 900 / ditto extraction never park
+  // macOS's main thread.
+  ok(/pub async fn download_update/.test(updater), "download_update is async");
+  ok(/pub async fn apply_update/.test(updater), "apply_update is async on every platform");
+  ok(updater.includes("spawn_blocking"), "the blocking work runs on a blocking-pool thread");
+  // The artifact is resolved strictly inside Rust from the channel
+  // manifest: download_update takes no caller URL/hash/size.
+  ok(!/pub (async )?fn download_update\(url: String/.test(updater), "download_update takes no caller-supplied URL");
+  ok(!/fn download_update\([^)]*sha256/.test(updater), "download_update takes no caller-supplied hash");
+  ok(updater.includes("CHANNEL_MANIFEST_URL"), "the updater resolves the artifact from CHANNEL_MANIFEST_URL");
+  ok(updater.includes("is_channel_host_url"), "asset URLs are checked against the channel host");
+  ok(updater.includes("--proto-redir") && updater.includes("=https"), "curl redirects are restricted to https");
+  // apply_update verifies the staged zip against the manifest hash (not
+  // just its own version stamp) and only accepts the file
+  // download_update itself wrote.
+  const applyStart = updater.indexOf("fn apply_update_sync");
+  ok(applyStart >= 0, "apply_update_sync exists");
+  const applyBody = updater.slice(applyStart, updater.indexOf("\n}\n", applyStart));
+  ok(applyBody.includes("channel_update_asset"), "apply_update re-reads the manifest's promised asset");
+  ok(applyBody.includes("sha256_file"), "apply_update re-hashes the staged zip");
+  ok(applyBody.includes("path_is_within"), "apply_update only accepts the file download_update wrote");
+  ok(applyBody.includes("PlistBuddy"), "the 1.0.4 version-stamp guard still stands");
+  // Registration + frontend contract.
+  const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(mainRs.includes("updater::download_update,"), "download_update is registered");
+  ok(mainRs.includes("updater::apply_update,"), "apply_update is registered");
+  const nativeSrc = readFileSync("src/native.ts", "utf8");
+  ok(nativeSrc.includes('invoke<string>("download_update")'), "native.ts invokes download_update with no URL argument");
+  const updatesSrc = readFileSync("src/updates.ts", "utf8");
+  ok(updatesSrc.includes("await downloadUpdate()"), "installUpdate downloads with no caller-supplied asset fields");
+  ok(updatesSrc.includes("manifest.update"), "installUpdate still refuses when the manifest names no installable asset");
+});
+
 check("seq 216: BMP is 24-bit bottom-up BGR with DPI in the header", () => {
   const bmp = bmpEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200);
   strictEqual(String.fromCharCode(bmp[0]!, bmp[1]!), "BM");

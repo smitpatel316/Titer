@@ -790,10 +790,12 @@ export const openFileInDefaultApp = (path: string) => invoke<void>("open_file", 
 export const fetchChannelManifestText = (url: string) =>
   invoke<string>("fetch_channel_manifest", { url });
 
-/** Downloads the update asset to a temp file and checks its size and
- *  sha256 against the manifest; the temp path. */
-export const downloadUpdate = (url: string, sha256: string, size: number) =>
-  invoke<string>("download_update", { url, sha256, size });
+/** Downloads the update asset to a temp file and checks it against the
+ *  channel manifest; the temp path. The shell resolves the artifact
+ *  strictly from the channel manifest itself (Round 2 Issue 46) — the
+ *  page passes no URL, hash, or size, so a compromised webview cannot
+ *  point the updater at an arbitrary host. */
+export const downloadUpdate = () => invoke<string>("download_update");
 
 /** Verifies the downloaded asset's version stamp and stages the bundle
  *  swap. Resolves once the swap is staged; the caller then quits, and a

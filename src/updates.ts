@@ -87,7 +87,11 @@ async function installUpdate(version: string, manifest: ChannelManifest, forced:
     return;
   }
   try {
-    const path = await downloadUpdate(asset.url, asset.sha256, asset.size);
+    // The shell resolves the asset strictly from the channel manifest
+    // itself (Round 2 Issue 46): the page passes no URL, hash, or size.
+    // `asset` is still the guard that an installable asset exists at
+    // all — without it, the manual download.
+    const path = await downloadUpdate();
     await alert("Update Downloaded", `Titer ${version} is ready. Titer will restart to install it.`, "info");
     await applyUpdate(path, version);
     // The helper swaps the bundle once this process exits; quit through
