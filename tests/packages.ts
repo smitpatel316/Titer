@@ -403,22 +403,38 @@ await startR(fileURLToPath(new URL("../node_modules/webr/dist/", import.meta.url
   check("P-12 hung install rejects as timeout", kindOwner === "timeout", `kind=${kindOwner}`);
   check("P-12 concurrent joiner times out too", kindJoiner === "timeout", `kind=${kindJoiner}`);
   check("P-12 timed-out package is failed, not loading", packageStatus("deming").status === "failed");
-  // A different package must not queue behind the dead chain: its batch
-  // starts (gate released on eviction) and times out on its own.
+  // A different package must not queue behind the dead chain — and it must
+  // not start a fresh install on an already-spent budget either. R2-66
+  // (webr-survival): the claim phase above already spent this call's whole
+  // 2 s budget, so there is nothing left for an install; the old pin
+  // expected the batch to start and time out on its own, but that is the
+  // budget-doubling the R2-66 fix removed (a fresh full timeout per phase,
+  // up to 2x timeoutMs for one call). The correct post-fix behaviour is:
+  // the call times out, the package is failed, no batch starts — and the
+  // chain gate is still released, which the retry below proves by starting
+  // a fresh install.
   const startedBefore = packageDiagnostics().installsStarted;
   const kindOther = await timedKind(["mvtnorm"], 2000);
   check("P-12 other package times out, not hangs", kindOther === "timeout", `kind=${kindOther}`);
   check("P-12 other package is failed, not loading", packageStatus("mvtnorm").status === "failed");
   check(
-    "P-12 queued batch starts after eviction (chain advances)",
-    packageDiagnostics().installsStarted === startedBefore + 1,
+    "P-12 timed-out batch does not start on an exhausted budget (R2-66)",
+    packageDiagnostics().installsStarted === startedBefore,
     `started ${packageDiagnostics().installsStarted - startedBefore}`,
   );
   // The repo recovers: both retries start fresh installs and succeed.
   releaseHungRepo();
+  const startedBeforeRetry = packageDiagnostics().installsStarted;
   const retryDeming = await timedKind(["deming"], PACKAGE_INSTALL_TIMEOUT_MS, 110_000);
   check("P-12 retry after timeout succeeds", retryDeming === "resolved", `kind=${retryDeming}`);
   check("P-12 retried package is ready", packageStatus("deming").status === "ready");
+  // Chain advances after eviction: the retry's batch ran instead of
+  // queueing behind the dead one (the gate was released on eviction).
+  check(
+    "P-12 chain advances after eviction (retry starts fresh)",
+    packageDiagnostics().installsStarted === startedBeforeRetry + 1,
+    `started ${packageDiagnostics().installsStarted - startedBeforeRetry}`,
+  );
   const retryMvt = await timedKind(["mvtnorm"], PACKAGE_INSTALL_TIMEOUT_MS, 110_000);
   check("P-12 other-package retry succeeds", retryMvt === "resolved", `kind=${retryMvt}`);
   check("P-12 retried other package is ready", packageStatus("mvtnorm").status === "ready");

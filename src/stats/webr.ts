@@ -856,9 +856,13 @@ export async function ensurePackages(names: string[], opts?: { timeoutMs?: numbe
       // BUG-REPORT Round 2 #66: the claim phase above already spent part of
       // this call's budget — the install gets only what is left of the
       // deadline, not a fresh full timeout, or the call's total budget
-      // doubles. Nothing left means the race below fires instead.
+      // doubles. Nothing left means the call has run out of budget: the
+      // batch must fail as a timeout, not return as if the install had
+      // run — a bare return resolves the batch, so the caller reports
+      // success and the packages stay `loading` forever (P-12: a queued
+      // batch after eviction, and a joiner arriving after eviction).
       const remaining = deadline - Date.now();
-      if (remaining <= 0) return;
+      if (remaining <= 0) throw timeoutError(missing, timeoutMs);
       return installBatch(missing, cancel, remaining);
     });
     batch.then(
@@ -882,6 +886,32 @@ export async function ensurePackages(names: string[], opts?: { timeoutMs?: numbe
   // joined as well as its own batch. (Before B2, a caller that only joined
   // a hung install awaited it before the race and hung forever with no
   // timeout at all.)
+  //
+  // Time this call out: release the claims it won and evict the stuck
+  // batch. The claims must go on the timeout path too — the release below
+  // only runs when the race resolves, so a timed-out winner would
+  // otherwise hold its claim until the steal window and a retry would spin
+  // on it (P-12: the deming retry never got past the claim loop). The
+  // release eval is best-effort and fire-and-forget: it queues behind the
+  // hung install and runs when the engine frees, ahead of the retry's
+  // claim. Only this caller's won claims — never another window's live one.
+  const releaseAndEvict = (error: PackageError): void => {
+    const toRelease = wanted.filter((n) => won.includes(n));
+    if (toRelease.length) {
+      void evalNamedVector(releaseClaimCode(toRelease), { timeoutMs: PACKAGE_INSTALL_TIMEOUT_MS }).catch(() => {});
+    }
+    evictTimedOut(wanted, error);
+  };
+  // The deadline is already spent and the packages are not all ready: fail
+  // now instead of racing a 0 ms timer against the joined batch — the
+  // batch promise resolves first (a microtask beats the timer), so the call
+  // would resolve successfully for packages that never installed (P-12
+  // joiner). A call whose packages are all ready resolves normally.
+  if (deadline - Date.now() <= 0 && !wanted.every((n) => stateOf(n).status === "ready")) {
+    const error = timeoutError(wanted, timeoutMs);
+    releaseAndEvict(error);
+    throw error;
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   let timedOut = false;
   try {
@@ -900,7 +930,13 @@ export async function ensurePackages(names: string[], opts?: { timeoutMs?: numbe
       }),
     ]);
   } catch (err) {
-    if (timedOut) evictTimedOut(wanted, err as PackageError);
+    // A timeout — from the wait race (`timedOut`) or from a batch that ran
+    // out of budget before it could start — evicts the stuck batch and
+    // releases this caller's claims (see releaseAndEvict above). Any other
+    // rejection is not a timeout and evicts nothing.
+    if (timedOut || (err instanceof PackageError && err.kind === "timeout")) {
+      releaseAndEvict(err as PackageError);
+    }
     throw err;
   } finally {
     clearTimeout(timer);
@@ -941,11 +977,21 @@ export async function ensurePackages(names: string[], opts?: { timeoutMs?: numbe
  *    (only while still `loading` — a package that already resolved `ready`
  *    is never clobbered).
  *  Idempotent: a second caller evicting the same packages finds no ticket
- *  and does nothing, so the owning caller's own timeout is a harmless no-op. */
+ *  and does nothing, so the owning caller's own timeout is a harmless no-op.
+ *  One exception: a batch that threw before its install started (its budget
+ *  was already spent) settles — and its ticket is cleaned up — before the
+ *  catch runs, so a package can be `loading` with no ticket. That package
+ *  still failed by timeout and is marked so; a package that is already
+ *  `failed` or `ready` is never touched. */
 function evictTimedOut(names: string[], error: PackageError): void {
   for (const name of names) {
     const ticket = inflight.get(name);
-    if (!ticket) continue;
+    if (!ticket) {
+      if (stateOf(name).status === "loading") {
+        states.set(name, { status: "failed", error: error.message, kind: "timeout" });
+      }
+      continue;
+    }
     ticket.cancel.current = true;
     ticket.releaseGate();
     inflight.delete(name);
