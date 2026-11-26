@@ -454,6 +454,7 @@ import {
   type OfficeTarget,
 } from "../src/lib/office-export";
 import {
+  MAX_IMPORT_ROWS,
   detectDelimiter,
   excelSerialToIso,
   importTabularFile,
@@ -36518,6 +36519,113 @@ check("import-155: appending works only when the shapes match", () => {
   );
   strictEqual(mergeIntoTable(existing, "column", xy), null);
 });
+
+// Seq 481 (Round 2 Issue 23): a custom number format is a date format
+// only when its date/time tokens sit outside literal text. The `d` in
+// `[Red]`, the `m` in `"nM"` / `[$CHF]` and the `s` in `"mg/mL"` are
+// literals, so `0.00;[Red]-0.00`, `0.0 "nM"` and `"USD" #,##0.00` must
+// import their numbers as numbers — not as 1900-era date strings. A
+// genuine date format (`yyyy-mm-dd`) still reads as a date.
+check(
+  "import-481: custom number formats with [Red], currency codes or unit suffixes import as numbers, not dates",
+  async () => {
+    const xlsxWithFormat = async (formatCode: string): Promise<Uint8Array> => {
+      const zip = new JSZip();
+      zip.file(
+        "xl/workbook.xml",
+        `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+      );
+      zip.file(
+        "xl/_rels/workbook.xml.rels",
+        `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+      );
+      zip.file(
+        "xl/styles.xml",
+        `<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts><numFmt numFmtId="164" formatCode='${formatCode}'/></numFmts><cellXfs><xf numFmtId="0"/><xf numFmtId="164"/></cellXfs></styleSheet>`,
+      );
+      zip.file(
+        "xl/worksheets/sheet1.xml",
+        `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="1"><v>12.5</v></c><c r="B1" s="1"><v>100</v></c><c r="C1" s="1"><v>-3.4</v></c></row></sheetData></worksheet>`,
+      );
+      return zip.generateAsync({ type: "uint8array" });
+    };
+    for (const code of ["0.00;[Red]-0.00", '0.0 "nM"', '"USD" #,##0.00', '0.0 "mg/mL"', "[$CHF] #,##0.00"]) {
+      const parsed = await parseXlsx(await xlsxWithFormat(code));
+      deepStrictEqual(parsed.sheet.rows[0], ["12.5", "100", "-3.4"], `format ${code} read its numbers as dates`);
+    }
+    // Positive control: a real date format still converts the serial.
+    const dated = await parseXlsx(await xlsxWithFormat("yyyy-mm-dd"));
+    deepStrictEqual(dated.sheet.rows[0], ["1900-01-11 12:00", "1900-04-09", "1899-12-26 14:24"]);
+  },
+);
+
+// Seq 482 (Round 2 Issue 24): the .xlsx reader must survive the XML
+// real files contain — a self-closing <row .../> still occupies its row
+// (the next row's cells don't shift up), a self-closing <t/> is an empty
+// shared-string run (not an opening tag swallowing the next string),
+// out-of-range numeric entities don't crash the import, and a 200k-row
+// file truncates to MAX_IMPORT_ROWS instead of overflowing the stack.
+check(
+  "import-482: self-closing <row/> and <t/> don't corrupt rows, huge imports truncate, malformed entities don't crash",
+  async () => {
+    const xlsx = async (sheetXml: string, sharedStrings?: string): Promise<Uint8Array> => {
+      const zip = new JSZip();
+      zip.file(
+        "xl/workbook.xml",
+        `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+      );
+      zip.file(
+        "xl/_rels/workbook.xml.rels",
+        `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+      );
+      zip.file(
+        "xl/styles.xml",
+        `<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs><xf numFmtId="0"/></cellXfs></styleSheet>`,
+      );
+      zip.file("xl/worksheets/sheet1.xml", sheetXml);
+      if (sharedStrings !== undefined) zip.file("xl/sharedStrings.xml", sharedStrings);
+      return zip.generateAsync({ type: "uint8array" });
+    };
+    const selfRow = await parseXlsx(
+      await xlsx(
+        `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="2" ht="15"/><row r="3"><c r="A3"><v>42</v></c></row></sheetData></worksheet>`,
+      ),
+    );
+    deepStrictEqual(selfRow.sheet.rows, [["1"], [], ["42"]]);
+    const selfT = await parseXlsx(
+      await xlsx(
+        `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData></worksheet>`,
+        `<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="2" uniqueCount="2"><si><t/><t>hello</t></si><si><t>world</t></si></sst>`,
+      ),
+    );
+    deepStrictEqual(selfT.sheet.rows, [["hello"]]);
+    // Out-of-range / lone-surrogate entities import literally, not as a
+    // RangeError; a valid entity still decodes.
+    const entities = await parseXlsx(
+      await xlsx(
+        `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c></row></sheetData></worksheet>`,
+        `<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="3" uniqueCount="3"><si><t>A&#x110000;B</t></si><si><t>C&#xD800;D</t></si><si><t>E&#65;F</t></si></sst>`,
+      ),
+    );
+    deepStrictEqual(entities.sheet.rows, [["A&#x110000;B", "C&#xD800;D", "EAF"]]);
+    // 200k rows truncate to MAX_IMPORT_ROWS instead of throwing RangeError.
+    const big = rowsToTable(
+      Array.from({ length: 200_000 }, () => ["1", "2"]),
+      "big.csv",
+    );
+    strictEqual(big.data.rows.length, MAX_IMPORT_ROWS);
+    ok(
+      big.notes.some((n) => n.includes("Only the first")),
+      "truncation note missing",
+    );
+    // attrOf anchors the attribute name: `spans="1:3"` must not match `s`.
+    const tabular = readFileSync("src/lib/tabular-import.ts", "utf8");
+    ok(
+      tabular.includes(`(?:^|\\\\s)`) || tabular.includes(`(^|\\\\s)`),
+      "attrOf builds its attribute regex without anchoring the name",
+    );
+  },
+);
 
 check("import-155: the menu, picker, reader and drop route the new file types", () => {
   const menu = readFileSync("src/app-menu.ts", "utf8");

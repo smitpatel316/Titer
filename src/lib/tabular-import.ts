@@ -148,12 +148,21 @@ const decodeEntities = (s: string): string =>
     if (body === "quot") return '"';
     if (body === "apos") return "'";
     const code = body.startsWith("#x") ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-    return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+    // String.fromCodePoint throws (RangeError) on out-of-range code
+    // points and lone surrogates — a malformed entity such as
+    // &#x110000; or &#xD800; must not crash the import, so the entity
+    // is left as-is instead.
+    if (!Number.isFinite(code) || code < 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return m;
+    return String.fromCodePoint(code);
   });
 
-/** The value of attribute `name` in a tag's attribute text, if present. */
+/** The value of attribute `name` in a tag's attribute text, if present.
+ *  The name is anchored to the start of the text or to whitespace, so an
+ *  attribute whose name merely ends in `name` (e.g. `spans="1:3"` when
+ *  looking for `s`) never matches. */
 const attrOf = (attrs: string, name: string): string | undefined =>
-  new RegExp(`${name}\\s*=\\s*"([^"]*)"`).exec(attrs)?.[1] ?? new RegExp(`${name}\\s*=\\s*'([^']*)'`).exec(attrs)?.[1];
+  new RegExp(`(?:^|\\s)${name}\\s*=\\s*"([^"]*)"`).exec(attrs)?.[1] ??
+  new RegExp(`(?:^|\\s)${name}\\s*=\\s*'([^']*)'`).exec(attrs)?.[1];
 
 /** A spreadsheet column letter ("A", "AA") as a 0-based index. */
 const columnIndex = (letters: string): number => {
@@ -174,8 +183,26 @@ const DATE_BUILTIN_FMT_IDS = new Set([
 ]);
 
 /** Whether a custom format code is a date/time one: it carries date or time
- *  tokens (year, month, day, hour, minute, second). Number formats never do. */
-const isDateFormatCode = (code: string): boolean => /y{1,4}|m{1,2}|d{1,2}|h{1,2}|s{1,2}/i.test(code);
+ *  tokens (year, month, day, hour, minute, second) outside of literal
+ *  text. Number formats never do — but a raw test sees the date letters
+ *  hiding inside literals: the `d` in `[Red]`, the `m` in `"nM"` or
+ *  `[$CHF]`, the `s` in `"mg/mL"`. So everything that is literal text,
+ *  not a format token, is stripped first: quoted literals (`"nM"`),
+ *  backslash escapes (`\m`), `_x` spacing and `*x` fill (each consumes
+ *  the next character), and bracketed colour / currency / locale tokens
+ *  (`[Red]`, `[$USD-409]`, `[DBNum1]`). Elapsed-time brackets (`[h]`,
+ *  `[m]`, `[s]`) ARE date/time tokens, so they stay, as the letter. */
+const isDateFormatCode = (code: string): boolean => {
+  const stripped = code
+    .replace(/"[^"]*"/g, "")
+    .replace(/"[^"]*$/g, "")
+    .replace(/\\./g, "")
+    .replace(/_./g, "")
+    .replace(/\*./g, "")
+    .replace(/\[([hms])\]/gi, "$1")
+    .replace(/\[[^\]]*\]/g, "");
+  return /y{1,4}|m{1,2}|d{1,2}|h{1,2}|s{1,2}/i.test(stripped);
+};
 
 /** An Excel date serial as an ISO date ("2026-01-09", or "2026-01-09 14:30"
  *  when it carries a time). Serial 1 is 1900-01-01 in Excel's (leap-bug)
@@ -253,13 +280,15 @@ export async function parseXlsx(bytes: Uint8Array): Promise<{
   const sheetXml = await readPart(firstPath);
   if (sheetXml === null) throw new Error("This .xlsx file's first sheet couldn't be read.");
 
-  // Shared strings: each <si>'s text is all its <t> runs joined.
+  // Shared strings: each <si>'s text is all its <t> runs joined. A
+  // self-closing <t/> is an empty run — the pattern must not match it
+  // as an opening tag and swallow the XML through the next </t>.
   const sharedStrings: string[] = [];
   const shared = await readPart("xl/sharedStrings.xml");
   if (shared !== null) {
     for (const m of shared.matchAll(/<si>([\s\S]*?)<\/si>/g)) {
       let text = "";
-      for (const t of m[1].matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)) text += decodeEntities(t[1]);
+      for (const t of m[1].matchAll(/<t\b[^>]*?(?:\/>|>([\s\S]*?)<\/t>)/g)) text += decodeEntities(t[1] ?? "");
       sharedStrings.push(text);
     }
   }
@@ -289,17 +318,20 @@ export async function parseXlsx(bytes: Uint8Array): Promise<{
 
   // The sheet's rows. A cell's position comes from its `r` reference
   // ("B3"); one without it follows the previous cell. A missing row or
-  // cell is blank, so sparse sheets read with their gaps intact.
+  // cell is blank, so sparse sheets read with their gaps intact. A
+  // self-closing <row .../> is an empty row — it still occupies its
+  // position, so the next row's cells don't shift up into it.
   const rows: string[][] = [];
   let errorCells = 0;
-  for (const rowMatch of sheetXml.matchAll(/<row\b([^>]*?)>([\s\S]*?)<\/row>/g)) {
+  for (const rowMatch of sheetXml.matchAll(/<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g)) {
     const rowAttrs = rowMatch[1];
+    const rowInner = rowMatch[2] ?? "";
     const rowRef = attrOf(rowAttrs, "r");
     const rowIndex = rowRef !== undefined ? parseInt(rowRef, 10) - 1 : rows.length;
     while (rows.length <= rowIndex) rows.push([]);
     const row = rows[rowIndex];
     let nextCol = 0;
-    for (const cellMatch of rowMatch[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    for (const cellMatch of rowInner.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
       const cellAttrs = cellMatch[1];
       const inner = cellMatch[2] ?? "";
       const ref = attrOf(cellAttrs, "r");
@@ -314,7 +346,7 @@ export async function parseXlsx(bytes: Uint8Array): Promise<{
         row[col] = Number.isFinite(idx) ? (sharedStrings[idx] ?? "") : "";
       } else if (type === "inlineStr" || type === "str") {
         let text = "";
-        for (const t of inner.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)) text += decodeEntities(t[1]);
+        for (const t of inner.matchAll(/<t\b[^>]*?(?:\/>|>([\s\S]*?)<\/t>)/g)) text += decodeEntities(t[1] ?? "");
         row[col] = text === "" ? decodeEntities(value) : text;
       } else if (type === "b") {
         row[col] = value === "1" || value.toLowerCase() === "true" ? "TRUE" : "FALSE";
@@ -370,7 +402,11 @@ export function rowsToTable(rows: string[][], source: string, header?: boolean):
   let grid = rows.filter((row) => row.some((c) => c !== ""));
   while (grid.length && grid[grid.length - 1].every((c) => c === "")) grid.pop();
   if (grid.length === 0) throw new Error(`“${source}” has no data to import.`);
-  let width = Math.max(...grid.map((r) => r.length));
+  // A plain loop, not Math.max(...lengths): spreading 200k rows onto the
+  // call stack throws RangeError before the MAX_IMPORT_ROWS truncation
+  // below ever runs.
+  let width = 0;
+  for (const r of grid) if (r.length > width) width = r.length;
   let lastCol = width - 1;
   while (lastCol > 0 && grid.every((r) => (r[lastCol] ?? "") === "")) lastCol--;
   width = lastCol + 1;
@@ -419,9 +455,7 @@ export function rowsToTable(rows: string[][], source: string, header?: boolean):
   const firstColValues = body.map((r) => r[0] ?? "");
   const firstColText = firstColValues.every((c) => c === "" || parseCell(c) === null);
   const titlesColumn =
-    width > 1 &&
-    firstColText &&
-    (headerRow || body.some((r) => r.slice(1).some((c) => parseCell(c) !== null)));
+    width > 1 && firstColText && (headerRow || body.some((r) => r.slice(1).some((c) => parseCell(c) !== null)));
   const titleNames = titlesColumn ? firstColValues : body.map(() => "");
   const dataColumns = titlesColumn ? width - 1 : width;
   if (dataColumns < 1) throw new Error(`“${source}” has no data columns to import.`);
