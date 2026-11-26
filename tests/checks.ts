@@ -19472,6 +19472,50 @@ check("seq 216: vector PDF keeps the drawing vector (no image XObject)", () => {
   strictEqual((stream.match(/W n/g) ?? []).length, 1, "one clip for the clipped group");
 });
 
+check("seq 546: vector PDF keeps Greek glyphs (γ, α) in axis labels", () => {
+  // Mansi's flow-cytokine labels (IFNγ, TNFα) rendered in the UI and in
+  // PNG, but the vector PDF dropped the Greek: the converter wrote every
+  // non-ASCII string as a UTF-16BE hex string for a plain Type1
+  // Helvetica, whose single-byte encoding has no Greek glyphs. The fix
+  // draws Greek runs in the base-14 /Symbol font (γ is Symbol's byte
+  // for 'g', α for 'a') with a /ToUnicode CMap, and Latin-1/WinAnsi
+  // characters as single WinAnsi bytes — the PDF stays vector and the
+  // glyphs survive. Synthetic labels only; no user project file.
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><rect x="0" y="0" width="640" height="480" fill="#ffffff"/><text x="320" y="470" text-anchor="middle" font-family="Arial" font-size="12" fill="#000000">IFNγ (% CD4 T cells)</text><text x="320" y="40" text-anchor="middle" font-family="Arial" font-size="14" font-weight="bold" fill="#111111">TNFα response</text><text x="20" y="100" font-family="Arial" font-size="12" fill="#000000">Dose ± 5 °C</text></svg>`;
+  const pdf = svgToPdf(svg);
+  const raw = new TextDecoder().decode(pdf);
+  const stream = pdfContentStream(pdf);
+  // No UTF-16BE hex strings any more: every non-ASCII glyph is a single
+  // byte in a font that owns it.
+  ok(!stream.includes("<feff"), "no UTF-16BE hex string in the content stream");
+  ok(!stream.toLowerCase().includes("03b3"), "no UTF-16BE γ code in the stream");
+  // The Greek runs draw in /Symbol, between their Latin runs.
+  ok(raw.includes("/BaseFont /Symbol"), "the PDF declares the Symbol font");
+  ok(stream.includes("/F7 12 Tf"), "the axis label's Greek run uses Symbol");
+  ok(stream.includes("/F7 14 Tf"), "the bold title's Greek run uses Symbol");
+  ok(stream.includes("(IFN"), "the Latin run before γ is drawn");
+  ok(stream.includes("(g) Tj"), "γ is drawn as Symbol's byte for 'g'");
+  ok(stream.includes("(TNF"), "the Latin run before α is drawn");
+  ok(stream.includes("(a) Tj"), "α is drawn as Symbol's byte for 'a'");
+  ok(stream.includes("( response)"), "the Latin run after α is drawn");
+  ok(stream.includes("( \\(% CD4 T cells\\))"), "parens in the same label stay escaped");
+  // WinAnsi characters in the same export draw as single WinAnsi bytes.
+  ok(raw.includes("/Encoding /WinAnsiEncoding"), "Latin fonts declare WinAnsiEncoding");
+  ok(stream.includes("\\261"), "± is drawn as its WinAnsi byte");
+  ok(stream.includes("\\260"), "° is drawn as its WinAnsi byte");
+  // The ToUnicode CMap lets copy-paste and text extraction read the
+  // Greek back instead of the Symbol bytes' Latin letters.
+  ok(raw.includes("/ToUnicode"), "the Symbol font carries a ToUnicode CMap");
+  ok(raw.includes("<67> <03B3>"), "the CMap maps Symbol 'g' back to γ");
+  ok(raw.includes("<61> <03B1>"), "the CMap maps Symbol 'a' back to α");
+  // Still true vector: no raster image smuggled in.
+  ok(!raw.includes("/Subtype /Image"), "the Greek PDF stays vector");
+  // A glyph no base-14 font owns refuses vector output instead of
+  // dropping it — the callers fall back to the raster PDF, which keeps it.
+  const cyrillic = seq216Svg.replace("Dose (nM)", "Доза (nM)");
+  throws(() => svgToPdf(cyrillic), VectorExportError);
+});
+
 check("seq 216: vector PDF in grayscale has no RGB operators; CMYK has CMYK operators", () => {
   // Operators start their line, so the patterns anchor at a line start.
   const gray = pdfContentStream(svgToPdf(seq216Svg, { colorMode: "grayscale" }));
