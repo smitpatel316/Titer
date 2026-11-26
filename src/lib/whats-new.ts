@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 /** The news, newest first. */
 export const WHAT_S_NEW: WhatsNewEntry[] = [
   {
+    version: "2.0.1",
+    title: "Titer 2.0.1 — patch fixes",
+    items: [
+      "Keynote export fixed: graphs now export to a valid .key file that opens in Keynote.",
+      "Greek symbols in graph labels now render in exported PDFs, and super/subscript formatting is preserved.",
+      "Grouped-bars graph fixes, and Antigravity now sees all MCP tools by default, staying in sync as tools are added.",
+      "Citation support: Titer ships a CITATION.cff, and the Zenodo DOI for citing Titer mints with this release.",
+    ],
+  },
+  {
     version: "2.0.0",
     title: "Titer 2.0.0 — our public launch",
     items: [
