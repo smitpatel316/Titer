@@ -45,10 +45,11 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
+    pin::Pin,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::sync::Notify;
+use tokio::sync::{Notify, OwnedNotified};
 
 /// Default Plane issues endpoint (workspace `titer`, project id verified
 /// against the live API — the `...585414ae000e` id in older notes is wrong
@@ -318,13 +319,19 @@ pub fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
 pub enum Claim {
     /// Already filed within the TTL: the stored issue id + URL.
     Done((String, String)),
-    /// Another request is creating this issue right now: wait on the
-    /// notifier, then re-claim.
-    InFlight(Arc<Notify>),
-    /// This caller owns creation: it must call
+    /// Another request is creating this issue right now. The boxed
+    /// `OwnedNotified` future was created from the leader's notifier
+    /// AND registered (via `enable()`) while the set's lock was held,
+    /// so the leader's completion notification cannot be missed:
+    /// await it, then re-claim.
+    InFlight(Pin<Box<OwnedNotified>>),
+    /// This caller owns creation. The guard releases the in-flight
+    /// slot (and wakes waiters) when dropped, so a cancelled leader —
+    /// e.g. hyper dropping the handler future on client disconnect
+    /// mid `create_plane_issue` — can never leak the slot. Call
     /// [`DedupeSet::complete`] on success or [`DedupeSet::abandon`]
-    /// on failure to release the claim.
-    Claimed,
+    /// on failure; the guard's `Drop` is idempotent with both.
+    Claimed(InFlightGuard),
 }
 
 /// Bounded set of recently seen `feedback_id`s, each remembering the
@@ -333,9 +340,20 @@ pub enum Claim {
 /// claimed before the upstream call and released when it resolves —
 /// so concurrent retries of one id serialize on a single issue
 /// instead of each creating their own.
+///
+/// `seen` and `in_flight` live under ONE lock: checking the filed set
+/// and claiming the in-flight slot is a single atomic step, so no
+/// interleaving can let two concurrent same-id requests both pass
+/// (the old two-mutex split let a claim whose `seen` check ran before
+/// a completion and whose `in_flight` check ran after it slip through
+/// and double-create).
 pub struct DedupeSet {
-    inner: Mutex<HashMap<String, DedupeEntry>>,
-    in_flight: Mutex<HashMap<String, Arc<Notify>>>,
+    inner: Mutex<DedupeState>,
+}
+
+struct DedupeState {
+    seen: HashMap<String, DedupeEntry>,
+    in_flight: HashMap<String, Arc<Notify>>,
 }
 
 pub struct DedupeEntry {
@@ -344,54 +362,117 @@ pub struct DedupeEntry {
     pub inserted: Instant,
 }
 
+/// RAII guard for an in-flight claim: dropping it releases the slot.
+/// The stored `Notify` identifies the slot this guard owns, so the
+/// release is a no-op if the leader already completed/abandoned and a
+/// new request re-claimed the id in the meantime.
+pub struct InFlightGuard {
+    dedupe: Arc<DedupeSet>,
+    feedback_id: String,
+    notify: Arc<Notify>,
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.dedupe.release_if_mine(&self.feedback_id, &self.notify);
+    }
+}
+
 impl DedupeSet {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(HashMap::new()),
-            in_flight: Mutex::new(HashMap::new()),
+            inner: Mutex::new(DedupeState {
+                seen: HashMap::new(),
+                in_flight: HashMap::new(),
+            }),
         }
     }
 
     /// Atomically claim a `feedback_id`: the stored issue when already
-    /// filed, the in-flight notifier when another request is creating
-    /// it, or `Claimed` when this caller owns creation. The claim is
-    /// taken before any upstream await, so concurrent retries of the
-    /// same id serialize on one Plane issue.
-    pub fn claim(&self, feedback_id: &str) -> Claim {
-        if let Some(found) = self.get(feedback_id) {
-            return Claim::Done(found);
-        }
-        let mut in_flight = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
-        match in_flight.get(feedback_id) {
-            Some(notify) => Claim::InFlight(notify.clone()),
-            None => {
-                let notify = Arc::new(Notify::new());
-                in_flight.insert(feedback_id.to_string(), notify);
-                Claim::Claimed
+    /// filed, the in-flight wait future when another request is
+    /// creating it, or `Claimed` when this caller owns creation. The
+    /// whole check runs under the single set lock, and the waiter's
+    /// `OwnedNotified` is created and `enable()`d before that lock is
+    /// released — a completion cannot fire in between, so the wakeup
+    /// cannot be lost.
+    pub fn claim(self: &Arc<Self>, feedback_id: &str) -> Claim {
+        let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let now = Instant::now();
+        match state.seen.get(feedback_id) {
+            Some(entry) if now.duration_since(entry.inserted) < DEDUPE_TTL => {
+                return Claim::Done((entry.issue_id.clone(), entry.issue_url.clone()));
             }
+            Some(_) => {
+                state.seen.remove(feedback_id);
+            }
+            None => {}
         }
+        if let Some(notify) = state.in_flight.get(feedback_id) {
+            // Register the waiter BEFORE releasing the lock: the
+            // future is created from the leader's notifier and
+            // enable()d while the leader still cannot complete
+            // (completion needs this lock), so notify_waiters() can
+            // never fire with no waiter registered.
+            let mut notified = Box::pin(notify.clone().notified_owned());
+            let _ = notified.as_mut().enable();
+            return Claim::InFlight(notified);
+        }
+        let notify = Arc::new(Notify::new());
+        state
+            .in_flight
+            .insert(feedback_id.to_string(), notify.clone());
+        Claim::Claimed(InFlightGuard {
+            dedupe: Arc::clone(self),
+            feedback_id: feedback_id.to_string(),
+            notify,
+        })
     }
 
     /// Record a completed creation and wake any waiters, so they
     /// re-claim and get the stored issue.
     pub fn complete(&self, feedback_id: &str, issue_id: String, issue_url: String) {
-        self.insert(feedback_id.to_string(), issue_id, issue_url);
-        self.finish_in_flight(feedback_id);
+        let notify = {
+            let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            Self::insert_locked(&mut state, feedback_id.to_string(), issue_id, issue_url);
+            state.in_flight.remove(feedback_id)
+        };
+        if let Some(notify) = notify {
+            notify.notify_waiters();
+        }
     }
 
     /// Release a failed creation without recording it, waking waiters
     /// so a retry can claim the id for itself.
     pub fn abandon(&self, feedback_id: &str) {
-        self.finish_in_flight(feedback_id);
+        let notify = {
+            let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            state.in_flight.remove(feedback_id)
+        };
+        if let Some(notify) = notify {
+            notify.notify_waiters();
+        }
     }
 
-    fn finish_in_flight(&self, feedback_id: &str) {
-        let notify = self
-            .in_flight
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(feedback_id);
-        if let Some(notify) = notify {
+    /// Guard `Drop` path: release the slot ONLY if this guard's
+    /// `Notify` is still the registered one. If the leader already
+    /// completed or abandoned and a new request re-claimed the id,
+    /// the stored notifier differs and the new owner's slot is left
+    /// alone.
+    fn release_if_mine(&self, feedback_id: &str, notify: &Arc<Notify>) {
+        let removed = {
+            let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            let mine = state
+                .in_flight
+                .get(feedback_id)
+                .map(|current| Arc::ptr_eq(current, notify))
+                .unwrap_or(false);
+            if mine {
+                state.in_flight.remove(feedback_id)
+            } else {
+                None
+            }
+        };
+        if let Some(notify) = removed {
             notify.notify_waiters();
         }
     }
@@ -400,14 +481,14 @@ impl DedupeSet {
     /// the id was seen within the TTL, else `None`. Expired entries are
     /// dropped on sight.
     pub fn get(&self, feedback_id: &str) -> Option<(String, String)> {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
-        match inner.get(feedback_id) {
+        match state.seen.get(feedback_id) {
             Some(entry) if now.duration_since(entry.inserted) < DEDUPE_TTL => {
                 Some((entry.issue_id.clone(), entry.issue_url.clone()))
             }
             Some(_) => {
-                inner.remove(feedback_id);
+                state.seen.remove(feedback_id);
                 None
             }
             None => None,
@@ -418,19 +499,31 @@ impl DedupeSet {
     /// first; if still at capacity, evicts the oldest entry so the set
     /// stays bounded.
     pub fn insert(&self, feedback_id: String, issue_id: String, issue_url: String) {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        Self::insert_locked(&mut state, feedback_id, issue_id, issue_url);
+    }
+
+    fn insert_locked(
+        state: &mut DedupeState,
+        feedback_id: String,
+        issue_id: String,
+        issue_url: String,
+    ) {
         let now = Instant::now();
-        inner.retain(|_, e| now.duration_since(e.inserted) < DEDUPE_TTL);
-        if inner.len() >= DEDUPE_CAPACITY && !inner.contains_key(&feedback_id) {
-            if let Some(oldest) = inner
+        state
+            .seen
+            .retain(|_, e| now.duration_since(e.inserted) < DEDUPE_TTL);
+        if state.seen.len() >= DEDUPE_CAPACITY && !state.seen.contains_key(&feedback_id) {
+            if let Some(oldest) = state
+                .seen
                 .iter()
                 .min_by_key(|(_, e)| e.inserted)
                 .map(|(k, _)| k.clone())
             {
-                inner.remove(&oldest);
+                state.seen.remove(&oldest);
             }
         }
-        inner.insert(
+        state.seen.insert(
             feedback_id,
             DedupeEntry {
                 issue_id,
@@ -675,6 +768,11 @@ async fn submit_feedback(
     // BEFORE awaiting Plane, so a concurrent retry of the same id waits
     // for this request's issue instead of creating a second one.
     let mut waits = 0u8;
+    // The leader's guard: bound here so it lives across the upstream
+    // await below. If this handler future is dropped first — hyper
+    // cancelling it on client disconnect — the guard's Drop releases
+    // the in-flight slot instead of leaking it.
+    let mut _leader_guard = None;
     loop {
         match state.dedupe.claim(&req.feedback_id) {
             Claim::Done((issue_id, issue_url)) => {
@@ -691,23 +789,25 @@ async fn submit_feedback(
                 )
                     .into_response();
             }
-            Claim::InFlight(notify) => {
+            Claim::InFlight(notified) => {
                 // Another request is creating this issue; wait for it,
-                // then re-claim. Bounded: the owner's upstream call
-                // times out at UPSTREAM_TIMEOUT, so one window covers
-                // it; after a few chained hand-offs the retry is told
-                // the upstream failed rather than waiting forever.
+                // then re-claim. The wait future was registered under
+                // the set lock, so the completion cannot be missed.
+                // Bounded: the owner's upstream call times out at
+                // UPSTREAM_TIMEOUT, so one window covers it; after a
+                // few chained hand-offs the retry is told the upstream
+                // failed rather than waiting forever.
                 waits += 1;
                 if waits > 4 {
                     return bad_gateway().into_response();
                 }
-                let _ = tokio::time::timeout(
-                    UPSTREAM_TIMEOUT + Duration::from_secs(5),
-                    notify.notified(),
-                )
-                .await;
+                let _ =
+                    tokio::time::timeout(UPSTREAM_TIMEOUT + Duration::from_secs(5), notified).await;
             }
-            Claim::Claimed => break,
+            Claim::Claimed(guard) => {
+                _leader_guard = Some(guard);
+                break;
+            }
         }
     }
     match create_plane_issue(&state, &req).await {
@@ -1347,6 +1447,113 @@ mod tests {
         );
         server.abort();
         mock.abort();
+    }
+
+    /// R2-87 pin (1): dropping the leader's claim — what hyper does to
+    /// the handler future when the client disconnects mid
+    /// `create_plane_issue` — must free the slot. Fails on the old
+    /// code (explicit cleanup only): the id stays in `in_flight` and
+    /// every retry stalls 35 s.
+    #[test]
+    fn dedupe_cancelled_leader_frees_slot() {
+        let dedupe = Arc::new(DedupeSet::new());
+        let leader = dedupe.claim("fb-87-leak");
+        assert!(
+            matches!(leader, Claim::Claimed(_)),
+            "first claim must own the slot"
+        );
+        drop(leader); // <- hyper cancelling the handler future mid-request
+        assert!(
+            matches!(dedupe.claim("fb-87-leak"), Claim::Claimed(_)),
+            "a cancelled leader must not leak its in_flight slot"
+        );
+    }
+
+    /// R2-87 pin (3): a waiter whose completion fires before it ever
+    /// polls must still wake. The wait future is registered under the
+    /// set lock, so completing the leader immediately after the waiter
+    /// claims — the exact lost-wakeup interleaving — resolves promptly
+    /// instead of hanging the full 35 s. Fails on the old code
+    /// (`notify_waiters()` fired with no waiter registered yet).
+    #[tokio::test]
+    async fn dedupe_waiter_does_not_miss_completion() {
+        let dedupe = Arc::new(DedupeSet::new());
+        let leader = dedupe.claim("fb-87-wake");
+        assert!(matches!(leader, Claim::Claimed(_)));
+        let waiter = match dedupe.claim("fb-87-wake") {
+            Claim::InFlight(waiter) => waiter,
+            _ => panic!("second claim must wait on the in-flight leader"),
+        };
+        // Leader completes BEFORE the waiter future is ever polled.
+        dedupe.complete(
+            "fb-87-wake",
+            "ISS-87".to_string(),
+            "http://x/ISS-87".to_string(),
+        );
+        drop(leader);
+        let woken = tokio::time::timeout(Duration::from_secs(2), waiter).await;
+        assert!(
+            woken.is_ok(),
+            "waiter missed the completion notification (lost wakeup)"
+        );
+        assert!(
+            matches!(dedupe.claim("fb-87-wake"), Claim::Done(_)),
+            "re-claim after the wake must return the stored issue"
+        );
+    }
+
+    /// R2-87 pin (2): concurrent same-id claims must yield exactly one
+    /// owner per round. Fails on the old two-mutex claim (a claim whose
+    /// `seen` check ran before the leader's completion and whose
+    /// `in_flight` check runs after it slips through and
+    /// double-creates). Hammered: 16 tasks x 300 fresh ids, barrier
+    /// start. Waiters re-claim on a short sleep instead of awaiting
+    /// the notifier, so this pin tests only the claim atomicity, not
+    /// the wakeup (covered by the pin above).
+    #[tokio::test]
+    async fn dedupe_concurrent_claims_have_one_owner() {
+        let dedupe = Arc::new(DedupeSet::new());
+        for round in 0..300u32 {
+            let id = format!("fb-87-race-{round}");
+            let creations = Arc::new(AtomicUsize::new(0));
+            let barrier = Arc::new(tokio::sync::Barrier::new(16));
+            let mut handles = Vec::new();
+            for _ in 0..16 {
+                let dedupe = dedupe.clone();
+                let id = id.clone();
+                let creations = creations.clone();
+                let barrier = barrier.clone();
+                handles.push(tokio::spawn(async move {
+                    barrier.wait().await;
+                    loop {
+                        match dedupe.claim(&id) {
+                            Claim::Done(_) => break,
+                            Claim::InFlight(_) => {
+                                tokio::time::sleep(Duration::from_millis(1)).await;
+                            }
+                            Claim::Claimed(guard) => {
+                                creations.fetch_add(1, Ordering::SeqCst);
+                                dedupe.complete(
+                                    &id,
+                                    "ISS-87".to_string(),
+                                    "http://x/ISS-87".to_string(),
+                                );
+                                drop(guard);
+                                break;
+                            }
+                        }
+                    }
+                }));
+            }
+            for handle in handles {
+                handle.await.unwrap();
+            }
+            assert_eq!(
+                creations.load(Ordering::SeqCst),
+                1,
+                "round {round}: more than one owner created issues for one feedback_id"
+            );
+        }
     }
 
     #[tokio::test]
