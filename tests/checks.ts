@@ -17977,7 +17977,7 @@ check("a figure's SVG export is one vector parent with labelled panels (F-03, F-
     { panels: panels!, grid: grid!, figureSize: figureSize!, labelStyle: labelStyle!, figureTitle: figureTitle!, sharedLegend: sharedLegend! },
   );
   strictEqual(missing, 0);
-  ok(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg" width="720" height="540"'));
+  ok(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg" width="720pt" height="540pt"'));
   ok(svg.includes("<text") && svg.includes(">A</text>") && svg.includes(">B</text>"), svg);
   strictEqual((svg.match(/<svg x="/g) ?? []).length, 2);
 });
@@ -19779,6 +19779,65 @@ check("seq 548: vector PDF/EPS draw super/subscripts as raised/lowered runs", ()
   ok(!eps.includes("(GFPhi)"), "EPS flattened the superscript");
   ok(eps.includes("(GFP) show") && eps.includes("(hi) show"), "EPS draws the base and script runs");
   ok(eps.includes("8.4 scalefont"), "EPS sets the 8.4pt script size");
+});
+
+check("seq 485 (r2-27): EPS text has a current point and clips do not leak", () => {
+  const textSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><text x="10" y="20" font-size="12">Hi</text><text x="100" y="20" font-size="12" text-anchor="middle">Mid</text></svg>`;
+  const epsText = new TextDecoder().decode(svgToEps(textSvg));
+  const translateIdx = epsText.indexOf("translate 1 -1 scale");
+  const showIdx = epsText.indexOf("show", translateIdx);
+  ok(epsText.slice(translateIdx, showIdx).includes("0 0 moveto"), "drawText establishes a current point before show/rmoveto");
+  const clipSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><defs><clipPath id="c"><rect x="0" y="0" width="50" height="50"/></clipPath></defs><g clip-path="url(#c)"><rect x="10" y="10" width="80" height="80" fill="#ff0000"/></g></svg>`;
+  const epsClip = new TextDecoder().decode(svgToEps(clipSvg));
+  const clipIdx = epsClip.indexOf("\nclip\n");
+  ok(clipIdx >= 0 && epsClip.slice(clipIdx, clipIdx + 200).includes("newpath"), "clipPath clears the clip path with newpath");
+  ok(epsClip.includes("newpath"), "drawPath starts with newpath");
+});
+
+check("seq 486 (r2-28): vector PDF/EPS keep non-ASCII text single-byte WinAnsi", () => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><text x="10" y="20" font-size="12">R² = 0.98</text><text x="10" y="40" font-size="12">Y = 2*X − 1 ± 0.5 µM °C ×2</text></svg>`;
+  const pdf = svgToPdf(svg);
+  const stream = pdfContentStream(pdf);
+  const raw = new TextDecoder("latin1").decode(pdf);
+  ok(!raw.includes("<feff") && !stream.includes("<feff"), "no UTF-16BE hex with BOM in the PDF");
+  ok(stream.includes("(R\\262 = 0.98)"), `² stays a WinAnsi byte in a literal Tj string: ${stream.match(/\(R[^)]*\) Tj/)}`);
+  ok(stream.includes("\\261") && stream.includes("\\265") && stream.includes("\\260") && stream.includes("\\327"), "± µ ° × stay WinAnsi bytes");
+  ok(raw.includes("/WinAnsiEncoding"), "Type1 fonts declare /WinAnsiEncoding");
+  const eps = new TextDecoder().decode(svgToEps(svg));
+  ok(!eps.includes("R²") && !eps.includes("−"), "no raw UTF-8 bytes in the PostScript strings");
+  ok(eps.includes("R\\262"), "EPS writes ² as a WinAnsi octal escape");
+});
+
+check("seq 487 (r2-29): vector export honours CSS px units, multiplies opacity, and grayscales colours not labels", () => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><text x="10" y="20" font-size="12px" fill="#000000">Hi</text><line x1="0" y1="50" x2="200" y2="50" stroke="#000000" stroke-width="2px" stroke-dasharray="9px, 3px"/></svg>`;
+  const eps = new TextDecoder().decode(svgToEps(svg));
+  ok(eps.includes("12 scalefont") && !eps.includes("16 scalefont"), "font-size 12px renders at 12pt, not the 16px fallback");
+  ok(eps.includes("2 setlinewidth"), "stroke-width 2px renders at 2pt, not the 1px fallback");
+  ok(eps.includes("[9 3] 0 setdash"), "stroke-dasharray '9px, 3px' renders dashed, not solid");
+  // A child at opacity 1 inside <g style="opacity: 0.4"> renders at 0.4:
+  // the red fill is blended 0.4 toward white (1, 0.6, 0.6), not full red.
+  const opSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><g style="opacity: 0.4"><rect x="10" y="10" width="80" height="80" fill="#ff0000" opacity="1"/></g></svg>`;
+  const opEps = new TextDecoder().decode(svgToEps(opSvg));
+  ok(opEps.includes("1 0.6 0.6 setrgbcolor"), `child opacity multiplies the parent group opacity: ${opEps.match(/[\d.]+ [\d.]+ [\d.]+ setrgbcolor/)}`);
+  const fig = grayscaleFigure({
+    data: [{ name: "Blue", x: [1], y: [2], marker: { color: "red" } }, { name: "Red", x: [1], y: [3] }],
+    layout: { title: { text: "Red" } },
+  });
+  strictEqual((fig.data[0] as { name: string }).name, "Blue", "a series named 'Blue' is a label, not a colour");
+  strictEqual(((fig.layout as { title: { text: string } }).title.text), "Red", "a title reading 'Red' is text, not a colour");
+  ok(((fig.data[0] as { marker: { color: string } }).marker.color) !== "red", "the actual marker colour is still grayscaled");
+});
+
+check("seq 488 (r2-30): multi-panel figure vector exports keep their configured physical size", () => {
+  const ptSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="720pt" height="540pt" viewBox="0 0 720 540"><rect x="0" y="0" width="720" height="540" fill="#ffffff"/></svg>`;
+  const pdf = new TextDecoder().decode(svgToPdf(ptSvg));
+  ok(pdf.includes("/MediaBox [0 0 720 540]"), `a 720pt × 540pt figure SVG keeps a 720 × 540 pt MediaBox: ${pdf.match(/\/MediaBox \[[^\]]*\]/)}`);
+  const eps = new TextDecoder().decode(svgToEps(ptSvg));
+  ok(eps.includes("%%BoundingBox: 0 0 720 540"), "a 720pt × 540pt figure SVG keeps a 720 × 540 BoundingBox");
+  // And a plain px SVG still converts at 72/96 (640×480 px → 480×360 pt).
+  ok(new TextDecoder().decode(svgToPdf(seq216Svg)).includes("/MediaBox [0 0 480 360]"), "unitless px SVGs still convert at 72/96");
+  const figSrc = readFileSync("src/lib/figure.ts", "utf8");
+  ok(figSrc.includes('width="${widthPt}pt"'), "composeFigureSvg emits its size with pt units");
 });
 
 check("copy-431: graph/figure copy writes a vector PDF item with a PNG fallback", async () => {
