@@ -48,6 +48,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use tokio::sync::Notify;
 
 /// Default Plane issues endpoint (workspace `titer`, project id verified
 /// against the live API — the `...585414ae000e` id in older notes is wrong
@@ -71,6 +72,16 @@ pub const GLOBAL_BURST: f64 = 100.0;
 pub const GLOBAL_REFILL_PER_HOUR: f64 = 100.0;
 /// Dedupe set: maximum entries kept.
 pub const DEDUPE_CAPACITY: usize = 1000;
+/// Rate limiter: maximum per-IP buckets kept. A bucket idle long enough
+/// to refill fully is evicted on sight (it is indistinguishable from a
+/// fresh bucket); the cap bounds bursts of distinct IPs inside that
+/// window by evicting the least-recently-seen bucket.
+pub const MAX_PER_IP_BUCKETS: usize = 10_000;
+/// A per-IP bucket idle this long has refilled to full
+/// (`RATE_BURST / RATE_REFILL_PER_HOUR` hours), so evicting it changes
+/// no admission decision.
+const PER_IP_IDLE_EVICT: Duration =
+    Duration::from_secs((RATE_BURST / RATE_REFILL_PER_HOUR * 3600.0) as u64);
 /// Dedupe set: how long an entry lives.
 pub const DEDUPE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 /// Validation caps (mirror the `titer_send_feedback` client caps).
@@ -175,11 +186,31 @@ impl Bucket {
         }
     }
 
+    /// Token count after refilling up to `now`, without mutating.
+    fn refilled_tokens(&self, capacity: f64, refill_per_hour: f64, now: Instant) -> f64 {
+        let elapsed_h = now.duration_since(self.last).as_secs_f64() / 3600.0;
+        (self.tokens + elapsed_h * refill_per_hour).min(capacity)
+    }
+
+    /// Non-consuming check: would one token be available right now?
+    /// Returns `Ok(())`, or the seconds until the next whole token
+    /// refills. Used to peek at both buckets before spending either,
+    /// so a request rejected by one bucket burns no token from the
+    /// other.
+    fn peek_take(&self, capacity: f64, refill_per_hour: f64, now: Instant) -> Result<(), u64> {
+        let tokens = self.refilled_tokens(capacity, refill_per_hour, now);
+        if tokens >= 1.0 {
+            Ok(())
+        } else {
+            let wait = ((1.0 - tokens) / refill_per_hour * 3600.0).ceil() as u64;
+            Err(wait.max(1))
+        }
+    }
+
     /// Refill and try to consume one token. Returns `Ok(())`, or the
     /// seconds until the next whole token refills.
     fn try_take(&mut self, capacity: f64, refill_per_hour: f64, now: Instant) -> Result<(), u64> {
-        let elapsed_h = now.duration_since(self.last).as_secs_f64() / 3600.0;
-        self.tokens = (self.tokens + elapsed_h * refill_per_hour).min(capacity);
+        self.tokens = self.refilled_tokens(capacity, refill_per_hour, now);
         self.last = now;
         if self.tokens >= 1.0 {
             self.tokens -= 1.0;
@@ -201,27 +232,64 @@ impl RateLimiter {
         }
     }
 
+    /// Admit a request only when BOTH buckets have a token, and spend
+    /// from neither when either refuses. Both buckets are peeked
+    /// (non-consuming) first, then both take one token: a request
+    /// rejected by the per-IP bucket spends no global token, so a
+    /// single blocked IP cannot drain the shared budget, and a request
+    /// rejected by the global bucket spends no per-IP token either.
+    /// A missing per-IP bucket is full, and no bucket is created for
+    /// a rejected request.
     pub fn check(&self, ip: IpAddr) -> Result<(), u64> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
-        // Check the global bucket first so a globally-capped request does
-        // not burn a per-IP token.
-        let global_wait = match inner.global.try_take(GLOBAL_BURST, GLOBAL_REFILL_PER_HOUR, now) {
-            Ok(()) => None,
-            Err(wait) => Some(wait),
-        };
-        if let Some(wait) = global_wait {
-            return Err(wait);
-        }
-        let bucket = inner.per_ip.entry(ip).or_insert_with(|| Bucket::new(RATE_BURST));
-        match bucket.try_take(RATE_BURST, RATE_REFILL_PER_HOUR, now) {
-            Ok(()) => Ok(()),
-            Err(wait) => {
-                // The global token is already spent; that is acceptable —
-                // the global bucket refills far faster than the per-IP one.
-                Err(wait)
+        // Evict idle buckets first: one idle long enough to have
+        // refilled to full is indistinguishable from a fresh bucket,
+        // so dropping it changes no admission decision and keeps the
+        // map bounded against distinct-IP scans.
+        inner
+            .per_ip
+            .retain(|_, b| now.duration_since(b.last) < PER_IP_IDLE_EVICT);
+        // Peek at the per-IP bucket before spending anything.
+        if let Some(bucket) = inner.per_ip.get(&ip) {
+            if let Err(wait) = bucket.peek_take(RATE_BURST, RATE_REFILL_PER_HOUR, now) {
+                return Err(wait);
             }
         }
+        // Then peek at the global bucket: a globally-capped request
+        // must not burn a per-IP token either.
+        if let Err(wait) = inner
+            .global
+            .peek_take(GLOBAL_BURST, GLOBAL_REFILL_PER_HOUR, now)
+        {
+            return Err(wait);
+        }
+        // Both buckets admit the request: consume one token from each.
+        // Both peeks just passed under this lock, so neither take can
+        // fail.
+        let _ = inner
+            .global
+            .try_take(GLOBAL_BURST, GLOBAL_REFILL_PER_HOUR, now);
+        // Enforce the hard cap before inserting a new per-IP bucket:
+        // evict the least-recently-seen bucket so the map stays
+        // bounded even under a burst of distinct IPs inside the idle
+        // window.
+        if !inner.per_ip.contains_key(&ip) && inner.per_ip.len() >= MAX_PER_IP_BUCKETS {
+            if let Some(oldest) = inner
+                .per_ip
+                .iter()
+                .min_by_key(|(_, b)| b.last)
+                .map(|(k, _)| *k)
+            {
+                inner.per_ip.remove(&oldest);
+            }
+        }
+        let bucket = inner
+            .per_ip
+            .entry(ip)
+            .or_insert_with(|| Bucket::new(RATE_BURST));
+        let _ = bucket.try_take(RATE_BURST, RATE_REFILL_PER_HOUR, now);
+        Ok(())
     }
 }
 
@@ -246,11 +314,28 @@ pub fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
 
 // ── Dedupe set ────────────────────────────────────────────────────────────
 
+/// Outcome of claiming a `feedback_id` for creation.
+pub enum Claim {
+    /// Already filed within the TTL: the stored issue id + URL.
+    Done((String, String)),
+    /// Another request is creating this issue right now: wait on the
+    /// notifier, then re-claim.
+    InFlight(Arc<Notify>),
+    /// This caller owns creation: it must call
+    /// [`DedupeSet::complete`] on success or [`DedupeSet::abandon`]
+    /// on failure to release the claim.
+    Claimed,
+}
+
 /// Bounded set of recently seen `feedback_id`s, each remembering the
 /// Plane issue it created so a client retry returns the same `201`
-/// without creating a second issue.
+/// without creating a second issue. It also tracks in-flight ids —
+/// claimed before the upstream call and released when it resolves —
+/// so concurrent retries of one id serialize on a single issue
+/// instead of each creating their own.
 pub struct DedupeSet {
     inner: Mutex<HashMap<String, DedupeEntry>>,
+    in_flight: Mutex<HashMap<String, Arc<Notify>>>,
 }
 
 pub struct DedupeEntry {
@@ -263,6 +348,51 @@ impl DedupeSet {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
+            in_flight: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Atomically claim a `feedback_id`: the stored issue when already
+    /// filed, the in-flight notifier when another request is creating
+    /// it, or `Claimed` when this caller owns creation. The claim is
+    /// taken before any upstream await, so concurrent retries of the
+    /// same id serialize on one Plane issue.
+    pub fn claim(&self, feedback_id: &str) -> Claim {
+        if let Some(found) = self.get(feedback_id) {
+            return Claim::Done(found);
+        }
+        let mut in_flight = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+        match in_flight.get(feedback_id) {
+            Some(notify) => Claim::InFlight(notify.clone()),
+            None => {
+                let notify = Arc::new(Notify::new());
+                in_flight.insert(feedback_id.to_string(), notify);
+                Claim::Claimed
+            }
+        }
+    }
+
+    /// Record a completed creation and wake any waiters, so they
+    /// re-claim and get the stored issue.
+    pub fn complete(&self, feedback_id: &str, issue_id: String, issue_url: String) {
+        self.insert(feedback_id.to_string(), issue_id, issue_url);
+        self.finish_in_flight(feedback_id);
+    }
+
+    /// Release a failed creation without recording it, waking waiters
+    /// so a retry can claim the id for itself.
+    pub fn abandon(&self, feedback_id: &str) {
+        self.finish_in_flight(feedback_id);
+    }
+
+    fn finish_in_flight(&self, feedback_id: &str) {
+        let notify = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(feedback_id);
+        if let Some(notify) = notify {
+            notify.notify_waiters();
         }
     }
 
@@ -541,27 +671,53 @@ async fn submit_feedback(
     }
     // A retry of an already-filed report returns the original issue —
     // never a second one. (Checked after validation so a malformed retry
-    // still gets its 400.)
-    if let Some((issue_id, issue_url)) = state.dedupe.get(&req.feedback_id) {
-        state.log(format!(
-            "feedback_duplicate issue_id={issue_id} path=/api/v1/feedback"
-        ));
-        return (
-            StatusCode::CREATED,
-            Json(FeedbackResponse {
-                feedback_id: req.feedback_id,
-                issue_id,
-                issue_url,
-            }),
-        )
-            .into_response();
+    // still gets its 400.) The id is claimed in the in_flight set
+    // BEFORE awaiting Plane, so a concurrent retry of the same id waits
+    // for this request's issue instead of creating a second one.
+    let mut waits = 0u8;
+    loop {
+        match state.dedupe.claim(&req.feedback_id) {
+            Claim::Done((issue_id, issue_url)) => {
+                state.log(format!(
+                    "feedback_duplicate issue_id={issue_id} path=/api/v1/feedback"
+                ));
+                return (
+                    StatusCode::CREATED,
+                    Json(FeedbackResponse {
+                        feedback_id: req.feedback_id,
+                        issue_id,
+                        issue_url,
+                    }),
+                )
+                    .into_response();
+            }
+            Claim::InFlight(notify) => {
+                // Another request is creating this issue; wait for it,
+                // then re-claim. Bounded: the owner's upstream call
+                // times out at UPSTREAM_TIMEOUT, so one window covers
+                // it; after a few chained hand-offs the retry is told
+                // the upstream failed rather than waiting forever.
+                waits += 1;
+                if waits > 4 {
+                    return bad_gateway().into_response();
+                }
+                let _ = tokio::time::timeout(
+                    UPSTREAM_TIMEOUT + Duration::from_secs(5),
+                    notify.notified(),
+                )
+                .await;
+            }
+            Claim::Claimed => break,
+        }
     }
     match create_plane_issue(&state, &req).await {
         Ok(issue_id) => {
             let issue_url = issue_url_for(&state.plane_url, &issue_id);
-            state
-                .dedupe
-                .insert(req.feedback_id.clone(), issue_id.clone(), issue_url.clone());
+            state.dedupe.complete(
+                &req.feedback_id,
+                issue_id.clone(),
+                issue_url.clone(),
+            );
             state.log(format!(
                 "feedback_created issue_id={issue_id} path=/api/v1/feedback"
             ));
@@ -575,7 +731,12 @@ async fn submit_feedback(
             )
                 .into_response()
         }
-        Err(e) => e.into_response(),
+        Err(e) => {
+            // Release the in-flight claim so a retry can claim the id
+            // for itself instead of waiting on a failed creation.
+            state.dedupe.abandon(&req.feedback_id);
+            e.into_response()
+        }
     }
 }
 
@@ -686,6 +847,19 @@ mod tests {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({"detail": "boom"})),
                 ),
+                "[feedback] slow-plane" => {
+                    // Deliberately slow upstream (500 ms): concurrent
+                    // retries of the same id must serialize on the
+                    // in-flight claim, not double-create.
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    (
+                        StatusCode::CREATED,
+                        Json(serde_json::json!({
+                            "id": "ISSUE-ID-SENTINEL-8d2f",
+                            "name": name,
+                        })),
+                    )
+                }
                 "[feedback] escape-me <script>alert(1)</script>" => {
                     assert!(
                         desc.contains("&lt;script&gt;alert(1)&lt;/script&gt;"),
@@ -1059,6 +1233,117 @@ mod tests {
             calls.load(Ordering::SeqCst),
             1,
             "a retry must not create a second Plane issue"
+        );
+        server.abort();
+        mock.abort();
+    }
+
+    /// R2-8 pin: a per-IP-blocked attacker must not drain the shared
+    /// global bucket. Fails on the old `check` (global token spent
+    /// before the per-IP check, never refunded): 10 admitted calls +
+    /// 90 per-IP-rejected calls spend all 100 global tokens, so the
+    /// fresh IP is capped too.
+    #[test]
+    fn per_ip_rejections_do_not_spend_global_tokens() {
+        let limiter = RateLimiter::new();
+        let attacker: IpAddr = "203.0.113.7".parse().unwrap();
+        // Spend the attacker's whole per-IP burst (10 calls consume 10
+        // global tokens too).
+        for _ in 0..RATE_BURST as usize {
+            assert!(limiter.check(attacker).is_ok());
+        }
+        // 90 more calls from the blocked attacker: per-IP rejects each
+        // one. None may spend a global token.
+        for _ in 0..90 {
+            assert!(limiter.check(attacker).is_err());
+        }
+        // The global bucket still holds 90 tokens: a fresh IP succeeds.
+        let fresh: IpAddr = "198.51.100.9".parse().unwrap();
+        assert!(
+            limiter.check(fresh).is_ok(),
+            "a per-IP-blocked attacker must not drain the global bucket"
+        );
+    }
+
+    fn test_ip(n: u32) -> IpAddr {
+        IpAddr::from(std::net::Ipv4Addr::from(n))
+    }
+
+    /// R2-8 pin: the per-IP map must stay bounded. Fails on the old
+    /// `check` (one `Bucket` per IP, never evicted): the map keeps all
+    /// 10,500 entries and the idle buckets survive.
+    #[test]
+    fn per_ip_map_is_bounded() {
+        let limiter = RateLimiter::new();
+        let stale = Instant::now() - Duration::from_secs(3 * 3600);
+        {
+            let mut inner = limiter.inner.lock().unwrap_or_else(|e| e.into_inner());
+            // 500 buckets idle for 3 h: fully refilled long since, so
+            // evictable without changing any admission decision.
+            for n in 0..500u32 {
+                inner.per_ip.insert(
+                    test_ip(n),
+                    Bucket {
+                        tokens: 0.0,
+                        last: stale,
+                    },
+                );
+            }
+            // Fill to the cap with fresh buckets.
+            for n in 500..(500 + MAX_PER_IP_BUCKETS as u32) {
+                inner.per_ip.insert(
+                    test_ip(n),
+                    Bucket {
+                        tokens: RATE_BURST,
+                        last: Instant::now(),
+                    },
+                );
+            }
+        }
+        // One admitted check from a brand-new IP must evict the idle
+        // buckets and stay within the cap.
+        assert!(limiter.check(test_ip(1_000_000)).is_ok());
+        let inner = limiter.inner.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(
+            inner.per_ip.len() <= MAX_PER_IP_BUCKETS,
+            "per_ip map must stay bounded, got {} entries",
+            inner.per_ip.len()
+        );
+        assert!(
+            inner.per_ip.get(&test_ip(0)).is_none(),
+            "idle buckets must be evicted"
+        );
+    }
+
+    /// R2-8 pin: concurrent retries of one `feedback_id` must create
+    /// exactly one Plane issue. Fails on the old `submit_feedback`
+    /// (dedupe inserted only after the upstream await): both requests
+    /// pass the empty dedupe check and each creates an issue. The
+    /// slow mock upstream (500 ms) makes the race deterministic.
+    #[tokio::test]
+    async fn dedupe_in_flight_duplicate_creates_one_issue() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (base, mock) = mock_plane_server(calls.clone()).await;
+        let (state, _, _) = test_state(base);
+        let (addr, server) = serve_app(state).await;
+        let payload = feedback_payload("fb-inflight-1", "slow-plane");
+        // Two concurrent submissions of the same feedback_id: the
+        // second must wait on the in-flight claim and return the first
+        // request's issue, not create a second one.
+        let (first, second) = tokio::join!(
+            post_feedback(addr, &payload),
+            post_feedback(addr, &payload),
+        );
+        assert_eq!(first.status(), StatusCode::CREATED);
+        assert_eq!(second.status(), StatusCode::CREATED);
+        let first_body: serde_json::Value = first.json().await.unwrap();
+        let second_body: serde_json::Value = second.json().await.unwrap();
+        assert_eq!(second_body["issue_id"], first_body["issue_id"]);
+        assert_eq!(second_body["issue_url"], first_body["issue_url"]);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "concurrent retries must create exactly one Plane issue"
         );
         server.abort();
         mock.abort();

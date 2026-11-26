@@ -53,6 +53,16 @@ pub const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(30);
 pub const RATE_REFILL_PER_MIN: f64 = 10.0;
 /// Rate limit: bucket capacity (burst).
 pub const RATE_BURST: f64 = 20.0;
+/// Rate limiter: maximum per-IP buckets kept. A bucket idle long enough
+/// to refill fully is evicted on sight (it is indistinguishable from a
+/// fresh bucket); the cap bounds bursts of distinct IPs inside that
+/// window by evicting the least-recently-seen bucket.
+pub const MAX_BUCKETS: usize = 10_000;
+/// A bucket idle this long has refilled to full
+/// (`RATE_BURST / RATE_REFILL_PER_MIN` minutes), so evicting it
+/// changes no admission decision.
+const BUCKET_IDLE_EVICT: Duration =
+    Duration::from_secs((RATE_BURST / RATE_REFILL_PER_MIN * 60.0) as u64);
 
 /// A client secret that can never be printed by accident: Debug is redacted,
 /// and there is no Display impl. The only place the inner value is used is
@@ -153,6 +163,18 @@ impl RateLimiter {
     pub fn check(&self, ip: IpAddr) -> Result<(), u64> {
         let mut buckets = self.buckets.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
+        // Evict idle buckets first: one idle long enough to have
+        // refilled to full is indistinguishable from a fresh bucket,
+        // so dropping it changes no admission decision and keeps the
+        // map bounded against distinct-IP scans.
+        buckets.retain(|_, b| now.duration_since(b.last) < BUCKET_IDLE_EVICT);
+        // Enforce the hard cap before inserting a new bucket, evicting
+        // the least-recently-seen one.
+        if !buckets.contains_key(&ip) && buckets.len() >= MAX_BUCKETS {
+            if let Some(oldest) = buckets.iter().min_by_key(|(_, b)| b.last).map(|(k, _)| *k) {
+                buckets.remove(&oldest);
+            }
+        }
         let bucket = buckets.entry(ip).or_insert(Bucket {
             tokens: RATE_BURST,
             last: now,
@@ -951,6 +973,56 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         server.abort();
         mock.abort();
+    }
+
+    /// R2-8 pin: the broker per-IP map must stay bounded. Fails on the
+    /// old `check` (one `Bucket` per IP, never evicted): the map keeps
+    /// all 10,500 entries and the idle buckets survive.
+    #[test]
+    fn rate_limiter_map_is_bounded() {
+        let limiter = RateLimiter::new();
+        let stale = Instant::now() - Duration::from_secs(10 * 60);
+        {
+            let mut buckets = limiter.buckets.lock().unwrap_or_else(|e| e.into_inner());
+            // 500 buckets idle for 10 min: fully refilled long since
+            // (burst 20 at 10/min refills in 2 min), so evictable
+            // without changing any admission decision.
+            for n in 0..500u32 {
+                buckets.insert(
+                    IpAddr::from(std::net::Ipv4Addr::from(n)),
+                    Bucket {
+                        tokens: 0.0,
+                        last: stale,
+                    },
+                );
+            }
+            // Fill to the cap with fresh buckets.
+            for n in 500..(500 + MAX_BUCKETS as u32) {
+                buckets.insert(
+                    IpAddr::from(std::net::Ipv4Addr::from(n)),
+                    Bucket {
+                        tokens: RATE_BURST,
+                        last: Instant::now(),
+                    },
+                );
+            }
+        }
+        // One admitted check from a brand-new IP must evict the idle
+        // buckets and stay within the cap.
+        let fresh = IpAddr::from(std::net::Ipv4Addr::from(1_000_000));
+        assert!(limiter.check(fresh).is_ok());
+        let buckets = limiter.buckets.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(
+            buckets.len() <= MAX_BUCKETS,
+            "buckets map must stay bounded, got {} entries",
+            buckets.len()
+        );
+        assert!(
+            buckets
+                .get(&IpAddr::from(std::net::Ipv4Addr::from(0)))
+                .is_none(),
+            "idle buckets must be evicted"
+        );
     }
 
     #[tokio::test]

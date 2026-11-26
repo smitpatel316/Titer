@@ -7,7 +7,7 @@ description = "First-party feedback endpoint for Titer: validates feedback repor
 
 [dependencies]
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 # rustls, not OpenSSL: no system TLS dependency on any target (same choice as src-tauri and the broker).
 # gzip: Plane answers `Accept-Encoding: gzip` with a gzipped body, and
 # without this feature reqwest cannot decode it (the create call then
