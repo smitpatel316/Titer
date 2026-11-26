@@ -21,7 +21,7 @@ import type {
 import { evaluateBindingModel, isTwoSeriesSaturation } from "../../stats/xy/binding";
 import { evaluateEnzymeInhibitionModel, parseInhibitorConcentration } from "../../stats/xy/enzyme-inhibition";
 import { evaluateDoseResponseSpecialModel } from "../../stats/xy/dose-response-special";
-import { pairUp, type Column } from "../../lib/dataset";
+import { splitXY, xyPoints, type Column, type DataSet } from "../../lib/dataset";
 import type { GraphFigure } from ".";
 import { num } from "../../lib/format";
 import { addNote, extent, type Paint } from "./plot-helpers";
@@ -127,7 +127,11 @@ function bindingLabel(model: BindingModel, coefficients: RegressionCoefficient[]
  *  (`columns` = X, then the Y series), under the points. Two-series
  *  saturation fits draw both curves: total in the series colour,
  *  nonspecific as a dashed line in the second series' colour. Kinetics
- *  curves start at Y0 — X is time, nothing is forced through the origin. */
+ *  curves start at Y0 — X is time, nothing is forced through the origin.
+ *  `params.y` / `params.y2` name Y data sets (as the binding analyses do),
+ *  so on a replicate table the curve spans the set's pooled points via
+ *  `xyPoints` — matching a raw subcolumn name would fall back to the first
+ *  replicate's narrower X range. */
 export function addBindingCurve(
   fig: GraphFigure,
   columns: Column[],
@@ -136,12 +140,15 @@ export function addBindingCurve(
   params: BindingParams,
   paint: Paint,
 ) {
-  const [x, ...ys] = columns;
+  // The chosen Y data set, by name — the same resolution the binding
+  // analyses use (`splitXY` + `xyPoints`), so the curve spans the points
+  // the analysis fitted, replicates pooled.
+  const { x, ys } = splitXY(columns);
   const model = params.model as BindingModel;
-  const y = ys.find((c) => c.name === params.y) ?? ys[0];
+  const y = params.y === undefined ? ys[0] : ys.find((s) => s.name === params.y);
   const coefficients = fit.coefficients ?? [];
   if (!x || !y || !coefficients.length) return;
-  const pairs = pairUp(x, y);
+  const pairs = xyPoints(x, y);
   const xs = pairs.x;
   if (!xs.length) return;
   const atd =
@@ -167,7 +174,10 @@ export function addBindingCurve(
   ];
   // The nonspecific branch of a two-series fit, dashed in its own colour.
   if (isTwoSeriesSaturation(model as BindingSaturationModel) && "y2" in params) {
-    const y2 = ys.find((c) => c.name === (params as BindingSaturationParams).y2) ?? ys[1];
+    const y2 =
+      (params as BindingSaturationParams).y2 === undefined
+        ? ys[1]
+        : ys.find((s) => s.name === (params as BindingSaturationParams).y2);
     if (y2) {
       const nsCurve = fittedCurve(model, coefficients, xMin, xMax, "nonspecific", atd);
       traces.push({
@@ -216,7 +226,11 @@ function enzymeInhibitionLabel(
  *  at 100 X points across the pooled X range (Morrison: one curve, X = [I]).
  *  No Lineweaver–Burk overlay: Prism offers LB only as a display Transform,
  *  never as a fit, and Titer has no transform infrastructure — these curves
- *  are always the closed-form nls fit, never a reciprocal linear regression. */
+ *  are always the closed-form nls fit, never a reciprocal linear regression.
+ *  `params.y` names Y data sets (as the enzyme-inhibition analysis does) and
+ *  `inhibitorConcentrations` is keyed by data-set name, so on a replicate
+ *  table each set's curve is found by name and its points pooled via
+ *  `xyPoints` — matching raw subcolumn names drew nothing at all. */
 export function addEnzymeInhibitionCurve(
   fig: GraphFigure,
   columns: Column[],
@@ -225,21 +239,26 @@ export function addEnzymeInhibitionCurve(
   params: EnzymeInhibitionParams,
   paint: Paint,
 ) {
-  const [x, ...ys] = columns;
+  // The chosen Y data sets, by name — the same resolution the
+  // enzyme-inhibition analysis uses, so a replicate table's sets are found
+  // and their points pooled.
+  const { x, ys } = splitXY(columns);
   const model = params.model;
   const coefficients = fit.coefficients ?? [];
   if (!x || !coefficients.length) return;
-  const included = params.y?.length ? ys.filter((c) => params.y!.includes(c.name)) : ys;
+  const included = params.y?.length
+    ? params.y.map((n) => ys.find((s) => s.name === n)).filter((s): s is DataSet => s !== undefined)
+    : ys;
   if (!included.length) return;
   // The pooled X range, so every curve spans the data the fit saw.
-  const allXs = included.flatMap((c) => pairUp(x, c).x);
+  const allXs = included.flatMap((s) => xyPoints(x, s).x);
   if (!allXs.length) return;
   const [xMin, xMax] = extent(allXs);
   const traces: GraphFigure["data"] = [];
-  for (const col of included) {
+  for (const set of included) {
     // Morrison's X is the inhibitor concentration itself, so no [I] is needed.
     const inhibitor =
-      model === "morrison" ? 0 : (params.inhibitorConcentrations?.[col.name] ?? parseInhibitorConcentration(col.name));
+      model === "morrison" ? 0 : (params.inhibitorConcentrations?.[set.name] ?? parseInhibitorConcentration(set.name));
     if (inhibitor === undefined) continue;
     const curve = curvePoints((x0) => evaluateEnzymeInhibitionModel(model, coefficients, x0, inhibitor), xMin, xMax);
     traces.push({
@@ -247,7 +266,7 @@ export function addEnzymeInhibitionCurve(
       mode: "lines",
       x: curve.x,
       y: curve.y,
-      line: { color: paint.color(col.name, ys.indexOf(col)), width: 1.5 },
+      line: { color: paint.color(set.name, ys.indexOf(set)), width: 1.5 },
       hoverinfo: "skip",
       showlegend: false,
     });
@@ -302,7 +321,11 @@ function doseResponseSpecialLabel(
  *  shared fitted parameters at 100 X points across the pooled X range.
  *  The series order is the fit's (params.ys — the control / full agonist
  *  first), not the table's, because the operational model's first series
- *  takes the 4PL branch and the rest the operational branch. */
+ *  takes the 4PL branch and the rest the operational branch. `params.ys`
+ *  names Y data sets (as the dose-response — Special analysis does) and
+ *  `antagonistConcentrations` is keyed by data-set name, so on a replicate
+ *  table each set's curve is found by name and its points pooled via
+ *  `xyPoints` — matching raw subcolumn names drew nothing at all. */
 export function addDoseResponseSpecialCurve(
   fig: GraphFigure,
   columns: Column[],
@@ -311,29 +334,32 @@ export function addDoseResponseSpecialCurve(
   params: DoseResponseSpecialParams,
   paint: Paint,
 ) {
-  const [x, ...ys] = columns;
+  // The chosen Y data sets, by name — the same resolution the
+  // dose-response — Special analysis uses, so a replicate table's sets are
+  // found and their points pooled.
+  const { x, ys } = splitXY(columns);
   const model = params.model;
   const coefficients = fit.coefficients ?? [];
   if (!x || !coefficients.length) return;
   const ordered = params.ys?.length
-    ? params.ys.map((n) => ys.find((c) => c.name === n)).filter((c): c is Column => c !== undefined)
+    ? params.ys.map((n) => ys.find((s) => s.name === n)).filter((s): s is DataSet => s !== undefined)
     : ys;
   if (!ordered.length) return;
   // The pooled X range, so every curve spans the data the fit saw.
-  const allXs = ordered.flatMap((c) => pairUp(x, c).x);
+  const allXs = ordered.flatMap((s) => xyPoints(x, s).x);
   if (!allXs.length) return;
   const [xMin, xMax] = extent(allXs);
   const traces: GraphFigure["data"] = [];
-  for (const [i, col] of ordered.entries()) {
+  for (const [i, set] of ordered.entries()) {
     // The operational model has no B; Schild / EC50 shift read it from
     // the params, else the column title (the Prism convention).
     const B =
       model === "operational-partial"
         ? 0
-        : (params.antagonistConcentrations?.[col.name] ?? parseInhibitorConcentration(col.name));
+        : (params.antagonistConcentrations?.[set.name] ?? parseInhibitorConcentration(set.name));
     if (B === undefined) continue;
     const curve = curvePoints(
-      (x0) => evaluateDoseResponseSpecialModel(model, coefficients, { name: col.name, covariate: B }, i, x0),
+      (x0) => evaluateDoseResponseSpecialModel(model, coefficients, { name: set.name, covariate: B }, i, x0),
       xMin,
       xMax,
     );
@@ -342,7 +368,7 @@ export function addDoseResponseSpecialCurve(
       mode: "lines",
       x: curve.x,
       y: curve.y,
-      line: { color: paint.color(col.name, ys.indexOf(col)), width: 1.5 },
+      line: { color: paint.color(set.name, ys.indexOf(set)), width: 1.5 },
       hoverinfo: "skip",
       showlegend: false,
     });

@@ -161,12 +161,17 @@ export interface ExportAllRenderOut {
   missing?: number;
 }
 
-/** Draw one batch item (a graph, or a whole figure) as image bytes. */
+/** Draw one batch item (a graph, or a whole figure) as image bytes. `run`
+ *  is the analysis runner the overlays reuse (the dispatcher's, so a batch
+ *  reuses the runs the view already made); `rootOrder` is the project root
+ *  order, for the info sheets the build resolves. */
 export type ExportAllRenderer = (
   item: ExportAllItem,
   format: ExportFormat,
   dpi: Resolution,
   nodes: Record<string, ProjectNode>,
+  run?: AnalysisRunner,
+  rootOrder?: string[],
 ) => Promise<ExportAllRenderOut>;
 
 /** What one export job reports: the tool's output. */
@@ -344,6 +349,11 @@ export async function renderGraphImage(
   size96: { width: number; height: number },
   run?: AnalysisRunner,
   colorMode: ColorMode = "color",
+  // The project root order, for the info sheets the build resolves (the
+  // node ids otherwise, as the panel builder always did) — forwarded by
+  // the export jobs, which have the state. Without it a figure's info
+  // constants resolve in node order, not the project's.
+  rootOrder?: string[],
 ): Promise<{
   bytes: Uint8Array;
   widthPx: number;
@@ -353,7 +363,7 @@ export async function renderGraphImage(
   overlays: GraphOverlayStatus[];
   vector: boolean;
 }> {
-  const { figure: fig, overlays } = await buildGraphFigure(graph, nodes, { run });
+  const { figure: fig, overlays } = await buildGraphFigure(graph, nodes, { run, rootOrder });
   if (!fig) {
     throw new Error(
       `Graph “${graph.name}” has nothing to draw — its table has no numeric columns, or its graph type is unknown.`,
@@ -428,7 +438,7 @@ export async function executeExportGraph(job: McpJob, deps: ExportJobDeps): Prom
   const state = deps.getState();
   const graph = graphNode(job, state, graphId);
   const size96 = graphDrawSize(graph, widthIn, heightIn);
-  const out = await renderGraphImage(graph, state.nodes, format, dpi, size96, deps.run, colorMode);
+  const out = await renderGraphImage(graph, state.nodes, format, dpi, size96, deps.run, colorMode, state.rootOrder);
   const ext = EXPORT_EXTENSION[format];
   const io = deps.io ?? defaultExportIo;
   await io.writeFile(ensureSaveExtension(path, ext), out.bytes);
@@ -546,7 +556,10 @@ export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Pro
   let overlays: GraphOverlayStatus[] = [];
   let vector = false;
   if (format === "svg") {
-    const out = await renderFigureSvg(sized, state.nodes, dpi, colorMode);
+    const out = await renderFigureSvg(sized, state.nodes, dpi, colorMode, {
+      run: deps.run,
+      rootOrder: state.rootOrder,
+    });
     bytes = new TextEncoder().encode(out.svg);
     widthPx = out.width;
     heightPx = out.height;
@@ -554,7 +567,10 @@ export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Pro
     overlays = out.overlays;
     vector = true;
   } else if (format === "eps") {
-    const out = await renderFigureSvg(sized, state.nodes, dpi, colorMode);
+    const out = await renderFigureSvg(sized, state.nodes, dpi, colorMode, {
+      run: deps.run,
+      rootOrder: state.rootOrder,
+    });
     bytes = svgToEps(out.svg, { colorMode });
     widthPx = out.width;
     heightPx = out.height;
@@ -562,7 +578,10 @@ export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Pro
     overlays = out.overlays;
     vector = true;
   } else if (format === "pdf") {
-    const svgOut = await renderFigureSvg(sized, state.nodes, dpi, colorMode);
+    const svgOut = await renderFigureSvg(sized, state.nodes, dpi, colorMode, {
+      run: deps.run,
+      rootOrder: state.rootOrder,
+    });
     missing = svgOut.missing;
     widthPx = svgOut.width;
     heightPx = svgOut.height;
@@ -572,7 +591,10 @@ export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Pro
       vector = true;
     } catch (err) {
       if (!(err instanceof VectorExportError)) throw err;
-      const out = await renderFigureRaster(sized, state.nodes, "pdf", dpi, colorMode);
+      const out = await renderFigureRaster(sized, state.nodes, "pdf", dpi, colorMode, {
+        run: deps.run,
+        rootOrder: state.rootOrder,
+      });
       bytes = new Uint8Array(await out.blob.arrayBuffer());
       widthPx = out.width;
       heightPx = out.height;
@@ -582,7 +604,10 @@ export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Pro
       overlays = out.overlays;
     }
   } else {
-    const out = await renderFigureRaster(sized, state.nodes, format, dpi, colorMode);
+    const out = await renderFigureRaster(sized, state.nodes, format, dpi, colorMode, {
+      run: deps.run,
+      rootOrder: state.rootOrder,
+    });
     bytes = new Uint8Array(await out.blob.arrayBuffer());
     widthPx = out.width;
     heightPx = out.height;
@@ -647,22 +672,28 @@ export interface RunExportAllOptions {
 
 /** The real batch renderer: a graph through the headless graph render,
  *  a figure through its own raster/SVG render — the same paths the
- *  single-item tools use, so a batch file matches its one-at-a-time file. */
+ *  single-item tools use, so a batch file matches its one-at-a-time file.
+ *  `run` and `rootOrder` forward into both, so a batch overlay reuses the
+ *  view's runs and the info sheets resolve in project order (Round 2
+ *  Issue 50: the batch used to render with neither). */
 async function defaultExportAllRender(
   item: ExportAllItem,
   format: ExportFormat,
   dpi: Resolution,
   nodes: Record<string, ProjectNode>,
+  run?: AnalysisRunner,
+  rootOrder?: string[],
 ): Promise<ExportAllRenderOut> {
   if (item.kind === "graph") {
     const graph = nodes[item.id]!;
     const size96 = graphDrawSize(graph);
-    const out = await renderGraphImage(graph, nodes, format, dpi, size96);
+    const out = await renderGraphImage(graph, nodes, format, dpi, size96, run, undefined, rootOrder);
     return { bytes: out.bytes, widthPx: out.widthPx, heightPx: out.heightPx, capped: out.capped, reason: out.reason };
   }
   const figure = nodes[item.id]!;
+  const figureOpts = { run, rootOrder };
   if (format === "svg") {
-    const out = await renderFigureSvg(figure, nodes, dpi);
+    const out = await renderFigureSvg(figure, nodes, dpi, "color", figureOpts);
     return {
       bytes: new TextEncoder().encode(out.svg),
       widthPx: out.width,
@@ -673,7 +704,7 @@ async function defaultExportAllRender(
   if (format === "eps") {
     // EPS is SVG converted, as the single-item export does — the raster
     // renderer takes no eps.
-    const out = await renderFigureSvg(figure, nodes, dpi);
+    const out = await renderFigureSvg(figure, nodes, dpi, "color", figureOpts);
     return {
       bytes: svgToEps(out.svg),
       widthPx: out.width,
@@ -684,7 +715,7 @@ async function defaultExportAllRender(
   if (format === "pdf") {
     // PDF is true vector (the composed SVG, converted), with a raster
     // fallback when a panel has content the converter cannot draw.
-    const svgOut = await renderFigureSvg(figure, nodes, dpi);
+    const svgOut = await renderFigureSvg(figure, nodes, dpi, "color", figureOpts);
     try {
       return {
         bytes: svgToPdf(svgOut.svg),
@@ -694,7 +725,7 @@ async function defaultExportAllRender(
       };
     } catch (err) {
       if (!(err instanceof VectorExportError)) throw err;
-      const out = await renderFigureRaster(figure, nodes, "pdf", dpi);
+      const out = await renderFigureRaster(figure, nodes, "pdf", dpi, "color", figureOpts);
       return {
         bytes: new Uint8Array(await out.blob.arrayBuffer()),
         widthPx: out.width,
@@ -705,7 +736,7 @@ async function defaultExportAllRender(
       };
     }
   }
-  const out = await renderFigureRaster(figure, nodes, format, dpi);
+  const out = await renderFigureRaster(figure, nodes, format, dpi, "color", figureOpts);
   return {
     bytes: new Uint8Array(await out.blob.arrayBuffer()),
     widthPx: out.width,
@@ -723,7 +754,7 @@ async function defaultExportAllRender(
 export async function runExportAllBatch(
   state: ExportJobState,
   options: RunExportAllOptions,
-  deps: Pick<ExportJobDeps, "io" | "render">,
+  deps: Pick<ExportJobDeps, "io" | "render" | "run">,
 ): Promise<ExportAllBatchOutcome> {
   // An empty folder would land files in "/" after the trailing-slash
   // trim below — refuse it here, so no caller (MCP, GUI, future) can
@@ -747,7 +778,7 @@ export async function runExportAllBatch(
   };
   for (const item of plan.items) {
     try {
-      const out = await render(item, plan.format, plan.dpi, state.nodes);
+      const out = await render(item, plan.format, plan.dpi, state.nodes, deps.run, state.rootOrder);
       const path = `${folder}/${item.fileName}`;
       await io.writeFile(path, out.bytes);
       const entry: ExportAllBatchOutcome["exported"][number] = {
@@ -839,7 +870,7 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
   if (graphId !== undefined) {
     const graph = graphNode(job, state, graphId);
     const size96 = graphDrawSize(graph);
-    const out = await renderGraphImage(graph, state.nodes, "png", dpi, size96, deps.run);
+    const out = await renderGraphImage(graph, state.nodes, "png", dpi, size96, deps.run, undefined, state.rootOrder);
     png = out.bytes;
     title = graph.name;
     widthPx = out.widthPx;
@@ -852,7 +883,10 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
     if (!figure.panels?.length) {
       throw jobErr(job, `cannot export figure “${figure.name}” — add a panel first.`);
     }
-    const out = await renderFigureRaster(figure, state.nodes, "png", dpi);
+    const out = await renderFigureRaster(figure, state.nodes, "png", dpi, "color", {
+      run: deps.run,
+      rootOrder: state.rootOrder,
+    });
     png = new Uint8Array(await out.blob.arrayBuffer());
     title = figure.name;
     widthPx = out.width;
@@ -935,13 +969,16 @@ export interface CopyRenderOut {
   overlays: GraphOverlayStatus[];
 }
 
-/** Draw one copy target (a graph, or a whole figure) as PNG bytes. */
+/** Draw one copy target (a graph, or a whole figure) as PNG bytes. `run`
+ *  is the analysis runner the overlays reuse; `rootOrder` is the project
+ *  root order, for the info sheets the build resolves. */
 export type CopyGraphImageRenderer = (
   target: { kind: "graph"; node: ProjectNode } | { kind: "figure"; node: ProjectNode },
   dpi: Resolution,
   colorMode: ColorMode,
   nodes: Record<string, ProjectNode>,
   run?: AnalysisRunner,
+  rootOrder?: string[],
 ) => Promise<CopyRenderOut>;
 
 /** The real copy renderer: a graph through the headless graph render, a
@@ -953,10 +990,11 @@ async function defaultCopyRender(
   colorMode: ColorMode,
   nodes: Record<string, ProjectNode>,
   run?: AnalysisRunner,
+  rootOrder?: string[],
 ): Promise<CopyRenderOut> {
   if (target.kind === "graph") {
     const size96 = graphDrawSize(target.node);
-    const out = await renderGraphImage(target.node, nodes, "png", dpi, size96, run, colorMode);
+    const out = await renderGraphImage(target.node, nodes, "png", dpi, size96, run, colorMode, rootOrder);
     return {
       bytes: out.bytes,
       widthPx: out.widthPx,
@@ -966,7 +1004,7 @@ async function defaultCopyRender(
       overlays: out.overlays,
     };
   }
-  const out = await renderFigureRaster(target.node, nodes, "png", dpi, colorMode);
+  const out = await renderFigureRaster(target.node, nodes, "png", dpi, colorMode, { run, rootOrder });
   return {
     bytes: new Uint8Array(await out.blob.arrayBuffer()),
     widthPx: out.width,
@@ -1032,7 +1070,7 @@ export async function executeCopyGraphImage(job: McpJob, deps: ExportJobDeps): P
   // graph with nothing plotted (or a figure that cannot draw) leaves the
   // clipboard exactly as it was.
   const render = deps.copyRender ?? defaultCopyRender;
-  const out = await render(target, dpi, colorMode, state.nodes, deps.run);
+  const out = await render(target, dpi, colorMode, state.nodes, deps.run, state.rootOrder);
   const clipboard = deps.clipboard ?? defaultClipboardIo;
   await clipboard.writePng(out.bytes);
   const result: Record<string, unknown> = {

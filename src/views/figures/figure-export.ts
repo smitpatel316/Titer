@@ -20,7 +20,7 @@ import {
   PT_PER_INCH,
   sharedLegendCheck,
 } from "../../lib/figure";
-import { buildGraphFigure, type GraphOverlayStatus } from "../graphs/graph-figure";
+import { buildGraphFigure, type AnalysisRunner, type GraphOverlayStatus } from "../graphs/graph-figure";
 import type { ExportFormat, Resolution } from "../graphs/graph-export";
 import { clipboardSupportsPdf, vectorClipboardItem, writeVectorToClipboard } from "../graphs/graph-export";
 import { buildOfficeDocument, officeDialogTitle, officeExtension, type OfficeTarget } from "../../lib/office-export";
@@ -31,6 +31,16 @@ let lastFolder: string | null = null;
 const reason = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 type Size = { width: number; height: number };
+
+/** What a figure render forwards into `buildGraphFigure`: the analysis
+ *  runner the caller already runs overlays with (the view's runs, so an
+ *  export reuses them instead of re-running) and the project root order
+ *  (the info sheets' order). Both optional — omitted, the builder runs
+ *  analyses itself and orders sheets by node id. */
+export interface FigureRenderOptions {
+  run?: AnalysisRunner;
+  rootOrder?: string[];
+}
 
 /** One overlay list per panel, merged: an overlay counts as applied when
  *  any panel applied it, else the first panel's report for it stands. */
@@ -62,8 +72,13 @@ async function panelImage(
   dpi: Resolution,
   hideLegend: boolean,
   colorMode: ColorMode = "color",
+  opts: FigureRenderOptions = {},
 ): Promise<{ image: Blob | null; overlays: GraphOverlayStatus[] }> {
-  const { figure: rawFig, overlays } = await buildGraphFigure(graph, nodes, { hideLegend });
+  const { figure: rawFig, overlays } = await buildGraphFigure(graph, nodes, {
+    hideLegend,
+    run: opts.run,
+    rootOrder: opts.rootOrder,
+  });
   if (!rawFig) return { image: null, overlays };
   const fig = colorMode === "grayscale" ? grayscaleFigure(rawFig) : rawFig;
   const el = document.createElement("div");
@@ -145,6 +160,7 @@ export async function renderFigureRaster(
   format: "png" | "jpeg" | "pdf" | "tiff" | "bmp",
   dpi: Resolution,
   colorMode: ColorMode = "color",
+  opts: FigureRenderOptions = {},
 ): Promise<{
   blob: Blob;
   missing: number;
@@ -183,7 +199,7 @@ export async function renderFigureRaster(
     const graph = nodes[rect.panel.graphId];
     const y = rect.y + g.titleStrip;
     if (graph) {
-      const { image, overlays } = await panelImage(graph, nodes, { width: rect.width, height: rect.height }, format, dpi, legend.ok, colorMode);
+      const { image, overlays } = await panelImage(graph, nodes, { width: rect.width, height: rect.height }, format, dpi, legend.ok, colorMode, opts);
       panelOverlays.push(overlays);
       if (image) {
         const bitmap = await createImageBitmap(image);
@@ -280,6 +296,7 @@ export async function renderFigureSvg(
   nodes: Record<string, ProjectNode>,
   dpi: Resolution,
   colorMode: ColorMode = "color",
+  opts: FigureRenderOptions = {},
 ): Promise<{ svg: string; missing: number; width: number; height: number; overlays: GraphOverlayStatus[] }> {
   const g = geometry(figure, dpi);
   const legend =
@@ -289,7 +306,7 @@ export async function renderFigureSvg(
   for (const rect of g.rects) {
     const graph = nodes[rect.panel.graphId];
     if (!graph) continue;
-    const { image, overlays } = await panelImage(graph, nodes, { width: rect.width, height: rect.height }, "svg", dpi, legend.ok, colorMode);
+    const { image, overlays } = await panelImage(graph, nodes, { width: rect.width, height: rect.height }, "svg", dpi, legend.ok, colorMode, opts);
     panelOverlays.push(overlays);
     if (image) composed.push({ panel: rect.panel, svg: await image.text() });
   }
@@ -315,8 +332,9 @@ export async function renderFigurePdf(
   nodes: Record<string, ProjectNode>,
   dpi: Resolution,
   colorMode: ColorMode = "color",
+  opts: FigureRenderOptions = {},
 ): Promise<{ blob: Blob; vector: boolean; missing: number; capped: boolean; reason?: string }> {
-  const svgOut = await renderFigureSvg(figure, nodes, dpi, colorMode);
+  const svgOut = await renderFigureSvg(figure, nodes, dpi, colorMode, opts);
   try {
     return {
       blob: new Blob([svgToPdf(svgOut.svg, { colorMode }) as BlobPart], { type: "application/pdf" }),
@@ -326,7 +344,7 @@ export async function renderFigurePdf(
     };
   } catch (err) {
     if (!(err instanceof VectorExportError)) throw err;
-    const out = await renderFigureRaster(figure, nodes, "pdf", dpi, colorMode);
+    const out = await renderFigureRaster(figure, nodes, "pdf", dpi, colorMode, opts);
     return { blob: out.blob, vector: false, missing: out.missing, capped: out.capped, reason: out.reason };
   }
 }
@@ -338,6 +356,7 @@ export async function saveFigureImage(
   dpi: Resolution,
   name: string,
   colorMode: ColorMode = "color",
+  opts: FigureRenderOptions = {},
 ) {
   if (!figure.panels?.length) return alert("Couldn't Export the Figure", "Add a panel first.", "error");
   const g = geometry(figure, dpi);
@@ -350,24 +369,24 @@ export async function saveFigureImage(
     let capReason: string | undefined;
     let vector = false;
     if (format === "svg") {
-      const out = await renderFigureSvg(figure, nodes, dpi, colorMode);
+      const out = await renderFigureSvg(figure, nodes, dpi, colorMode, opts);
       bytes = new TextEncoder().encode(out.svg);
       missing = out.missing;
       vector = true;
     } else if (format === "eps") {
-      const out = await renderFigureSvg(figure, nodes, dpi, colorMode);
+      const out = await renderFigureSvg(figure, nodes, dpi, colorMode, opts);
       bytes = svgToEps(out.svg, { colorMode });
       missing = out.missing;
       vector = true;
     } else if (format === "pdf") {
-      const out = await renderFigurePdf(figure, nodes, dpi, colorMode);
+      const out = await renderFigurePdf(figure, nodes, dpi, colorMode, opts);
       bytes = new Uint8Array(await out.blob.arrayBuffer());
       missing = out.missing;
       vector = out.vector;
       capped = out.capped;
       capReason = out.reason;
     } else {
-      const out = await renderFigureRaster(figure, nodes, format, dpi, colorMode);
+      const out = await renderFigureRaster(figure, nodes, format, dpi, colorMode, opts);
       bytes = new Uint8Array(await out.blob.arrayBuffer());
       missing = out.missing;
       capped = out.capped;
@@ -419,13 +438,14 @@ export async function copyFigureImage(
   nodes: Record<string, ProjectNode>,
   dpi: Resolution,
   colorMode: ColorMode = "color",
+  opts: FigureRenderOptions = {},
 ) {
   if (!figure.panels?.length) return void alert("Couldn't Copy the Figure", "Add a panel first.", "error");
   const mode = colorMode === "cmyk" ? "color" : colorMode;
   // The PDF render always runs (seq 446): the native write takes it on
   // macOS, the webview write where supports() says so.
-  const pdf = renderFigurePdf(figure, nodes, dpi, mode).then((out) => out.blob);
-  const png = renderFigureRaster(figure, nodes, "png", dpi, mode).then((out) => out.blob);
+  const pdf = renderFigurePdf(figure, nodes, dpi, mode, opts).then((out) => out.blob);
+  const png = renderFigureRaster(figure, nodes, "png", dpi, mode, opts).then((out) => out.blob);
   if (await writeVectorToClipboard(pdf, png)) return;
   navigator.clipboard
     .write([new ClipboardItem(clipboardSupportsPdf() ? vectorClipboardItem(pdf, png) : { "image/png": png })])
@@ -450,6 +470,7 @@ export async function sendFigureToOffice(
   target: OfficeTarget,
   dpi: Resolution,
   name: string,
+  opts: FigureRenderOptions = {},
 ) {
   const title = officeDialogTitle(target);
   if (!figure.panels?.length) return alert(title, "Add a panel first.", "error");
@@ -457,7 +478,7 @@ export async function sendFigureToOffice(
   if (hasEmptyCell(g.panels, g.grid))
     await alert("Empty Cell", "The figure has an empty cell — it exports blank.", "warning");
   try {
-    const out = await renderFigureRaster(figure, nodes, "png", dpi);
+    const out = await renderFigureRaster(figure, nodes, "png", dpi, "color", opts);
     if (out.capped && out.reason) await alert("Figure Too Large", `${out.reason} Exporting at the largest fitting size.`, "warning");
     const png = new Uint8Array(await out.blob.arrayBuffer());
     if (target === "keynote") {
