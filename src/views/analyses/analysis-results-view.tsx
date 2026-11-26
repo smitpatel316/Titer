@@ -765,26 +765,6 @@ export function AnalysisResultsView({
         />
       )}
 
-      {result.outlierGroups?.[0]?.grubbs && (
-        <Table
-          title="Outliers by column"
-          columns={[
-            { label: "" },
-            { label: "Points", numeric: true },
-            { label: "Farthest value", numeric: true },
-            { label: "G", numeric: true },
-            { label: "P value", numeric: true },
-          ]}
-          rows={result.outlierGroups.map((g) => [
-            g.group,
-            g.points,
-            num(g.grubbs?.extreme),
-            num(g.grubbs?.g),
-            <P p={g.grubbs?.p} />,
-          ])}
-        />
-      )}
-
       {result.outlierGroups && result.outlierGroups.length > 0 && !result.outlierGroups[0].grubbs && (
         <Table
           title="Outliers by column"

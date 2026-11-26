@@ -475,7 +475,6 @@ export function useAppMenu(doc: DocumentActions) {
             enabled: hasTable,
             action: () => edit("select-column"),
           },
-          { text: "Fill Down", accelerator: "CmdOrCtrl+D", enabled: hasTable, action: () => edit("fill-down") },
           {
             // One sheet, nothing else (seq 236): a table's children stay behind.
             text: "Duplicate Current Sheet",
@@ -756,8 +755,10 @@ export function useAppMenu(doc: DocumentActions) {
         text: "Info Sheet",
         items: [
           {
+            // Round 2 Issue 65: this used the Inspector's shortcut — Info
+            // Sheet takes CmdOrCtrl+Shift+I instead.
             text: "New Info Sheet…",
-            accelerator: "CmdOrCtrl+Alt+I",
+            accelerator: "CmdOrCtrl+Shift+I",
             action: () => latest.current.store.createInfoSheet(),
           },
           sep,
@@ -889,7 +890,14 @@ export function useAppMenu(doc: DocumentActions) {
     hasLink,
     wandAvailable,
     analysisKey,
-    activeNodeId !== null,
+    // Round 2 Issue 65: the dep used to be a boolean (null check on the
+    // active node id), so switching between two analysis nodes never
+    // re-ran this effect and Change Parameters… kept the previous node's
+    // enabled state. Track the node identity, its analysis type, and the
+    // editability gate itself.
+    activeNodeId,
+    activeNode?.analysisType,
+    isEditableAnalysis(activeNode, nodes),
     activeNode?.type,
     activeNode?.frozen,
     drawingSelection,

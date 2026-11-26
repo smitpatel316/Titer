@@ -21386,6 +21386,33 @@ check("copy-68-75: graph/figure copy writes one multi-flavour pasteboard item, a
   ok(figureSrc.includes("writeVectorToClipboard(pdf, png)"), "copyFigureImage goes through the shared native write");
 });
 
+check("r2-65: UI/menu minor defects — single Grubbs' table, single Fill Down, no shortcut collision, fresh Change Parameters… state", () => {
+  const results = readFileSync("src/views/analyses/analysis-results-view.tsx", "utf8");
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  // 1. The Grubbs' "Outliers by column" block was rendered twice identically.
+  const grubbsBlocks = [...results.matchAll(/\{result\.outlierGroups\?\.\[0\]\?\.grubbs && \(\s*<Table\s+title="Outliers by column"/g)];
+  strictEqual(grubbsBlocks.length, 1, `Grubbs' "Outliers by column" table must render once (found ${grubbsBlocks.length})`);
+  // 2. Edit ▸ Fill Down was listed twice; the first lacked !activeTableFrozen.
+  const fillDowns = [...menu.matchAll(/\{ text: "Fill Down"/g)];
+  strictEqual(fillDowns.length, 1, `Edit ▸ Fill Down must appear once (found ${fillDowns.length})`);
+  ok(/\{ text: "Fill Down", accelerator: "CmdOrCtrl\+D", enabled: hasTable && !activeTableFrozen/.test(menu), "the surviving Fill Down must stay disabled on frozen tables");
+  // 3. CmdOrCtrl+Alt+I was bound to both New Info Sheet… and Show/Hide Inspector.
+  const altI = [...menu.matchAll(/CmdOrCtrl\+Alt\+I/g)];
+  strictEqual(altI.length, 1, `CmdOrCtrl+Alt+I must be bound once (found ${altI.length})`);
+  ok(/text: "New Info Sheet…",\s*accelerator: "CmdOrCtrl\+Shift\+I"/.test(menu), "New Info Sheet… takes CmdOrCtrl+Shift+I");
+  // 4. useAppMenu's dep array held only `activeNodeId !== null` (a boolean),
+  // so switching between two analysis nodes never re-ran the menu effect and
+  // Change Parameters… kept the previous node's enabled state.
+  const menuEffect = menu.slice(menu.indexOf("export function useAppMenu"));
+  const depStart = menuEffect.lastIndexOf("}, [");
+  ok(depStart >= 0, "useAppMenu dep array exists");
+  const depArray = menuEffect.slice(depStart, depStart + 1200);
+  ok(!depArray.includes("activeNodeId !== null"), "dep array must not reduce the active node to a boolean");
+  ok(depArray.includes("activeNodeId,"), "dep array must track the active node identity");
+  ok(depArray.includes("activeNode?.analysisType"), "dep array must track the active analysis type");
+  ok(depArray.includes("isEditableAnalysis(activeNode, nodes)"), "dep array must track the Change Parameters… editability gate");
+});
+
 check("seq 216: BMP is 24-bit bottom-up BGR with DPI in the header", () => {
   const bmp = bmpEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200);
   strictEqual(String.fromCharCode(bmp[0]!, bmp[1]!), "BM");
