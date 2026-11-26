@@ -62,11 +62,14 @@ const showTips = () =>
   );
 
 /** How to cite the app (Help ▸ How to Cite Titer, seq 432): Prism's entry
- *  shows its citation; Titer's shows its own — version, address, licence. */
+ *  shows its citation; Titer's shows its own — version, address, licence,
+ *  and the Zenodo DOI for this version (seq 549 Phase 2). The DOI below is
+ *  the version DOI for 2.0.1 — update it on every release; it must name the
+ *  version above. The concept DOI (all versions) is 10.5281/zenodo.24569160. */
 const showCitation = () =>
   alert(
     "How to Cite Titer",
-    `Titer ${version} (https://github.com/smitpatel316/Titer). Titer is free and open-source software under GPL-3.0, a modified fork of Helix by mickaphd. Cite the version you used and the address above.`,
+    `Titer ${version} (https://github.com/smitpatel316/Titer). DOI for this version: https://doi.org/10.5281/zenodo.24569161. Titer is free and open-source software under GPL-3.0, a modified fork of Helix by mickaphd. Cite the version you used and the address above.`,
     "info",
   );
 

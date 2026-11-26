@@ -1,6 +1,7 @@
 # Titer
 
 [![Release](https://img.shields.io/github/v/release/smitpatel316/Titer)](https://github.com/smitpatel316/Titer/releases)
+[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.24569160.svg)](https://doi.org/10.5281/zenodo.24569160)
 [![License: GPL v3](https://img.shields.io/github/license/smitpatel316/Titer)](LICENSE)
 [![CodeQL](https://github.com/smitpatel316/Titer/actions/workflows/codeql.yml/badge.svg)](https://github.com/smitpatel316/Titer/actions/workflows/codeql.yml)
 [![Release](https://github.com/smitpatel316/Titer/actions/workflows/release.yml/badge.svg)](https://github.com/smitpatel316/Titer/actions/workflows/release.yml)
@@ -360,11 +361,12 @@ Storage; without one they tell you to connect first.
 
 If you use Titer in published work, cite the version you used. In your methods, you can write:
 
-> "Statistical analyses and graphs were made with Titer (version 2.0.0; https://github.com/smitpatel316/Titer), which computes its statistics with R."
+> "Statistical analyses and graphs were made with Titer (version 2.0.1; https://github.com/smitpatel316/Titer; DOI: https://doi.org/10.5281/zenodo.24569161), which computes its statistics with R."
 
-Replace 2.0.0 with the version you used (Titer › About Titer). Since every result comes from R,
-it's good practice to cite R too. A permanent DOI for Titer is coming with the 2.0.1 release —
-this section will be updated with it then. The same citation is in the app, under
+Replace 2.0.1 with the version you used (Titer › About Titer) and its DOI — the DOI
+above is for version 2.0.1; the concept DOI https://doi.org/10.5281/zenodo.24569160
+always points at the latest version. Since every result comes from R,
+it's good practice to cite R too. The same citation is in the app, under
 Help › How to Cite Titer.
 
 ## Privacy
