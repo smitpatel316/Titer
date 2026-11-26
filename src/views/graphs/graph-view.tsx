@@ -72,6 +72,7 @@ import {
 import { chooseSelectionStyle } from "./style-menus";
 import { genesNamed, volcanoAxes, volcanoPair } from "./volcano";
 import { titleCase } from "../../lib/format";
+import { formatFigureLabels } from "../../lib/label-format";
 import { tooManyBins } from "../../lib/histogram";
 
 // WebGL's resolution, which Plotly takes up to 4. The zoom range lives in
@@ -866,10 +867,15 @@ export function GraphView({ node }: { node: ProjectNode }) {
       // A graph of individual points picks them by dragging; the others stay still.
       const keys = drawnKeys(fig.data);
       if (keys.size) fig.layout.dragmode = "select";
+      // Labels render with super/subscripts (seq 548): the drawn figure is
+      // formatted, while `fig` itself stays raw — the selection keys and
+      // `setDrawn` below read the raw series, and every export re-draws
+      // this same formatted figure from the live div.
+      const formatted = formatFigureLabels(fig);
       await Plotly.react(
         el,
-        ring ? [...fig.data, ring] : fig.data,
-        { ...fig.layout, ...size },
+        ring ? [...formatted.data, ring] : formatted.data,
+        { ...formatted.layout, ...size },
         { displayModeBar: false, scrollZoom: false, doubleClick: false, plotGlPixelRatio: glRatio, edits: MOVABLE },
       );
       if (plottedRef.current !== el) listen(el as PlotElement);

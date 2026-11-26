@@ -26,6 +26,7 @@ import { displayXCell } from "../../lib/date-time";
 import { levelSuggestions } from "../../lib/variable-types";
 import { fileName } from "../../lib/paths";
 import { seriesKeyOf } from "../../lib/columns";
+import { formatLabelNodes } from "../../lib/label-format";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
 import { alert, askPasteLink, popupMenu, readClipboardFormats as readClipboardFormatsNative } from "../../native";
 import { XIcon } from "@phosphor-icons/react";
@@ -990,7 +991,13 @@ export function Grid({
             : undefined
         }
       >
-        {isCalculatedColumn(data, data.columns[c]) ? `ƒx ${headers[c]}` : headers[c]}
+        {isCalculatedColumn(data, data.columns[c]) ? (
+          <>
+            ƒx {formatLabelNodes(headers[c] ?? "")}
+          </>
+        ) : (
+          formatLabelNodes(headers[c] ?? "")
+        )}
       </span>
       {resizeHandle(c)}
     </div>
@@ -1144,7 +1151,7 @@ export function Grid({
                       onDoubleClick={() => startRenameGroup(lo)}
                       onContextMenu={(e) => showMenu(e, "column")}
                     >
-                      {key}
+                      {formatLabelNodes(key)}
                     </div>
                   );
                 })}
@@ -1170,7 +1177,7 @@ export function Grid({
                       onDoubleClick={() => startRenameSubgroup(lo)}
                       onContextMenu={(e) => showMenu(e, "column")}
                     >
-                      {key}
+                      {formatLabelNodes(key)}
                     </div>
                   );
                 })}

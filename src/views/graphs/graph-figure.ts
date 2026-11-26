@@ -107,6 +107,7 @@ import {
 import { coxSurvivalColumns } from "./survival";
 import { volcanoPair } from "./volcano";
 import { labelPlotGeometry, pointLabels } from "./selection";
+import { formatFigureLabels } from "../../lib/label-format";
 import {
   addNote,
   onAxis,
@@ -273,7 +274,12 @@ export function buildBaseFigure(
     dataset.summary,
   );
   fig.data = withCaps(fig.data, buildOptions);
-  return opts.hideLegend ? { ...fig, layout: { ...fig.layout, showlegend: false } } : fig;
+  // Labels render with super/subscripts (seq 548): the base chart is
+  // formatted here, and the full figure again after its overlays (the
+  // overlay annotations are built from raw titles) — formatting is
+  // idempotent, so the second pass is a no-op for the base chart.
+  const formatted = formatFigureLabels(fig);
+  return opts.hideLegend ? { ...formatted, layout: { ...formatted.layout, showlegend: false } } : formatted;
 }
 
 /** One analysis's outcome as the builder sees it: the live run, the frozen
@@ -789,5 +795,5 @@ export async function buildGraphFigure(
     fig.layout.shapes = [...((fig.layout.shapes as unknown[]) ?? []), ...shapes];
     fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...annotations];
   }
-  return { figure: fig, overlays };
+  return { figure: formatFigureLabels(fig), overlays };
 }
