@@ -1467,6 +1467,36 @@ export function interleavedPositions(groups: number, labels: string[]): Category
   };
 }
 
+/** A grouped bar's width and center within its row's slot, matching what
+ *  Plotly itself draws on a "category" axis (the cluster takes 0.8 of the
+ *  slot — bargap 0.2 — split across the groups, `barGap` between neighbours):
+ *  width = (0.8 / groups) * (1 - barGap), center(g) = -0.4 + (0.8/groups)*(g+0.5).
+ *  The numeric-positions path (bars with points overlaid) must use these
+ *  instead of `groupOffset`: Plotly sizes bars from the smallest gap between
+ *  bar positions, so `groupOffset`'s ±0.28 spread makes the bars thin with a
+ *  bigger gap between paired bars than between conditions (seq 547) — and
+ *  the gap only shrinks as groups are added. With an explicit `width` on the
+ *  trace Plotly centers the bar on its x, so these centers + width reproduce
+ *  the category-axis geometry exactly, showPoints on or off. The significance
+ *  brackets already assume these centers (see groupedSpots). */
+export function groupedBarGeometry(groups: number, barGap: number): { width: number; center: (g: number) => number } {
+  const slot = 0.8 / Math.max(1, groups);
+  return { width: slot * (1 - barGap), center: (g: number) => -0.4 + slot * (g + 0.5) };
+}
+
+/** Category positions for interleaved grouped bars with points overlaid:
+ *  each group's bar at its `groupedBarGeometry` center, so a point overlaid
+ *  on a bar sits on its own bar. Ticks are the row labels, one per row. */
+export function groupedBarPositions(groups: number, labels: string[], barGap: number): CategoryPositions {
+  const { center } = groupedBarGeometry(groups, barGap);
+  return {
+    posOf: (g, r) => r + center(g),
+    tickvals: labels.map((_, i) => i),
+    ticktext: labels,
+    range: [-0.5, labels.length - 0.5],
+  };
+}
+
 /** Category positions for the "Separated" arrangement: each group gets its own
  *  block of `rows` slots (with a 1-slot gap between blocks) instead of sharing
  *  a slot per row, so groups sit side by side rather than interleaved. Ticks

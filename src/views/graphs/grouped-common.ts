@@ -12,9 +12,10 @@ import {
   perRowStats,
   perRowSummaryStats,
   groupOffset,
+  groupedBarGeometry,
   groupedBarLayout,
+  groupedBarPositions,
   groupedScatterLayout,
-  interleavedPositions,
   jitter,
   separatedPositions,
   seriesCenter,
@@ -36,12 +37,14 @@ import type { SummaryFormat } from "../../lib/summary-format";
  *  the stored Means and the whiskers the stored errors (converted to the
  *  graph's error kind); there are no replicates to average. With `showPoints`
  *  on an interleaved replicates table, each group's individual values are
- *  overlaid as a points trace at the same places grouped-scatter draws them
- *  (`groupOffset` + jitter), so a point sits on its own bar; the bars then
- *  take numeric category positions instead of Plotly's "category" axis, as
- *  the separated layout already does. Stacked bars and summary tables never
- *  draw points (a stack's total is not its replicates' values, and a summary
- *  table has no individual values). */
+ *  overlaid as a points trace centered on its own bar (jitter scaled to the
+ *  bar width, so points stay inside the bar for any group count); the bars
+ *  then take numeric category positions instead of Plotly's "category" axis,
+ *  as the separated layout already does — at the `groupedBarGeometry`
+ *  centers, with an explicit `width`, so the bars keep the category axis's
+ *  Prism proportions instead of going thin with an inverted gap (seq 547).
+ *  Stacked bars and summary tables never draw points (a stack's total is not
+ *  its replicates' values, and a summary table has no individual values). */
 export function buildGroupedBars(
   columns: Column[],
   options: GraphOptions,
@@ -60,8 +63,15 @@ export function buildGroupedBars(
   const pointsOn = mode === "group" && options.showPoints && summary === "replicates";
   // Numeric category positions whenever the bars leave the "category" axis:
   // separated blocks, or interleaved bars with points overlaid (the points
-  // need numeric places to sit on their own bar).
-  const positions = separated ?? (pointsOn ? interleavedPositions(groups.length, labels) : undefined);
+  // need numeric places to sit on their own bar). Interleaved bars with
+  // points use the grouped-bar geometry — Plotly sizes bars from the
+  // smallest gap between bar positions, so the old `groupOffset` centers
+  // made them thin with a bigger gap between paired bars than between
+  // conditions (seq 547); the explicit width below restores the
+  // category-axis proportions. Separated bars already get their width
+  // from a 1-slot spacing, so they need neither.
+  const barGeom = pointsOn && !separated ? groupedBarGeometry(groups.length, options.barGap) : undefined;
+  const positions = separated ?? (pointsOn ? groupedBarPositions(groups.length, labels, options.barGap) : undefined);
   // Superimposed (Prism's "Data Sets on Graph" relation): every group's bar
   // runs from the axis to its value at the same x — Plotly's barmode
   // "overlay" — instead of standing side by side. Later groups draw over
@@ -100,6 +110,9 @@ export function buildGroupedBars(
       orientation: horizontal ? "h" : "v",
       [horizontal ? "y" : "x"]: x,
       [horizontal ? "x" : "y"]: center,
+      // Explicit width: Plotly centers an explicit-width bar on its x, so
+      // the bars keep their category-axis width when the axis goes numeric.
+      ...(barGeom ? { width: barGeom.width } : {}),
       marker: paint.bars(g.name, i),
       ...(errArr
         ? {
@@ -110,9 +123,13 @@ export function buildGroupedBars(
     };
   });
 
-  // The individual points for each group, at the same places interleaved
-  // scatter draws them — on top of the bars (later traces draw above).
+  // The individual points for each group, centered on their own bar — on
+  // top of the bars (later traces draw above). The jitter (±0.15) is scaled
+  // to the bar width (× 2×width caps the offset at 0.3×width), so points
+  // stay inside their bar for any group count; separated bars are wide
+  // enough that the legacy ±0.06 spread already fits.
   if (pointsOn) {
+    const jitterAmp = barGeom ? 2 * barGeom.width : 0.4;
     groups.forEach((g, gi) => {
       const basePos = (r: number) => positions!.posOf(gi, r);
       const px: number[] = [];
@@ -122,7 +139,7 @@ export function buildGroupedBars(
         g.columns.forEach((c, ci) => {
           const v = c.byRow[r] ?? null;
           if (v != null) {
-            px.push(basePos(r) + jitter(gi, r * 10 + ci) * 0.4);
+            px.push(basePos(r) + jitter(gi, r * 10 + ci) * jitterAmp);
             py.push(v);
             pointKeys.push(pointKeyOf(c.name, r));
           }
@@ -167,7 +184,13 @@ export function buildGroupedBars(
  *  error whiskers, so no center line is drawn twice. On a summary table
  *  there are no individual values to plot — the bars alone. Superimposed
  *  bars put every group's points at the row's center, on their bar; the
- *  interleaved and separated arrangements fan them out with their group. */
+ *  interleaved and separated arrangements fan them out with their group.
+ *  With `showPoints` on, `buildGroupedBars` already overlaid the points —
+ *  adding them again here drew every point twice (with a second legend
+ *  entry), so this builder only adds points when they aren't already there.
+ *  Interleaved points sit at the grouped-bar centers (what the bars are
+ *  actually drawn at on the category axis), not at `groupOffset` — that
+ *  put them off-center, toward the bar's outer edge (seq 547). */
 export function buildGroupedBarsScatter(
   columns: Column[],
   options: GraphOptions,
@@ -177,15 +200,21 @@ export function buildGroupedBarsScatter(
 ): GraphFigure {
   const bars = buildGroupedBars(columns, options, "group", false, paint, titles, summary);
   if (summary !== "replicates") return bars;
+  if (options.showPoints) return bars;
   const groups = groupsOf(columns);
   const rows = rowCountOf(columns);
   const total = groups.length;
   const separated = options.groupLayout === "separated" ? separatedPositions(total, rowLabels(rows, titles)) : undefined;
   const superimposed = options.groupLayout === "superimposed";
+  const geom = groupedBarGeometry(total, options.barGap);
   const data: unknown[] = [...bars.data];
   groups.forEach((g, gi) => {
     const basePos = (r: number) =>
-      superimposed ? r : separated ? separated.posOf(gi, r) : r + groupOffset(gi, total);
+      superimposed ? r : separated ? separated.posOf(gi, r) : r + geom.center(gi);
+    // Same jitter rule as buildGroupedBars: scaled to the bar width on
+    // interleaved bars, the legacy ±0.06 on the wide superimposed/separated
+    // bars (0.8 / 0.72 wide — the spread already fits).
+    const jitterAmp = superimposed || separated ? 0.4 : 2 * geom.width;
     const px: number[] = [];
     const py: number[] = [];
     const pointKeys: string[] = [];
@@ -193,7 +222,7 @@ export function buildGroupedBarsScatter(
       g.columns.forEach((c, ci) => {
         const v = c.byRow[r] ?? null;
         if (v != null) {
-          px.push(basePos(r) + jitter(gi, r * 10 + ci) * 0.4);
+          px.push(basePos(r) + jitter(gi, r * 10 + ci) * jitterAmp);
           py.push(v);
           pointKeys.push(pointKeyOf(c.name, r));
         }
@@ -207,6 +236,7 @@ export function buildGroupedBarsScatter(
       y: py,
       ...seriesPoints(paint, g.name, gi, pointKeys),
       hoverinfo: "y",
+      showlegend: false,
     });
   });
   return { data, layout: bars.layout };

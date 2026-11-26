@@ -14,6 +14,7 @@ import {
   errors,
   FONT,
   groupOffset,
+  groupedBarGeometry,
   INK,
   perRowStats,
   rowCountOf,
@@ -481,13 +482,16 @@ function groupedSpots(
   const separated = options.groupLayout === "separated" ? separatedPositions(n, rowLabels(rows, titles)) : undefined;
   // Superimposed bars all stand at the row's center, so their brackets do too.
   const superimposed = options.groupLayout === "superimposed";
+  // Bars sit at the grouped-bar centers (the same geometry the bar builder
+  // draws); scatter points and boxes at their `groupOffset` places.
+  const barGeom = groupedBarGeometry(n, options.barGap);
   const xOf = (g: number, r: number) =>
     separated
       ? separated.posOf(g, r)
       : superimposed
         ? r
         : graphType === "grouped-bars" || graphType === "grouped-bars-scatter"
-          ? r - 0.4 + (0.8 * (g + 0.5)) / n
+          ? r + barGeom.center(g)
           : r + groupOffset(g, n);
   return groups.flatMap((group, g) => {
     // One group, one series: its center/error override governs every row, so a

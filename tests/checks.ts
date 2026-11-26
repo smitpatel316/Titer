@@ -6976,6 +6976,7 @@ check("grouped bars overlay the individual points when showPoints is set (Mansi 
     name?: string;
     x?: (number | string)[];
     y?: (number | null)[];
+    width?: number;
     error_y?: { array: number[] };
     error_x?: { array: number[] };
     showlegend?: boolean;
@@ -7001,12 +7002,14 @@ check("grouped bars overlay the individual points when showPoints is set (Mansi 
   strictEqual(ptsB.showlegend, false);
   deepStrictEqual(ptsA.y, [1, 3, 4, 2]);
   deepStrictEqual(ptsB.y, [2, 6, 5, 1]);
-  // Each point sits on its own bar: group A's bar center in row 1 is −0.28, row 2 is 0.72
-  // (groupOffset), within the jitter's ±0.06 — and the bars sit at those same centers.
-  ok(ptsA.x!.every((x, k) => close(x as number, (k < 2 ? -0.28 : 0.72) + jitter(0, (k < 2 ? 0 : 10) + (k % 2)) * 0.4)));
-  ok(ptsB.x!.every((x, k) => close(x as number, (k < 2 ? 0.28 : 1.28) + jitter(1, (k < 2 ? 0 : 10) + (k % 2)) * 0.4)));
-  ok(close(barA.x![0] as number, -0.28) && close(barA.x![1] as number, 0.72));
-  ok(close(barB.x![0] as number, 0.28) && close(barB.x![1] as number, 1.28));
+  // Each point sits on its own bar: group A's bar center in row 1 is −0.20, row 2 is 0.80
+  // (grouped-bar geometry, seq 547), within the jitter's ±0.108 (0.3 × the 0.36 bar width) —
+  // and the bars sit at those same centers, at the category-axis width.
+  ok(close(barA.width, 0.36) && close(barB.width, 0.36));
+  ok(ptsA.x!.every((x, k) => close(x as number, (k < 2 ? -0.2 : 0.8) + jitter(0, (k < 2 ? 0 : 10) + (k % 2)) * 0.72)));
+  ok(ptsB.x!.every((x, k) => close(x as number, (k < 2 ? 0.2 : 1.2) + jitter(1, (k < 2 ? 0 : 10) + (k % 2)) * 0.72)));
+  ok(close(barA.x![0] as number, -0.2) && close(barA.x![1] as number, 0.8));
+  ok(close(barB.x![0] as number, 0.2) && close(barB.x![1] as number, 1.2));
   // The axis still ticks the row labels at the row slots.
   const xaxis = fig.layout.xaxis as { tickvals?: number[]; ticktext?: string[]; range?: [number, number] };
   deepStrictEqual(xaxis.tickvals, [0, 1]);
@@ -7027,12 +7030,83 @@ check("grouped bars overlay the individual points when showPoints is set (Mansi 
   const hTraces = hFig.data as Trace[];
   strictEqual(hTraces.length, 4);
   deepStrictEqual(hTraces[2].x, [1, 3, 4, 2]);
-  ok(hTraces[2].y!.every((y, k) => close(y as number, (k < 2 ? -0.28 : 0.72) + jitter(0, (k < 2 ? 0 : 10) + (k % 2)) * 0.4)));
+  ok(close(hTraces[0].width, 0.36) && close(hTraces[1].width, 0.36));
+  ok(hTraces[2].y!.every((y, k) => close(y as number, (k < 2 ? -0.2 : 0.8) + jitter(0, (k < 2 ? 0 : 10) + (k % 2)) * 0.72)));
   // No points where there are no individual values: a summary table, or stacked bars.
   const summary = readTable(summaryTable());
   const sumFig = GRAPHS["grouped-bars"].build(summary.numeric, options, paintOf(options, 2), summary.titles, "mean-sd-n");
   strictEqual(sumFig.data.length, 2);
   strictEqual(GRAPHS["grouped-stacked"].build(columns, options, paintOf(options, 2)).data.length, 2);
+});
+
+check("seq 547: grouped bars with showPoints keep Prism proportions, points centered on their bar", () => {
+  const close = (a: number | undefined, b: number) => a !== undefined && Math.abs(a - b) < 1e-9;
+  type Trace = {
+    type?: string;
+    name?: string;
+    x?: (number | string)[];
+    y?: (number | null)[];
+    width?: number;
+    showlegend?: boolean;
+  };
+  const table = {
+    columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [
+      [null, "1", "3", "2", "6"],
+      [null, "4", "2", "5", "1"],
+    ],
+  };
+  const columns = readTable(table).columns;
+  const options: GraphOptions = { ...newGraphOptions("grouped-bars"), showPoints: true };
+  const fig = GRAPHS["grouped-bars"].build(columns, options, paintOf(options, 2));
+  const traces = fig.data as Trace[];
+  const [barA, barB] = traces;
+  // (1) Bar proportions: the bars are the category-axis bars — 0.36 wide
+  // ((0.8/2) × (1 − 0.1)), centers ±0.20 — so paired bars sit close (0.04
+  // apart) with clear spacing between conditions (0.24). Before the fix the
+  // numeric-positions path drew 0.317-wide bars with the gap inverted
+  // (0.243 between pairs, 0.123 between conditions).
+  ok(close(barA.width, 0.36) && close(barB.width, 0.36));
+  ok(close(barA.x![0] as number, -0.2) && close(barB.x![0] as number, 0.2));
+  const intra = ((barB.x![0] as number) - (barA.x![0] as number)) - barA.width!;
+  const inter = ((barA.x![1] as number) - (barB.x![0] as number)) - barB.width!;
+  ok(close(intra, 0.04) && close(inter, 0.24) && intra < inter);
+  // (2) Point placement: every point within 0.3 × the bar width of its bar's
+  // center — centered on the bar, never outside it.
+  const within = (pts: Trace, bar: Trace) =>
+    (pts.x as number[]).every((x, k) => Math.abs(x - ((bar.x as number[])[Math.floor(k / 2)] as number)) <= 0.3 * bar.width! + 1e-9);
+  ok(within(traces[2], barA) && within(traces[3], barB));
+  // The same holds with four groups, where the old fixed ±0.06 jitter reached
+  // the edge of a 0.134-wide bar: bars 0.18 wide, points within 0.054 of center.
+  const four = readTable({
+    columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2", "C:Y1", "C:Y2", "D:Y1", "D:Y2"],
+    rows: [
+      [null, "1", "3", "2", "6", "4", "5", "7", "8"],
+      [null, "4", "2", "5", "1", "3", "6", "2", "9"],
+    ],
+  }).columns;
+  const fourFig = GRAPHS["grouped-bars"].build(four, options, paintOf(options, 2));
+  const fourTraces = fourFig.data as Trace[];
+  ok(fourTraces.slice(0, 4).every((b) => close(b.width, 0.18)));
+  ok(fourTraces.slice(4).every((pts, gi) => within(pts, fourTraces[gi])));
+  // (3) Bars-with-points draws each point once, centered on its bar, with no
+  // legend entry of its own — whether or not showPoints is also on (before
+  // the fix, showPoints on drew every point twice, and off put the points at
+  // the ±0.28 scatter offsets while the bars sat at ±0.20).
+  const scatterDefault = GRAPHS["grouped-bars-scatter"].build(columns, newGraphOptions("grouped-bars-scatter"), paintOf(options, 2));
+  const scatterTraces = scatterDefault.data as Trace[];
+  strictEqual(scatterTraces.length, 4);
+  deepStrictEqual(scatterTraces.map((t) => t.type), ["bar", "bar", "scatter", "scatter"]);
+  ok(scatterTraces.slice(2).every((t) => t.showlegend === false));
+  // The bars here sit on the category axis (string x, no explicit width),
+  // where Plotly draws them at the grouped-bar centers (±0.20, 0.36 wide),
+  // so the points are checked against those centers directly.
+  const centered = (pts: Trace, g: number) =>
+    (pts.x as number[]).every((x, k) => Math.abs(x - (Math.floor(k / 2) + (g === 0 ? -0.2 : 0.2))) <= 0.3 * 0.36 + 1e-9);
+  ok(centered(scatterTraces[2], 0) && centered(scatterTraces[3], 1));
+  const scatterOn = GRAPHS["grouped-bars-scatter"].build(columns, options, paintOf(options, 2));
+  strictEqual(scatterOn.data.length, 4);
+  deepStrictEqual((scatterOn.data as Trace[]).map((t) => t.type), ["bar", "bar", "scatter", "scatter"]);
 });
 
 // ── Summary sub-columns on XY and nested tables (seq 208) ─────────────────
