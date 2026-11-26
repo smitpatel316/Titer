@@ -754,31 +754,102 @@ export const PACKAGE_INSTALL_TIMEOUT_MS = 360_000;
  *  (360 s) so a live holder is never robbed mid-install. */
 export const CLAIM_STALE_MS = 400_000;
 
+/** This window's claim stamps: package -> the R `Sys.time()` value this
+ *  window won the claim with (read back from the winning claim eval).
+ *  The stamp is the ownership proof that lets a later call in this window
+ *  RECLAIM its own abandoned claim (see `claimInstallCode`): a timed-out
+ *  call's claim can outlive it in the engine — the fire-and-forget release
+ *  meant to clear it is dropped by webR's interrupt (see below) — and the
+ *  retry must be able to tell "my own dead claim" from "another window's
+ *  live install". A stamp only ever matches a claim this window won; a
+ *  live holder in another window has a different stamp, so a reclaim can
+ *  never rob it. Per window (module-level, like `states`): a second
+ *  window imports a second module record with its own empty map, so P-13
+ *  dedup is unaffected. Entries are cleared once the package reports
+ *  installed (the claim is moot then). */
+const claimStamps = new Map<string, number>();
+
 /** R code: for each wanted package, 2 = installed at the pinned version,
  *  1 = this caller wins the claim, 0 = another window holds the claim.
- *  One eval, atomic in the single-threaded worker. */
-function claimInstallCode(names: string[]): string {
+ *  One eval, atomic in the single-threaded worker. The result also
+ *  carries `<pkg>_claim`: the stored claim timestamp — the new `now` on
+ *  a win, the holder's timestamp on a 0, 0 when installed.
+ *  `reclaim` (package -> stamp this window won with) lets a caller
+ *  re-win its OWN abandoned claim at once: the holder's timestamp
+ *  matches the recorded win, so the claim is dead — its holder timed
+ *  out and evicted — not another window's live install. Callers pass a
+ *  stamp only for packages whose local state is `failed` (a live batch
+ *  in this window shows `loading`, and a concurrent same-window caller
+ *  must never reclaim it). Without a stamp the slot is won only when
+ *  empty or stale, exactly as before. */
+function claimInstallCode(names: string[], reclaim?: Map<string, number>): string {
   const pkgs = `c(${names.map((n) => JSON.stringify(n)).join(",")})`;
   const vers = `c(${names.map((n) => JSON.stringify(registryByName.get(n)!.version)).join(",")})`;
+  const mine = `c(${names.map((n) => JSON.stringify(reclaim?.get(n) ?? 0)).join(",")})`;
   return (
-    `pkgs<-${pkgs};vers<-${vers};` +
+    `pkgs<-${pkgs};vers<-${vers};mine<-${mine};` +
     `claims<-get0(".helix_install_claims",envir=.GlobalEnv,ifnotfound=list());` +
-    `now<-as.numeric(Sys.time());codes<-numeric(length(pkgs));` +
+    `now<-as.numeric(Sys.time());codes<-numeric(length(pkgs));stamps<-numeric(length(pkgs));` +
     `for(i in seq_along(pkgs)){p<-pkgs[i];` +
     `ok<-requireNamespace(p,quietly=TRUE)&&packageVersion(p)==package_version(vers[i]);` +
-    `if(ok){codes[i]<-2}else{held<-claims[[p]];` +
-    `if(is.null(held)||now-held>${CLAIM_STALE_MS / 1000}){claims[[p]]<-now;codes[i]<-1}else{codes[i]<-0}}};` +
+    `if(ok){codes[i]<-2;stamps[i]<-0}else{held<-claims[[p]];` +
+    `if(is.null(held)||now-held>${CLAIM_STALE_MS / 1000}||(mine[i]>0&&abs(held-mine[i])<5)){claims[[p]]<-now;codes[i]<-1;stamps[i]<-now}else{codes[i]<-0;stamps[i]<-held}}};` +
     `assign(".helix_install_claims",claims,envir=.GlobalEnv);` +
-    `setNames(codes,pkgs)`
+    `c(setNames(codes,pkgs),setNames(stamps,paste0(pkgs,"_claim")))`
   );
 }
 
 /** R code: drop this caller's claims (on failure, so another window's retry
- *  can claim at once instead of waiting out the steal window). Best effort. */
-function releaseClaimCode(names: string[]): string {
+ *  can claim at once instead of waiting out the steal window). Best effort.
+ *  CONDITIONAL on the stamp: a claim is cleared only if the stored
+ *  timestamp still matches the one this caller won with. A release eval
+ *  that lands late — after a retry reclaimed the package and started a
+ *  fresh install — must not drop the retry's live claim, so the stamp
+ *  mismatch makes it a no-op. Packages without a recorded stamp are left
+ *  alone: this caller never owned them.
+ *
+ *  Why the release cannot be trusted to land at all (measured 2026-11-26,
+ *  scratch probe #5): a release eval issued while the engine is busy
+ *  queues its Shelter-creation message behind the hung install, and the
+ *  hung install's watchdog interrupt calls webR's
+ *  `SharedBufferChannelMain.interrupt()`, which does
+ *  `inputQueue.reset()` — discarding every queued message. The release's
+ *  promise then pends forever (its parked resolver is discarded with the
+ *  message) and the claim is never cleared. That is the P-12 root cause:
+ *  the owner's deming claim, taken at engine start, was still held —
+ *  timestamp unchanged — 44 s after the owner's timeout, while the
+ *  engine answered other evals promptly, so the retry spun on code 0
+ *  until its watchdog. The reclaim above is the fix: the retry re-wins
+ *  its own abandoned claim without depending on a release ever landing.
+ *  (Old code recovered by accident: its doubled budgets let the
+ *  watchdog grace expire before the repo was released, so `resetR`
+ *  wiped the engine — claims included. R2-66's shorter budgets removed
+ *  that accidental recovery and exposed the broken release.) */
+function releaseClaimCode(names: string[], stamps?: Map<string, number>): string {
+  if (!stamps) {
+    // Unconditional (legacy): used only by the abandoned-eval fallback
+    // below, where the caller never won the claim and so has no stamp —
+    // the eval it abandoned may still win one later, and only an
+    // unconditional clear drops that zombie win. The timeout paths use
+    // the conditional form instead (never drop a claim this caller did
+    // not win, and never drop a live re-win).
+    return (
+      `claims<-get0(".helix_install_claims",envir=.GlobalEnv,ifnotfound=list());` +
+      `claims[c(${names.map((n) => JSON.stringify(n)).join(",")})]<-NULL;` +
+      `assign(".helix_install_claims",claims,envir=.GlobalEnv);c(released=1)`
+    );
+  }
+  const clears = names
+    .filter((n) => stamps.has(n))
+    .map(
+      (n) =>
+        `held<-claims[[${JSON.stringify(n)}]];` +
+        `if(!is.null(held)&&abs(held-${JSON.stringify(stamps.get(n))})<5)claims[[${JSON.stringify(n)}]]<-NULL;`,
+    )
+    .join("");
   return (
     `claims<-get0(".helix_install_claims",envir=.GlobalEnv,ifnotfound=list());` +
-    `claims[c(${names.map((n) => JSON.stringify(n)).join(",")})]<-NULL;` +
+    clears +
     `assign(".helix_install_claims",claims,envir=.GlobalEnv);c(released=1)`
   );
 }
@@ -806,13 +877,18 @@ function timeoutError(names: string[], timeoutMs: number): PackageError {
  *  queue order) to drop whatever it won, instead of poisoning a retry.
  *  Throws a timeout PackageError (and marks the unresolved failed) if the
  *  caller's budget runs out while another window's install is still going
- *  and the engine IS answering. */
+ *  and the engine IS answering.
+ *  A win records this window's claim stamp (see `claimStamps`); a retry
+ *  reclaims with it. Returns the stamps this call won, so the caller's
+ *  timeout release can prove ownership (a stamp is per call: the
+ *  window-level map may since have been overwritten by a later win). */
 async function resolveInEngine(
   names: string[],
   deadline: number,
   timeoutMs: number,
-): Promise<{ won: string[]; unresolved: string[] }> {
+): Promise<{ won: string[]; wonStamps: Map<string, number>; unresolved: string[] }> {
   const won: string[] = [];
+  const wonStamps = new Map<string, number>();
   let pending = [...names];
   while (pending.length) {
     const remaining = deadline - Date.now();
@@ -823,7 +899,14 @@ async function resolveInEngine(
     }
     let codes: RVector | null;
     try {
-      codes = await claimEvalWithBudget(pending, remaining);
+      // Reclaim only what this window previously won AND already failed
+      // here: a package `loading` in this window has a live batch, and a
+      // concurrent same-window caller must wait for it, never steal it.
+      const reclaim = new Map<string, number>();
+      for (const n of pending) {
+        if (stateOf(n).status === "failed" && claimStamps.has(n)) reclaim.set(n, claimStamps.get(n)!);
+      }
+      codes = await claimEvalWithBudget(pending, remaining, reclaim);
     } catch (err) {
       if (err instanceof EvalTimeoutError) {
         const error = timeoutError(pending, timeoutMs);
@@ -839,18 +922,26 @@ async function resolveInEngine(
       // hang here. Queue a release behind the abandoned eval so a claim
       // it wins later cannot poison a retry.
       void evalNamedVector(releaseClaimCode(pending), { timeoutMs: PACKAGE_INSTALL_TIMEOUT_MS }).catch(() => {});
-      return { won, unresolved: pending };
+      return { won, wonStamps, unresolved: pending };
     }
     const next: string[] = [];
     for (const n of pending) {
-      if (codes[n] === 2) states.set(n, { status: "ready" });
-      else if (codes[n] === 1) won.push(n);
-      else next.push(n);
+      if (codes[n] === 2) {
+        states.set(n, { status: "ready" });
+        claimStamps.delete(n);
+      } else if (codes[n] === 1) {
+        won.push(n);
+        const stamp = codes[`${n}_claim`] ?? 0;
+        if (stamp) {
+          wonStamps.set(n, stamp);
+          claimStamps.set(n, stamp);
+        }
+      } else next.push(n);
     }
     pending = next;
     if (pending.length) await new Promise((r) => setTimeout(r, 1000));
   }
-  return { won, unresolved: [] };
+  return { won, wonStamps, unresolved: [] };
 }
 
 /** One claim eval, raced against the caller's remaining budget. The eval
@@ -858,9 +949,9 @@ async function resolveInEngine(
  *  and Shelter creation queues behind a hung install in the engine, so
  *  without this race the wait would be unbounded. `null` = the engine
  *  never answered; the eval stays queued and is abandoned. */
-function claimEvalWithBudget(names: string[], budgetMs: number): Promise<RVector | null> {
+function claimEvalWithBudget(names: string[], budgetMs: number, reclaim?: Map<string, number>): Promise<RVector | null> {
   return Promise.race([
-    evalNamedVector(claimInstallCode(names), { timeoutMs: budgetMs }),
+    evalNamedVector(claimInstallCode(names, reclaim), { timeoutMs: budgetMs }),
     new Promise<null>((resolve) => setTimeout(() => resolve(null), budgetMs)),
   ]);
 }
@@ -914,9 +1005,11 @@ export async function ensurePackages(names: string[], opts?: { timeoutMs?: numbe
   // Unresolved packages (the engine never answered the claim eval) fall
   // through to the batch below exactly like won ones — the claim is
   // best-effort and never gates the install.
-  const { won }: { won: string[]; unresolved: string[] } = toResolve.length
+  const {
+    wonStamps,
+  }: { won: string[]; wonStamps: Map<string, number>; unresolved: string[] } = toResolve.length
     ? await resolveInEngine(toResolve, deadline, timeoutMs)
-    : { won: [], unresolved: [] };
+    : { won: [], wonStamps: new Map(), unresolved: [] };
   // Join in-flight installs, then install what's still missing — all decided
   // synchronously, before the first await, so concurrent callers cannot
   // start a second install of the same package.
@@ -939,9 +1032,13 @@ export async function ensurePackages(names: string[], opts?: { timeoutMs?: numbe
       // BUG-REPORT Round 2 #66: the claim phase above already spent part of
       // this call's budget — the install gets only what is left of the
       // deadline, not a fresh full timeout, or the call's total budget
-      // doubles. Nothing left means the race below fires instead.
+      // doubles. Nothing left means the call has run out of budget: the
+      // batch must fail as a timeout, not return as if the install had
+      // run — a bare return resolves the batch, so the caller reports
+      // success and the packages stay `loading` forever (P-12: a queued
+      // batch after eviction, and a joiner arriving after eviction).
       const remaining = deadline - Date.now();
-      if (remaining <= 0) return;
+      if (remaining <= 0) throw timeoutError(missing, timeoutMs);
       return installBatch(missing, cancel, remaining);
     });
     batch.then(
@@ -965,6 +1062,38 @@ export async function ensurePackages(names: string[], opts?: { timeoutMs?: numbe
   // joined as well as its own batch. (Before B2, a caller that only joined
   // a hung install awaited it before the race and hung forever with no
   // timeout at all.)
+  //
+  // Time this call out: release the claims it won and evict the stuck
+  // batch. The claims must go on the timeout path too — the release below
+  // only runs when the race resolves, so a timed-out winner would
+  // otherwise hold its claim until the steal window and a retry would spin
+  // on it (P-12: the deming retry never got past the claim loop). The
+  // release eval is best-effort and fire-and-forget: it queues behind the
+  // hung install and runs when the engine frees, ahead of the retry's
+  // claim. Only this caller's won claims — never another window's live one:
+  // the release is conditional on this call's own stamp, so a release
+  // that lands late (after a retry reclaimed the package) is a harmless
+  // no-op instead of dropping the retry's live claim. And the release
+  // may never land at all (webR's interrupt drops queued evals — see
+  // `releaseClaimCode`); the retry does not depend on it, it reclaims
+  // with the recorded stamp instead.
+  const releaseAndEvict = (error: PackageError): void => {
+    const toRelease = wanted.filter((n) => wonStamps.has(n));
+    if (toRelease.length) {
+      void evalNamedVector(releaseClaimCode(toRelease, wonStamps), { timeoutMs: PACKAGE_INSTALL_TIMEOUT_MS }).catch(() => {});
+    }
+    evictTimedOut(wanted, error);
+  };
+  // The deadline is already spent and the packages are not all ready: fail
+  // now instead of racing a 0 ms timer against the joined batch — the
+  // batch promise resolves first (a microtask beats the timer), so the call
+  // would resolve successfully for packages that never installed (P-12
+  // joiner). A call whose packages are all ready resolves normally.
+  if (deadline - Date.now() <= 0 && !wanted.every((n) => stateOf(n).status === "ready")) {
+    const error = timeoutError(wanted, timeoutMs);
+    releaseAndEvict(error);
+    throw error;
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   let timedOut = false;
   try {
@@ -983,7 +1112,13 @@ export async function ensurePackages(names: string[], opts?: { timeoutMs?: numbe
       }),
     ]);
   } catch (err) {
-    if (timedOut) evictTimedOut(wanted, err as PackageError);
+    // A timeout — from the wait race (`timedOut`) or from a batch that ran
+    // out of budget before it could start — evicts the stuck batch and
+    // releases this caller's claims (see releaseAndEvict above). Any other
+    // rejection is not a timeout and evicts nothing.
+    if (timedOut || (err instanceof PackageError && err.kind === "timeout")) {
+      releaseAndEvict(err as PackageError);
+    }
     throw err;
   } finally {
     clearTimeout(timer);
@@ -994,11 +1129,11 @@ export async function ensurePackages(names: string[], opts?: { timeoutMs?: numbe
     // claim at once instead of waiting out the steal window. Awaited briefly
     // (a prompt retry must see it); if the engine is busy the steal window
     // is the backstop. Only this caller's won claims — never another
-    // window's live claim.
-    const toRelease = failed.filter((n) => won.includes(n));
+    // window's live claim (the release is conditional on this call's stamp).
+    const toRelease = failed.filter((n) => wonStamps.has(n));
     if (toRelease.length) {
       await Promise.race([
-        evalNamedVector(releaseClaimCode(toRelease), { timeoutMs: PACKAGE_INSTALL_TIMEOUT_MS }).catch(() => {}),
+        evalNamedVector(releaseClaimCode(toRelease, wonStamps), { timeoutMs: PACKAGE_INSTALL_TIMEOUT_MS }).catch(() => {}),
         new Promise((r) => setTimeout(r, 2000)),
       ]);
     }
@@ -1024,11 +1159,21 @@ export async function ensurePackages(names: string[], opts?: { timeoutMs?: numbe
  *    (only while still `loading` — a package that already resolved `ready`
  *    is never clobbered).
  *  Idempotent: a second caller evicting the same packages finds no ticket
- *  and does nothing, so the owning caller's own timeout is a harmless no-op. */
+ *  and does nothing, so the owning caller's own timeout is a harmless no-op.
+ *  One exception: a batch that threw before its install started (its budget
+ *  was already spent) settles — and its ticket is cleaned up — before the
+ *  catch runs, so a package can be `loading` with no ticket. That package
+ *  still failed by timeout and is marked so; a package that is already
+ *  `failed` or `ready` is never touched. */
 function evictTimedOut(names: string[], error: PackageError): void {
   for (const name of names) {
     const ticket = inflight.get(name);
-    if (!ticket) continue;
+    if (!ticket) {
+      if (stateOf(name).status === "loading") {
+        states.set(name, { status: "failed", error: error.message, kind: "timeout" });
+      }
+      continue;
+    }
     ticket.cancel.current = true;
     ticket.releaseGate();
     inflight.delete(name);
