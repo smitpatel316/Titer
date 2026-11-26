@@ -9,7 +9,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cancelActiveEvals, EvalCancelledError, ensurePackages, evalNamedVector, getEngineBootStatus, onEngineBootStatus, packageDiagnostics, packageStatus, resetR, setPackageRepo, startR, type EngineBootStatus } from "../src/stats/webr";
+import { cancelActiveEvals, connectR, EvalCancelledError, ensurePackages, evalNamedVector, getEngineBootStatus, onEngineBootStatus, packageDiagnostics, packageStatus, resetR, setPackageRepo, startR, type EngineBootStatus, type RVector } from "../src/stats/webr";
 import {
   createEvalQueue,
   getRQueueSnapshot,
@@ -43355,6 +43355,177 @@ check("feedback-loop-453: feedback reachable for every user, Discussions + suppo
   ok(mcp.includes('"app_version": env!("CARGO_PKG_VERSION")'), "feedback context carries the app version");
   ok(mcp.includes('"os": std::env::consts::OS'), "feedback context carries the OS");
   ok(mcp.includes('"kind": kind'), "feedback entries carry their kind");
+});
+
+
+// ── BUG-REPORT Round 2 WebR claim issues #89 + #90 + #96 (seq 561/562/568) ──
+
+// BUG-REPORT Round 2 #89: claim ownership used `Math.abs(held - stamp) < 5`
+// — a 5-second fuzzy window — so two windows starting within 5 s of each
+// other could pass the stamp match and steal/release each other's live
+// install claim, and `claimStamps` was never cleared on install/reset/
+// release. Ownership is now an exact unique token (see `claimTokens` in
+// src/stats/webr.ts): the engine stores the winning token per package,
+// reclaim/release match it with exact `==`, and a reclaim re-win rotates
+// to a fresh token. The runtime half below drives the exported claim/release
+// codegen against the live engine (on a fresh engine — `resetR()` first —
+// so no earlier check's installed packages short-circuit the claim path).
+// The codegen fns are reached by dynamic import: statically importing a
+// name the module does not export would fail the whole file at load, so
+// the pin fails cleanly on its own assertion instead.
+check("r2-89 webr: claim ownership is an exact unique token, never a fuzzy timestamp window; tokens cleared on completion, failure, release and reset", async () => {
+  const webr = readFileSync("src/stats/webr.ts", "utf8");
+  ok(!webr.includes("abs(held"), "claim matching must not use a fuzzy timestamp tolerance");
+  ok(!webr.includes('paste0(pkgs,"_claim")'), "the claim eval must not return numeric timestamp stamps");
+  const claimFn = webr.slice(webr.indexOf("export function claimInstallCode"), webr.indexOf("export function releaseClaimCode"));
+  ok(/heldTok==mine\[i\]/.test(claimFn), "a reclaim must match the stored token with exact equality");
+  ok(/tokens\[\[p\]\]<-store\[i\]/.test(claimFn), "a win must store the attempt's fresh token, not the reclaim token");
+  ok(/\.helix_install_claim_tokens/.test(claimFn), "claims must live in a token list alongside the timestamp list");
+  const releaseFn = webr.slice(webr.indexOf("export function releaseClaimCode"), webr.indexOf("/** The timeout PackageError"));
+  ok(/heldTok==/.test(releaseFn), "a release must match the stored token with exact equality");
+  ok(!releaseFn.includes("claims[c("), "releaseClaimCode must have no unconditional claim deletion");
+  ok(!releaseFn.includes("if (!stamps)"), "releaseClaimCode must have no unstamped fallback branch");
+  ok(
+    /export function releaseClaimCode\(names: string\[\], tokens: Map<string, string>\)/.test(webr),
+    "releaseClaimCode must require the caller's tokens",
+  );
+  const resetFn = webr.slice(webr.indexOf("export function resetR"), webr.indexOf("/** Called when an evaluation stays stuck"));
+  ok(resetFn.includes("claimTokens.clear()"), "resetR must clear the claim tokens with the dead engine");
+  const installFn = webr.slice(webr.indexOf("async function installBatch"), webr.indexOf("/** An R/eval error while installing"));
+  ok(
+    (installFn.match(/claimTokens\.delete\(n\)/g) ?? []).length >= 2,
+    "installBatch must drop the token on install completion and on terminal failure",
+  );
+  const ensureFn = webr.slice(webr.indexOf("export async function ensurePackages"), webr.indexOf("/** B2 — evict every package"));
+  ok(ensureFn.includes("claimTokens.delete(n)"), "the failed path must drop the token once the claim is released");
+  ok(/const claimTokens = new Map<string, string>\(\)/.test(webr), "claim tokens must be strings, not numeric timestamps");
+
+  // Runtime: window A wins; window B, retrying with its own earlier token,
+  // must NOT steal A's live claim; A reclaiming with its own token must win.
+  const mod = (await import("../src/stats/webr")) as unknown as {
+    claimInstallCode?: (names: string[], reclaim?: Map<string, string>, fresh?: Map<string, string>) => string;
+    releaseClaimCode?: (names: string[], tokens: Map<string, string>) => string;
+  };
+  const { claimInstallCode, releaseClaimCode } = mod;
+  ok(typeof claimInstallCode === "function", "webr.ts must export claimInstallCode (claim-ownership pin)");
+  ok(typeof releaseClaimCode === "function", "webr.ts must export releaseClaimCode (claim-ownership pin)");
+  resetR();
+  const tokenA = "pin89-window-a";
+  const win = await evalNamedVector(
+    claimInstallCode!(["survival"], new Map(), new Map([["survival", tokenA]])),
+  );
+  strictEqual(win["survival"], 1, "window A must win the unclaimed install claim");
+  const steal = await evalNamedVector(
+    claimInstallCode!(
+      ["survival"],
+      new Map([["survival", "pin89-window-b"]]),
+      new Map([["survival", "pin89-window-b-fresh"]]),
+    ),
+  );
+  strictEqual(steal["survival"], 0, "another window's token must not steal a live claim (exact token match, no fuzzy window)");
+  const reclaim = await evalNamedVector(
+    claimInstallCode!(
+      ["survival"],
+      new Map([["survival", tokenA]]),
+      new Map([["survival", "pin89-window-a-fresh"]]),
+    ),
+  );
+  strictEqual(reclaim["survival"], 1, "the owner must reclaim its own abandoned claim with its exact token");
+});
+
+// BUG-REPORT Round 2 #96: `resolveInEngine` fired an unconditional
+// `releaseClaimCode(pending)` on claim timeout (`codes === null`), deleting
+// the shared claim variable without verifying ownership — wiping another
+// window's live claim. The timeout path now passes the attempt's own
+// tokens into the conditional release, so it can only ever clear that
+// attempt's own late win. Runtime half: a foreign-token release must be a
+// no-op against a live claim; the owner's release must free it. (Same
+// fresh engine as the #89 pin above, a different package, so no reset.)
+check("r2-96 webr: the claim-timeout release is ownership-checked — a foreign token never clears a live claim", async () => {
+  const webr = readFileSync("src/stats/webr.ts", "utf8");
+  ok(!webr.includes("releaseClaimCode(pending)"), "no call site may release claims without the caller's tokens");
+  const resolveFn = webr.slice(webr.indexOf("async function resolveInEngine"), webr.indexOf("/** One claim eval, raced against"));
+  ok(
+    resolveFn.includes("releaseClaimCode(pending, attemptTokens)"),
+    "the codes===null path must release with the attempt's own tokens",
+  );
+
+  const mod = (await import("../src/stats/webr")) as unknown as {
+    claimInstallCode?: (names: string[], reclaim?: Map<string, string>, fresh?: Map<string, string>) => string;
+    releaseClaimCode?: (names: string[], tokens: Map<string, string>) => string;
+  };
+  const { claimInstallCode, releaseClaimCode } = mod;
+  ok(typeof claimInstallCode === "function", "webr.ts must export claimInstallCode (claim-ownership pin)");
+  ok(typeof releaseClaimCode === "function", "webr.ts must export releaseClaimCode (claim-ownership pin)");
+  const tokenD = "pin96-owner";
+  const win = await evalNamedVector(
+    claimInstallCode!(["deming"], new Map(), new Map([["deming", tokenD]])),
+  );
+  strictEqual(win["deming"], 1, "the owner must win the deming claim");
+  await evalNamedVector(releaseClaimCode!(["deming"], new Map([["deming", "pin96-foreign"]])));
+  const stillHeld = await evalNamedVector(
+    claimInstallCode!(["deming"], new Map(), new Map([["deming", "pin96-fresh"]])),
+  );
+  strictEqual(stillHeld["deming"], 0, "a foreign-token release must not wipe the live claim");
+  await evalNamedVector(releaseClaimCode!(["deming"], new Map([["deming", tokenD]])));
+  const freed = await evalNamedVector(
+    claimInstallCode!(["deming"], new Map(), new Map([["deming", "pin96-after"]])),
+  );
+  strictEqual(freed["deming"], 1, "the owner's own release must free the claim");
+});
+
+// BUG-REPORT Round 2 #90: `ensurePackages` checked only `status ===
+// "failed"` after awaiting a joined in-flight batch, so an evicted joined
+// batch settling while a retry had flipped the packages back to "loading"
+// resolved as success while packages were still loading — and the
+// downstream `library(...)` failed. It now loops until every wanted
+// package is `ready` (joining the retry's batch), throwing only on a
+// terminal `failed` or a spent deadline. Runtime half: a stub engine
+// (claim evals always win, install evals reject after 600 ms) runs the
+// exact interleaving — A times out and evicts, B joins A's batch, C
+// retries and flips the state back to loading — and B must reject, not
+// resolve. This pin runs last and leaves `connectR` stubbed: nothing
+// after it needs the live engine (the runner only tallies and exits).
+check("r2-90 webr: ensurePackages does not resolve until every package is ready (evicted joined batch)", async () => {
+  const webr = readFileSync("src/stats/webr.ts", "utf8");
+  const ensureFn = webr.slice(webr.indexOf("export async function ensurePackages"), webr.indexOf("/** B2 — evict every package"));
+  ok(
+    /while \(!wanted\.every\(\(n\) => stateOf\(n\)\.status === "ready"\)\)/.test(ensureFn),
+    "ensurePackages must loop until every wanted package is ready",
+  );
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  connectR(async (code: string): Promise<RVector> => {
+    if (code.includes("webr::install")) {
+      await sleep(600);
+      throw new Error("stub install failure");
+    }
+    if (code.includes("c(released=1)")) return { released: 1 };
+    if (code.includes(".helix_install_claims")) return { survival: 1 };
+    return {};
+  });
+  const outcome: Record<string, string> = {};
+  const a = ensurePackages(["survival"], { timeoutMs: 300 }).then(
+    () => { outcome.A = "resolved"; },
+    (e: unknown) => { outcome.A = `rejected:${e instanceof Error ? e.name : e}`; },
+  );
+  await sleep(50);
+  const b = ensurePackages(["survival"], { timeoutMs: 5000 }).then(
+    () => { outcome.B = "resolved"; },
+    (e: unknown) => { outcome.B = `rejected:${e instanceof Error ? e.name : e}`; },
+  );
+  await sleep(300); // t=350: A has timed out + evicted; C retries.
+  const c = ensurePackages(["survival"], { timeoutMs: 5000 }).then(
+    () => { outcome.C = "resolved"; },
+    (e: unknown) => { outcome.C = `rejected:${e instanceof Error ? e.name : e}`; },
+  );
+  await Promise.allSettled([a, b, c]);
+  ok(outcome.A?.startsWith("rejected:"), `A must time out and reject, got ${outcome.A}`);
+  ok(outcome.C?.startsWith("rejected:"), `the retry C must reject on its failed install, got ${outcome.C}`);
+  ok(
+    outcome.B?.startsWith("rejected:"),
+    `the joined caller B must not resolve while the retry is still loading, got ${outcome.B} (status ${packageStatus("survival").status})`,
+  );
 });
 
 
