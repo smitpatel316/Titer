@@ -49,7 +49,7 @@ import {
   parseGuideSeen,
   shouldShowGuide,
 } from "../src/lib/startup-guide";
-import { WHAT_S_NEW } from "../src/lib/whats-new";
+import { WHAT_S_NEW, filterWhatsNewEntries, visibleWhatsNewEntries } from "../src/lib/whats-new";
 import {
   extractMethod,
   formatMethodReport,
@@ -2788,7 +2788,7 @@ check("seq 432: Help carries Prism's entries in order — guides, Tips, How to C
   // The new destinations ride the same fixed-address openLink as the guide.
   const native = readFileSync("src/native.ts", "utf8");
   const openLinkDecl = native.slice(native.indexOf("export const openLink"), native.indexOf(") => void invoke", native.indexOf("export const openLink")));
-  for (const key of ["curve-fitting", "statistics", "support", "support-policies", "discussions", "site"]) {
+  for (const key of ["curve-fitting", "statistics", "support", "support-policies", "discussions", "site", "releases-list"]) {
     ok(openLinkDecl.includes(`"${key}"`), `openLink doesn't take the new Help destination ${key}`);
   }
   const shell = readFileSync("src-tauri/src/main.rs", "utf8");
@@ -2799,6 +2799,7 @@ check("seq 432: Help carries Prism's entries in order — guides, Tips, How to C
     ["discussions", "https://github.com/smitpatel316/Titer/discussions"],
     ["support-policies", "https://github.com/smitpatel316/Titer/blob/main/SUPPORT.md"],
     ["site", "https://titer.smitpatel.net/"],
+    ["releases-list", "https://github.com/smitpatel316/Titer/releases"],
   ];
   for (const [key, url] of arms) {
     ok(new RegExp(`"${key}" =>`).test(shell), `open_link has no ${key} arm`);
@@ -43460,7 +43461,52 @@ check("feedback-loop-453: feedback reachable for every user, Discussions + suppo
     pkgVersion,
     `newest What's New entry (${WHAT_S_NEW[0]?.version}) must match package.json (${pkgVersion})`,
   );
+  // Pin (What's New shows only what you missed): the dialog shows only
+  // the entries newer than the version whose news was last shown, most
+  // recent first, max 3 — an every-release updater sees one entry, a
+  // skipper sees what they missed, never the whole history. No usable
+  // record (fresh install, or an update from before the dialog existed)
+  // shows only the current entry; already seen, or a downgrade, shows
+  // nothing.
+  const shownVersions = (entries: { version: string }[]) => entries.map((e) => e.version);
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.0")), ["2.0.1"], "prev 2.0.0 sees only 2.0.1");
+  deepStrictEqual(
+    shownVersions(visibleWhatsNewEntries("1.9.0")),
+    ["2.0.1", "2.0.0"],
+    "prev 1.9.0 sees 2.0.1 + 2.0.0",
+  );
+  deepStrictEqual(
+    shownVersions(visibleWhatsNewEntries("1.8.1")),
+    ["2.0.1", "2.0.0", "1.9.0"],
+    "prev 1.8.1 sees all three, capped at 3",
+  );
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.1")), [], "prev 2.0.1 sees nothing");
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.2")), [], "downgrade sees nothing");
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries(null)), ["2.0.1"], "no record sees only the current entry");
+  deepStrictEqual(
+    shownVersions(visibleWhatsNewEntries("banana")),
+    ["2.0.1"],
+    "garbled record sees only the current entry",
+  );
+  const fiveEntries = ["2.0.3", "2.0.2", "2.0.1", "2.0.0", "1.9.0"].map((v) => ({
+    version: v,
+    title: `Titer ${v}`,
+    items: [`${v} note`],
+  }));
+  deepStrictEqual(
+    shownVersions(filterWhatsNewEntries(fiveEntries, "1.0.0")),
+    ["2.0.3", "2.0.2", "2.0.1"],
+    "the cap keeps the 3 newest",
+  );
   ok(readFileSync("src/components/whats-new-dialog.tsx", "utf8").includes("WHAT_S_NEW"), "the What's New dialog renders the entries");
+  ok(
+    readFileSync("src/components/whats-new-dialog.tsx", "utf8").includes("visibleWhatsNewEntries"),
+    "the What's New dialog renders the filtered entries",
+  );
+  ok(
+    readFileSync("src/components/whats-new-dialog.tsx", "utf8").includes('openLink("releases-list")'),
+    "the What's New dialog links older release notes",
+  );
   const shell = readFileSync("src/components/app-shell.tsx", "utf8");
   ok(shell.includes("SendFeedbackDialog"), "the shell mounts the feedback dialog");
   ok(shell.includes("CrashReportDialog"), "the shell mounts the crash-report dialog");

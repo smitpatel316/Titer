@@ -4,6 +4,14 @@
 // Help ▸ What's New re-opens the dialog on demand, and it auto-shows
 // once per version (the seen record below) after an update.
 //
+// What the dialog shows is only the entries newer than the version
+// whose news was last shown (most recent first, max 3) — a user who
+// updates every release sees one entry; one who skipped a release sees
+// what they missed, never the whole history. The seen record is the
+// previously-installed version for this purpose: it names the version
+// the user was on when the news last showed. Older notes live on
+// GitHub releases, linked from the dialog footer.
+//
 // The seen record is a localStorage key holding the last version whose
 // news was shown, mirroring the startup guide's seen record
 // (src/lib/startup-guide.ts): only an explicit match counts as seen, so
@@ -17,6 +25,7 @@
 // previous version's news (2.0.0 shipped with only the 1.9.0 entry).
 
 import { version } from "../../package.json";
+import { isNewer } from "./version";
 
 /** One release's news: the version it shipped in, a headline, and the
  *  few lines a user would care about. */
@@ -28,6 +37,16 @@ export interface WhatsNewEntry {
 
 /** The news, newest first. */
 export const WHAT_S_NEW: WhatsNewEntry[] = [
+  {
+    version: "2.0.1",
+    title: "Titer 2.0.1 — patch fixes",
+    items: [
+      "Keynote export fixed: graphs now export to a valid .key file that opens in Keynote.",
+      "Greek symbols in graph labels now render in exported PDFs, and super/subscript formatting is preserved.",
+      "Grouped-bars graph fixes, and Antigravity now sees all MCP tools by default, staying in sync as tools are added.",
+      "Citation support: Titer ships a CITATION.cff, and the Zenodo DOI for citing Titer mints with this release.",
+    ],
+  },
   {
     version: "2.0.0",
     title: "Titer 2.0.0 — our public launch",
@@ -62,6 +81,33 @@ export function whatsNewVersion(): string {
  *  not already name it. */
 export function shouldShowWhatsNew(storedValue: unknown): boolean {
   return storedValue !== whatsNewVersion();
+}
+
+/** A stored seen value that names a version ("2.0.0", "1.9", "v2.0.1"),
+ *  or null when it names nothing usable — no record, a garbled record,
+ *  or a refusal-shaped value. A bad value never silently takes the
+ *  news away: it falls through to the current entry below. */
+function seenVersion(storedValue: unknown): string | null {
+  if (typeof storedValue !== "string") return null;
+  const trimmed = storedValue.trim();
+  return /^v?\d+(\.\d+)*$/.test(trimmed) ? trimmed : null;
+}
+
+/** The entries of `entries` (newest first) newer than the version
+ *  whose news was last shown, most recent first, max 3: what the
+ *  dialog shows. No usable record (fresh install, or an update from
+ *  before the dialog existed) shows only the newest entry — the user
+ *  missed nothing they had. A record naming this version or newer
+ *  (already seen, or a downgrade) shows nothing. */
+export function filterWhatsNewEntries(entries: WhatsNewEntry[], storedSeen: unknown): WhatsNewEntry[] {
+  const seen = seenVersion(storedSeen);
+  if (seen === null) return entries[0] ? [entries[0]] : [];
+  return entries.filter((entry) => isNewer(entry.version, seen)).slice(0, 3);
+}
+
+/** The entries the dialog shows for the stored seen record. */
+export function visibleWhatsNewEntries(storedSeen: unknown): WhatsNewEntry[] {
+  return filterWhatsNewEntries(WHAT_S_NEW, storedSeen);
 }
 
 /** The stored seen record, or unseen when nothing is stored. Never
