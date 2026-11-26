@@ -1416,9 +1416,6 @@ function symbolToUnicodeCmap(): string {
     "",
   ].join("\n");
 }
-function pdfEscape(text: string): string {
-  return winAnsiLiteral(text);
-}
 
 class PdfBackend implements Backend {
   ops: string[] = [];
