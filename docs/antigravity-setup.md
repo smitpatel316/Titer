@@ -123,11 +123,12 @@ Then restart Antigravity (or open the MCP manager with `/mcp` and enable `titer`
 - **401 / unauthorized:** the token is wrong, or MCP is off in Titer. Check "Allow AI apps to connect" in Settings → AI Connections (since 1.7.3 it stays on once flipped). If you regenerated the token, re-copy it (manual path only — the one-click stdio entry never holds a token).
 - **Connection refused:** Titer isn't running, or it's on a different port. Check the endpoint in the AI Connections panel.
 - **Tools don't show up in Antigravity:** restart Antigravity after connecting, or click Refresh under Installed MCP Servers, then check `/mcp` — `titer` should be listed and enabled.
-- **A tool answers that it isn't enabled:** turn on the group it names in Settings → AI Connections, then reconnect your AI app. By default only the seven read tools are on.
+- **A tool answers that it isn't enabled:** turn on the group it names in Settings → AI Connections — connected apps pick it up without a reconnect; if yours doesn't, reconnect it. By default only the seven read tools are on.
 - **A long analysis seems stuck:** it runs as a job. Ask Gemini to poll `titer_read_job` instead of starting it again.
 - **A result says `not_computed`:** the analysis hasn't been run in this Titer session. Run it in Titer (or ask Gemini to run it, with the Run analyses group on) — the agent must not invent a result.
 
 ## Version note
 
 - **1.7.3:** the one-click flow landed; the server advertised all 52 tools and Antigravity enabled all of them, including destructive ones. Any doc that says "52 tools" describes 1.7.3.
-- **1.8.0:** the server-side allowlist is enforced — `tools/list` advertises only the enabled groups (6 read tools by default), and `tools/call` refuses the rest by name. The server now has 58 tools in total. The one-click entry itself still allowlists exactly the five read tools.
+- **1.8.0:** the server-side allowlist is enforced — `tools/list` advertises only the enabled groups (6 read tools by default), and `tools/call` refuses the rest by name. The server now has 58 tools in total.
+- **2.0 (seq 540):** the one-click entry derives `enabledTools` from the live allowlist (no hardcoded list); toggling a group re-applies the entry and notifies live sessions (`notifications/tools/list_changed`), so no reconnect is needed; the entry is also re-synced on every launch, so a new version's tools appear without a manual step; and the bridge recovers from an expired session on its own (re-read discovery, replay initialize, retry once). Omitting `enabledTools` entirely is pending a live Mac check that absent means "all".

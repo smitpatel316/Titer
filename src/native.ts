@@ -338,8 +338,9 @@ export interface McpAllowlistGroup {
 export const mcpAllowlist = () => invoke<McpAllowlistGroup[]>("mcp_allowlist");
 
 /** Records the enabled allowlist groups (Settings → AI Connections).
- *  Takes effect for MCP sessions started after the change — a connected
- *  AI app picks it up when it reconnects. Returns the groups now in effect. */
+ *  Takes effect immediately — connected AI apps get
+ *  `notifications/tools/list_changed` and the Antigravity entry is
+ *  re-applied; no reconnect needed. Returns the groups now in effect. */
 export const mcpSetAllowlist = (groups: string[]) =>
   invoke<McpAllowlistGroup[]>("mcp_set_allowlist", { groups });
 
