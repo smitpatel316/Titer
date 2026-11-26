@@ -7108,9 +7108,10 @@ check("seq 547: grouped bars with showPoints keep Prism proportions, points cent
   strictEqual(scatterTraces.length, 4);
   deepStrictEqual(scatterTraces.map((t) => t.type), ["bar", "bar", "scatter", "scatter"]);
   ok(scatterTraces.slice(2).every((t) => t.showlegend === false));
-  // The bars here sit on the category axis (string x, no explicit width),
-  // where Plotly draws them at the grouped-bar centers (±0.20, 0.36 wide),
-  // so the points are checked against those centers directly.
+  // The bars here sit at the grouped-bar centers (±0.20, 0.36 wide) on the
+  // numeric axis (BUG-REPORT #31: the points used to land as float scatter X
+  // on the bars' category axis), so the points are checked against those
+  // centers directly.
   const centered = (pts: Trace, g: number) =>
     (pts.x as number[]).every((x, k) => Math.abs(x - (Math.floor(k / 2) + (g === 0 ? -0.2 : 0.2))) <= 0.3 * 0.36 + 1e-9);
   ok(centered(scatterTraces[2], 0) && centered(scatterTraces[3], 1));
@@ -8381,6 +8382,110 @@ check("seq 223: superimposed grouped bars overlap at one x (barmode overlay, no 
   );
   strictEqual(plain.layout.barmode, "group");
   strictEqual(plain.layout.bargroupgap, 0.1);
+});
+
+// BUG-REPORT Recheck-2 #92: superimposed bars + showPoints. With points on,
+// the bars used to switch to interleaved numeric positions (r ± center(g)),
+// splitting the superimposed bars apart and desyncing them from the
+// significance brackets (which sit at the row center r). They must stay
+// row-centered on the category axis, with their points at the row center too.
+check("BUG-REPORT #92: superimposed grouped bars stay row-centered with showPoints, brackets align", () => {
+  const close = (a: number | undefined, b: number) => a !== undefined && Math.abs(a - b) < 1e-9;
+  type Trace = {
+    type?: string;
+    x?: (number | string)[];
+    y?: (number | null)[];
+    width?: number;
+    showlegend?: boolean;
+  };
+  const dataset = readTable(groupedNumbers());
+  const options: GraphOptions = {
+    ...newGraphOptions("grouped-bars"),
+    groupLayout: "superimposed" as const,
+    showPoints: true,
+  };
+  const fig = GRAPHS["grouped-bars"].build(dataset.columns, options, paintOf(options, 2), dataset.titles);
+  const traces = fig.data as Trace[];
+  strictEqual(traces.length, 4);
+  // Both groups' bars stand at the row labels — one x per row, full
+  // category width, overlaid — not split into ±0.20 side-by-side bars.
+  deepStrictEqual(traces[0].x, ["r1", "r2"]);
+  deepStrictEqual(traces[1].x, ["r1", "r2"]);
+  strictEqual(traces[0].width, undefined);
+  strictEqual(traces[1].width, undefined);
+  strictEqual(fig.layout.barmode, "overlay");
+  strictEqual((fig.layout.xaxis as { type?: string }).type, "category");
+  // The points sit at the row center (the legacy ±0.06 spread), on their bar.
+  ok((traces[2].x as number[]).every((x, k) => Math.abs(x - Math.floor(k / 2)) <= 0.061));
+  ok((traces[3].x as number[]).every((x, k) => Math.abs(x - Math.floor(k / 2)) <= 0.061));
+  // And a significance bracket between the two groups at row 0 draws at the
+  // row center (x 0..0) — over the bars, not between split ones.
+  const brOptions: GraphOptions = { ...options, sigPairs: [pairKey("A", "B")] };
+  const brFig = GRAPHS["grouped-bars"].build(dataset.columns, brOptions, paintOf(brOptions, 2), dataset.titles);
+  addSignificance(
+    brFig,
+    dataset.columns,
+    "grouped-bars",
+    brOptions,
+    [{ key: pairKey("A", "B"), group1: "A", group2: "B", p: 0.01, cells: [{ group: "A", row: 0 }, { group: "B", row: 0 }] }],
+    dataset.titles,
+  );
+  const shapes = (brFig.layout.shapes as { x0?: number; x1?: number }[] | undefined) ?? [];
+  ok(shapes.length > 0, "the bracket draws");
+  ok(shapes.every((s) => close(s.x0, 0) && close(s.x1, 0)), `bracket x: ${JSON.stringify(shapes.map((s) => [s.x0, s.x1]))}`);
+});
+
+// BUG-REPORT Recheck-2 #31 (remaining): grouped-bars-scatter with the default
+// showPoints: false used to append float scatter X coordinates onto the bars'
+// categorical axis (spurious numeric tick labels to the right of the bars).
+// The points now come from buildGroupedBars with showPoints on, so the whole
+// figure sits on the bars' numeric axis with the row ticks.
+check("BUG-REPORT #31: grouped-bars-scatter with default showPoints draws points on the bars' numeric axis", () => {
+  const close = (a: number | undefined, b: number) => a !== undefined && Math.abs(a - b) < 1e-9;
+  type Trace = {
+    type?: string;
+    x?: (number | string)[];
+    y?: (number | null)[];
+    width?: number;
+    showlegend?: boolean;
+  };
+  const dataset = readTable(groupedNumbers());
+  const options = newGraphOptions("grouped-bars-scatter"); // showPoints defaults false
+  const fig = GRAPHS["grouped-bars-scatter"].build(dataset.columns, options, paintOf(options, 2), dataset.titles);
+  const traces = fig.data as Trace[];
+  strictEqual(traces.length, 4);
+  // The axis is numeric with the row ticks — never type "category" under
+  // float scatter X.
+  const xaxis = fig.layout.xaxis as { type?: string; tickmode?: string; tickvals?: number[]; ticktext?: string[] };
+  strictEqual(xaxis.type, undefined);
+  strictEqual(xaxis.tickmode, "array");
+  deepStrictEqual(xaxis.tickvals, [0, 1]);
+  deepStrictEqual(xaxis.ticktext, ["r1", "r2"]);
+  // Bars at the grouped-bar centers with the category-axis width, points on
+  // their own bar — and no scatter X outside the axis range.
+  ok(close(traces[0].x![0] as number, -0.2) && close(traces[0].x![1] as number, 0.8));
+  ok(close(traces[0].width, 0.36) && close(traces[1].width, 0.36));
+  ok(
+    (traces[2].x as number[]).every(
+      (x, k) => Math.abs(x - ((traces[0].x as number[])[Math.floor(k / 2)] as number)) <= 0.3 * 0.36 + 1e-9,
+    ),
+  );
+  ok((traces[3].x as number[]).every(
+    (x, k) => Math.abs(x - ((traces[1].x as number[])[Math.floor(k / 2)] as number)) <= 0.3 * 0.36 + 1e-9,
+  ));
+  ok((traces.slice(2).flatMap((t) => t.x as number[]) as number[]).every((x) => x >= -0.5 && x <= 1.5));
+  // With showPoints on as well the points are still drawn once, not twice.
+  const on = GRAPHS["grouped-bars-scatter"].build(
+    dataset.columns,
+    { ...options, showPoints: true },
+    paintOf(options, 2),
+    dataset.titles,
+  );
+  strictEqual(on.data.length, 4);
+  deepStrictEqual(
+    (on.data as Trace[]).map((t) => t.type),
+    ["bar", "bar", "scatter", "scatter"],
+  );
 });
 
 check("seq 223: bars with individual points draws bars plus one points trace per group", () => {
