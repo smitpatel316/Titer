@@ -1,0 +1,18 @@
+{
+  "access_right": "open",
+  "creators": [
+    {
+      "name": "Patel, Smit"
+    }
+  ],
+  "description": "Scientific data analysis, simplified — an open-source alternative to GraphPad Prism. Titer covers 61 statistical analyses with graphs, reachable from AI assistants via MCP, and is free and open-source software under the GPL-3.0.",
+  "keywords": [
+    "statistics",
+    "data analysis",
+    "scientific graphing",
+    "GraphPad Prism alternative"
+  ],
+  "license": "GPL-3.0-or-later",
+  "title": "Titer",
+  "upload_type": "software"
+}
