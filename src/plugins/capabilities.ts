@@ -32,7 +32,11 @@ export type TiterCommand =
   | "titer.saveFile"
   | "titer.exportResults"
   | "titer.openLink"
-  | "titer.fetch";
+  | "titer.fetch"
+  | "titer.importData"
+  | "titer.secureGet"
+  | "titer.secureSet"
+  | "titer.secureDelete";
 
 export const KNOWN_COMMANDS: readonly TiterCommand[] = [
   "titer.readTable",
@@ -43,6 +47,10 @@ export const KNOWN_COMMANDS: readonly TiterCommand[] = [
   "titer.exportResults",
   "titer.openLink",
   "titer.fetch",
+  "titer.importData",
+  "titer.secureGet",
+  "titer.secureSet",
+  "titer.secureDelete",
 ];
 
 /** Which permission each command needs. One permission per command, so the
@@ -56,6 +64,10 @@ export const COMMAND_PERMISSIONS: Record<TiterCommand, PluginPermission> = {
   "titer.exportResults": "save-file",
   "titer.openLink": "open-link",
   "titer.fetch": "network",
+  "titer.importData": "import-data",
+  "titer.secureGet": "secure-storage",
+  "titer.secureSet": "secure-storage",
+  "titer.secureDelete": "secure-storage",
 };
 
 /** What each command does, in the user's language — for the review step and
@@ -69,6 +81,10 @@ export const COMMAND_DESCRIPTIONS: Record<TiterCommand, string> = {
   "titer.exportResults": "export results",
   "titer.openLink": "open a link in the browser",
   "titer.fetch": "access the network",
+  "titer.importData": "import data into the open project",
+  "titer.secureGet": "read its saved sign-in",
+  "titer.secureSet": "save its sign-in",
+  "titer.secureDelete": "forget its saved sign-in",
 };
 
 /** The commands a granted permission set allows. */

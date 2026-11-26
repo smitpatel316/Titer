@@ -45428,6 +45428,62 @@ check("plugin-sdk manifest: valid passes, invalid and unknown-permission rejecte
   }
 });
 
+// LabForge B1 (official-plugin exception, Smit Nov 25, 2026): the `titer.`
+// reservation admits the official LabForge plugin id and no other `titer.`
+// id. The LabForge permissions ("import-data", "secure-storage") and the
+// `networkHosts` fetch allowlist validate here too.
+check("labforge B1: titer.labforge is accepted, other titer. ids still rejected", async () => {
+  const { OFFICIAL_PLUGIN_IDS, describePermissions, isValidPluginId, validatePluginManifest } =
+    await import("../src/plugins/index");
+  deepStrictEqual([...OFFICIAL_PLUGIN_IDS], ["titer.labforge"]);
+  ok(isValidPluginId("titer.labforge"), "the official LabForge id must be valid");
+  ok(!isValidPluginId("titer.hello"), "any other titer. id must stay reserved");
+  ok(!isValidPluginId("titer."), "a bare titer. prefix must stay invalid");
+
+  const labforge = {
+    id: "titer.labforge",
+    name: "LabForge",
+    version: "0.1.1",
+    apiVersion: "3.0",
+    author: "LabForge",
+    license: "Proprietary — LabForge commercial licence",
+    permissions: ["network", "read-table", "save-file", "open-link", "import-data", "secure-storage"],
+    entry: "index.js",
+    minAppVersion: "2.0.0",
+    networkHosts: ["https://labforge.smitpatel.net"],
+  };
+  const good = validatePluginManifest(labforge);
+  ok("manifest" in good, `the LabForge manifest must validate: ${JSON.stringify(good)}`);
+  if ("manifest" in good) {
+    deepStrictEqual(good.manifest.networkHosts, ["https://labforge.smitpatel.net"]);
+    const lines = describePermissions(good.manifest.permissions);
+    ok(lines.some((l) => /Import data/.test(l)), "import-data must have a review line");
+    ok(lines.some((l) => /sign-in/.test(l)), "secure-storage must have a review line");
+  }
+
+  const otherTiter = validatePluginManifest({ ...labforge, id: "titer.evil" });
+  ok(
+    "errors" in otherTiter && otherTiter.errors.some((e) => /reserved for first-party/.test(e)),
+    "a non-official titer. id must still be rejected",
+  );
+
+  const badHost = validatePluginManifest({ ...labforge, networkHosts: ["https://labforge.smitpatel.net/api"] });
+  ok(
+    "errors" in badHost && badHost.errors.some((e) => /networkHosts/.test(e)),
+    "a networkHosts entry with a path must be rejected",
+  );
+  const badScheme = validatePluginManifest({ ...labforge, networkHosts: ["ftp://example.com"] });
+  ok(
+    "errors" in badScheme && badScheme.errors.some((e) => /networkHosts/.test(e)),
+    "a non-https networkHosts entry must be rejected",
+  );
+  const badList = validatePluginManifest({ ...labforge, networkHosts: "https://labforge.smitpatel.net" });
+  ok(
+    "errors" in badList && badList.errors.some((e) => /networkHosts/.test(e)),
+    "networkHosts must be a list",
+  );
+});
+
 // Round 2 Issue 7 (seq 471): the entry charset check admitted `..`
 // segments and leading `/`, so a crafted manifest could point the
 // loader outside the plugin folder. An entry is a relative path inside
@@ -45594,6 +45650,81 @@ check("plugin-sdk loader: install → review → enable → disable lifecycle", 
     "disabling unregisters the analyses at once",
   );
   clearPluginRegistry();
+});
+
+// LabForge B5: a plugin may carry no analyses at all — a UI-only plugin
+// (its panel is the product) parses with `analyses: []`, but only when it
+// names its entry file. A plugin with neither analyses nor an entry has
+// nothing to install and is still rejected.
+check("labforge B5: no-analyses plugin parses with an entry, fails without one", async () => {
+  const { parsePluginPackage } = await import("../src/plugins/index");
+  const base = {
+    id: "example.ui-only",
+    name: "UI Only",
+    version: "1.0.0",
+    apiVersion: "3.0",
+    author: "Example",
+    license: "MIT",
+    permissions: [],
+  };
+  const withEntry = parsePluginPackage(
+    new Map([
+      ["plugin.json", JSON.stringify({ ...base, entry: "index.js" })],
+      ["index.js", "titer.fetch({ url: \"https://example.com\" });"],
+      ["README.md", "# UI Only\n"],
+    ]),
+  );
+  ok("package" in withEntry, `UI-only package with an entry must parse: ${JSON.stringify(withEntry)}`);
+  if ("package" in withEntry) deepStrictEqual(withEntry.package.analyses, []);
+
+  const withoutEntry = parsePluginPackage(
+    new Map([
+      ["plugin.json", JSON.stringify(base)],
+      ["README.md", "# UI Only\n"],
+    ]),
+  );
+  ok(
+    "errors" in withoutEntry && withoutEntry.errors.some((e) => /entry file/.test(e)),
+    "a plugin with no analyses and no entry must be rejected",
+  );
+
+  const badAnalyses = parsePluginPackage(
+    new Map([
+      ["plugin.json", JSON.stringify({ ...base, entry: "index.js", analyses: "hello-mean" })],
+      ["index.js", ""],
+      ["README.md", "# UI Only\n"],
+    ]),
+  );
+  ok(
+    "errors" in badAnalyses && badAnalyses.errors.some((e) => /analyses/.test(e)),
+    "a non-list analyses value must be rejected",
+  );
+});
+
+// LabForge R2/R3: the four new commands are in the capability catalogue,
+// gated by the new permissions, and fail closed without them.
+check("labforge capabilities: importData and secure storage commands are permission-gated", async () => {
+  const { checkCapability, commandsAllowedBy } = await import("../src/plugins/index");
+  deepStrictEqual(commandsAllowedBy(["import-data"]), ["titer.importData"]);
+  deepStrictEqual(commandsAllowedBy(["secure-storage"]), [
+    "titer.secureGet",
+    "titer.secureSet",
+    "titer.secureDelete",
+  ]);
+  ok(checkCapability(["import-data"], "titer.importData").allowed, "import-data must allow titer.importData");
+  ok(checkCapability(["secure-storage"], "titer.secureGet").allowed, "secure-storage must allow titer.secureGet");
+  ok(checkCapability(["secure-storage"], "titer.secureSet").allowed, "secure-storage must allow titer.secureSet");
+  ok(
+    checkCapability(["secure-storage"], "titer.secureDelete").allowed,
+    "secure-storage must allow titer.secureDelete",
+  );
+  const denied = checkCapability(["read-table"], "titer.secureGet");
+  ok(!denied.allowed && /secure-storage/.test(denied.reason), "titer.secureGet without the permission must fail closed");
+  const deniedImport = checkCapability([], "titer.importData");
+  ok(
+    !deniedImport.allowed && /import-data/.test(deniedImport.reason),
+    "titer.importData without the permission must fail closed",
+  );
 });
 
 // Round 2 Issue 7 (seq 471): zip entry paths were read verbatim into

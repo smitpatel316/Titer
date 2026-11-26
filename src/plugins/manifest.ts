@@ -28,7 +28,15 @@ export const APP_NAME = "Titer";
  *  `network` is denied by default — a plugin must declare it AND the user
  *  must approve it at the enable review step (see loader.ts); the default
  *  answer is no. */
-export type PluginPermission = "read-table" | "run-analysis" | "write-analysis" | "save-file" | "open-link" | "network";
+export type PluginPermission =
+  | "read-table"
+  | "run-analysis"
+  | "write-analysis"
+  | "save-file"
+  | "open-link"
+  | "network"
+  | "import-data"
+  | "secure-storage";
 
 export const KNOWN_PERMISSIONS: readonly PluginPermission[] = [
   "read-table",
@@ -37,6 +45,8 @@ export const KNOWN_PERMISSIONS: readonly PluginPermission[] = [
   "save-file",
   "open-link",
   "network",
+  "import-data",
+  "secure-storage",
 ];
 
 /** Plain-language lines for the install/review step — shown to the user, never
@@ -48,6 +58,8 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "save-file": "Save files and export results through Titer",
   "open-link": "Open links in your browser",
   network: "Access the network (off unless you approve it)",
+  "import-data": "Import data into the open project",
+  "secure-storage": "Save its sign-in securely on this computer",
 };
 
 /** The plain-language lines for these permissions, in allowlist order. */
@@ -82,8 +94,19 @@ export function semverAtLeast(a: Semver, b: Semver): boolean {
  *  first-party plugins. */
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]*$/;
 
+/** First-party plugin ids the `titer.` reservation admits (Smit, Nov 25,
+ *  2026): the official LabForge plugin. Any other `titer.` id is still
+ *  rejected — the reservation is an exception list, not a free prefix. */
+export const OFFICIAL_PLUGIN_IDS: readonly string[] = ["titer.labforge"];
+
 export function isValidPluginId(id: unknown): id is string {
-  return typeof id === "string" && id.length > 0 && id.length <= 128 && PLUGIN_ID.test(id) && !id.startsWith("titer.");
+  return (
+    typeof id === "string" &&
+    id.length > 0 &&
+    id.length <= 128 &&
+    PLUGIN_ID.test(id) &&
+    (!id.startsWith("titer.") || OFFICIAL_PLUGIN_IDS.includes(id))
+  );
 }
 
 /** The manifest itself: id, name, version, apiVersion, author, license,
@@ -91,7 +114,11 @@ export function isValidPluginId(id: unknown): id is string {
  *  the plugin's JS entry file inside its folder/zip (loaded by the Phase 4
  *  Isolation webview; groundwork only checks it exists). `minAppVersion`
  *  is the earliest Titer the plugin supports; absent, any Titer speaking
- *  this API major. `description`/`homepage` are shown on the review step. */
+ *  this API major. `description`/`homepage` are shown on the review step.
+ *  `networkHosts` is the list of origins the plugin may fetch with
+ *  `titer.fetch` (LabForge R1) — an absent list means nothing is
+ *  fetchable; each entry is validated as a usable origin here and
+ *  normalised again when the fetch handler is built. */
 export interface PluginManifest {
   id: string;
   name: string;
@@ -104,10 +131,30 @@ export interface PluginManifest {
   homepage?: string;
   entry?: string;
   minAppVersion?: string;
+  networkHosts?: string[];
 }
 
 const isNonEmptyString = (v: unknown, max = 128): v is string =>
   typeof v === "string" && v.trim().length > 0 && v.length <= max;
+
+/** Whether a declared fetch origin is usable: an https origin (or http on
+ *  this computer), with no userinfo and no path. The runtime twin is
+ *  `normalizeAllowedOrigin` (host-fetch.ts), which enforces the same rule
+ *  when the fetch handler is built. */
+function isUsableFetchOrigin(value: unknown): boolean {
+  if (typeof value !== "string" || value.trim().length === 0) return false;
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return false;
+  }
+  if (url.username !== "" || url.password !== "") return false;
+  if (url.pathname !== "/" && url.pathname !== "") return false;
+  if (url.protocol === "https:") return true;
+  if (url.protocol !== "http:") return false;
+  return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+}
 
 /**
  * Validate a parsed `plugin.json` manifest. Returns the typed manifest, or
@@ -178,6 +225,21 @@ export function validatePluginManifest(value: unknown): { manifest: PluginManife
   }
   if (v.minAppVersion !== undefined && parseSemver(v.minAppVersion) === null)
     errors.push(`Plugin minAppVersion “${String(v.minAppVersion)}” is not a version like “3.0.0”.`);
+  if (v.networkHosts !== undefined) {
+    if (!Array.isArray(v.networkHosts)) {
+      errors.push(
+        "Plugin networkHosts must be a list of origins (for example [\"https://labforge.smitpatel.net\"]).",
+      );
+    } else {
+      for (const host of v.networkHosts) {
+        if (!isUsableFetchOrigin(host)) {
+          errors.push(
+            `Plugin networkHosts entry “${String(host)}” is not a usable origin — origins are https (or http on this computer), with no path.`,
+          );
+        }
+      }
+    }
+  }
 
   if (errors.length) return { errors };
   return {
@@ -193,6 +255,7 @@ export function validatePluginManifest(value: unknown): { manifest: PluginManife
       ...(typeof v.homepage === "string" ? { homepage: v.homepage } : {}),
       ...(typeof v.entry === "string" ? { entry: v.entry } : {}),
       ...(typeof v.minAppVersion === "string" ? { minAppVersion: v.minAppVersion } : {}),
+      ...(Array.isArray(v.networkHosts) ? { networkHosts: [...(v.networkHosts as string[])] } : {}),
     },
   };
 }

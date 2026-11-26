@@ -15,7 +15,9 @@ export type PluginPermission =
   | "write-analysis"
   | "save-file"
   | "open-link"
-  | "network";
+  | "network"
+  | "import-data"
+  | "secure-storage";
 
 /** Install lifecycle state (documented, loader.ts). */
 export type PluginStatus = "disabled" | "pending-review" | "enabled" | "incompatible";
@@ -33,6 +35,7 @@ export interface PluginManifest {
   homepage?: string;
   entry?: string;
   minAppVersion?: string;
+  networkHosts?: string[];
 }
 
 /**

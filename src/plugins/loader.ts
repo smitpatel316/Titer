@@ -98,12 +98,24 @@ export function parsePluginPackage(
   if ("errors" in manifestResult) return { errors: manifestResult.errors };
   const { manifest } = manifestResult;
 
+  // B5 (LabForge): a plugin may carry no analyses at all — a UI-only
+  // plugin (its panel is the product). An absent `analyses` means none;
+  // a present one must still be a list of valid specs. A plugin with no
+  // analyses must name its entry file: without analyses AND without an
+  // entry there is nothing to install.
   const rawAnalyses = (raw as Record<string, unknown>).analyses;
-  if (!Array.isArray(rawAnalyses) || rawAnalyses.length === 0) {
-    return { errors: ["plugin.json must list at least one analysis under “analyses”."] };
+  if (rawAnalyses !== undefined && !Array.isArray(rawAnalyses)) {
+    return { errors: ["plugin.json “analyses” must be a list of analysis specs (or absent)."] };
+  }
+  if (rawAnalyses === undefined && manifest.entry === undefined) {
+    return {
+      errors: [
+        "A plugin with no analyses must name an entry file (“entry” in plugin.json) — a UI-only plugin needs its JavaScript entry point.",
+      ],
+    };
   }
   const analyses: PluginAnalysisSpecJson[] = [];
-  rawAnalyses.forEach((specValue, i) => {
+  (rawAnalyses ?? []).forEach((specValue, i) => {
     const result = validatePluginAnalysisSpec(specValue, { allowTypeScriptCompute: false });
     if ("errors" in result) {
       errors.push(...result.errors.map((e) => `Analysis ${i + 1}: ${e}`));
