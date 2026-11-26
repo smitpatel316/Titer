@@ -2450,11 +2450,16 @@ mod tests {
 
     #[test]
     fn cli_project_files_accepts_uppercase_hlx() {
-        let hlx = fixture("bom.hlx");
-        let upper = hlx.with_extension("HLX");
-        let _ = fs::copy(&hlx, &upper);
+        // The .HLX file must live in a per-test temp dir, never next to the
+        // shared fixture: on a case-insensitive FS (APFS) `bom.HLX` IS
+        // `bom.hlx`, so the old copy-then-remove in the fixtures dir
+        // truncated/deleted the shared fixture out from under parallel
+        // tests (Mac flake: 1–3 failures).
+        let dir = move_scratch_dir("cli-upper");
+        let upper = dir.join("bom.HLX");
+        fs::copy(fixture("bom.hlx"), &upper).expect("fixture copy");
         let found = cli_project_files(["titer".into(), upper.to_string_lossy().into_owned()].into_iter());
-        let _ = fs::remove_file(&upper);
+        let _ = fs::remove_dir_all(&dir);
         assert_eq!(found.len(), 1, ".HLX should be accepted: {found:?}");
     }
 
