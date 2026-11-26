@@ -159,8 +159,23 @@ export function validatePluginManifest(value: unknown): { manifest: PluginManife
   if (v.homepage !== undefined && typeof v.homepage !== "string") errors.push("Plugin homepage must be a string.");
   if (v.entry !== undefined && (typeof v.entry !== "string" || v.entry.trim().length === 0))
     errors.push("Plugin entry must be a non-empty file name (for example “index.js”).");
-  if (v.entry !== undefined && typeof v.entry === "string" && !/^[A-Za-z0-9._/-]+$/.test(v.entry))
-    errors.push(`Plugin entry “${v.entry}” must be a plain file name inside the plugin folder.`);
+  if (v.entry !== undefined && typeof v.entry === "string" && v.entry.trim().length > 0) {
+    // A manifest entry is a relative path inside the plugin folder: no
+    // absolute path, no parent-directory (`..`) segment, no backslash, no
+    // empty or `.` segment. The old charset check (`/^[A-Za-z0-9._/-]+$/`)
+    // admitted `../../evil.js` and `/tmp/evil.js`, letting a crafted
+    // manifest point the loader outside the plugin folder (Round 2
+    // Issue 7, seq 471).
+    const entry = v.entry;
+    const badEntry =
+      entry.startsWith("/") ||
+      entry.includes("\\") ||
+      entry.split("/").some((seg) => seg === ".." || seg === "." || seg === "" || !/^[A-Za-z0-9._-]+$/.test(seg));
+    if (badEntry)
+      errors.push(
+        `Plugin entry “${entry}” must be a plain file name inside the plugin folder (no “..”, no leading “/”, no backslashes).`,
+      );
+  }
   if (v.minAppVersion !== undefined && parseSemver(v.minAppVersion) === null)
     errors.push(`Plugin minAppVersion “${String(v.minAppVersion)}” is not a version like “3.0.0”.`);
 

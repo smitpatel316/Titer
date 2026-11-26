@@ -18,6 +18,8 @@ import {
   type MarketplaceListing,
 } from "./index";
 import type { PluginLoaderPort, PluginPermission, PluginRecord } from "./loader-port";
+import { onPluginDisabled, onPluginUninstalled } from "../plugins/isolation";
+import { parseSemver } from "../plugins/manifest";
 import { clearPin as clearStoredPin, pinnedVersion as storedPin, savePin as saveStoredPin } from "./pins";
 import { availableUpdateFor } from "./updates";
 import { defaultStorage, type StorageLike } from "./storage";
@@ -187,13 +189,40 @@ export class MarketplaceStore {
     }
     const parsed = await this.loader.loadPluginFromZip(bytes, `${listing.id}-${targetVersion}.zip`);
     if ("errors" in parsed) return { errors: parsed.errors };
+    // The zip is attacker-influenced bytes (a mirror, a tampered download
+    // whose hash the index also got wrong): the manifest inside it must
+    // identify the listing being installed, at the version being
+    // installed — a spoofed id would otherwise install one plugin under
+    // another's name, and a mismatched version would silently install
+    // the wrong release (Round 2 Issue 7, seq 471). Versions compare by
+    // number, so "1.0" and "v1.0.0" are the same release.
+    const manifest = parsed.package.manifest;
+    if (manifest.id !== listing.id) {
+      return {
+        errors: [
+          `Refusing to install “${listing.name}” ${targetVersion}: the download identifies itself as plugin “${manifest.id}”, not “${listing.id}”. The file may be mislabelled or tampered with.`,
+        ],
+      };
+    }
+    const manifestVersion = parseSemver(manifest.version);
+    const target = parseSemver(targetVersion);
+    if (!manifestVersion || !target || manifestVersion.major !== target.major || manifestVersion.minor !== target.minor || manifestVersion.patch !== target.patch) {
+      return {
+        errors: [
+          `Refusing to install “${listing.name}” ${targetVersion}: the download is version ${manifest.version}, not ${targetVersion}. The file may be mislabelled or tampered with.`,
+        ],
+      };
+    }
     const installed = this.loader.installPlugin(parsed.package, [...this.installed.keys()], {
       kind: "zip",
       name: `${listing.id}-${targetVersion}.zip`,
     });
     if ("errors" in installed) return { errors: installed.errors };
-    this.installed.set(installed.record.manifest.id, installed.record);
-    this.zipCache.set(installed.record.manifest.id, bytes);
+    // Installed under the LISTING id, never the zip's manifest id — the
+    // two are equal after the check above, but the key must not come from
+    // zip-controlled bytes (Round 2 Issue 7, seq 471).
+    this.installed.set(listing.id, installed.record);
+    this.zipCache.set(listing.id, bytes);
     this.persistInstalled();
     return installed;
   }
@@ -224,9 +253,13 @@ export class MarketplaceStore {
     return record;
   }
 
-  /** Disable: analyses unregister at once. */
+  /** Disable: analyses unregister at once, and the plugin's Isolation
+   *  frame is torn down with its grants — the loader tears it down, and
+   *  the store tears it down too, so the disable holds even for a loader
+   *  port that does not (Round 2 Issue 5, seq 469). */
   disable(id: string): PluginRecord {
     const record = this.loader.disablePlugin(this.requireInstalled(id));
+    onPluginDisabled(id);
     this.installed.set(id, record);
     this.persistInstalled();
     return record;
@@ -304,7 +337,9 @@ export class MarketplaceStore {
 
   /**
    * Uninstall: disable (unregister at once) + remove the record, the cached
-   * zip and the pin. Nothing of the plugin is left behind.
+   * zip and the pin. Nothing of the plugin is left behind — including its
+   * Isolation frame, which is torn down unconditionally: a frame must
+   * never survive its plugin's uninstall (Round 2 Issue 5, seq 469).
    */
   uninstall(id: string): { removed: true } | { errors: string[] } {
     const record = this.installed.get(id);
@@ -312,6 +347,7 @@ export class MarketplaceStore {
     if (record.status === "enabled" || record.status === "pending-review") {
       this.loader.disablePlugin(record);
     }
+    onPluginUninstalled(id);
     this.installed.delete(id);
     this.zipCache.delete(id);
     clearStoredPin(this.storage, id);

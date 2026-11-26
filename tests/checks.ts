@@ -40495,6 +40495,41 @@ check("plugin-sdk manifest: valid passes, invalid and unknown-permission rejecte
   }
 });
 
+// Round 2 Issue 7 (seq 471): the entry charset check admitted `..`
+// segments and leading `/`, so a crafted manifest could point the
+// loader outside the plugin folder. An entry is a relative path inside
+// the folder: no `..`, no leading `/`, no backslash, no empty/`.` segment.
+check("r2-7 manifest entry: '..' segments, absolute paths and backslashes are rejected", async () => {
+  const { validatePluginManifest } = await import("../src/plugins/index");
+  const base = {
+    id: "example.evil",
+    name: "Evil",
+    version: "1.0.0",
+    apiVersion: "3.0",
+    author: "Evil",
+    license: "MIT",
+    permissions: [],
+  };
+  for (const entry of [
+    "../../evil.js",
+    "../evil.js",
+    "/tmp/evil.js",
+    "sub/../../evil.js",
+    "a\\b.js",
+    "./index.js",
+    "dist//index.js",
+    "dist/",
+  ]) {
+    const bad = validatePluginManifest({ ...base, entry });
+    ok("errors" in bad, `entry “${entry}” must be rejected`);
+    if ("errors" in bad) ok(bad.errors.some((e) => /entry/i.test(e)), `entry “${entry}” must fail on the entry rule`);
+  }
+  for (const entry of ["index.js", "dist/index.js", "lib/entry.mjs", "a.b-c_d/e.js"]) {
+    const good = validatePluginManifest({ ...base, entry });
+    ok("manifest" in good, `entry “${entry}” must be accepted`);
+  }
+});
+
 check("plugin-sdk registry: plugin ids are namespaced and never shadow first-party", async () => {
   const {
     clearPluginRegistry,
@@ -40628,6 +40663,75 @@ check("plugin-sdk loader: install → review → enable → disable lifecycle", 
   clearPluginRegistry();
 });
 
+// Round 2 Issue 7 (seq 471): zip entry paths were read verbatim into
+// the file map — a `..` entry could escape the plugin folder or shadow
+// `plugin.json` — and there was no uncompressed-size cap at all.
+check("r2-7 zip: traversal, absolute and backslash entries are refused, and oversized entries are capped", async () => {
+  const { loadPluginFromZip, isUnsafeZipEntryPath } = await import("../src/plugins/index");
+  const JSZip = (await import("jszip")).default;
+  // The entry rule itself, directly: a zip library normalises `..`
+  // segments away before the loader ever sees them, so the `..` arms
+  // cannot be reached through a built zip — assert them on the rule.
+  for (const evil of ["../evil.js", "sub/../../evil.js", "/abs/evil.js", "a\\b.js", "..\\evil2.js", "a//b.js", ""]) {
+    ok(isUnsafeZipEntryPath(evil), `zip entry rule must refuse “${evil}”`);
+  }
+  ok(!isUnsafeZipEntryPath("plugin.json"), "the rule must accept a plain entry");
+  ok(!isUnsafeZipEntryPath("docs/readme.md"), "the rule must accept a nested entry");
+  const goodJson = JSON.stringify({
+    id: "example.hello-analysis",
+    name: "Hello Analysis",
+    version: "1.0.0",
+    apiVersion: "3.0",
+    author: "Titer example author",
+    license: "MIT",
+    permissions: [],
+    analyses: [
+      {
+        id: "hello-mean",
+        label: "Hello mean",
+        tableTypes: ["column"],
+        minColumns: 1,
+        parameters: [],
+        questions: [],
+        compute: { kind: "r", code: "c(mean_value=mean(g0))" },
+      },
+    ],
+  });
+  const zipWith = async (entries: [string, string][]) => {
+    const zip = new JSZip();
+    for (const [name, text] of entries) zip.file(name, text);
+    return loadPluginFromZip(await zip.generateAsync({ type: "uint8array" }), "evil.zip");
+  };
+  // End to end through a built zip: only the names a zip library
+  // preserves reach the loader — an absolute path and backslash names.
+  // ("../evil.js" and "sub/../../evil.js" are normalised away by the
+  // library itself, so they are covered by the rule assertions above.)
+  for (const evil of ["/abs/evil.js", "a\\b.js", "..\\evil2.js"]) {
+    const result = await zipWith([
+      ["plugin.json", goodJson],
+      ["README.md", "# Hi\n"],
+      [evil, "evil"],
+    ]);
+    ok("errors" in result, `zip entry “${evil}” must be refused`);
+    if ("errors" in result) {
+      ok(result.errors.some((e) => /unsafe zip entry/i.test(e)), `zip entry “${evil}” must fail on the entry rule`);
+    }
+  }
+  // Oversized entry: 5 MB + 1 byte of text.
+  const big = await zipWith([
+    ["plugin.json", goodJson],
+    ["README.md", "x".repeat(5 * 1024 * 1024 + 1)],
+  ]);
+  ok("errors" in big, "an entry over the size cap must be refused");
+  if ("errors" in big) ok(big.errors.some((e) => /too large/i.test(e)), "the oversized entry must fail on size");
+  // The valid zip still loads.
+  const good = await zipWith([
+    ["plugin.json", goodJson],
+    ["README.md", "# Hi\n"],
+  ]);
+  ok("package" in good, `a clean zip must still load: ${JSON.stringify(good)}`);
+});
+
 check("plugin-sdk hello: verifyHelloPlugin numbers", async () => {
   const { clearPluginRegistry, verifyHelloPlugin } = await import("../src/plugins/index");
   clearPluginRegistry();
@@ -40650,6 +40754,47 @@ check("plugin-sdk hello: verifyHelloPlugin numbers", async () => {
     "multiplier 99 must be refused",
   );
   clearPluginRegistry();
+});
+
+// Round 2 Issue 6 (seq 470), runtime half: plugin R was interpolated raw
+// into `local({…})` in the shared webR engine, so it could close the
+// block (`})`) and assign into `.GlobalEnv`. Plugin code now travels as
+// a string literal into its own environment, with `.GlobalEnv` shadowed
+// by a throwaway environment — an assign into it writes into the void.
+check("r2-6 webr: plugin R runs in its own environment and cannot reach .GlobalEnv", async () => {
+  const webr = readFileSync("src/stats/webr.ts", "utf8");
+  ok(!webr.includes("local({${code}})"), "webr.ts must not interpolate raw code into the shared engine");
+  ok(webr.includes("new.env"), "the engine must evaluate code in a fresh environment (new.env)");
+  ok(webr.includes("evalPluginNamedVector"), "the engine must expose a plugin-only eval path");
+  const registry = readFileSync("src/plugins/registry.ts", "utf8");
+  ok(registry.includes("evalPluginNamedVector"), "plugin compute must run through evalPluginNamedVector");
+  ok(
+    !registry.includes("evalNamedVector(`${declareGroups(groups)};${spec.compute.code}`)"),
+    "plugin compute must not be interpolated raw into the shared eval",
+  );
+  const { evalNamedVector, evalPluginNamedVector } = await import("../src/stats/webr");
+  // An assign into .GlobalEnv writes into the decoy, not the real global
+  // environment — the run still returns its numbers, and a probe of the
+  // real .GlobalEnv (from inside the same plugin eval) finds nothing.
+  const escaped = await evalPluginNamedVector(
+    'assign("titer_escape_probe", 1, envir=.GlobalEnv); c(mean_value=42, escaped=as.numeric(exists("titer_escape_probe", envir=globalenv())))',
+  );
+  strictEqual(escaped.mean_value, 42, "the plugin run must still return its numbers");
+  strictEqual(escaped.escaped, 0, "an assign into .GlobalEnv must not reach the real global environment");
+  // A brace-breakout cannot escape the evaluation: closing the block and
+  // injecting a top-level assign is a parse error inside the plugin env,
+  // never an executed statement — and nothing lands in .GlobalEnv.
+  await rejects(
+    evalPluginNamedVector('c(a=1)}); assign("titer_breakout_probe", 7, envir=.GlobalEnv); local({c(b=2)})'),
+    /unexpected|Error/,
+  );
+  const probe = await evalNamedVector('c(probe=as.numeric(exists("titer_breakout_probe", envir=.GlobalEnv)))');
+  strictEqual(probe.probe, 0, "the breakout assign must not land in .GlobalEnv");
+  // The shared first-party primitive is unchanged in behaviour: the
+  // hello-mean numbers still come back (the hello pin above covers the
+  // full registry path; this is the primitive itself).
+  const plain = await evalNamedVector("c(a=1, b=2)");
+  deepStrictEqual(plain, { a: 1, b: 2 });
 });
 
 // ── M3 (seq 435): marketplace trust & safety pins ────────────────────────
@@ -40799,6 +40944,53 @@ check("m3 gates: JS eval() and the Function constructor are caught; clean JS pas
   const fnHits = scanPluginJsCode("const f = new Function('x', 'return x');", "index.js", ["read-table"]);
   ok(fnHits.some((f) => f.pattern.includes("Function")), "new Function() must be caught");
   strictEqual(scanPluginJsCode("export function run() { return 1; }\n", "index.js", ["read-table"]).length, 0);
+});
+
+// Round 2 Issue 6 (seq 470): the Tauri-global regex had a typo
+// (`__TAURI(_INTERNALS__)?__` never matches the real
+// `__TAURI_INTERNALS__`), and `Function()` without `new` sailed through.
+check("r2-6 gates: __TAURI_INTERNALS__ and bare Function() are caught (no regex-typo bypass)", () => {
+  const tauri = scanPluginJsCode('window.__TAURI_INTERNALS__.invoke("x")', "index.js", []);
+  ok(tauri.some((f) => f.pattern.includes("tauri")), "__TAURI_INTERNALS__ must be caught");
+  const tauriOld = scanPluginJsCode('window.__TAURI__.invoke("x")', "index.js", []);
+  ok(tauriOld.some((f) => f.pattern.includes("tauri")), "__TAURI__ must still be caught");
+  const fn = scanPluginJsCode('Function("return 1")()', "index.js", []);
+  ok(fn.some((f) => f.pattern.includes("Function")), "bare Function() must be caught");
+  const fnNew = scanPluginJsCode("const f = new Function('x', 'return x');", "index.js", []);
+  strictEqual(
+    fnNew.filter((f) => f.pattern.includes("Function")).length,
+    1,
+    "new Function() must report once, not twice",
+  );
+  strictEqual(scanPluginJsCode("export function run() { return 1; }\n", "index.js", []).length, 0);
+});
+
+// Round 2 Issue 6 (seq 470): R backtick-wrapped calls (`` `eval`(…) ``)
+// and runtime-resolved calls (`do.call("eval", …)`, `get("system")(…)`,
+// `match.fun("system")`) bypassed every `name\s*\(` denylist pattern,
+// and nothing stopped plugin code reaching for the shared `.GlobalEnv`.
+check("r2-6 gates: R backtick calls, do.call/get dynamic dispatch and .GlobalEnv escapes are caught", () => {
+  for (const code of [
+    "`eval`(parse(text=\"1+1\"))",
+    "`system`(\"id\")",
+    'do.call("eval", list(parse(text="1+1")))',
+    "do.call(eval, list(1))",
+    'get("system")("id")',
+    'get0("eval")(parse(text="1"))',
+    'match.fun("system")("id")',
+    'assign("x", 1, envir=.GlobalEnv)',
+    "x <- globalenv()",
+    "x <- parent.env(environment())",
+    "x <- parent.frame()",
+    'unlockBinding("x", .GlobalEnv)',
+    "attach(list(x=1))",
+  ]) {
+    ok(scanPluginRCodeExtended(code, "evil.R").length > 0, `${code} must be caught`);
+  }
+  // Controls: clean R passes, and resolving a SAFE name is not a bypass.
+  strictEqual(scanPluginRCodeExtended("c(mean=mean(g0))").length, 0, "clean R code passes");
+  strictEqual(scanPluginRCodeExtended('x <- get("g0")').length, 0, "get() of a data name is not a bypass");
+  strictEqual(scanPluginRCodeExtended('do.call("mean", list(g0))').length, 0, "do.call() of a safe function passes");
 });
 
 check("m3 gates: child_process and direct fs access are caught", () => {
@@ -41369,6 +41561,85 @@ check("M2-install: a hash mismatch refuses loudly and installs nothing", async (
   strictEqual(store.listInstalled().length, 0);
 });
 
+// Round 2 Issue 7 (seq 471): installListing verified the download hash
+// but never the manifest inside it — a zip whose manifest id or version
+// did not match the listing installed under the zip's spoofed id, at the
+// wrong release. Update funnels through installListing, so this covers
+// the update path too.
+check("r2-7 install: a zip whose manifest id or version does not match the listing is refused", async () => {
+  const listing = m2Listing();
+  const craftZip = async (manifest: Record<string, unknown>) => {
+    const JSZip = (await import("jszip")).default;
+    const zip = new JSZip();
+    zip.file(
+      "plugin.json",
+      JSON.stringify({
+        ...manifest,
+        analyses: [
+          {
+            id: "hello-mean",
+            label: "Hello mean",
+            tableTypes: ["column"],
+            minColumns: 1,
+            parameters: [],
+            questions: [],
+            compute: { kind: "r", code: "c(mean_value=mean(g0))" },
+          },
+        ],
+      }),
+    );
+    zip.file("README.md", "# Hi\n");
+    const bytes = await zip.generateAsync({ type: "uint8array" });
+    return { bytes, sha256: await sha256Hex(bytes) };
+  };
+  const listingFor = (sha256: string): MarketplaceListing => ({
+    ...listing,
+    sha256,
+    versions: [{ ...listing.versions[0]!, sha256 }],
+  });
+  // Spoofed id: the zip claims to be another plugin entirely.
+  const spoofed = await craftZip({
+    id: "example.spoofed",
+    name: "Spoofed",
+    version: "1.1.0",
+    apiVersion: "3.0",
+    author: "Spoof",
+    license: "MIT",
+    permissions: [],
+  });
+  const storeSpoofed = new MarketplaceStore(m2StoreDeps({ loadBundledZip: async () => spoofed.bytes }));
+  const installedSpoofed = await storeSpoofed.installListing(listingFor(spoofed.sha256));
+  ok("errors" in installedSpoofed, "a spoofed manifest id must refuse the install");
+  if ("errors" in installedSpoofed) {
+    ok(
+      installedSpoofed.errors.some((e) => /example\.spoofed/.test(e) && /not “example\.hello-analysis”/.test(e)),
+      `the refusal must name the spoofed id (got: ${installedSpoofed.errors.join(" | ")})`,
+    );
+  }
+  strictEqual(storeSpoofed.listInstalled().length, 0, "a refused install must install nothing");
+  strictEqual(storeSpoofed.getInstalled("example.spoofed"), undefined, "nothing may install under the spoofed id");
+  // Wrong version: the right plugin at the wrong release.
+  const wrongVersion = await craftZip({
+    id: "example.hello-analysis",
+    name: "Hello Analysis",
+    version: "9.9.9",
+    apiVersion: "3.0",
+    author: "Titer example author",
+    license: "MIT",
+    permissions: [],
+  });
+  const storeVersion = new MarketplaceStore(m2StoreDeps({ loadBundledZip: async () => wrongVersion.bytes }));
+  const installedVersion = await storeVersion.installListing(listingFor(wrongVersion.sha256));
+  ok("errors" in installedVersion, "a mismatched manifest version must refuse the install");
+  if ("errors" in installedVersion) {
+    ok(
+      installedVersion.errors.some((e) => /9\.9\.9/.test(e) && /not 1\.1\.0/.test(e)),
+      `the refusal must name the mismatched version (got: ${installedVersion.errors.join(" | ")})`,
+    );
+  }
+  strictEqual(storeVersion.listInstalled().length, 0, "a refused install must install nothing");
+});
+
 check("M2-install: a duplicate install is refused", async () => {
   const store = new MarketplaceStore(m2StoreDeps());
   const listing = m2Listing();
@@ -41447,6 +41718,55 @@ check("M2-uninstall: uninstall disables and removes the files cleanly", async ()
   strictEqual(persisted.length, 0, "uninstall must leave no installed record in storage");
   const again = store.uninstall("example.hello-analysis");
   ok("errors" in again && again.errors.some((e) => /not installed/i.test(e)), "second uninstall must report not installed");
+});
+
+// Round 2 Issue 5 (seq 469), store half: the dialog's disable/uninstall
+// path goes through the marketplace store, so the store itself must tear
+// the frame down — not only the loader underneath it. Uses the real
+// loader port (as wiring.ts binds it), so the full stack is exercised.
+check("r2-5 store: disable/uninstall through the marketplace store tear the frame down", async () => {
+  const { clearPluginRegistry, isPluginWebviewRunning, launchPluginWebview, teardownAllPluginWebviews } =
+    await import("../src/plugins/index");
+  const loaderModule = await import("../src/plugins/loader");
+  const port: PluginLoaderPort = {
+    loadPluginFromZip: loaderModule.loadPluginFromZip,
+    installPlugin: loaderModule.installPlugin,
+    requestEnable: loaderModule.requestEnable,
+    confirmEnable: loaderModule.confirmEnable,
+    disablePlugin: loaderModule.disablePlugin,
+    rehydrateEnabledPlugin: loaderModule.rehydrateEnabledPlugin,
+    pluginReviewLines: loaderModule.pluginReviewLines,
+  };
+  clearPluginRegistry();
+  teardownAllPluginWebviews();
+  const storage = createMemoryStorage();
+  const store = new MarketplaceStore(m2StoreDeps({ loader: port, storage }));
+  const listing = m2Listing();
+  await m2Install(store, listing);
+  store.requestEnable("example.hello-analysis");
+  const enabled = store.confirmEnable("example.hello-analysis", ["read-table"]);
+  const launched = launchPluginWebview(enabled, { source: "// hello entry" });
+  ok("session" in launched, `launch failed: ${JSON.stringify(launched)}`);
+  if (!("session" in launched)) return;
+  strictEqual(isPluginWebviewRunning("example.hello-analysis"), true, "the launched webview is running");
+  // Store disable tears the frame down (and revokes the grants).
+  const disabled = store.disable("example.hello-analysis");
+  strictEqual(disabled.status, "disabled");
+  deepStrictEqual(disabled.grantedPermissions, [], "store disable revokes the grants outright");
+  strictEqual(isPluginWebviewRunning("example.hello-analysis"), false, "store disable must tear the frame down");
+  // Re-enable, relaunch, then uninstall: no frame survives the uninstall.
+  store.requestEnable("example.hello-analysis");
+  const reenabled = store.confirmEnable("example.hello-analysis", ["read-table"]);
+  const relaunched = launchPluginWebview(reenabled, { source: "// hello entry" });
+  ok("session" in relaunched, `relaunch failed: ${JSON.stringify(relaunched)}`);
+  if (!("session" in relaunched)) return;
+  strictEqual(isPluginWebviewRunning("example.hello-analysis"), true, "the relaunched webview is running");
+  const removed = store.uninstall("example.hello-analysis");
+  ok(!("errors" in removed), `uninstall failed: ${"errors" in removed ? removed.errors.join(" ") : ""}`);
+  strictEqual(isPluginWebviewRunning("example.hello-analysis"), false, "uninstall must tear the frame down");
+  strictEqual(store.getInstalled("example.hello-analysis"), undefined, "uninstall must remove the record");
+  teardownAllPluginWebviews();
+  clearPluginRegistry();
 });
 
 check("M2-review: enable requires the review step, and grants cannot exceed the manifest", async () => {
@@ -41932,12 +42252,15 @@ check("plugin-m5 lifecycle: a disabled plugin cannot execute and teardown ends e
   if (!("session" in launched)) return;
   strictEqual(isPluginWebviewRunning("example.hello-analysis"), true, "the launched webview is running");
   strictEqual(await interceptPluginCall(launched.session, "titer.readTable", {}, host), "ran");
-  // Disable the plugin (loader: analyses unregister at once) and tell the
-  // isolation layer: the webview is torn down, and no call gets through.
+  // Disable the plugin (loader: analyses unregister at once) — the
+  // disable itself tears the webview down and revokes the grants, so no
+  // separate hook call is needed (Round 2 Issue 5, seq 469: the old
+  // split left the frame running with revoked permissions).
   const disabled = disablePlugin(registered.record);
   strictEqual(disabled.status, "disabled");
-  strictEqual(onPluginDisabled("example.hello-analysis"), true, "disabling tears down the running webview");
-  strictEqual(isPluginWebviewRunning("example.hello-analysis"), false, "no webview survives its plugin being disabled");
+  deepStrictEqual(disabled.grantedPermissions, [], "disable revokes the grants outright");
+  strictEqual(isPluginWebviewRunning("example.hello-analysis"), false, "disablePlugin itself tears the frame down");
+  strictEqual(onPluginDisabled("example.hello-analysis"), false, "teardown is idempotent — the hook finds nothing left to tear down");
   await rejects(interceptPluginCall(launched.session, "titer.readTable", {}, host), /torn down|disabled/);
   // A disabled record cannot launch a new webview at all.
   const relaunch = launchPluginWebview(disabled, { source: "// hello entry" });
@@ -41946,6 +42269,74 @@ check("plugin-m5 lifecycle: a disabled plugin cannot execute and teardown ends e
   // Teardown is idempotent and leaves no orphan behind.
   strictEqual(teardownPluginWebview("example.hello-analysis"), false, "tearing down an already-torn-down webview is a no-op");
   strictEqual(listPluginWebviews().length, 0, "no webview sessions remain");
+  teardownAllPluginWebviews();
+  clearPluginRegistry();
+});
+
+// Round 2 Issue 5 (seq 469): disabling/uninstalling a plugin never tore
+// down its Isolation session, so re-enabling with a smaller permission
+// set kept the revoked permissions — the old session was returned
+// verbatim and the interceptor enforced its stale snapshot. The fix:
+// disable tears the frame down and revokes the grants, launch rebuilds
+// a session whose permissions changed, and the interceptor enforces the
+// live grants.
+check("r2-5 revocation: a narrowed re-enable never reuses a stale session, and the interceptor enforces live grants", async () => {
+  const {
+    clearPluginRegistry,
+    confirmEnable,
+    disablePlugin,
+    interceptPluginCall,
+    isPluginWebviewRunning,
+    launchPluginWebview,
+    registerHelloPlugin,
+    requestEnable,
+    setLiveGrantedPermissions,
+    teardownAllPluginWebviews,
+  } = await import("../src/plugins/index");
+  clearPluginRegistry();
+  teardownAllPluginWebviews();
+  const registered = registerHelloPlugin();
+  ok(!("errors" in registered), `hello plugin must register: ${"errors" in registered ? registered.errors.join(" ") : ""}`);
+  if ("errors" in registered) return;
+  const host = async () => "ran";
+  const launched = launchPluginWebview(registered.record, { source: "// hello entry" });
+  ok("session" in launched, `launch failed: ${JSON.stringify(launched)}`);
+  if (!("session" in launched)) return;
+  // A relaunch with unchanged grants returns the live session.
+  const same = launchPluginWebview(registered.record, { source: "// hello entry" });
+  ok("session" in same && same.session === launched.session, "a relaunch with unchanged grants returns the live session");
+  // A relaunch with narrowed grants tears the stale session down instead
+  // of returning it verbatim.
+  const narrowed = launchPluginWebview(
+    { ...registered.record, grantedPermissions: [] },
+    { source: "// hello entry" },
+  );
+  ok("session" in narrowed, `narrowed relaunch failed: ${JSON.stringify(narrowed)}`);
+  if (!("session" in narrowed)) return;
+  ok(narrowed.session !== launched.session, "a relaunch with different grants must not return the stale session");
+  strictEqual(launched.session.status, "torn-down", "the stale session is torn down by the relaunch");
+  await rejects(interceptPluginCall(launched.session, "titer.readTable", {}, host), /torn down|disabled/);
+  // Disable tears the narrowed session down too, and revokes the grants.
+  const disabled = disablePlugin(registered.record);
+  strictEqual(disabled.status, "disabled");
+  deepStrictEqual(disabled.grantedPermissions, [], "disable revokes the grants outright");
+  strictEqual(isPluginWebviewRunning("example.hello-analysis"), false, "disablePlugin itself tears the frame down");
+  // Re-enable with NO grants: a fresh session, enforcing the narrower set.
+  const reenabled = confirmEnable(requestEnable(disabled), [], "3.0.0");
+  strictEqual(reenabled.status, "enabled");
+  deepStrictEqual(reenabled.grantedPermissions, []);
+  const relaunched = launchPluginWebview(reenabled, { source: "// hello entry" });
+  ok("session" in relaunched, `relaunch after re-enable failed: ${JSON.stringify(relaunched)}`);
+  if (!("session" in relaunched)) return;
+  ok(relaunched.session !== narrowed.session, "re-enable launches a fresh session, never the stale one");
+  await rejects(interceptPluginCall(relaunched.session, "titer.readTable", {}, host), /not granted/);
+  // The interceptor enforces the LIVE grants, not the launch snapshot:
+  // widening the live grants lets the call through without relaunching,
+  // and narrowing them again denies at once.
+  setLiveGrantedPermissions("example.hello-analysis", ["read-table"]);
+  strictEqual(await interceptPluginCall(relaunched.session, "titer.readTable", {}, host), "ran");
+  setLiveGrantedPermissions("example.hello-analysis", []);
+  await rejects(interceptPluginCall(relaunched.session, "titer.readTable", {}, host), /not granted/);
   teardownAllPluginWebviews();
   clearPluginRegistry();
 });

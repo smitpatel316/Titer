@@ -42,6 +42,11 @@ import {
   unregisterPlugin,
   unregisterPluginAnalysis,
 } from "./registry";
+import {
+  clearLiveGrantedPermissions,
+  onPluginDisabled,
+  setLiveGrantedPermissions,
+} from "./isolation";
 
 /** Install lifecycle state. */
 export type PluginStatus = "disabled" | "pending-review" | "enabled" | "incompatible";
@@ -126,7 +131,32 @@ export function parsePluginPackage(
   return { package: { manifest, analyses, warnings } };
 }
 
-/** Load a plugin from a zip's bytes (in-app install, marketplace download). */
+/** Largest single text entry a plugin zip may carry (5 MB), and largest
+ *  total text across entries (10 MB): a zip bomb for the in-memory file
+ *  map is refused instead of read (Round 2 Issue 7, seq 471). */
+export const MAX_PLUGIN_ZIP_ENTRY_BYTES = 5 * 1024 * 1024;
+export const MAX_PLUGIN_ZIP_TOTAL_BYTES = 10 * 1024 * 1024;
+
+/** Load a plugin from a zip's bytes (in-app install, marketplace download).
+ *  Zip entry paths are attacker-controlled: a `..` segment, an absolute
+ *  path, a backslash, or an empty segment (zip-slip) refuses the whole
+ *  package instead of letting an entry escape the plugin folder or
+ *  shadow `plugin.json` (Round 2 Issue 7, seq 471). */
+/** Whether a zip entry path is unsafe to read: a `..` segment, an absolute
+ *  path, a backslash, or an empty segment (zip-slip). Split out so the
+ *  rule itself is directly testable — a zip library normalises `..`
+ *  segments away before the loader ever sees them, so an end-to-end zip
+ *  can only exercise the absolute-path and backslash arms (Round 2
+ *  Issue 7, seq 471). */
+export function isUnsafeZipEntryPath(path: string): boolean {
+  return (
+    path.startsWith("/") ||
+    path.startsWith("\\") ||
+    path.includes("\\") ||
+    path.split("/").some((seg) => seg === ".." || seg === "")
+  );
+}
+
 export async function loadPluginFromZip(
   bytes: Uint8Array | ArrayBuffer,
   name: string,
@@ -138,12 +168,36 @@ export async function loadPluginFromZip(
     return { errors: [`“${name}” is not a readable zip file: ${err instanceof Error ? err.message : String(err)}`] };
   }
   const files = new Map<string, string>();
+  let totalBytes = 0;
   for (const [path, entry] of Object.entries(zip.files)) {
     if (entry.dir) continue;
+    if (isUnsafeZipEntryPath(path)) {
+      return {
+        errors: [
+          `“${name}” has an unsafe zip entry path “${path}” — entries must stay inside the plugin folder (no “..”, no absolute path, no backslashes).`,
+        ],
+      };
+    }
     // Text files only: the manifest, code and docs. Binaries (screenshots)
     // travel in the zip but are not read by this groundwork.
     if (!/\.(json|js|mjs|ts|md|txt)$/i.test(path)) continue;
-    files.set(path, await entry.async("string"));
+    const text = await entry.async("string");
+    if (text.length > MAX_PLUGIN_ZIP_ENTRY_BYTES) {
+      return {
+        errors: [
+          `“${name}” entry “${path}” is too large (${text.length} bytes — the limit is ${MAX_PLUGIN_ZIP_ENTRY_BYTES} bytes per entry).`,
+        ],
+      };
+    }
+    totalBytes += text.length;
+    if (totalBytes > MAX_PLUGIN_ZIP_TOTAL_BYTES) {
+      return {
+        errors: [
+          `“${name}” is too large in total (${totalBytes} bytes of text — the limit is ${MAX_PLUGIN_ZIP_TOTAL_BYTES} bytes).`,
+        ],
+      };
+    }
+    files.set(path, text);
   }
   return parsePluginPackage(files);
 }
@@ -223,14 +277,23 @@ export function confirmEnable(
   // The installed version is recorded for the workflow dependency check
   // (registry.ts): a range is testable against live state from here on.
   setPluginVersion(record.manifest.id, record.manifest.version);
+  // The grants are live from here on: the interceptor enforces them, not
+  // any older session snapshot (Round 2 Issue 5, seq 469).
+  setLiveGrantedPermissions(record.manifest.id, granted);
   return { ...record, status: "enabled", grantedPermissions: [...granted], incompatibility: undefined };
 }
 
 /** Disable a plugin: its analyses unregister at once, so they vanish from
- *  the registry (and from `resolveAnalysis`) immediately. */
+ *  the registry (and from `resolveAnalysis`) immediately. The disable
+ *  also tears the plugin's Isolation frame down and revokes its grants
+ *  outright — a disabled plugin holds no permissions, so a later
+ *  re-enable starts from the grants the user picks then, never from a
+ *  stale session or a retained grant set (Round 2 Issue 5, seq 469). */
 export function disablePlugin(record: PluginRecord): PluginRecord {
   unregisterPlugin(record.manifest.id);
-  return { ...record, status: "disabled", incompatibility: undefined };
+  clearLiveGrantedPermissions(record.manifest.id);
+  onPluginDisabled(record.manifest.id);
+  return { ...record, status: "disabled", incompatibility: undefined, grantedPermissions: [] };
 }
 
 /**
@@ -242,8 +305,14 @@ export function disablePlugin(record: PluginRecord): PluginRecord {
 export function recheckPluginCompatibility(record: PluginRecord, appVersion: string): PluginRecord {
   const incompatibility = pluginIncompatibility(record.manifest, appVersion);
   if (incompatibility) {
-    if (record.status === "enabled" || record.status === "pending-review") unregisterPlugin(record.manifest.id);
-    return { ...record, status: "incompatible", incompatibility };
+    if (record.status === "enabled" || record.status === "pending-review") {
+      unregisterPlugin(record.manifest.id);
+      // An incompatible plugin loses its frame and its grants with its
+      // enabled state — same revocation as a disable (Round 2 Issue 5).
+      clearLiveGrantedPermissions(record.manifest.id);
+      onPluginDisabled(record.manifest.id);
+    }
+    return { ...record, status: "incompatible", incompatibility, grantedPermissions: [] };
   }
   if (record.status === "incompatible") {
     return { ...record, status: "disabled", incompatibility: undefined };
@@ -278,6 +347,8 @@ export function rehydrateEnabledPlugin(record: PluginRecord, appVersion: string)
     registered.push(result.id);
   }
   setPluginVersion(record.manifest.id, record.manifest.version);
+  // The rehydrated grants are live from here on (same as confirmEnable).
+  setLiveGrantedPermissions(record.manifest.id, record.grantedPermissions);
   return record;
 }
 
