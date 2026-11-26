@@ -1627,6 +1627,7 @@ export function groupedBarLayout(
           tickvals: opts.positions.tickvals,
           ticktext: opts.positions.ticktext,
           range: opts.positions.range,
+          autotickangles: [0, 90],
         }
       : { type: "category", autotickangles: [0, 90] }),
     ...axisChrome(options, categoryGrid),

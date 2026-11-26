@@ -303,7 +303,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, applyDateAxis, applyNumberFormats, axesRangeInputs, baseLayout, centers, curveXs, errorOf, errors, fitLabels, groupedBarLayout, groupedScatterLayout, hasTableXAxis, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowStats, perRowSummaryStats, scatterOffsets, summaryErrorAt, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, applyDateAxis, applyNumberFormats, axesRangeInputs, baseLayout, centers, curveXs, errorOf, errors, fitLabels, groupedBarLayout, groupedScatterLayout, hasTableXAxis, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowStats, perRowSummaryStats, rowValues, scatterOffsets, summaryErrorAt, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -42570,8 +42570,18 @@ check("every axis setting the Format panel offers changes the graph, and no othe
       const options = { ...newGraphOptions(type), ...volcano, rowsAt };
       const { axes, horizontal } = GRAPHS[type];
       const drawn = axesDrawn(type, options);
+      // The Format panel offers a scale control only when the axis is a value
+      // axis for THIS data: connected lines' rows stand at their titles'
+      // values only when every row holding data has a numeric title
+      // (graph-view computes the same `atValues` from the table). Assuming
+      // row values always exist claimed a scale for grouped lines on the XY
+      // fixture, whose titles are null, that the graph never draws.
+      const [tableType, data] = tableOf(type);
+      const dataset = readTable(data);
+      const columns = plotColumns(dataset, type, options, tableType);
+      const atValues = GRAPHS[type].placesRows ? !!rowValues(columns, dataset.titles) : true;
       for (const shown of ["x", "y"] as const) {
-        const kind = axes(options, true)[shown];
+        const kind = axes(options, atValues)[shown];
         const k = (shown === "x") === !horizontal ? "x" : "y";
         const changes = (patch: Partial<GraphOptions>) => axesDrawn(type, { ...options, ...patch }) !== drawn;
         const what = `${type} (${rowsAt}) ${shown.toUpperCase()}`;
