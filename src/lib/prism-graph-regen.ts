@@ -203,13 +203,24 @@ export function mapSidecarGraph(input: SidecarMappingInput): SidecarMapping {
       }
       return { reconstructible: true, graphType: "xy-scatter", ...e, ...link, ...sigmoidalAlt };
     }
-    case "grouped":
+    case "grouped": {
+      // The summary format decides the error bars, exactly as for column
+      // and XY tables: y_sd_n draws SD, y_cv_n derived SD, y_single /
+      // y_plus_minus none (with the asymmetric note) — the table default
+      // ("sem") is only the y_replicates answer.
+      const e = errorFor(resolved);
+      if (!e) {
+        return notReconstructible(
+          `No confident mapping — the dataset format “${resolved}” isn't one Titer maps to a graph.`,
+        );
+      }
       return {
         reconstructible: true,
         graphType: "grouped-bars",
-        error: tableDefault,
+        ...e,
         adjustAlternatives: ["grouped-scatter", "grouped-box", "grouped-lines"],
       };
+    }
     case "survival":
       return { reconstructible: true, graphType: "survival", error: "none" };
     case "contingency":
@@ -594,7 +605,10 @@ const ERROR_CHOICES: readonly string[] = ["none", "sd", "sem", "ci"];
  * `newGraphOptions`); the link goes through `remapGraphOptions` with an
  * identity map, so a link whose analysis is gone is dropped with a
  * warning instead of pointing at nothing. Throws on the first invalid
- * decision — nothing is created when the decisions don't validate.
+ * decision — nothing is created when the decisions don't validate: the
+ * run is two passes, a validate pass over every decision first and a
+ * create pass second, so a bad decision at index N never leaves index
+ * 0..N-1's graphs behind for a retry to duplicate.
  * (The caller clears the plans once the run is done: the offer is
  * import-time, and a second run would rebuild the same graphs.)
  */
@@ -622,7 +636,18 @@ export function applyRegenDecisions(plans: GraphPlan[], decisions: RegenDecision
   }
   const state = deps.getState();
   const report: RegenReport = { created: [], skipped: [], notReconstructible: [], warnings: [] };
-  for (const plan of plans) {
+  // Pass 1 — validate EVERY decision's content before creating anything.
+  // A bad decision at index N must not leave index 0..N-1's graphs
+  // behind: the caller clears the plans after the run, so a retry would
+  // rebuild them and duplicate the graphs. This pass only reads state
+  // and fills the report's skip rows; the remap runs here too because it
+  // is pure, and a dropped link is a warning, not a mutation.
+  const resolvedById = new Map<
+    string,
+    { plan: GraphPlan; graphType: GraphType; options: GraphOptions; name: string }
+  >();
+  for (let i = 0; i < plans.length; i++) {
+    const plan = plans[i];
     const decision = decisions.find((d) => d.proposalId === plan.proposalId)!;
     if (!plan.reconstructible) {
       if (decision.action === "confirm") {
@@ -694,9 +719,17 @@ export function applyRegenDecisions(plans: GraphPlan[], decisions: RegenDecision
     if (dropped.includes("regAnalysisId")) {
       report.warnings.push(`“${name}”: the linked analysis is gone, so the graph was built without it.`);
     }
-    const graphId = deps.createGraph(tableId, graphType, remapped ?? options);
-    deps.renameNode(graphId, name);
-    report.created.push({ graphId, graphType, name, origin: plan.origin });
+    resolvedById.set(plan.proposalId, { plan, graphType, options: remapped ?? options, name });
+  }
+  // Pass 2 — create exactly what pass 1 validated, in plan order. By
+  // here nothing can throw for a bad decision, so a run either creates
+  // every confirmed graph or none at all.
+  for (const plan of plans) {
+    const item = resolvedById.get(plan.proposalId);
+    if (!item) continue;
+    const graphId = deps.createGraph(plan.sourceTableId!, item.graphType, item.options);
+    deps.renameNode(graphId, item.name);
+    report.created.push({ graphId, graphType: item.graphType, name: item.name, origin: plan.origin });
   }
   return report;
 }
