@@ -34720,9 +34720,11 @@ check("linux-smoke boots webR from the filesystem path, and build-mac-dmg.sh rea
 // and the in-app Help ▸ How to Cite Titer cited only the GitHub URL. These
 // two files are the Phase 1 fix: .zenodo.json so Zenodo records the release
 // correctly once the GitHub integration is enabled, and CITATION.cff so
-// GitHub offers "Cite this repository". No DOI exists yet, so neither file
-// carries one — the DOI is added (here, and in showCitation in src/menus.ts)
-// once Zenodo mints it. The version in CITATION.cff must track package.json.
+// GitHub offers "Cite this repository". The DOI minted with 2.0.1 on
+// 2026-11-26 (version DOI 10.5281/zenodo.24569161; concept DOI, all versions,
+// 10.5281/zenodo.24569160), so CITATION.cff now carries the concept DOI and
+// showCitation names the version DOI (Phase 2 pin below). The version in
+// CITATION.cff must track package.json.
 check("citation entry: .zenodo.json and CITATION.cff exist, parse, name Titer under GPL-3.0, and track the package version (seq 549)", () => {
   const root = fileURLToPath(new URL("../", import.meta.url));
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
@@ -34766,7 +34768,47 @@ check("citation entry: .zenodo.json and CITATION.cff exist, parse, name Titer un
     cff.includes("https://github.com/smitpatel316/Titer"),
     "CITATION.cff must point at the Titer repo",
   );
-  ok(!cff.includes("doi:"), "CITATION.cff must not carry a DOI until Zenodo mints one");
+  strictEqual(
+    field("doi"),
+    "10.5281/zenodo.24569160",
+    "CITATION.cff doi must be the concept DOI (all versions)",
+  );
+});
+
+// ── Citation Phase 2 (seq 549): the DOI minted with 2.0.1 ───────────────
+// Zenodo minted 10.5281/zenodo.24569161 for v2.0.1 on 2026-11-26; the concept
+// DOI (all versions) is 10.5281/zenodo.24569160. showCitation names the
+// version DOI for the running version, and the README carries the concept-DOI
+// badge plus the version DOI in How to cite. The showCitation DOI is
+// hardcoded per release — update it with every release (see the comment
+// above showCitation in src/menus.ts).
+check("citation phase 2: showCitation and README carry the minted DOI (seq 549)", () => {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const menus = readFileSync(join(root, "src/menus.ts"), "utf8");
+  const citation = menus.match(/const showCitation[\s\S]*?`([^`]*)`/)?.[1] ?? "";
+  ok(
+    citation.includes("10.5281/zenodo.24569161"),
+    "showCitation must name the version DOI",
+  );
+  ok(
+    citation.includes("github.com/smitpatel316/Titer"),
+    "showCitation must still cite the repo address",
+  );
+  const readme = readFileSync(join(root, "README.md"), "utf8");
+  ok(
+    readme.includes(
+      "[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.24569160.svg)](https://doi.org/10.5281/zenodo.24569160)",
+    ),
+    "README must carry the Zenodo DOI badge (concept DOI)",
+  );
+  ok(
+    readme.includes("10.5281/zenodo.24569161"),
+    "README How to cite must name the version DOI",
+  );
+  ok(
+    !readme.includes("coming with the 2.0.1 release"),
+    "README must not still say the DOI is coming",
+  );
 });
 
 // ── Replicate pooling (prism-format-work (b)/(g)) ─────────────────────────
