@@ -168,14 +168,17 @@ export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeI
   // mean anything as `true` (the reader drops anything else): a re-pointed
   // analysis carries `orphaned: false` in state, and writing it would make
   // the next open report the file as updated. Leave the flags off unless
-  // true. A graph or figure's frozen flag is written as the state holds it
-  // (seq 237): the reader re-freezes from the snapshot, flag or no flag —
-  // but the flag is only ever set together with the snapshot
-  // (setGraphFrozen, or the reader itself), so a sound frozen node
-  // round-trips unedited, while a frozen node with no snapshot still reads
-  // as the repair it is (updated, unfrozen on load). The serializer never
-  // derives the flag — only the reader does. An info sheet never carries
-  // the flag.
+  // true. A graph or figure's frozen flag is written as the state holds it —
+  // but only when the node carries its snapshot field (seq 237 vs seq 165).
+  // The flag is only ever set together with the snapshot (setGraphFrozen,
+  // or the reader itself), so a frozen node whose snapshot field is present
+  // but empty lost its data: the flag is written, and the reader repairs it
+  // visibly (updated, unfrozen on load). A frozen node with no snapshot
+  // field at all never went through the freeze machinery — its flag is stale
+  // dead weight (a hand edit, or a file from before graphs could freeze) —
+  // so the flag is dropped silently, as the old saver did, and the file still
+  // opens unedited. The serializer never derives the flag from the snapshot
+  // — only the reader does. An info sheet never carries the flag.
   const cleanNodes = Object.fromEntries(
     Object.entries(nodes).map(([id, node]) => {
       const next = { ...node };
@@ -184,8 +187,10 @@ export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeI
         if (next.frozen !== true) delete next.frozen;
       } else if (next.type === "table") {
         if (next.frozen !== true) delete next.frozen;
-      } else if (next.type === "graph" || next.type === "figure") {
-        if (next.frozen !== true) delete next.frozen;
+      } else if (next.type === "graph") {
+        if (next.frozen !== true || !("frozenData" in next)) delete next.frozen;
+      } else if (next.type === "figure") {
+        if (next.frozen !== true || !("frozenDataByGraph" in next)) delete next.frozen;
       } else {
         delete next.frozen;
       }
