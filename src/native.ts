@@ -712,13 +712,14 @@ export function setSpinner(at: [number, number] | null) {
   spinner = spinner.then(() => invoke<void>("set_spinner", { at })).catch(() => {});
 }
 
-/** Titer's GitHub page, its releases, the user guide, the Prism guides, the
- *  support pages, the Titer web site, or Buy Me a Coffee, in the default
- *  browser. */
+/** Titer's GitHub page, its releases, the full releases list, the user
+ *  guide, the Prism guides, the support pages, the Titer web site, or
+ *  Buy Me a Coffee, in the default browser. */
 export const openLink = (
   link:
     | "github"
     | "releases"
+    | "releases-list"
     | "coffee"
     | "guide"
     | "curve-fitting"
