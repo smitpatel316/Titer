@@ -76,9 +76,12 @@ export function MarketplaceDialog() {
     setReview({ record, lines: s.reviewLines(record.manifest.id) });
     const initial: Record<string, boolean> = {};
     for (const p of record.manifest.permissions) {
-      // Fresh install: everything declared starts checked. Re-enable:
-      // what was granted last time starts checked.
-      initial[p] = record.grantedPermissions.includes(p) || record.grantedPermissions.length === 0;
+      // Fresh install: nothing starts checked — the user grants each
+      // permission explicitly. Re-enable: what was granted last time
+      // starts checked. (R2-64: the old `|| grantedPermissions.length
+      // === 0` pre-checked every permission, including "network", on
+      // a fresh install and on re-enabling a zero-permission plugin.)
+      initial[p] = record.grantedPermissions.includes(p);
     }
     setGrants(initial);
   };
