@@ -1,13 +1,14 @@
-# Titer (Helix) Bug Report — Round 2 (Recheck at `b8a2528`)
+# Titer (Helix) Bug Report — Round 2 (Recheck 2 at `8c877d8`)
 
-Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findings) and rechecked at `HEAD` `b8a2528` across the 57 commits in `62678b2..b8a2528`.
+Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findings), rechecked at `b8a2528` (`62678b2..b8a2528`, +14 findings `#68`–`#81`), and rechecked at `HEAD` `8c877d8` across the 46 commits in `0b80c30..8c877d8` (+16 findings `#82`–`#97`).
 
-## Recheck Status at `b8a2528`
+## Recheck Status at `8c877d8`
 
-- **Round 1 (`85f6c91`, 28 issues)**: **28 of 28** now fixed (the sole Round 1 carryover `#67` was fixed in `242e6c9`).
-- **Round 2 (`d44c1da`, #1–#67)**: **10 Fixed** (`#2`, `#3`, `#13`, `#14`, `#15`, `#21`, `#42`, `#43`, `#55`, `#67`), **8 Partially Fixed** (`#1`, `#12`, `#17`, `#34`, `#49`, `#54`, `#56`, `#63`), **49 Open**.
-- **New in `62678b2..b8a2528` (#68–#81)**: **14 New** (**5 High**, **8 Medium**, **1 Low**).
-- **Active Total**: **71 Active** (**40 High**, **28 Medium**, **3 Low**).
+- **Round 1 (`85f6c91`, 28 issues)**: **28 of 28** fixed.
+- **Round 2 (`d44c1da`, #1–#67)**: **18 Fixed** (`#2`, `#3`, `#5`, `#13`, `#14`, `#15`, `#21`, `#27`, `#30`, `#38`, `#42`, `#43`, `#55`, `#61`, `#62`, `#64`, `#66`, `#67` — +8 newly fixed at `8c877d8`), **19 Partially Fixed** (`#1`, `#6`, `#7`, `#8`, `#12`, `#17`, `#23`, `#24`, `#28`, `#29`, `#31`, `#34`, `#36`, `#37`, `#39`, `#49`, `#54`, `#56`, `#63` — +11 newly partial at `8c877d8`), **30 Open** (`#25`, `#26`, `#60` were merged in `67b89f0` and reverted in `294da63`).
+- **Recheck 1 (`b8a2528`, #68–#81)**: **14 Open** (**5 High**, **8 Medium**, **1 Low**).
+- **New in `0b80c30..8c877d8` (#82–#97)**: **16 New** (**9 High**, **6 Medium**, **1 Low**).
+- **Active Total**: **79 Active** (**45 High**, **31 Medium**, **3 Low**; 18 Fixed out of 97 total).
 
 ---
 
@@ -19,10 +20,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 | 2 | **High** | Fixed | Cloud / Security | Arbitrary file read via unvalidated `provider` path traversal in `cloud_read_cache` |
 | 3 | **High** | Fixed | Cloud / Security | OAuth browser URL allowlist bypass in `open_browser_url` / `open_url` via userinfo (`@`) |
 | 4 | **High** | Open | Plugins / Security | Plugin permission UI spoofing in `permissionChoices`: non-canonical permission order swaps checkbox labels and grants the wrong capability |
-| 5 | **High** | Open | Plugins / Security | Plugin capability revocation bypass: disabling/uninstalling a plugin never tears down its Isolation session, letting re-enable retain revoked permissions |
-| 6 | **High** | Open | Plugins / Security | Plugin static-gate bypasses (`__TAURI_INTERNALS__` regex typo, `Function()`, R backtick/dynamic dispatch) and `.GlobalEnv` escape in shared WebR |
-| 7 | **High** | Open | Plugins / Security | Path traversal in `manifest.entry` / zip-slip entries in `loadPluginFromZip`, plus unverified manifest ID/version on marketplace install & update |
-| 8 | **High** | Open | Server / Security | Feedback server global rate limit can be exhausted by a single per-IP blocked attacker, plus unbounded rate-limiter maps and dedupe TOCTOU race |
+| 5 | **High** | Fixed | Plugins / Security | Plugin capability revocation bypass: disabling/uninstalling a plugin never tears down its Isolation session, letting re-enable retain revoked permissions |
+| 6 | **High** | Partial | Plugins / Security | Plugin static-gate bypasses (`__TAURI_INTERNALS__` regex typo, `Function()`, R backtick/dynamic dispatch) and `.GlobalEnv` escape in shared WebR |
+| 7 | **High** | Partial | Plugins / Security | Path traversal in `manifest.entry` / zip-slip entries in `loadPluginFromZip`, plus unverified manifest ID/version on marketplace install & update |
+| 8 | **High** | Partial | Server / Security | Feedback server global rate limit can be exhausted by a single per-IP blocked attacker, plus unbounded rate-limiter maps and dedupe TOCTOU race |
 | 9 | **High** | Open | Cloud Sync | Cloud conflict "Overwrite" always fails (`expectedVersion ?? handle.version`), while offline-opened remote files silently overwrite remote edits |
 | 10 | **High** | Open | Cloud Auth | Concurrent Box token refresh deletes fresh single-use tokens and signs user out; deleted tokens leave permanent zombie accounts |
 | 11 | **High** | Open | Plugins / Isolation | `PluginIsolationWebview` is non-functional in both dev (`<StrictMode>` teardown) and release builds (Tauri CSP blocks `srcDoc` inline `<script>`s) |
@@ -37,23 +38,23 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 | 20 | **High** | Open | Project File | Save/load round-trip regressions in `project-file.ts`: frozen graphs/figures always reopen `updated: true`, blank/image figure panels trigger false "missing graph" warnings, and `rootOrder`/`orphanedDataSet` mismatches |
 | 21 | **High** | Fixed | Calculated Variables | `calcvars.ts`: `NOT` binds tighter than comparisons/arithmetic (inverting `WHERE NOT …` and `IF(NOT …)`), and `renameVariableInFormula` writes unbracketed names (breaking formulas or silently substituting `Math.E`/`Math.PI`) and corrupts scientific notation |
 | 22 | **High** | Open | Calculated Variables | `calcvars.ts`: stale `rawTextAt` for chained calculated variables (`COUNTA`, `OVER`), silent wrong/blank results for expression aggregates (`MIN(A+B)`, `MEAN(A+B)`), and `RANK` returning `0.5` on excluded rows |
-| 23 | **High** | Open | Tabular Import | `.xlsx` import misclassifies custom number formats containing `[Red]`, currency codes, or unit suffixes (`"nM"`, `"mg/mL"`) as dates — silently corrupting numeric data into 1900-era date strings |
-| 24 | **High** | Open | Tabular Import | `.xlsx` / CSV importer corrupts rows on self-closing `<row .../>` and `<t/>` tags, crashes on malformed attributes/entities, and overflows the call stack before `MAX_IMPORT_ROWS` truncation |
+| 23 | **High** | Partial | Tabular Import | `.xlsx` import misclassifies custom number formats containing `[Red]`, currency codes, or unit suffixes (`"nM"`, `"mg/mL"`) as dates — silently corrupting numeric data into 1900-era date strings |
+| 24 | **High** | Partial | Tabular Import | `.xlsx` / CSV importer corrupts rows on self-closing `<row .../>` and `<t/>` tags, crashes on malformed attributes/entities, and overflows the call stack before `MAX_IMPORT_ROWS` truncation |
 | 25 | **High** | Open | Prism `.prism` Import | `.prism` import drops `summaryFormat` on grouped summary tables (treating Mean/SD/N as raw replicates) and fails to sanitize `:` or pad ragged subcolumns |
 | 26 | **High** | Open | Prism `.prism`/`.pzfx` Export | Native Titer XY replicate (`A:Y1`, `A:Y2`) and XY summary (`A:Mean`, `A:SD`, `A:N`) tables lose their grouping, `summaryFormat`, and nonlinear-regression dataset links in both `.prism` and `.pzfx` exports |
-| 27 | **High** | Open | Vector Export (EPS) | EPS vector export produces invalid/corrupted PostScript (`nocurrentpoint` crash on text + leaked `clip` path) |
-| 28 | **High** | Open | Vector Export (PDF) | PDF vector export corrupts all non-ASCII text (`−`, `R²`, `±`, `µM`, `°C`, `×`) by writing UTF-16BE bytes into single-byte Type1 `Tj` streams |
-| 29 | **High** | Open | Vector Export (PDF/EPS) | Vector PDF/EPS export silently ignores Plotly CSS `px` units (`font-size`, `stroke-width`, `stroke-dasharray`), erases parent `<g>` opacity, and `grayscaleFigure` rewrites series labels matching CSS color names |
-| 30 | **High** | Open | Vector Export (Figures) | Multi-panel Figure vector PDF and EPS exports are shrunk to 75% (`0.75×`) of configured physical dimensions |
-| 31 | **High** | Open | Graphs (Grouped) | `grouped-bars-scatter` ("Bars with individual points") plots numeric scatter X coordinates on a categorical X axis and duplicates points/legend entries |
+| 27 | **High** | Fixed | Vector Export (EPS) | EPS vector export produces invalid/corrupted PostScript (`nocurrentpoint` crash on text + leaked `clip` path) |
+| 28 | **High** | Partial | Vector Export (PDF) | PDF vector export corrupts all non-ASCII text (`−`, `R²`, `±`, `µM`, `°C`, `×`) by writing UTF-16BE bytes into single-byte Type1 `Tj` streams |
+| 29 | **High** | Partial | Vector Export (PDF/EPS) | Vector PDF/EPS export silently ignores Plotly CSS `px` units (`font-size`, `stroke-width`, `stroke-dasharray`), erases parent `<g>` opacity, and `grayscaleFigure` rewrites series labels matching CSS color names |
+| 30 | **High** | Fixed | Vector Export (Figures) | Multi-panel Figure vector PDF and EPS exports are shrunk to 75% (`0.75×`) of configured physical dimensions |
+| 31 | **High** | Partial | Graphs (Grouped) | `grouped-bars-scatter` ("Bars with individual points") plots numeric scatter X coordinates on a categorical X axis and duplicates points/legend entries |
 | 32 | **High** | Open | Graphs (Summary) | Summary tables draw no SEM error bars on `"mean-sem"` tables and drop asymmetric lower error bars (`errorMinus`) on XY summary graphs |
 | 33 | **High** | Open | MCP Server | `titer_read_results` returns stale cached results after table mutations and returns `not_computed` for frozen/orphaned/cloned analyses with saved `cachedResult` |
 | 34 | **High** | Partial | MCP / Param Validation | `validateAnalysisParams` omits 11 per-analysis enum narrowings from `analysis-params-schema.json`, allowing cross-family params that silently run the wrong statistical test or crash R |
 | 35 | **High** | Open | XY Graphs / Overlays | `addFittedCurve` draws all-`NaN` curves (no line rendered) for every multi-Y (`params.ys`) and curve-comparison (`params.compareWith`) nonlinear regression |
-| 36 | **High** | Open | XY Stats (Nonlinear) | Raw-X sigmoidal models (`sigmoidal-4pl-x`, `absolute-ic50-x`, `asymmetric-5pl-x`, `agonist-4pl-normalized-x`) force `Y = Bottom` (or `0`) at `X = 0` in R even when `HillSlope < 0`, corrupting falling-curve fits and disagreeing with TS `evaluate()` |
-| 37 | **High** | Open | XY Stats (Nonlinear) | `applyFitOptions` (`transformNlsCall`) silently strips built-in `lower=`/`upper=` bounds on 17+ models whenever weights, fixed params, bounds, or robust/Poisson IRLS are used — and crashes on `logistic-growth` / `gompertz-growth` |
-| 38 | **High** | Open | XY Stats (Nonlinear) | Weighted, robust, and Poisson fits on log-Y models (`semilog-y-log`, `log-log-line`, `exponential-growth-log`) compute `R²` by dividing `log(Y)`-scale SS by raw `Y`-scale SST, and Poisson IRLS uses `1/log(Y)` weights |
-| 39 | **High** | Open | XY Stats (Nonlinear) | `ecAnything` crashes R (`subscript out of bounds`) when `params.ecx` is requested on competition models, and `runGlobalNonlinear` mislabels shared `IC50`/`IC50Hi`/`LogKd` midpoints as `"EC50"` |
+| 36 | **High** | Partial | XY Stats (Nonlinear) | Raw-X sigmoidal models (`sigmoidal-4pl-x`, `absolute-ic50-x`, `asymmetric-5pl-x`, `agonist-4pl-normalized-x`) force `Y = Bottom` (or `0`) at `X = 0` in R even when `HillSlope < 0`, corrupting falling-curve fits and disagreeing with TS `evaluate()` |
+| 37 | **High** | Partial | XY Stats (Nonlinear) | `applyFitOptions` (`transformNlsCall`) silently strips built-in `lower=`/`upper=` bounds on 17+ models whenever weights, fixed params, bounds, or robust/Poisson IRLS are used — and crashes on `logistic-growth` / `gompertz-growth` |
+| 38 | **High** | Fixed | XY Stats (Nonlinear) | Weighted, robust, and Poisson fits on log-Y models (`semilog-y-log`, `log-log-line`, `exponential-growth-log`) compute `R²` by dividing `log(Y)`-scale SS by raw `Y`-scale SST, and Poisson IRLS uses `1/log(Y)` weights |
+| 39 | **High** | Partial | XY Stats (Nonlinear) | `ecAnything` crashes R (`subscript out of bounds`) when `params.ecx` is requested on competition models, and `runGlobalNonlinear` mislabels shared `IC50`/`IC50Hi`/`LogKd` midpoints as `"EC50"` |
 | 40 | **High** | Open | XY Stats (User-Defined) | `user-defined.ts` accepts R reserved keywords (`NA`, `Inf`, `NULL`, `TRUE`, `for`, `in`, …) causing R syntax errors, and naming a parameter `HillSlope` causes the fitted curve overlay to render nothing (all `NaN`) |
 | 41 | **High** | Open | Multiple Stats | Multiple Linear Regression (`multiple-regression.ts`) miscomputes VIFs, crashes with R syntax error when only categorical predictors are present, and passes raw unaligned columns to `describe()` |
 | 42 | **High** | Fixed | Grouped Stats | Three-way ANOVA Games–Howell post-hoc crashes R (`object 'Infinity' not found`) when compared cells have zero variance (identical replicates) |
@@ -75,27 +76,43 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 | 58 | **Medium** | Open | Prism Graph Regen | `applyRegenDecisions` mutates the project before validating later decisions (creating duplicate graphs on retry), and `mapSidecarGraph` ignores summary formats on grouped `.prism` tables |
 | 59 | **Medium** | Open | Multi-Table Graphs | `mergeGraphTables` skips the `summaryFormat` mismatch check for XY tables and silently drops extra Nested tables whose name contains `:` |
 | 60 | **Medium** | Open | Prism `.prism` Import | `.prism` import destroys line breaks in Info Sheet `notes` via `plainTitle()` and lacks bounds/type guards on malformed `document.json` / `content.json` and large row/column spreads |
-| 61 | **Medium** | Open | Stats Report | `report/conclusion.ts`, `report/checks.ts`, and `report/analyzed.ts` produce inverted/misleading conclusions and assumption checks (FDR `multiple-t-tests` always concludes "no difference", `compareModel` prints `"Y" and "undefined"`, `chi-square` trend uses omnibus Pearson P, `checks.ts` ignores weights & replicates, `analyzed.ts` ignores `chi-square` `sets` and misreports MV `linear-regression` X) |
-| 62 | **Medium** | Open | XY Stats (Nonlinear) | `AICc` in `enzyme-inhibition.ts` (and `nonlinear-regression.ts`) omits the residual-variance parameter (`+ 1`) from `k`; `interpolationCode` silently drops 95% CIs on tight positive-X ranges; multi-Y centered polynomials share only the first set's `centeredX` |
+| 61 | **Medium** | Fixed | Stats Report | `report/conclusion.ts`, `report/checks.ts`, and `report/analyzed.ts` produce inverted/misleading conclusions and assumption checks (FDR `multiple-t-tests` always concludes "no difference", `compareModel` prints `"Y" and "undefined"`, `chi-square` trend uses omnibus Pearson P, `checks.ts` ignores weights & replicates, `analyzed.ts` ignores `chi-square` `sets` and misreports MV `linear-regression` X) |
+| 62 | **Medium** | Fixed | XY Stats (Nonlinear) | `AICc` in `enzyme-inhibition.ts` (and `nonlinear-regression.ts`) omits the residual-variance parameter (`+ 1`) from `k`; `interpolationCode` silently drops 95% CIs on tight positive-X ranges; multi-Y centered polynomials share only the first set's `centeredX` |
 | 63 | **Medium** | Partial | Sample Size & Power | `noncentralTCdf` underflows to `0` at `|δ| ≥ 38.57`, causing t-test power to jump discontinuously to `100%` and `solveN` to underestimate `n` at small `df` / strict `α` |
-| 64 | **Medium** | Open | Plugins / Marketplace | Plugin wizard `kind: "text"` questions reject all non-numeric text, and `MarketplaceDialog` pre-checks `"network"` (and all permissions) by default |
+| 64 | **Medium** | Fixed | Plugins / Marketplace | Plugin wizard `kind: "text"` questions reject all non-numeric text, and `MarketplaceDialog` pre-checks `"network"` (and all permissions) by default |
 | 65 | **Low** | Open | UI / Menus | UI/menu minor defects: duplicate Grubbs' `"Outliers by column"` table, duplicate `Edit ▸ Fill Down` menu item (first lacks `!activeTableFrozen`), `CmdOrCtrl+Alt+I` shortcut collision (`New Info Sheet…` vs `Inspector`), and stale `Change Parameters…` enabled state |
-| 66 | **Low** | Open | WebR / Survival | WebR / survival edge cases: `ensurePackages` doubles caller `timeoutMs` on claim timeout; `survival-analysis.ts` computes 2-group HR on `k ≥ 3` and returns `—` without explanation on disjoint risk sets |
+| 66 | **Low** | Fixed | WebR / Survival | WebR / survival edge cases: `ensurePackages` doubles caller `timeoutMs` on claim timeout; `survival-analysis.ts` computes 2-group HR on `k ≥ 3` and returns `—` without explanation on disjoint risk sets |
 | 67 | **Low** | Fixed | Nested Tables (R1 #28) | [Carryover from Round 1 #28] Pasting wide data into a Nested table silently drops overflow columns without showing the `"Some Values Weren't Pasted"` notice (`columnsBeyond` omits `isNested(data)`) |
-| 68 | **High** | New | Native Clipboard | `copy_pdf_to_clipboard` puts two separate `NSPasteboardItem`s on the macOS clipboard instead of one multi-flavour item |
-| 69 | **High** | New | UI / What's New | `WhatsNewDialog` auto-closes itself 2 seconds after opening via Help ▸ What's New |
-| 70 | **High** | New | Error Reporting | Independent error-report sharing (`CrashReportDialog` / `try_send_error_entry`) never sends when feedback sharing is off |
-| 71 | **High** | New | UI / Startup Guide | `StartupGuideDialog`'s `mailto:smit@muse.ai` support link is silently blocked by Tauri's `.on_navigation` policy |
-| 72 | **High** | New | Error Reporting | Startup flush race and permanent unsent-duplicate loop in `CrashReportDialog` / `main.tsx` / `mcp_flush_error_log` |
-| 73 | **Medium** | New | Figures / Freeze | Freezing or re-freezing a graph overrides the snapshot of a previously frozen Figure |
-| 74 | **Medium** | New | UI / Analyses | macOS native `NSProgressIndicator` spinner overlaps the `Running…` text and `Cancel` button in `AnalysisView` |
-| 75 | **Medium** | New | Native Clipboard | `copy_pdf_to_clipboard` JXA `if (!pdfData)` / `if (!pngData)` checks are dead code, wiping the user's clipboard on read failure |
-| 76 | **Medium** | New | Feedback / Privacy | `SendFeedbackDialog` and `AiConnectionsDialog` drop server/network errors and falsely claim "Sharing is off"; `mcp_send_feedback` sends `project_file` + `recent_activity` |
-| 77 | **Medium** | New | UI / Modals | `StartupGuideDialog`'s global `window` keydown handler hijacks `Enter` and `Escape` from top-layer `<dialog>` modals (including `SendFeedbackDialog`) |
-| 78 | **Medium** | New | Native Menu | Windowless Help menu exposes Help ▸ Send Feedback and Help ▸ What's New as enabled dead no-ops |
-| 79 | **Medium** | New | UI / Startup Guide | `StartupGuideDialog` auto-show omits `!openedFile.current` and pops over opened `.pzt` templates, Sample Project, and slow/failed file launches |
-| 80 | **Medium** | New | Math / Distributions | `noncentralTCdf` (`logWeights` path) silently returns `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447` |
-| 81 | **Low** | New | Native IPC | `send_to_keynote_blocking` / `applescript_number` lacks `.is_finite()` / upper-bound checks and can emit invalid AppleScript `inf` or `0` |
+| 68 | **High** | Open | Native Clipboard | `copy_pdf_to_clipboard` puts two separate `NSPasteboardItem`s on the macOS clipboard instead of one multi-flavour item |
+| 69 | **High** | Open | UI / What's New | `WhatsNewDialog` auto-closes itself 2 seconds after opening via Help ▸ What's New |
+| 70 | **High** | Open | Error Reporting | Independent error-report sharing (`CrashReportDialog` / `try_send_error_entry`) never sends when feedback sharing is off |
+| 71 | **High** | Open | UI / Startup Guide | `StartupGuideDialog`'s `mailto:smit@muse.ai` support link is silently blocked by Tauri's `.on_navigation` policy |
+| 72 | **High** | Open | Error Reporting | Startup flush race and permanent unsent-duplicate loop in `CrashReportDialog` / `main.tsx` / `mcp_flush_error_log` |
+| 73 | **Medium** | Open | Figures / Freeze | Freezing or re-freezing a graph overrides the snapshot of a previously frozen Figure |
+| 74 | **Medium** | Open | UI / Analyses | macOS native `NSProgressIndicator` spinner overlaps the `Running…` text and `Cancel` button in `AnalysisView` |
+| 75 | **Medium** | Open | Native Clipboard | `copy_pdf_to_clipboard` JXA `if (!pdfData)` / `if (!pngData)` checks are dead code, wiping the user's clipboard on read failure |
+| 76 | **Medium** | Open | Feedback / Privacy | `SendFeedbackDialog` and `AiConnectionsDialog` drop server/network errors and falsely claim "Sharing is off"; `mcp_send_feedback` sends `project_file` + `recent_activity` |
+| 77 | **Medium** | Open | UI / Modals | `StartupGuideDialog`'s global `window` keydown handler hijacks `Enter` and `Escape` from top-layer `<dialog>` modals (including `SendFeedbackDialog`) |
+| 78 | **Medium** | Open | Native Menu | Windowless Help menu exposes Help ▸ Send Feedback and Help ▸ What's New as enabled dead no-ops |
+| 79 | **Medium** | Open | UI / Startup Guide | `StartupGuideDialog` auto-show omits `!openedFile.current` and pops over opened `.pzt` templates, Sample Project, and slow/failed file launches |
+| 80 | **Medium** | Open | Math / Distributions | `noncentralTCdf` (`logWeights` path) silently returns `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447` |
+| 81 | **Low** | Open | Native IPC | `send_to_keynote_blocking` / `applescript_number` lacks `.is_finite()` / upper-bound checks and can emit invalid AppleScript `inf` or `0` |
+| 82 | **High** | New | Graphs / Labels | `formatFigureLabels` HTML-escapes `<br>` and `<b>` across graph overlays, tooltips, and survival tables |
+| 83 | **High** | New | Graphs / Security | `formatLabelForPlotly` double-escapes `&`, `<`, `>`, `\^`, `\_` in `buildGraphFigure` and allows HTML-escaping bypass (XSS) via `<sup>`/`<sub>` |
+| 84 | **High** | New | Vector Export (PDF/EPS) | `vector-export.ts` `textRuns` splits single-line Plotly `<sup>`/`<sub>` `<text>` into separate lines, breaking `middle`/`end` alignment |
+| 85 | **High** | New | XY Stats (Nonlinear) | `ecAnything` for `homologous-competition-logx` uses inverted `(100 - f) / f`, computing `IC(100-F)` labeled as `IC{F}` |
+| 86 | **High** | New | XY Stats (Nonlinear) | Sign-aware `X = 0` guard `ifelse(HillSlope<0, Top, Bottom)` truncates unshared `Top[g]`/`Bottom[g]` to length 1 in global fits |
+| 87 | **High** | New | Server / Reliability | `feedback-server` `DedupeSet` has permanent `in_flight` leak on client disconnect, two-mutex TOCTOU race, and `Notify` lost wakeup |
+| 88 | **High** | New | MCP Bridge | `mcp-bridge` `seq 540` session recovery fails on port-change restart, fails on rotated-token restart, and permanently wedges on transient failure |
+| 89 | **High** | New | WebR / Concurrency | `webr.ts` P-12 claim-stamp matching uses a 5-second fuzzy window and never clears `claimStamps` on install/reset/release |
+| 90 | **High** | New | WebR / Concurrency | `webr.ts` `ensurePackages` resolves as success while packages are still `"loading"` when an evicted joined batch settles after a retry started |
+| 91 | **Medium** | New | Graphs / Labels | `formatFigureLabels` rewrites `layout.annotations[i].name`, breaking point-label drag repositioning and leaking phantom keys into `graphOptions.points` |
+| 92 | **Medium** | New | Graphs (Grouped) | `buildGroupedBars` breaks `groupLayout: "superimposed"` when `showPoints: true`, misaligning bars with significance overlays |
+| 93 | **Medium** | New | MCP Server | `TiterMcpServer::get_info()` never advertises `capabilities.tools.listChanged: true` and `mcp_set_enabled(false)` never clears `inner.peers` |
+| 94 | **Medium** | New | MCP Server | `reapply_antigravity_entry_if_connected` silently overwrites custom/remote `"titer"` entries in `~/.gemini/config/mcp_config.json` on every launch |
+| 95 | **Medium** | New | Tabular Import | `parseXlsx` skips self-closing `<si/>` (and `<si ...>` with attributes) in `sharedStrings.xml`, shifting all subsequent cell strings off by 1, and concatenates `<rPh>` phonetic runs |
+| 96 | **Medium** | New | WebR / Concurrency | `webr.ts` `resolveInEngine` fires an unconditional `releaseClaimCode(pending)` on claim timeout (`codes === null`), risking wiping another window's live claim |
+| 97 | **Low** | New | Graphs / Tables Labels | `labelRuns` splits Unicode minus (`10^−6` → `10<sup>−</sup>6`) and collapses consecutive `_` runs (`ctrl_1_a` → `ctrl<sub>1a</sub>`) |
 
 ---
 
@@ -191,8 +208,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 5: Plugin capability revocation bypass: disabling/uninstalling a plugin never tears down its Isolation session, letting re-enable retain revoked permissions
+### Issue 5 [FIXED]: Plugin capability revocation bypass: disabling/uninstalling a plugin never tears down its Isolation session, letting re-enable retain revoked permissions
 - **Severity**: High
+- **Status**: Fixed at `8c877d8` (`src/plugins/loader.ts:292-321`, `src/plugins/isolation.ts:201-209, 306-326`, and `src/marketplace/store.ts:260-266, 344-356` tear down active sessions, clear live grants, and validate live grants in `launchPluginWebview` / `interceptPluginCall`)
 - **Files**:
   - `src/plugins/isolation.ts:151-169, 213-220, 250-277`
   - `src/plugins/loader.ts:223-226`
@@ -209,8 +227,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 6: Plugin static-gate bypasses (`__TAURI_INTERNALS__` regex typo, `Function()`, R backtick/dynamic dispatch) and `.GlobalEnv` escape in shared WebR
+### Issue 6 [PARTIALLY FIXED]: Plugin static-gate bypasses (`__TAURI_INTERNALS__` regex typo, `Function()`, R backtick/dynamic dispatch) and `.GlobalEnv` escape in shared WebR
 - **Severity**: High
+- **Status**: Partially Fixed at `8c877d8` (JS `__TAURI_INTERNALS__` & `Function()`, R backtick call heads, and `})` block breakout are now gated)
+- **Remaining at `8c877d8`**: (1) `pluginEvalExpression` (`src/stats/webr.ts:387-409, 472-483`) still creates `new.env(parent = globalenv())`, so `assign(..., pos = 1L)` / `pos.to.env(1)` / `<<-` / `globalenv()` / `unlockBinding` still poison `.GlobalEnv`; (2) all 13 R equivalents (`getFromNamespace`, `evalq`, `eval.parent`, `readRDS`, `readBin`, `writeBin`, `loadNamespace`, `requireNamespace`, `webr::install`, `.Internal`, `.Primitive`, `.Fortran`, `.External2`) are still absent from `src/plugins/gates.ts:85-236`; (3) string-quoted call heads (`"eval"(...)`) and unquoted `match.fun(eval)` still bypass `src/plugins/gates.ts:196, 252`.
 - **Files**:
   - `src/plugins/gates.ts:85-136, 175-226`
   - `src/plugins/registry.ts:356`
@@ -230,8 +250,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 7: Path traversal in `manifest.entry` / zip-slip entries in `loadPluginFromZip`, plus unverified manifest ID/version on marketplace install & update
+### Issue 7 [PARTIALLY FIXED]: Path traversal in `manifest.entry` / zip-slip entries in `loadPluginFromZip`, plus unverified manifest ID/version on marketplace install & update
 - **Severity**: High
+- **Status**: Partially Fixed at `8c877d8` (path traversal and manifest ID/version checks added in `src/plugins/manifest.ts:162-178`, `src/plugins/loader.ts:151-180`, and `src/marketplace/store.ts:199-225`)
+- **Remaining at `8c877d8`**: `loadPluginFromZip` (`src/plugins/loader.ts:184-199`) still decompresses each entry via `await entry.async("string")` (with no `try/catch`) *before* checking `MAX_PLUGIN_ZIP_ENTRY_BYTES`, leaving it vulnerable to zip-bomb OOM.
 - **Files**:
   - `src/plugins/manifest.ts:160-163`
   - `src/plugins/loader.ts:103-112, 122-141`
@@ -247,8 +269,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 8: Feedback server global rate limit can be exhausted by a single per-IP blocked attacker, plus unbounded rate-limiter maps and dedupe TOCTOU race
+### Issue 8 [PARTIALLY FIXED]: Feedback server global rate limit can be exhausted by a single per-IP blocked attacker, plus unbounded rate-limiter maps and dedupe TOCTOU race
 - **Severity**: High
+- **Status**: Partially Fixed at `8c877d8` (global-before-per-IP drain and unbounded rate-limiter maps fixed in `feedback-server/src/lib.rs:79-84, 243-293` and `broker/src/lib.rs:60-65, 163-177`)
+- **Remaining at `8c877d8`**: New `DedupeSet` (`feedback-server/src/lib.rs:336-397, 677-741`) introduces a permanent `in_flight` leak on disconnect, a two-mutex TOCTOU race, and a `Notify` lost wakeup (tracked as new Issue `#87`).
 - **Files**:
   - `feedback-server/src/lib.rs:156-226` (`RateLimiter::check`)
   - `feedback-server/src/lib.rs:545-565` (`submit_feedback` dedupe check)
@@ -518,8 +542,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 23: `.xlsx` import misclassifies custom number formats containing `[Red]`, currency codes, or unit suffixes (`"nM"`, `"mg/mL"`) as dates — silently corrupting numeric data into 1900-era date strings
+### Issue 23 [PARTIALLY FIXED]: `.xlsx` import misclassifies custom number formats containing `[Red]`, currency codes, or unit suffixes (`"nM"`, `"mg/mL"`) as dates — silently corrupting numeric data into 1900-era date strings
 - **Severity**: High
+- **Status**: Partially Fixed at `8c877d8` (`isDateFormatCode` at `src/lib/tabular-import.ts:195-205` now strips `[Red]` and `"..."` literals)
+- **Remaining at `8c877d8`**: `parseXlsx` (`src/lib/tabular-import.ts:304`) never calls `decodeEntities(code)`, so real Excel XML `formatCode="0.0 &quot;nM&quot;"` still strips nothing and corrupts numeric columns to 1900 dates; `excelSerialToIso` (`211-218`) still lacks a non-finite `Date` guard; and `[hh]`/`[mm]`/`[ss]` elapsed-time tokens are stripped (`202-203`).
 - **Files**:
   - `src/lib/tabular-import.ts:178, 267-288, 326-333`
 - **Explanation**:
@@ -531,8 +557,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 24: `.xlsx` / CSV importer corrupts rows on self-closing `<row .../>` and `<t/>` tags, crashes on malformed attributes/entities, and overflows the call stack before `MAX_IMPORT_ROWS` truncation
+### Issue 24 [PARTIALLY FIXED]: `.xlsx` / CSV importer corrupts rows on self-closing `<row .../>` and `<t/>` tags, crashes on malformed attributes/entities, and overflows the call stack before `MAX_IMPORT_ROWS` truncation
 - **Severity**: High
+- **Status**: Partially Fixed at `8c877d8` (self-closing `<row/>` and `<t/>`, `Math.max` stack overflow, `decodeEntities` range checks, and `attrOf` boundaries fixed in `src/lib/tabular-import.ts`)
+- **Remaining at `8c877d8`**: Malformed `rowRef` values (`"0"`, `"abc"`) still throw `TypeError` (`src/lib/tabular-import.ts:329-341`), and huge row/col refs allocate unbounded arrays before `MAX_IMPORT_ROWS` / `MAX_IMPORT_COLUMNS` truncation.
 - **Files**:
   - `src/lib/tabular-import.ts:148, 152-153, 262, 295-317, 373-380`
 - **Explanation**:
@@ -550,6 +578,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 25: `.prism` import drops `summaryFormat` on grouped summary tables (treating Mean/SD/N as raw replicates) and fails to sanitize `:` or pad ragged subcolumns
 - **Severity**: High
+- **Status**: Open (merged in `67b89f0`, reverted in `294da63`)
 - **Files**:
   - `src/lib/prism.ts:1054-1067, 1103, 1128-1142, 1165-1169`
   - `src/lib/prism-write.ts:477-520`
@@ -570,6 +599,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 26: Native Titer XY replicate (`A:Y1`, `A:Y2`) and XY summary (`A:Mean`, `A:SD`, `A:N`) tables lose their grouping, `summaryFormat`, and nonlinear-regression dataset links in both `.prism` and `.pzfx` exports
 - **Severity**: High
+- **Status**: Open (merged in `67b89f0`, reverted in `294da63`)
 - **Files**:
   - `src/lib/prism-write.ts:289-331, 521-538, 785-794`
   - `src/lib/pzfx-write.ts:134-177, 428-431`
@@ -583,8 +613,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 27: EPS vector export produces invalid/corrupted PostScript (`nocurrentpoint` crash on text + leaked `clip` path)
+### Issue 27 [FIXED]: EPS vector export produces invalid/corrupted PostScript (`nocurrentpoint` crash on text + leaked `clip` path)
 - **Severity**: High
+- **Status**: Fixed at `8c877d8` (`src/lib/vector-export.ts:1646-1664, 1709`; minor EPSF-3.0 note: `%%BoundingBox` on line 1737 still emits fractional floats rather than integer bounds)
 - **Files**:
   - `src/lib/vector-export.ts:1203-1206` (`EpsBackend.clipPath`)
   - `src/lib/vector-export.ts:1230-1246` (`EpsBackend.drawPath`)
@@ -599,8 +630,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 28: PDF vector export corrupts all non-ASCII text (`−`, `R²`, `±`, `µM`, `°C`, `×`) by writing UTF-16BE bytes into single-byte Type1 `Tj` streams
+### Issue 28 [PARTIALLY FIXED]: PDF vector export corrupts all non-ASCII text (`−`, `R²`, `±`, `µM`, `°C`, `×`) by writing UTF-16BE bytes into single-byte Type1 `Tj` streams
 - **Severity**: High
+- **Status**: Partially Fixed at `8c877d8` (PDF `/WinAnsiEncoding` + `/Symbol` Greek routing fixed in `src/lib/vector-export.ts:1297-1418, 1490-1588`)
+- **Remaining at `8c877d8`**: EPS `psEscape` (`src/lib/vector-export.ts:1615-1617, 1696-1714`) still emits WinAnsi bytes into un-reencoded Adobe `StandardEncoding` fonts (corrupting `R²`, `±`, `°`, `µ`, `×`, `–`, `—`) and never splits Greek to `/Symbol` (throwing `VectorExportError` with no fallback).
 - **Files**:
   - `src/lib/vector-export.ts:996-1005` (`pdfEscape`)
   - `src/lib/vector-export.ts:1085, 1091-1092` (`PdfBackend.drawText`, `PdfBackend.resources`)
@@ -614,8 +647,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 29: Vector PDF/EPS export silently ignores Plotly CSS `px` units (`font-size`, `stroke-width`, `stroke-dasharray`), erases parent `<g>` opacity, and `grayscaleFigure` rewrites series labels matching CSS color names
+### Issue 29 [PARTIALLY FIXED]: Vector PDF/EPS export silently ignores Plotly CSS `px` units (`font-size`, `stroke-width`, `stroke-dasharray`), erases parent `<g>` opacity, and `grayscaleFigure` rewrites series labels matching CSS color names
 - **Severity**: High
+- **Status**: Partially Fixed at `8c877d8` (`stroke-width`, `stroke-dasharray`, opacity multiplication, and `grayscaleFigure` key scoping fixed in `src/lib/vector-export.ts`)
+- **Remaining at `8c877d8`**: Regression from `aaaebf4`: `fontSizeOf` (`src/lib/vector-export.ts:380-393`) and `svgLength` (`840`) only strip `px`, breaking `pt`/`in`/`cm`/`mm`/`pc` font sizes.
 - **Files**:
   - `src/lib/vector-export.ts:135-152` (`grayscaleFigure`)
   - `src/lib/vector-export.ts:333-367` (`presentationOf`)
@@ -630,8 +665,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 30: Multi-panel Figure vector PDF and EPS exports are shrunk to 75% (`0.75×`) of configured physical dimensions
+### Issue 30 [FIXED]: Multi-panel Figure vector PDF and EPS exports are shrunk to 75% (`0.75×`) of configured physical dimensions
 - **Severity**: High
+- **Status**: Fixed at `8c877d8` (`src/lib/figure.ts:670` emits `pt` units in `composeFigureSvg`; `src/lib/vector-export.ts:1540-1563` handles unit conversion in `svgSize`/`rootViewBoxMatrix`)
 - **Files**:
   - `src/lib/figure.ts:605-606, 669-674` (`composeFigureSvg`)
   - `src/lib/vector-export.ts:1100-1108, 1131-1133, 1277-1279` (`svgSize`, `svgToPdf`, `svgToEps`)
@@ -645,8 +681,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 31: `grouped-bars-scatter` ("Bars with individual points") plots numeric scatter X coordinates on a categorical X axis and duplicates points/legend entries
+### Issue 31 [PARTIALLY FIXED]: `grouped-bars-scatter` ("Bars with individual points") plots numeric scatter X coordinates on a categorical X axis and duplicates points/legend entries
 - **Severity**: High
+- **Status**: Partially Fixed at `8c877d8` (duplicate points when `showPoints: true` and duplicate legend entries fixed in `78aad76` at `src/views/graphs/grouped-common.ts:203, 239`)
+- **Remaining at `8c877d8`**: Default `showPoints: false` still appends float scatter X coordinates onto `xaxis: { type: "category" }` (`src/views/graphs/grouped-common.ts:201, 211-241`). (See also `groupLayout: "superimposed"` regression in new Issue `#92`.)
 - **Files**:
   - `src/views/graphs/grouped-common.ts:60-64, 171-213` (`buildGroupedBars`, `buildGroupedBarsScatter`)
   - `src/views/graphs/grouped-bars-scatter.ts:6-14`
@@ -736,8 +774,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 36: Raw-X sigmoidal models (`sigmoidal-4pl-x`, `absolute-ic50-x`, `asymmetric-5pl-x`, `agonist-4pl-normalized-x`) force `Y = Bottom` (or `0`) at `X = 0` in R even when `HillSlope < 0`, corrupting falling-curve fits and disagreeing with TS `evaluate()`
+### Issue 36 [PARTIALLY FIXED]: Raw-X sigmoidal models (`sigmoidal-4pl-x`, `absolute-ic50-x`, `asymmetric-5pl-x`, `agonist-4pl-normalized-x`) force `Y = Bottom` (or `0`) at `X = 0` in R even when `HillSlope < 0`, corrupting falling-curve fits and disagreeing with TS `evaluate()`
 - **Severity**: High
+- **Status**: Partially Fixed at `8c877d8` (R `x == 0` guards made sign-aware via `ifelse(HillSlope<0, ...)`)
+- **Remaining at `8c877d8`**: `src/views/graphs/fitted-curve.ts` still lacks an explicit `x === 0` guard when `EC50 <= 0`, and `ifelse(HillSlope<0, Top, Bottom)` truncates unshared `Top[g]`/`Bottom[g]` in global fits (tracked as new Issue `#86`).
 - **Files**:
   - `src/stats/xy/nonlinear-fit.ts:379, 391, 658, 676, 853-875, 1143, 1158, 1342-1356`
   - `src/views/graphs/fitted-curve.ts:63-64, 85-86, 137-138, 174-175`
@@ -750,8 +790,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 37: `applyFitOptions` (`transformNlsCall`) silently strips built-in `lower=`/`upper=` bounds on 17+ models whenever weights, fixed params, bounds, or robust/Poisson IRLS are used — and crashes on `logistic-growth` / `gompertz-growth`
+### Issue 37 [PARTIALLY FIXED]: `applyFitOptions` (`transformNlsCall`) silently strips built-in `lower=`/`upper=` bounds on 17+ models whenever weights, fixed params, bounds, or robust/Poisson IRLS are used — and crashes on `logistic-growth` / `gompertz-growth`
 - **Severity**: High
+- **Status**: Partially Fixed at `8c877d8` (`transformNlsCall` preserves built-in bounds and handles `start=local({...})`)
+- **Remaining at `8c877d8`**: `runGlobalNonlinear` (`src/stats/xy/nonlinear-regression.ts:1809`) still omits built-in bounds, `warmStartFit` (`src/stats/xy/nonlinear-fit.ts:2993`) still fails to parse `local(`, and `nlsDerivTol` (`src/stats/xy/nonlinear-fit.ts:445-446`) leaves fixed params in `deriv()`'s theta list.
 - **Files**:
   - `src/stats/xy/nonlinear-fit.ts:1505-1525, 1980-2042, 2172-2278, 2868-2877, 2946-2951`
   - `src/stats/xy/nonlinear-regression.ts:1757-1774`
@@ -767,8 +809,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 38: Weighted, robust, and Poisson fits on log-Y models (`semilog-y-log`, `log-log-line`, `exponential-growth-log`) compute `R²` by dividing `log(Y)`-scale SS by raw `Y`-scale SST, and Poisson IRLS uses `1/log(Y)` weights
+### Issue 38 [FIXED]: Weighted, robust, and Poisson fits on log-Y models (`semilog-y-log`, `log-log-line`, `exponential-growth-log`) compute `R²` by dividing `log(Y)`-scale SS by raw `Y`-scale SST, and Poisson IRLS uses `1/log(Y)` weights
 - **Severity**: High
+- **Status**: Fixed at `8c877d8` (`src/stats/xy/nonlinear-fit.ts:2780-2786, 3036-3037, 3073-3076, 3108-3113` and `src/stats/xy/nonlinear-regression.ts:1453, 2262-2266`)
 - **Files**:
   - `src/stats/xy/nonlinear-fit.ts:487-508, 2661-2667, 2908, 2968-2970`
   - `src/stats/xy/nonlinear-regression.ts:1435-1444, 1465-1475`
@@ -784,8 +827,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 39: `ecAnything` crashes R (`subscript out of bounds`) when `params.ecx` is requested on competition models, and `runGlobalNonlinear` mislabels shared `IC50`/`IC50Hi`/`LogKd` midpoints as `"EC50"`
+### Issue 39 [PARTIALLY FIXED]: `ecAnything` crashes R (`subscript out of bounds`) when `params.ecx` is requested on competition models, and `runGlobalNonlinear` mislabels shared `IC50`/`IC50Hi`/`LogKd` midpoints as `"EC50"`
 - **Severity**: High
+- **Status**: Partially Fixed at `8c877d8` (two-site competition `ecx` refusal and `midpointLabel` mapping fixed)
+- **Remaining at `8c877d8`**: `ecAnything` for `homologous-competition-logx` (`src/stats/xy/nonlinear-fit.ts:282`) uses an inverted `(100 - f) / f` formula (tracked as new Issue `#85`).
 - **Files**:
   - `src/stats/xy/nonlinear-fit.ts:263-284, 1841, 1876, 1919`
   - `src/stats/xy/nonlinear-regression.ts:1940-1954, 2004-2011, 2203-2208`
@@ -1078,6 +1123,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 60: `.prism` import destroys line breaks in Info Sheet `notes` via `plainTitle()` and lacks bounds/type guards on malformed `document.json` / `content.json` and large row/column spreads
 - **Severity**: Medium
+- **Status**: Open (merged in `67b89f0`, reverted in `294da63`)
 - **Files**:
   - `src/lib/prism.ts:556-579, 744-749, 812, 832-843, 1083, 1271`
   - `src/lib/prism-write.ts:657-658, 1091`
@@ -1089,8 +1135,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 61: `report/conclusion.ts`, `report/checks.ts`, and `report/analyzed.ts` produce inverted/misleading conclusions and assumption checks
+### Issue 61 [FIXED]: `report/conclusion.ts`, `report/checks.ts`, and `report/analyzed.ts` produce inverted/misleading conclusions and assumption checks
 - **Severity**: Medium
+- **Status**: Fixed at `8c877d8` (`src/stats/report/conclusion.ts:194, 234-235, 289-306, 374-380, 516-521`, `src/stats/report/checks.ts:213-229, 242-247`, `src/stats/report/analyzed.ts:36-45, 168-180`)
 - **Files**:
   - `src/stats/report/conclusion.ts:147-165, 187-193, 223-231, 276-290, 343-350, 484`
   - `src/stats/report/checks.ts:207-224`
@@ -1104,8 +1151,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 62: `AICc` in `enzyme-inhibition.ts` (and `nonlinear-regression.ts`) omits the residual-variance parameter (`+ 1`) from `k`; `interpolationCode` drops 95% CIs on tight positive-X ranges; multi-Y centered polynomials share only the first set's `centeredX`
+### Issue 62 [FIXED]: `AICc` in `enzyme-inhibition.ts` (and `nonlinear-regression.ts`) omits the residual-variance parameter (`+ 1`) from `k`; `interpolationCode` drops 95% CIs on tight positive-X ranges; multi-Y centered polynomials share only the first set's `centeredX`
 - **Severity**: Medium
+- **Status**: Fixed at `8c877d8` (`src/stats/xy/enzyme-inhibition.ts:149`, `src/stats/xy/nonlinear-regression.ts:1329, 1453, 2929-2932, 3032-3034, 3161`, `src/views/graphs/fitted-curve.ts:346-350, 435, 479, 497`)
 - **Files**:
   - `src/stats/xy/enzyme-inhibition.ts:146`
   - `src/stats/xy/nonlinear-regression.ts:112-174, 535, 1319-1365, 1441-1442, 2869-2872`
@@ -1133,8 +1181,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 64: Plugin wizard `kind: "text"` questions reject all non-numeric text, and `MarketplaceDialog` pre-checks `"network"` (and all permissions) by default
+### Issue 64 [FIXED]: Plugin wizard `kind: "text"` questions reject all non-numeric text, and `MarketplaceDialog` pre-checks `"network"` (and all permissions) by default
 - **Severity**: Medium
+- **Status**: Fixed at `8c877d8` (`src/plugins/analysis-spec.ts:441-456`, `src/components/marketplace-dialog.tsx:75-87`)
 - **Files**:
   - `src/plugins/analysis-spec.ts:441-449`
   - `src/views/analyses/analysis-wizard.tsx:309-319`
@@ -1163,8 +1212,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 66: WebR / survival edge cases (`ensurePackages` doubled timeout on claim timeout; `survival-analysis.ts` 2-group HR on `k ≥ 3` and silent `—` on disjoint risk sets)
+### Issue 66 [FIXED]: WebR / survival edge cases (`ensurePackages` doubled timeout on claim timeout; `survival-analysis.ts` 2-group HR on `k ≥ 3` and silent `—` on disjoint risk sets)
 - **Severity**: Low
+- **Status**: Fixed at `8c877d8` (`src/stats/webr.ts:1040-1042, 1092-1111`, `src/stats/survival/survival-analysis.ts:78-86, 105-110, 153-156`; new WebR P-12 concurrency issues tracked in `#89`, `#90`, `#96`)
 - **Files**:
   - `src/stats/webr.ts:743-760, 885-888`
   - `src/stats/survival/survival-analysis.ts:75-81`
@@ -1194,7 +1244,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 68: `copy_pdf_to_clipboard` puts TWO separate `NSPasteboardItem`s on the macOS clipboard instead of one multi-flavour item
 - **Severity**: High
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src-tauri/src/main.rs:1039-1044` (`copy_pdf_to_clipboard_blocking`)
 - **Explanation**:
@@ -1208,7 +1258,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 69: `WhatsNewDialog` auto-closes itself 2 seconds after opening via **Help ▸ What's New**
 - **Severity**: High
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src/components/whats-new-dialog.tsx:16-35`
   - `src/lib/whats-new.ts:51-53, 68-74`
@@ -1224,7 +1274,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 70: Independent error-report sharing (`CrashReportDialog` / `try_send_error_entry`) never sends when feedback sharing is off
 - **Severity**: High
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src-tauri/src/mcp.rs:1558-1574, 2510-2525` (`try_send_error_entry`, `feedback_share_result`)
   - `src/components/crash-report-dialog.tsx:79-93, 150-155`
@@ -1241,7 +1291,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 71: `StartupGuideDialog`'s `mailto:smit@muse.ai` support link is silently blocked by Tauri's `.on_navigation` policy
 - **Severity**: High
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src/components/startup-guide-dialog.tsx:99-105`
   - `src/lib/startup-guide.ts:63-67`
@@ -1257,7 +1307,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 72: Startup flush race and permanent unsent-duplicate loop in `CrashReportDialog` / `main.tsx` / `mcp_flush_error_log`
 - **Severity**: High
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src/main.tsx:37-42, 50-57`
   - `src/components/crash-report-dialog.tsx:38-60, 62-77, 150-155`
@@ -1274,7 +1324,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 73: Freezing or re-freezing a graph overrides the snapshot of a previously frozen Figure
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src/lib/multi-table.ts:87`
   - `src/views/graphs/graph-figure.ts:193, 361`
@@ -1291,7 +1341,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 74: macOS native `NSProgressIndicator` spinner overlaps the `Running…` text and `Cancel` button in `AnalysisView`
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src/views/analyses/analysis-view.tsx:34-66` (`Running`)
   - `src-tauri/src/main.rs:1597-1629` (`set_spinner`)
@@ -1306,7 +1356,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 75: `copy_pdf_to_clipboard` JXA `if (!pdfData)` / `if (!pngData)` checks are dead code, wiping the user's clipboard on read failure
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src-tauri/src/main.rs:1033-1038` (`copy_pdf_to_clipboard_blocking`)
 - **Explanation**:
@@ -1320,7 +1370,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 76: `SendFeedbackDialog` and `AiConnectionsDialog` drop server/network errors and falsely claim "Sharing is off", and `mcp_send_feedback` sends `project_file` + `recent_activity` despite promising "Only the text below is ever shared"
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src-tauri/src/mcp.rs:1738-1756, 1766-1780, 2510-2540`
   - `src/components/send-feedback-dialog.tsx:62-98`
@@ -1337,7 +1387,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 77: `StartupGuideDialog`'s global `window` keydown handler hijacks `Enter` and `Escape` from top-layer `<dialog>` modals (including `SendFeedbackDialog`)
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src/components/startup-guide-dialog.tsx:42-72, 106-110`
   - `src/components/send-feedback-dialog.tsx:30-32, 117-124`
@@ -1353,7 +1403,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 78: Windowless Help menu exposes **Help ▸ Send Feedback** and **Help ▸ What's New** as enabled dead no-ops
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src/menus.ts:119, 166, 171`
   - `src/engine.ts:28-40`
@@ -1370,7 +1420,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 79: `StartupGuideDialog` auto-show omits `!openedFile.current` and pops over opened `.pzt` templates, Sample Project, and slow/failed file launches
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src/store/use-document.ts:1710-1763, 2714-2726`
 - **Explanation**:
@@ -1384,7 +1434,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 80: `noncentralTCdf` (`logWeights` path) silently returns `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447`
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src/stats/distributions.ts:316-389` (`noncentralTCdf`)
 - **Explanation**:
@@ -1399,7 +1449,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 81: `send_to_keynote_blocking` / `applescript_number` lacks `.is_finite()` / upper-bound checks and can emit invalid AppleScript `inf` or `0`
 - **Severity**: Low
-- **Status**: New
+- **Status**: Open (from Recheck 1 at `b8a2528`)
 - **Files**:
   - `src-tauri/src/main.rs:557-564, 856-859`
 - **Explanation**:
@@ -1409,3 +1459,248 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 - **Suggested Fix**:
   Require `width_pt.is_finite() && height_pt.is_finite()` within reasonable point bounds (e.g., `1.0..=1e5`) in `send_to_keynote_blocking`.
 
+
+---
+
+## New Issues Found in Recheck 2 at `8c877d8` (#82–#97)
+
+### Issue 82: `formatFigureLabels` HTML-escapes `<br>` and `<b>` across graph overlays, tooltips, and survival tables
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/lib/label-format.ts:104-126, 157-191` (`formatLabelForPlotly`, `formatFigureLabels`)
+  - `src/views/graphs/graph-figure.ts:281, 798`
+  - `src/views/graphs/graph-view.tsx:874`
+  - `src/views/figures/panel-figure.ts:56`
+  - `src/views/graphs/survival.ts:162`
+- **Explanation**:
+  `formatLabelForPlotly` (`src/lib/label-format.ts:104-126`) HTML-escapes `<` and `>` unconditionally unless `<sup>` or `<sub>` is already present in the string, and `formatFigureLabels` applies it broadly across `layout.annotations`, trace `text`, trace `hovertext`, and `trace.name`. As a result, intentional HTML formatting breaks across multiple graph surfaces:
+  - Curve-fit and equation notes using `<br>` render literal `&lt;br&gt;`.
+  - Volcano and bubble hover tooltips using `<br>` display literal `&lt;br&gt;` instead of line breaks.
+  - Survival number-at-risk table headers (`"<b>Number at risk</b>"` in `src/views/graphs/survival.ts:162`) render literal `&lt;b&gt;Number at risk&lt;/b&gt;`.
+- **Minimal Reproduction**:
+  Open a survival graph with a Number-at-risk table, a volcano/bubble plot tooltip, or a regression graph note containing `<br>`: literal `&lt;b&gt;` / `&lt;br&gt;` tags appear on screen.
+- **Suggested Fix**:
+  Only run `formatLabelForPlotly` on user-authored labels (titles, axis titles, legend names, category tick labels) rather than internal HTML-formatted annotations/tooltips, or preserve safe formatting tags (`<br>`, `<b>`, `<i>`) before escaping.
+
+---
+
+### Issue 83: `formatLabelForPlotly` double-escapes `&`, `<`, `>`, `\^`, `\_` in `buildGraphFigure` and allows HTML-escaping bypass (XSS) via `<sup>`/`<sub>`
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/lib/label-format.ts:104-126` (`formatLabelForPlotly`)
+  - `src/views/graphs/graph-figure.ts:281, 507, 798` (`buildBaseFigure`, `buildGraphFigure`)
+- **Explanation**:
+  1. **Double-escaping in `buildGraphFigure`**: `buildBaseFigure` calls `formatFigureLabels` (`src/views/graphs/graph-figure.ts:281`), and `buildGraphFigure` calls `formatFigureLabels` a second time (`line 798`) on the already-formatted figure (and trace names at `line 507`). Any `&`, `<`, `>`, escaped caret `\^`, or escaped underscore `\_` becomes double-escaped: `"A & B"` → `"A &amp;amp; B"` and `"WT\\_1"` → `"WT&amp;#95;1"`.
+  2. **HTML-escaping bypass (XSS)**: `formatLabelForPlotly` (`src/lib/label-format.ts:107`) returns early with `if (label.includes("<sup>") || label.includes("<sub>")) return label;` before performing any HTML escaping. A crafted label such as `<a href="javascript:alert(1)">x</a><sup>1</sup>` or `<img src=x onerror=...><sub>1</sub>` bypasses all HTML sanitization.
+- **Minimal Reproduction**:
+  Export or render a figure via `buildGraphFigure` with a series/title named `"A & B"` or `"WT\\_1"` → `"A &amp;amp; B"` / `"WT&amp;#95;1"`. Pass `"<a href='javascript:alert(1)'>x</a><sup>1</sup>"` → returned verbatim without escaping.
+- **Suggested Fix**:
+  Make `formatLabelForPlotly` idempotent (or call `formatFigureLabels` only once at the final stage), and escape all untrusted HTML before emitting `<sup>`/`<sub>` tags (never short-circuiting escaping when `<sup>`/`<sub>` appears in input).
+
+---
+
+### Issue 84: `vector-export.ts` `textRuns` splits single-line Plotly `<sup>`/`<sub>` `<text>` into separate lines, breaking `middle`/`end` alignment in PDF/EPS
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/lib/vector-export.ts:849-908, 1149-1178` (`textRuns`, line positioning in vector backends)
+- **Explanation**:
+  When Plotly renders `<sup>` or `<sub>` inside an SVG `<text>` element, it emits inline `<tspan>` child nodes that do not carry new `x` or `y` attributes. In `textRuns` (`src/lib/vector-export.ts:849-908`), direct `<tspan>` children without `x`/`y` still increment the `line` counter with `anchored = false`, splitting a single inline line (e.g. centered graph titles, X-axis tick labels, or right-aligned log Y-axis ticks like `10^7`) into separate lines that are individually aligned rather than measured as one combined line width.
+- **Minimal Reproduction**:
+  Export a graph with a log10 Y axis (`10^−3`..`10^7`) or centered title containing `R^2` / `H_2O` to vector **PDF** or **EPS**: superscripts/subscripts separate from their base text with alignment gaps.
+- **Suggested Fix**:
+  Keep inline `<tspan>` runs without `x`/`y` attributes (and without explicit line-break `dy`) on the same logical line in `textRuns`, summing total line advance for `text-anchor="middle"` and `"end"`.
+
+---
+
+### Issue 85: `ecAnything` for `homologous-competition-logx` uses inverted `(100 - f) / f`, computing `IC(100-F)` labeled as `IC{F}`
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/stats/xy/nonlinear-fit.ts:279-290` (`ecAnything`)
+  - `tests/checks.ts:13201-13217` (pins the inverted expectation)
+- **Explanation**:
+  For homologous competition, at inhibitory fraction $F \in (0, 100)$, the remaining fraction of specific binding is $(100 - F)/100$, so $[I] = (K_d + [L]) \cdot F / (100 - F)$. Instead, `ecAnything` (`src/stats/xy/nonlinear-fit.ts:282`) computes `(10^logKd + L) * ((100 - f) / f)`, which evaluates $\text{IC}_{100-F}$ and labels it `IC{F}`. For $L = 1, K_d = 1$, requesting `IC80` returns `0.5` ($\text{IC}_{20}$) instead of `8` (a $16\times$ error; $81\times$ at `IC90`). `tests/checks.ts:13201-13217` currently asserts the inverted value.
+- **Minimal Reproduction**:
+  Fit `homologous-competition-logx` with `ligandConcentration: 1` (true $K_d = 1$) and request `ecx: 80`: `IC80` reports `0.5` instead of `8`.
+- **Suggested Fix**:
+  Change `((100 - f) / f)` to `(f / (100 - f))` in `src/stats/xy/nonlinear-fit.ts:282` and update the corresponding assertion in `tests/checks.ts:13201-13217`.
+
+---
+
+### Issue 86: Sign-aware `X = 0` guard `ifelse(HillSlope<0, Top, Bottom)` truncates unshared `Top[g]`/`Bottom[g]` to length 1 in global fits
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/stats/xy/nonlinear-fit.ts:419, 1384`
+  - `src/stats/xy/nonlinear-regression.ts:1630-1635, 1783-1791`
+- **Explanation**:
+  In R, `ifelse(test, yes, no)` returns a vector with the length of `test`. When `HillSlope` is shared or fixed (a length-1 scalar) and `Top` / `Bottom` are unshared vectors (`Top[g]`, `Bottom[g]`) in a global fit (`runGlobalNonlinear`), `ifelse(x==0, ifelse(HillSlope<0, Top, Bottom), ...)` evaluates `ifelse(HillSlope<0, ...)` to length 1 (`Series 1`'s plateau) and recycles it across every group `g` at `X = 0`, corrupting `X = 0` predictions for Series 2..k.
+- **Minimal Reproduction**:
+  Run a global fit on `sigmoidal-4pl-x` (or `asymmetric-5pl-x` / `absolute-ic50-x`) with two datasets having `X = 0` and different `Top`/`Bottom` spans while sharing or fixing `HillSlope`: Series 2's `X = 0` fitted value uses Series 1's `Top`/`Bottom`.
+- **Suggested Fix**:
+  Replace `ifelse(HillSlope<0, Top, Bottom)` with `(Bottom + (Top - Bottom) * ifelse(HillSlope<0, 1, 0))` (or coerce condition length to `length(x)`).
+
+---
+
+### Issue 87: `feedback-server` `DedupeSet` has permanent `in_flight` leak on client disconnect, two-mutex TOCTOU race, and `Notify` lost wakeup
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `feedback-server/src/lib.rs:336-397, 677-741` (`DedupeSet`, `submit_feedback`)
+- **Explanation**:
+  `DedupeSet` (`feedback-server/src/lib.rs:336-397`) has three concurrency defects:
+  1. **Permanent `in_flight` leak on disconnect**: Claiming an in-flight `feedback_id` relies on explicit cleanup after `await` rather than an RAII `Drop` guard. If the HTTP client disconnects while `create_plane_issue` is pending and hyper cancels the handler future, the `feedback_id` remains stuck in `in_flight` permanently, stalling every subsequent retry for 35 s.
+  2. **Two-mutex TOCTOU race**: `seen` and `in_flight` are guarded by separate mutexes; releasing `seen` before acquiring/inserting `in_flight` leaves a window where two concurrent requests with the same `feedback_id` both pass and create duplicate Plane issues.
+  3. **`Notify::notify_waiters()` lost wakeup**: `notify_waiters()` only wakes tasks already registered in `.notified().await`. A second task transitioning from checking `in_flight` to calling `notified().await` can miss the notification and hang for the full 35 s wait timeout.
+- **Minimal Reproduction**:
+  Abort an in-flight `POST /api/v1/feedback` connection mid-request (client disconnect): all subsequent requests with that `feedback_id` stall for 35 s forever. Or send two simultaneous requests with the same `feedback_id` across the mutex gap.
+- **Suggested Fix**:
+  Unify `seen` and `in_flight` under a single `Mutex`, register `notified()` futures (pinned) *before* releasing the lock, and attach an RAII `Drop` guard that releases the `in_flight` slot (and notifies waiters) if the leader future is dropped/cancelled.
+
+---
+
+### Issue 88: `mcp-bridge` `seq 540` session recovery fails on port-change restart, fails on rotated-token restart, and permanently wedges on transient failure
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src-tauri/mcp-bridge/src/main.rs:395-427, 442-483` (`forward_rpc`, `recover_session`)
+- **Explanation**:
+  1. **Port-change restart fails**: When Titer restarts and binds a new ephemeral MCP port, the existing socket refuses connections (`e.is_connect()`), and `forward_rpc` returns an error immediately without reloading `discovery.json` to discover the new port.
+  2. **Rotated-token restart fails**: On HTTP `401`, the bridge reloads the bearer token and retries using the stale `session_id` — getting a raw HTTP `404` without triggering `recover_session`.
+  3. **Permanent wedge on transient failure**: `recover_session` clears `*session_id = None` *before* attempting `initialize`. If `initialize` fails once transiently (e.g. during startup), subsequent requests see `session_id.is_none()` and stop triggering session recovery, wedging the bridge permanently.
+- **Minimal Reproduction**:
+  Restart Titer while an MCP client session is connected to `mcp-bridge` (changing port or rotating token): bridge calls fail with connection/404 errors instead of re-initializing against the new `discovery.json` server.
+- **Suggested Fix**:
+  Reload `discovery.json` on `e.is_connect()` and recover the session; treat `401` + rotated token retry `404` as recoverable; and keep `*session_id` intact (or fall back to re-initialize whenever `session_id` is absent) until `initialize` succeeds.
+
+---
+
+### Issue 89: `webr.ts` P-12 claim-stamp matching uses a 5-second fuzzy window and never clears `claimStamps` on install/reset/release
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/stats/webr.ts:209-229, 796, 847, 905-938, 1080-1139, 1219`
+- **Explanation**:
+  `webr.ts` checks claim ownership using `Math.abs(held - stamp) < 5` (a 5-second fuzzy tolerance window) and never clears stale entries from `claimStamps` after package install completes, engine reset, or release. Two racing windows starting within 5 seconds of each other can pass the stamp match and steal/release each other's live install claim, and a late conditional release on a timed-out call can match within 5 seconds and drop the active retry's live claim.
+- **Minimal Reproduction**:
+  Launch two Titer windows initializing WebR packages within 5 seconds of each other (or trigger a timeout retry within 5 s of the prior claim stamp): conditional claim release steals/drops the live claim.
+- **Suggested Fix**:
+  Replace the fuzzy `< 5` timestamp tolerance with an exact unique claim token/nonce (or PID + monotonic counter) and clear `claimStamps` unconditionally on install completion, failure, release, and engine reset.
+
+---
+
+### Issue 90: `webr.ts` `ensurePackages` resolves as success while packages are still `"loading"` when an evicted joined batch settles after a retry started
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/stats/webr.ts:1100-1148, 1216-1239` (`ensurePackages`)
+- **Explanation**:
+  In `ensurePackages`, line 1126 checks only `if (status === "failed")` after awaiting a joined in-flight batch rather than requiring `status === "ready"`. When an earlier batch times out and is evicted while a retry immediately flips the package state back to `"loading"`, an overlapping caller that joined the evicted batch observes the evicted promise settle while status is `"loading"` (not `"failed"`) and resolves `ensurePackages()` early, causing downstream `library(...)` calls to fail.
+- **Minimal Reproduction**:
+  Trigger an `ensurePackages` timeout under contention while a second caller joins the batch and a third triggers a retry: the joined caller resolves before the retry finishes loading packages, and `library(...)` throws `there is no package called ...`.
+- **Suggested Fix**:
+  Loop/wait until every requested package reaches `status === "ready"` (or throws if the overall deadline expires / all retries fail) rather than assuming `!failed` means ready.
+
+---
+
+## Medium-Severity Issues (Recheck 2)
+
+### Issue 91: `formatFigureLabels` rewrites `layout.annotations[i].name`, breaking point-label drag repositioning and leaking phantom keys into `graphOptions.points`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/lib/label-format.ts:157-171` (`formatFigureLabels`)
+  - `src/views/graphs/plot-helpers.ts:457-466`
+  - `src/views/graphs/graph-view.tsx:382-388, 699-700, 874`
+- **Explanation**:
+  `formatFigureLabels` transforms `layout.annotations[i].name` alongside display text. However, `graph-view.tsx` and `plot-helpers.ts` use `annotation.name` as the stable internal identifier key into `graphOptions.points` when persisting dragged point-label offsets. Modifying `annotation.name` when a point label contains `^`/`_`/HTML characters breaks lookups for saved positions and writes phantom keys into `graphOptions.points`.
+- **Minimal Reproduction**:
+  Label a scatter point `CO_2` or `A & B`, enable point labels, and drag the label to reposition it: the offset is stored under a formatted/escaped key and fails to round-trip to the point.
+- **Suggested Fix**:
+  Do not rewrite `annotation.name` in `formatFigureLabels`; only format `annotation.text`.
+
+---
+
+### Issue 92: `buildGroupedBars` breaks `groupLayout: "superimposed"` when `showPoints: true`, misaligning bars with significance overlays
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/views/graphs/grouped-common.ts:61-75, 164-177` (`buildGroupedBars`)
+  - `src/views/graphs/significance-overlay.ts:491-492`
+- **Explanation**:
+  When `showPoints: true`, `buildGroupedBars` switches bars from centered categorical slots to interleaved numeric bar positions `r ± center(g)` even when `options.groupLayout === "superimposed"`. This splits superimposed bars into narrow side-by-side bars and desynchronizes bar X centers from `significance-overlay.ts:491-492`.
+- **Minimal Reproduction**:
+  Create a Grouped graph with `groupLayout: "superimposed"`, enable **Show individual points**, and attach significance brackets: bars split apart instead of superimposing and brackets misalign.
+- **Suggested Fix**:
+  Preserve row-centered X coordinates (`r`) for `groupLayout === "superimposed"` even when `showPoints: true`.
+
+---
+
+### Issue 93: `TiterMcpServer::get_info()` never advertises `capabilities.tools.listChanged: true` and `mcp_set_enabled(false)` never clears `inner.peers`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/mcp.rs:1098-1102, 10090-10092`
+- **Explanation**:
+  1. `TiterMcpServer::get_info()` (`src-tauri/src/mcp.rs:1098-1102`) returns server capabilities without calling `.enable_tool_list_changed()`, so compliant MCP clients ignore `tools/list_changed` notifications.
+  2. `mcp_set_enabled(false)` (`line 10090`) leaves disconnected/disabled peer handles in `inner.peers` instead of clearing them.
+- **Suggested Fix**:
+  Call `.enable_tool_list_changed()` inside `ServerCapabilities::builder().enable_tools()` in `TiterMcpServer::get_info()`, and clear `inner.peers` in `mcp_set_enabled(false)`.
+
+---
+
+### Issue 94: `reapply_antigravity_entry_if_connected` silently overwrites custom/remote `"titer"` entries in `~/.gemini/config/mcp_config.json` on every launch
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/mcp.rs:1897-1901, 2541-2580` (`reapply_antigravity_entry_if_connected`)
+- **Explanation**:
+  On every launch, `reapply_antigravity_entry_if_connected` overwrites any `"titer"` entry in `~/.gemini/config/mcp_config.json` unconditionally — clobbering user-customized or remote `"titer"` configurations even when auto-connect is disabled/opted out — and calls `create_dir_all` for `<app_data>/mcp/` before checking whether `mcp_config.json` even exists.
+- **Suggested Fix**:
+  Check `mcp_config.json` existence and whether the existing `"titer"` entry is a Titer-managed local bridge entry (and not opted out) before creating directories or modifying `~/.gemini/config/mcp_config.json`.
+
+---
+
+### Issue 95: `parseXlsx` skips self-closing `<si/>` (and `<si ...>` with attributes) in `sharedStrings.xml`, shifting all subsequent cell strings off by 1, and concatenates `<rPh>` phonetic runs
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/lib/tabular-import.ts:288-294` (`parseXlsx` sharedStrings parser)
+- **Explanation**:
+  `parseXlsx` parses `sharedStrings.xml` with `/<si>([\s\S]*?)<\/si>/g`, which misses `<si/>` (empty shared string entry) and `<si ...>` with attributes, and strips tags globally across each `<si>` body without excluding `<rPh>...</rPh>` phonetic guide runs:
+  1. Every `<si/>` or `<si ...>` skipped decrements the array index of all subsequent `<si>` entries, shifting every following cell's `t="s"` string lookup off by 1+.
+  2. `<rPh>` ruby/furigana phonetic annotations are concatenated onto the visible cell string.
+- **Minimal Reproduction**:
+  Import an `.xlsx` file whose `xl/sharedStrings.xml` contains `<si/>` at index 2 (e.g. an empty string cell shared in Excel) or `<rPh>` phonetic runs: all later text cells show the wrong string from the next row/column.
+- **Suggested Fix**:
+  Match `/<si(?:\s[^>]*)?(?:\/>|>([\s\S]*?)<\/si>)/g` (pushing `""` for self-closing `<si/>`) and strip `<rPh\b[\s\S]*?<\/rPh>` before extracting `<t>` text inside each `<si>`.
+
+---
+
+### Issue 96: `webr.ts` `resolveInEngine` fires an unconditional `releaseClaimCode(pending)` on claim timeout (`codes === null`), risking wiping another window's live claim
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/stats/webr.ts:828-841, 918-926` (`resolveInEngine`)
+- **Explanation**:
+  When `resolveInEngine` times out obtaining claim codes (`codes === null`), it falls back to running an unconditional `releaseClaimCode(pending)` cleanup that deletes the shared claim variable without verifying ownership — risking wiping another window's live package-install claim in progress.
+- **Suggested Fix**:
+  Pass the window's own unique claim token/stamp into the conditional release helper even on timeout (never issuing an unconditional claim deletion).
+
+---
+
+## Low-Severity Issues (Recheck 2)
+
+### Issue 97: `labelRuns` splits Unicode minus (`10^−6` → `10<sup>−</sup>6`) and collapses consecutive `_` runs (`ctrl_1_a` → `ctrl<sub>1a</sub>`)
+- **Severity**: Low
+- **Status**: New
+- **Files**:
+  - `src/lib/label-format.ts:43, 77-90` (`labelRuns`)
+  - `src/views/tables/grid.tsx:996, 999, 1154, 1180`
+- **Explanation**:
+  `labelRuns` only recognizes ASCII `-` (U+002D) as part of signed exponents, so Unicode minus `−` (U+2212) terminates the superscript run after `−` (`"10^−6"` → `10<sup>−</sup>6`). It also collapses chained `_` tokens when unbraced (`"ctrl_1_a"` → `ctrl<sub>1a</sub>`), affecting both graph labels and `grid.tsx` headers.
+- **Suggested Fix**:
+  Include Unicode minus `\u2212` alongside ASCII `-` in exponent sign matching, and avoid merging separated `_` tokens into a single subscript run.
