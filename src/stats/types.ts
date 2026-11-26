@@ -2793,6 +2793,13 @@ export interface AnalysisResult {
    *  curve (powers of X − centeredX, not of X). Set whenever the run fitted
    *  a polynomial with `centered`. */
   centeredX?: number;
+  /** The per-set centers of a multi-Y centered polynomial fit (Round 2
+   *  Issue 62): one mean X per set, parallel to `fit.sets`. Each set is
+   *  centred on its own fitted X's — their missing rows differ, so the
+   *  single `centeredX` (the first set's) miscentres the rest. Set
+   *  whenever the run fitted a polynomial with `centered` on several
+   *  sets; `centeredX` stays as the first set's center. */
+  centeredXs?: number[];
   /** Optional variance components ("mixed-effects"): one row per
    *  random-effects grouping (subject intercept + residual in v1). */
   varianceComponents?: VarianceComponent[];

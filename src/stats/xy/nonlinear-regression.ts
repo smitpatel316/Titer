@@ -1320,7 +1320,13 @@ function interpolationCode(spec: ModelSpec, unknowns: number[], lo: number, hi: 
   const u = `u<-c(${unknowns.join(",")});slo<-${lo};shi<-${hi};`;
   const w = hi - lo;
   const [gLo, gHi] = spec.positiveX || spec.nonNegativeX ? [lo / 10, hi * 10] : [lo - w, hi + w];
-  const grid = `xg<-seq(${gLo},${gHi},length.out=200);`;
+  // Three sub-grids — below, inside, and above the standards' range —
+  // instead of one 200-point grid over the whole span: on a tight
+  // positive-X range ((hi−lo)/hi < 0.05) the single grid puts zero
+  // points inside [slo, shi] and the 95% CIs come back NA (Round 2
+  // Issue 62). Each sub-grid shares its boundary point with its
+  // neighbour, so a crossing straddling a boundary is not missed.
+  const grid = `xg<-c(seq(${gLo},slo,length.out=100),seq(slo,shi,length.out=100),seq(shi,${gHi},length.out=100));`;
   // Curve + band, per fitter kind.
   const band =
     spec.kind === "lm"
@@ -1438,8 +1444,13 @@ function compareModelsRCode(
     `${codeA}ssA<-ss;dfA<-df;vA<-c(${fitEntries(specA, "a_")});` +
     `${codeB}ssB<-ss;dfB<-df;vB<-c(${fitEntries(specB, "b_")});` +
     `n<-length(x);` +
+    // AICc counts the residual variance (k = p + 1, matching AIC(m) —
+    // Round 2 Issue 62), and a log-Y model fits log(y), so its AICc is
+    // on the log scale: the Jacobian of the log transform, 2·Σ ln y,
+    // puts it on the raw-Y scale before comparing (Burnham & Anderson) —
+    // without it ΔAICc is biased by ≈2Σln y (Round 2 Issue 38).
     `aicc<-function(ss,n,k) if(n-k-1>0) n*log(ss/n)+2*k+2*k*(k+1)/(n-k-1) else NA_real_;` +
-    `aiccA<-aicc(ssA,n,${specA.terms.length});aiccB<-aicc(ssB,n,${specB.terms.length});` +
+    `aiccA<-aicc(ssA,n,${specA.terms.length + 1})${specA.logY ? "+2*sum(log(y))" : ""};aiccB<-aicc(ssB,n,${specB.terms.length + 1})${specB.logY ? "+2*sum(log(y))" : ""};` +
     fTest +
     `c(vA,vB,F=Fc,dfn=${nested ? nested.dfn : 0},dfd=dfC,p=p,aiccA=aiccA,aiccB=aiccB,ssA=ssA,ssB=ssB)`
   );
@@ -1648,6 +1659,29 @@ function rangeNotes(params: NonlinearRegressionParams | undefined, rangeExcluded
     "."
   );
 }
+
+/** The label for a shared dose midpoint in a global fit's rows: the
+ *  midpoint's own name, not a blanket "EC50" — a shared IC50Hi is an
+ *  IC50 (high affinity) and a shared LogKd is a Kd (Round 2 Issue 39:
+ *  the old code labelled every shared midpoint "EC50"). */
+const midpointLabel = (midpoint: string): string => {
+  switch (midpoint) {
+    case "LogIC50":
+    case "IC50":
+      return "IC50";
+    case "LogIC50Hi":
+    case "IC50Hi":
+      return "IC50 (high affinity)";
+    case "LogIC50Lo":
+    case "IC50Lo":
+      return "IC50 (low affinity)";
+    case "LogKd":
+    case "Kd":
+      return "Kd";
+    default:
+      return "EC50";
+  }
+};
 
 /** A global (shared-parameter) fit (plan 26): several Y series fitted in one
  *  stacked nls() call through runGlobalFit. Single-series fits supply the
@@ -1942,7 +1976,7 @@ async function runGlobalNonlinear(
     const mid = coefficients.find((c) => c.term === termLabel(midpoint));
     if (mid?.estimate != null) {
       const isLog = midpoint.startsWith("Log");
-      const label = midpoint === "LogIC50" ? "IC50" : "EC50";
+      const label = midpointLabel(midpoint);
       const value = isLog ? 10 ** mid.estimate : mid.estimate;
       rows.push({ label, values: sets.map(() => value) });
       if (mid.low != null && mid.high != null) {
@@ -2004,7 +2038,7 @@ async function runGlobalNonlinear(
   if (midpoint && shared.includes(midpoint)) {
     const mid = coefficients.find((c) => c.term === termLabel(midpoint));
     if (mid?.estimate != null) {
-      const label = midpoint === "LogIC50" ? "IC50" : "EC50";
+      const label = midpointLabel(midpoint);
       const value = midpoint.startsWith("Log") ? 10 ** mid.estimate : mid.estimate;
       derivedRows.push(derivedRow(label, value, [sourceTerm(midpoint, sets[0]!)]));
     }
@@ -2203,14 +2237,33 @@ export async function runNonlinearRegression(
   if (params?.ecx != null && params.compareWith === undefined && spec.dose) {
     const f = params.ecx;
     if (!(f >= 1 && f <= 99)) return { error: "ECx must be between 1 and 99%." };
+    // Round 2 Issue 39: a two-site competition curve has two midpoints,
+    // so ECx has no single closed form — ecAnything would index a
+    // LogEC50/EC50 + HillSlope the fit does not have, and R dies with
+    // "subscript out of bounds". Refuse it plainly; a homologous
+    // competition curve has one midpoint (LogKd) and ecAnything handles it.
+    if (isTwoSiteCompetition(model))
+      return {
+        error:
+          "ECx isn't defined for a two-site competition curve — it has two midpoints (a high- and a low-affinity one), so there is no single X at F% response. Read each site's IC50 from the coefficients instead.",
+      };
     const ecxBlocked = [spec.dose.midpoint, "HillSlope", "S"].some((t) => fixedNames.includes(t));
-    if (!ecxBlocked) spec = { ...spec, derived: [...(spec.derived ?? []), ecAnything(model, f)] };
+    if (!ecxBlocked) spec = { ...spec, derived: [...(spec.derived ?? []), ecAnything(model, f, params?.ligandConcentration)] };
   }
   // Seq 200: the fitting method — least squares, robust, or Poisson.
   // A bogus value (from MCP or a stored file) is refused, not defaulted.
   const fitMethod = params?.fitMethod ?? "least-squares";
   if (!(NONLINEAR_FIT_METHODS as readonly string[]).includes(fitMethod))
     return { error: "Choose a fitting method: least squares, robust, or Poisson." };
+  // Round 2 Issue 38: Poisson weights by 1/fitted, but a log-Y model's
+  // fitted values are log(Y) — 1/log(Y) is not a Poisson weight (and
+  // goes negative when Y < 1). Refused up front, like the other
+  // method combinations below; fitModelSpec refuses it too.
+  if (fitMethod === "poisson" && spec.logY)
+    return {
+      error:
+        "Poisson fitting isn't supported for a log-Y curve — its fitted values are log(Y), so the Poisson weights 1/fitted would be 1/log(Y), not 1/Y. Fit the curve on the raw Y scale instead.",
+    };
   // Seq 323: difficult-fit handling — identify unstable parameters, or
   // neither. Seq 387: a third mode, identify ambiguous fits (Prism's
   // older method). A bogus value is refused, not defaulted.
@@ -2870,6 +2923,13 @@ async function assembleResult(
     params?.centered === true && first.xs.length
       ? first.xs.reduce((s, v) => s + v, 0) / first.xs.length
       : undefined;
+  // Round 2 Issue 62: one center per set, not one scalar from the first
+  // set — each set is centred on its own fitted X's (their missing rows
+  // differ), so the first set's mean miscentres the rest.
+  const centeredXs =
+    params?.centered === true
+      ? sets.map((s) => (s.xs.length ? s.xs.reduce((a, v) => a + v, 0) / s.xs.length : (centeredX ?? 0)))
+      : undefined;
   // Plan 29: the segmental breakpoint is a derived value, not a fitted
   // coefficient — report it as a coefficient row with no standard error
   // (the fixed-parameter precedent in runNonlinearRegression), so the
@@ -2969,7 +3029,9 @@ async function assembleResult(
     unstableNote(parsed) +
     ambiguousNote(parsed) +
     (centeredX != null
-      ? ` Centered at the mean of X (${num(centeredX)}): B0 is the fitted Y there, and the higher terms are powers of (X − ${num(centeredX)}).`
+      ? centeredXs && sets.length > 1 && centeredXs.some((c) => c !== centeredX)
+        ? ` Centered per data set at the mean of its X (${sets.map((s, i) => `“${s.name}”: ${num(centeredXs[i])}`).join(", ")}): B0 is the fitted Y there, and the higher terms are powers of (X − center).`
+        : ` Centered at the mean of X (${num(centeredX)}): B0 is the fitted Y there, and the higher terms are powers of (X − ${num(centeredX)}).`
       : "") +
     (other ? ` Extra sum-of-squares F test: ${question} ${answer}` : "") +
     (sets.length > 1 && !other ? " Each data set is fitted on its own." : "") +
@@ -3095,5 +3157,7 @@ async function assembleResult(
     ...(params?.customEquation != null ? { customEquation: params.customEquation } : {}),
     // The overlays need the center to evaluate a centered polynomial (seq 201).
     ...(centeredX != null ? { centeredX } : {}),
+    // ... and the per-set centers for a multi-Y centered polynomial (Round 2 Issue 62).
+    ...(centeredXs != null ? { centeredXs } : {}),
   };
 }

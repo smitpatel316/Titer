@@ -271,7 +271,7 @@ import { buildPanelFigure } from "../src/views/figures/panel-figure";
 import type { McpJob } from "../src/native";
 import { nestedMeans } from "../src/stats/nested/base";
 import { runNestedTTest } from "../src/stats/nested/nested-t-test";
-import { AMBIGUOUS_DEPENDENCY_THRESHOLD, applyUnstableFlags, derivedSources, fitModelSpec, identifyUnstableParameters, modelSpec, parameterDependencies, prepareFit, UNSTABLE_CONDITION_THRESHOLD, type DerivedRow, type ModelSpec } from "../src/stats/xy/nonlinear-fit";
+import { AMBIGUOUS_DEPENDENCY_THRESHOLD, applyFitOptions, applyUnstableFlags, derivedSources, ecAnything, fitModelSpec, fitSummaryStatements, identifyUnstableParameters, modelSpec, parameterDependencies, prepareFit, UNSTABLE_CONDITION_THRESHOLD, type DerivedRow, type ModelSpec } from "../src/stats/xy/nonlinear-fit";
 import { adjustComparisonRows, adjustFdrComparisonRows, adjustFdrPValues, adjustPValues, describe, describedBy, incompleteRows, missingColumn, R_EFFECT_CI, rVec } from "../src/stats/column/base";
 import { analysisTitle, titleAfterApply } from "../src/stats/index";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
@@ -12761,6 +12761,290 @@ check("only nested model pairs get the F test", () => {
   strictEqual(nestedPair("sigmoidal-4pl-logx", "asymmetric-5pl-logx")?.complex, "asymmetric-5pl-logx");
   ok(Math.abs((aicc(0.3112, 8, 2) ?? 0) - -19.5734) < 0.001);
   strictEqual(aicc(1, 4, 3), null);
+});
+
+// BUG-REPORT.md Round 2 Issue 36 (High, cycle 44): raw-X sigmoidal models
+// forced Y = Bottom (or 0) at X = 0 in R even when HillSlope < 0, corrupting
+// falling-curve fits — the R guards are now sign-aware, matching TS
+// evaluate() (which returns the falling-curve limit Top at X = 0).
+check("R2-36: raw-X sigmoidal R guards are sign-aware at X = 0 (falling curves tend to Top)", async () => {
+  // TS/R agreement at X = 0 — evaluate() looks coefficients up by display
+  // name ("Hill slope", not "HillSlope").
+  const falling = [
+    { term: "Bottom", estimate: 1 },
+    { term: "Top", estimate: 100 },
+    { term: "EC50", estimate: 10 },
+    { term: "Hill slope", estimate: -1 },
+  ] as never;
+  strictEqual(evaluateFittedCurve("sigmoidal-4pl-x", falling, 0), 100);
+  const rising = [
+    { term: "Bottom", estimate: 1 },
+    { term: "Top", estimate: 100 },
+    { term: "EC50", estimate: 10 },
+    { term: "Hill slope", estimate: 1 },
+  ] as never;
+  strictEqual(evaluateFittedCurve("sigmoidal-4pl-x", rising, 0), 1);
+  // The R fit expressions and curve functions carry the same sign-aware guard.
+  ok(modelSpec("sigmoidal-4pl-x").fit.includes("ifelse(HillSlope<0,Top,Bottom)"), "FOUR_X guard must be sign-aware");
+  ok(
+    modelSpec("sigmoidal-4pl-x").curveFn?.includes('ifelse(p[["HillSlope"]]<0,p[["Top"]],p[["Bottom"]])'),
+    "4PL-X curveFn guard must be sign-aware",
+  );
+  ok(modelSpec("agonist-4pl-normalized-x").fit.includes("ifelse(HillSlope<0,100,0)"), "normalized 4PL-X guard must be sign-aware");
+  ok(modelSpec("asymmetric-5pl-x").fit.includes("ifelse(HillSlope<0,Top,Bottom)"), "5PL-X guard must be sign-aware");
+  // Behaviour: a noiseless falling 4PL-X fit with an X = 0 (vehicle) point
+  // recovers the curve — the unconditional Bottom guard left a ~99 residual
+  // at X = 0 and dragged R² below 0.9.
+  const xs = [0, 1, 3, 10, 30, 100];
+  const ys = xs.map((x) => (x === 0 ? 100 : 1 + 99 / (1 + x / 10)));
+  const fit = await fitModelSpec(xs, ys, modelSpec("sigmoidal-4pl-x"));
+  const r2 = fit.stats.find((s) => s.label === "R squared")?.value;
+  ok(r2 != null && r2 > 0.99, `falling 4PL-X fit R² should be ~1, got ${r2}`);
+  const ec50 = fit.coefficients.find((c) => c.term === "EC50")?.estimate;
+  ok(ec50 != null && Math.abs(ec50 - 10) < 1, `falling 4PL-X EC50 should be ~10, got ${ec50}`);
+  const hill = fit.coefficients.find((c) => c.term === "HillSlope")?.estimate;
+  ok(hill != null && hill < 0, `falling 4PL-X Hill slope should stay negative, got ${hill}`);
+});
+
+// BUG-REPORT.md Round 2 Issue 37 (High, cycle 44): applyFitOptions
+// (transformNlsCall) silently stripped built-in lower=/upper= bounds on
+// 17+ models whenever weights, fixed params, bounds or robust/Poisson
+// IRLS rewrote the call — and crashed on logistic-growth /
+// gompertz-growth, whose start=local({...}) the rewriter could not parse.
+check("R2-37: applyFitOptions keeps built-in bounds and rewrites local( starts", () => {
+  // Weights alone must not strip a model's built-in bounds.
+  const two = modelSpec("two-site-competition-logx");
+  ok(two.fit.includes("lower=") && two.fit.includes("upper="), "two-site spec should carry built-in bounds");
+  const weighted = applyFitOptions(two, { weights: [1, 1, 1, 1, 1, 1] });
+  ok(
+    weighted.spec.fit.includes("lower=c(-Inf,-Inf,-Inf,-Inf,0)"),
+    `weights rewrite must keep the FractionHi lower bound, got: ${weighted.spec.fit}`,
+  );
+  ok(
+    weighted.spec.fit.includes("upper=c(Inf,Inf,Inf,Inf,1)"),
+    `weights rewrite must keep the FractionHi upper bound, got: ${weighted.spec.fit}`,
+  );
+  // A caller's bound overrides one variable; the built-ins survive elsewhere.
+  const bounded = applyFitOptions(two, { bounds: { LogIC50Hi: [-2, 2] } });
+  ok(
+    bounded.spec.fit.includes("lower=c(-Inf,-Inf,-2,-Inf,0)"),
+    `caller bound must merge with built-ins, got: ${bounded.spec.fit}`,
+  );
+  ok(
+    bounded.spec.fit.includes("upper=c(Inf,Inf,2,Inf,1)"),
+    `caller bound must merge with built-ins, got: ${bounded.spec.fit}`,
+  );
+  // Fixing a parameter drops its bound with it, keeping the rest aligned.
+  const fixed = applyFitOptions(two, { fixed: { FractionHi: 0.5 } });
+  strictEqual(fixed.spec.terms.includes("FractionHi"), false);
+  ok(
+    fixed.spec.fit.includes("lower=c(-Inf,-Inf,-Inf,-Inf)"),
+    `fixed FractionHi must drop its bound, got: ${fixed.spec.fit}`,
+  );
+  // The growth models' start=local({...}) rewrites instead of crashing.
+  ok(
+    applyFitOptions(modelSpec("logistic-growth"), { weights: [1, 1, 1, 1, 1, 1] }).spec.fit.includes("nls("),
+    "logistic-growth weights rewrite must keep a valid nls call",
+  );
+  ok(
+    applyFitOptions(modelSpec("gompertz-growth"), { fitMethod: "robust", weights: [0] }).spec.fit.includes("nls("),
+    "gompertz-growth robust rewrite must not crash",
+  );
+  const fixedGrowth = applyFitOptions(modelSpec("logistic-growth"), { fixed: { YM: 200 } });
+  ok(!fixedGrowth.spec.fit.includes("YM=M"), "fixed YM must leave the local start list");
+  ok(fixedGrowth.spec.fit.includes("(200)*Y0"), "fixed YM must be substituted into the formula");
+});
+
+// BUG-REPORT.md Round 2 Issue 38 (High, cycle 44): weighted, robust and
+// Poisson fits on log-Y models computed R² by dividing log(Y)-scale SS by
+// a raw Y-scale SST (absurd negative R² on small-Y data), Poisson IRLS
+// weighted a log(y) fit by 1/log(y_hat), and compareModels compared logY
+// vs raw-Y AICc with no Jacobian correction.
+check("R2-38: log-Y fits use log-scale SST, Poisson is refused on log-Y models, AICc carries the Jacobian", async () => {
+  // The generated R² uses log(y)-scale SST on log-Y models, weighted or not.
+  ok(
+    fitSummaryStatements(modelSpec("semilog-y-log"), false).includes("sum((log(y)-mean(log(y)))^2)"),
+    "unweighted log-Y SST must be log-scale",
+  );
+  ok(
+    fitSummaryStatements(modelSpec("semilog-y-log"), true).includes("sum(w*(log(y)-sum(w*log(y))/sum(w))^2)"),
+    "weighted log-Y SST must be log-scale",
+  );
+  ok(
+    !fitSummaryStatements(modelSpec("semilog-y-log"), true).includes("sum(w*(y-sum(w*y)/sum(w))^2)"),
+    "weighted log-Y SST must not be raw-Y",
+  );
+  // Poisson on a log-Y model is refused before R runs (1/log(Y) weights).
+  const xs = [0, 1, 2, 3, 4, 5, 6, 7];
+  const ys = xs.map((x) => 0.01 * Math.exp(0.3 * x));
+  await rejects(
+    fitModelSpec(xs, ys, modelSpec("semilog-y-log"), "", (t) => t, { fitMethod: "poisson" }),
+    /Poisson.*log-Y/,
+  );
+  // Behaviour: a robust fit and a weighted fit on small-Y log-scale data
+  // report a sane R² — the raw-Y SST gave R² ≈ -3 here.
+  const noise = [1.05, 0.95, 1.08, 0.97, 1.03, 0.96, 1.04, 0.98];
+  const noisy = ys.map((y, i) => y * noise[i]!);
+  const robust = await fitModelSpec(xs, noisy, modelSpec("semilog-y-log"), "", (t) => t, { fitMethod: "robust" });
+  const r2r = robust.stats.find((s) => s.label === "R squared")?.value;
+  ok(r2r != null && r2r > 0.9 && r2r <= 1, `robust log-Y R² should be sane (0.9, 1], got ${r2r}`);
+  const weighted = await fitModelSpec(xs, noisy, modelSpec("semilog-y-log"), "", (t) => t, { weights: [1, 1, 1, 1, 1, 1, 1, 1] });
+  const r2w = weighted.stats.find((s) => s.label === "R squared")?.value;
+  ok(r2w != null && r2w > 0.9 && r2w <= 1, `weighted log-Y R² should be sane (0.9, 1], got ${r2w}`);
+  // Behaviour: comparing a log-Y model with its raw-Y twin, the reported
+  // ΔAICc matches the TS aicc() with k = p + 1 plus the log Jacobian
+  // 2·Σ ln y — without it the comparison is biased by ≈2Σln y (≈ -56 here).
+  const cmpTable: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: xs.map((x, i) => ["", String(x), String(noisy[i])]),
+  };
+  const cmp = await runAnalysis("nonlinear-regression", cmpTable, { y: "Y1", model: "semilog-y-log", compareModel: "exponential-growth" });
+  if ("error" in cmp) throw new Error(cmp.error);
+  const ssA = cmp.fit?.rows.find((r) => r.label === "Sum of squares")?.values?.[0];
+  const ssB = cmp.stats?.find((s) => s.label === "Sum of squares (comparison model)")?.value;
+  const aiccA = cmp.stats?.find((s) => s.label === "AICc")?.value;
+  const delta = cmp.stats?.find((s) => s.label === "ΔAICc (primary − comparison)")?.value;
+  ok(ssA != null && ssB != null && aiccA != null && delta != null, "comparison must report both sums of squares and AICc");
+  const jac = 2 * noisy.reduce((s, y) => s + Math.log(y), 0);
+  const wantA = (aicc(ssA!, xs.length, 3) ?? 0) + jac;
+  const wantB = aicc(ssB!, xs.length, 3) ?? 0;
+  ok(Math.abs(aiccA! - wantA) < 0.01, `log-Y AICc should carry the Jacobian, got ${aiccA}, want ${wantA}`);
+  ok(Math.abs(delta! - (wantA - wantB)) < 0.01, `ΔAICc should carry the Jacobian, got ${delta}, want ${wantA - wantB}`);
+});
+
+// BUG-REPORT.md Round 2 Issue 39 (High, cycle 44): ecAnything crashed R
+// ("subscript out of bounds") when params.ecx was requested on competition
+// models — it indexed LogEC50/EC50 + HillSlope, none of which a two-site
+// or homologous fit has — and runGlobalNonlinear mislabelled shared
+// IC50/IC50Hi/LogKd midpoints as "EC50".
+check("R2-39: ecx refuses two-site curves, homologous ECx uses LogKd, global midpoints keep their names", async () => {
+  // ecAnything handles the homologous midpoint (LogKd) in closed form —
+  // the X at F% of span is log10(L + Kd) + log10((100 − F)/F) — and
+  // refuses two-site curves instead of indexing a missing midpoint.
+  const hom = ecAnything("homologous-competition-logx", 80, 1);
+  strictEqual(hom.label, "IC80");
+  ok(hom.expr.includes("LogKd"), `homologous ECx must use LogKd, got: ${hom.expr}`);
+  throws(() => ecAnything("two-site-competition-logx", 80), /two-site/);
+  throws(() => ecAnything("two-site-competition-x", 80), /two-site/);
+  // The runner refuses ecx on two-site curves with a plain error, not an R crash.
+  const refusedTable: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["", "-2", "90"],
+      ["", "-1", "80"],
+      ["", "0", "55"],
+      ["", "1", "25"],
+      ["", "2", "10"],
+    ],
+  };
+  const refused = await runAnalysis("nonlinear-regression", refusedTable, { y: "Y1", model: "two-site-competition-logx", ecx: 80 });
+  ok("error" in refused && refused.error.includes("two-site"), `two-site ecx should be refused plainly, got: ${"error" in refused ? refused.error : "ran"}`);
+  // ... while a homologous EC80 comes back from LogKd + [L]: L = Kd = 1,
+  // so the log-X at 80% is log10(2) + log10(0.25) ≈ -0.301 and the IC80
+  // concentration (the derived row's units, like every other ECx/ICx) is
+  // (L + Kd)·(100 − 80)/80 = 0.5.
+  const homTable: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: [-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2].map((x) => ["", String(x), String(100 / (2 + 10 ** x))]),
+  };
+  const homOut = await runAnalysis("nonlinear-regression", homTable, {
+    y: "Y1",
+    model: "homologous-competition-logx",
+    ligandConcentration: 1,
+    ecx: 80,
+  });
+  if ("error" in homOut) throw new Error(homOut.error);
+  const ic80 = homOut.fit?.rows.find((r) => r.label === "IC80")?.values?.[0];
+  ok(ic80 != null && Math.abs(ic80 - 0.5) < 0.05, `homologous IC80 should be ~0.5, got ${ic80}`);
+  // The global fit labels a shared midpoint by its own name: the mapping
+  // lives in midpointLabel, wired at both row sites, and the blanket
+  // "EC50" line is gone.
+  const reg = readFileSync("src/stats/xy/nonlinear-regression.ts", "utf8");
+  ok(!reg.includes('const label = midpoint === "LogIC50" ? "IC50" : "EC50";'), "blanket EC50 label must be gone");
+  ok(reg.includes('case "LogIC50Hi":') && reg.includes('"IC50 (high affinity)"'), "LogIC50Hi must map to IC50 (high affinity)");
+  ok(reg.includes('case "LogKd":') && reg.includes('"Kd"'), "LogKd must map to Kd");
+  ok(reg.includes("midpointLabel(midpoint)"), "both global-fit label sites must use midpointLabel");
+});
+
+// BUG-REPORT.md Round 2 Issue 62 (Medium, cycle 44): AICc in
+// enzyme-inhibition.ts (and nonlinear-regression.ts compareModels) omitted
+// the residual-variance parameter (+1) from k; interpolationCode dropped
+// 95% CIs on tight positive-X ranges; multi-Y centered polynomials shared
+// only the first set's centeredX.
+check("R2-62: AICc counts the residual variance; tight-range interpolation keeps its CIs; multi-Y centered polynomials centre per set", async () => {
+  // (1) AICc uses k = p + 1, matching AIC(m) — in the enzyme derived row
+  // and in the comparison R code.
+  const enzyme = readFileSync("src/stats/xy/enzyme-inhibition.ts", "utf8");
+  ok(enzyme.includes("2*(length(cf)+1)*(length(cf)+2)/(length(y)-length(cf)-2)"), "enzyme AICc must use k = p + 1");
+  const reg = readFileSync("src/stats/xy/nonlinear-regression.ts", "utf8");
+  ok(reg.includes("specA.terms.length + 1") && reg.includes("specB.terms.length + 1"), "compareModels AICc must use k = p + 1");
+  // Behaviour: a line-vs-quadratic comparison's reported AICc matches the
+  // TS aicc() with k = p + 1 from the returned sums of squares.
+  const xs = [0, 1, 2, 3, 4, 5, 6, 7];
+  const noise = [0.1, -0.1, 0.05, -0.05, 0.1, -0.1, 0.05, -0.05];
+  const ys = xs.map((x, i) => 1 + 2 * x + 0.5 * x * x + noise[i]!);
+  const cmpTable: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const cmp = await runAnalysis("nonlinear-regression", cmpTable, { y: "Y1", model: "line", compareModel: "quadratic" });
+  if ("error" in cmp) throw new Error(cmp.error);
+  const ssA = cmp.fit?.rows.find((r) => r.label === "Sum of squares")?.values?.[0];
+  const ssB = cmp.stats?.find((s) => s.label === "Sum of squares (comparison model)")?.value;
+  const aiccA = cmp.stats?.find((s) => s.label === "AICc")?.value;
+  const delta = cmp.stats?.find((s) => s.label === "ΔAICc (primary − comparison)")?.value;
+  ok(ssA != null && ssB != null && aiccA != null && delta != null, "comparison must report both sums of squares and AICc");
+  const wantA = aicc(ssA!, xs.length, 3) ?? 0;
+  const wantB = aicc(ssB!, xs.length, 4) ?? 0;
+  ok(Math.abs(aiccA! - wantA) < 0.01, `line AICc should use k = p + 1, got ${aiccA}, want ${wantA}`);
+  ok(Math.abs(delta! - (wantA - wantB)) < 0.01, `ΔAICc should use k = p + 1, got ${delta}, want ${wantA - wantB}`);
+  // (2) Tight positive-X standards keep their interpolation CIs: with X in
+  // [99, 100] the single 200-point grid over [9.9, 1000] put no point
+  // inside the standards' range and the 95% CIs came back NA. (A
+  // two-parameter Michaelis-Menten standard curve: the window is nearly
+  // flat, so the noise stays small relative to its 0.26 span.)
+  const txs = [99, 99.2, 99.4, 99.6, 99.8, 100];
+  const tnoise = [0.01, -0.01, 0.01, -0.01, 0.01, -0.01];
+  const mm = (x: number) => (100 * x) / (99.5 + x);
+  const interpTable: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: [...txs.map((x, i) => ["", String(x), String(mm(x) + tnoise[i])]), ["", "", "50"]],
+  };
+  const interp = await runAnalysis("nonlinear-regression", interpTable, { y: "Y1", model: "michaelis-menten", interpolate: true });
+  if ("error" in interp) throw new Error(interp.error);
+  ok(interp.interpolated?.length === 1, "tight-range interpolation must return one unknown");
+  const u = interp.interpolated![0];
+  ok(u.x != null && Math.abs(u.x - 99.5) < 0.1, `tight-range X should be ~99.5, got ${u.x}`);
+  ok(u.low != null && u.high != null && u.low < u.x && u.x < u.high, `tight-range CI must bracket X, got [${u.low}, ${u.high}]`);
+  // (3) Multi-Y centered quadratic: each set centres on its own mean X —
+  // Y2 drops the X = 0 row, so its mean is 4, not the first set's 3.5.
+  const multi: TableData = {
+    columns: ["Title", "X", "Y1", "Y2"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i]), x === 0 ? "" : String(ys[i]! + 1)]),
+  };
+  const out = await runAnalysis("nonlinear-regression", multi, { y: "Y1", ys: ["Y1", "Y2"], model: "quadratic", centered: true });
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.centeredX, 3.5);
+  deepStrictEqual(out.centeredXs, [3.5, 4]);
+  // The overlay draws each set's curve from its own center: the view's
+  // multi-set branch passes centerForSet(fit, setName), not the scalar.
+  const fittedCurve = readFileSync("src/views/graphs/fitted-curve.ts", "utf8");
+  ok(fittedCurve.includes("function centerForSet(fit: AnalysisResult, setName: string)"), "fitted-curve must define centerForSet");
+  ok(fittedCurve.includes("centerForSet(fit, setName)"), "the multi-set overlay branch must use the per-set center");
+  // Behaviour: at its own center a set's curve is its B0 — the several-Y
+  // path prefixes each set's coefficients ("Y2 — B0"), so strip the
+  // second set's prefix and evaluate from its own center.
+  const coeffs = out.coefficients ?? [];
+  strictEqual(coeffs.length, 6);
+  const c2 = coeffs
+    .filter((c) => c.term.startsWith("Y2 — "))
+    .map((c) => ({ ...c, term: c.term.replace("Y2 — ", "") }));
+  const b0 = c2.find((c) => c.term === "B0")?.estimate;
+  ok(b0 != null, "second set must carry B0");
+  const atCenter = evaluateFittedCurve("quadratic", c2, 4, undefined, undefined, out.centeredXs?.[1]);
+  ok(Math.abs(atCenter - b0!) < 1e-9, `second set's curve at its own center should be B0, got ${atCenter} vs ${b0}`);
+  const atWrong = evaluateFittedCurve("quadratic", c2, 4, undefined, undefined, out.centeredX);
+  ok(Math.abs(atWrong - b0!) > 1e-6, "the first set's center must not reproduce the second set's curve at its center");
 });
 
 // Seq 166 (Prism 11 nonlinear additions): logistic growth reports its

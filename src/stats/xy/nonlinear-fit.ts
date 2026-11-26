@@ -260,7 +260,34 @@ const kiFromLinear = (label: string, p: string, d: number): Derived => ({
  *  Top (an inhibitor's ICF: F % inhibition), from its log midpoint, Hill slope and asymmetry
  *  (`dl`: its 95% CI by the delta method, the fit's covariance carried to it; at the fit,
  *  what refitting with log ECF as a parameter gives). On the log scale, then raised. */
-export function ecAnything(model: NonlinearModel, f: number): Derived {
+export function ecAnything(model: NonlinearModel, f: number, ligandConcentration?: number): Derived {
+  // A two-site competition curve has two midpoints, so ECx has no single
+  // closed form — the old code indexed LogEC50/EC50 + HillSlope, none of
+  // which a two-site fit has, and R died with "subscript out of bounds"
+  // (Round 2 Issue 39). The runner refuses ecx on two-site models
+  // before calling this; the throw is the backstop for direct callers.
+  if (model === "two-site-competition-logx" || model === "two-site-competition-x")
+    throw new Error(
+      "ECx is not defined for a two-site competition curve — it has two midpoints (LogIC50Hi/LogIC50Lo, or IC50Hi/IC50Lo), so there is no single X at F% response.",
+    );
+  // A homologous competition curve is single-site in shape (fixed slope
+  // −1 in log units): Y = Bmax·L/(L + 10^X + Kd) + Bottom, so the X at
+  // F% of span is log10(L + Kd) + log10((100 − F)/F) — its midpoint
+  // LogKd, not a LogEC50/EC50 + HillSlope. [L] is the fit's ligand
+  // concentration (a literal when the runner passed it, else the R
+  // variable L the homologous fit defines).
+  if (model === "homologous-competition-logx") {
+    const l =
+      ligandConcentration != null && Number.isFinite(ligandConcentration) ? String(ligandConcentration) : "L";
+    const at = `log10(${l}+10^b[["LogKd"]])+log10((100-${f})/${f})`;
+    const d = `dl(function(b)${at})`;
+    return {
+      label: `IC${f}`,
+      expr: `10^(${d}[1])`,
+      low: `10^(${d}[2])`,
+      high: `10^(${d}[3])`,
+    };
+  }
   const logX = model.endsWith("-logx");
   const [log, raise] = logX ? ["log10", (e: string) => `10^(${e})`] : ["log", (e: string) => `exp(${e})`];
   // 1.8: an inhibitor's midpoint is LogIC50 on log X but IC50 on raw X —
@@ -379,16 +406,17 @@ export interface ModelSpec {
 const SIGN = "if(isTRUE(cor(x,y)<0))-1 else 1";
 const FOUR_LOG = "Bottom+(Top-Bottom)/(1+10^((LogEC50-x)*HillSlope))";
 // Raw-concentration 4PL, guarded at X = 0 (prism-format-work (g)): the
-// vehicle point is the Bottom anchor and stays in the fit, but (EC50/x)
-// is Inf/NaN at x = 0 whenever a trial step takes EC50 ≤ 0 with a
-// fractional HillSlope — R's nls then dies with "Missing value or an
-// infinity produced when evaluating the model" on datasets Prism fits
-// (39 such failures in the corpus sweep). ifelse returns Bottom at x = 0
-// without evaluating the ratio there; for x > 0 the formula is unchanged,
-// so fitted values on data without an X = 0 point do not move. (ifelse
+// vehicle point stays in the fit, but (EC50/x) is Inf/NaN at x = 0
+// whenever a trial step takes EC50 ≤ 0 with a fractional HillSlope — R's
+// nls then dies with "Missing value or an infinity produced when
+// evaluating the model" on datasets Prism fits (39 such failures in the
+// corpus sweep). The guard is sign-aware: a rising curve (HillSlope > 0)
+// tends to Bottom as X → 0+, a falling one (HillSlope < 0) to Top —
+// forcing Bottom unconditionally injects a full-span residual jump at
+// X = 0 on falling curves and biases the fit (Round 2 Issue 36). ifelse
 // evaluates both branches, but a NaN in the unselected branch is
-// discarded — the plateau-decay model already relies on this.)
-const FOUR_X = "ifelse(x==0,Bottom,Bottom+(Top-Bottom)/(1+(EC50/x)^HillSlope))";
+// discarded — the plateau-decay model already relies on this.
+const FOUR_X = "ifelse(x==0,ifelse(HillSlope<0,Top,Bottom),Bottom+(Top-Bottom)/(1+(EC50/x)^HillSlope))";
 const nls200 = (expr: string, start: string) => `nls(y~${expr},start=${start},control=nls.control(maxiter=200))`;
 /** The 4PL retry (Linux 4PL fix): the same nls call with a relaxed
  *  convergence tolerance. On near-perfect sigmoids the default tol=1e-5
@@ -673,7 +701,7 @@ export function modelSpec(
         derived: [span],
         nonNegativeX: true,
         curveFn:
-          'g<-function(xv,p) ifelse(xv==0,p[["Bottom"]],p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+(p[["EC50"]]/xv)^p[["HillSlope"]]))',
+          'g<-function(xv,p) ifelse(xv==0,ifelse(p[["HillSlope"]]<0,p[["Top"]],p[["Bottom"]]),p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+(p[["EC50"]]/xv)^p[["HillSlope"]]))',
         asymptotes: ["Bottom", "Top"],
         dose: { expr: FOUR_X, midpoint: "EC50" },
       };
@@ -851,8 +879,10 @@ export function modelSpec(
       };
     }
     case "agonist-4pl-normalized-x": {
-      // B6 Stim #8: ... -- Variable slope.
-      const expr = "ifelse(x==0,0,100/(1+(EC50/x)^HillSlope))";
+      // B6 Stim #8: ... -- Variable slope. The X = 0 guard is
+      // sign-aware, like FOUR_X: a falling curve (HillSlope < 0) tends
+      // to 100 as X → 0+, a rising one to 0 (Round 2 Issue 36).
+      const expr = "ifelse(x==0,ifelse(HillSlope<0,100,0),100/(1+(EC50/x)^HillSlope))";
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, `list(EC50=median(x[x>0]),HillSlope=${SIGN})`)}`,
@@ -871,7 +901,7 @@ export function modelSpec(
         derived: [span100],
         nonNegativeX: true,
         curveFn:
-          'g<-function(xv,p) ifelse(xv==0,0,100/(1+(p[["EC50"]]/xv)^p[["HillSlope"]]))',
+          'g<-function(xv,p) ifelse(xv==0,ifelse(p[["HillSlope"]]<0,100,0),100/(1+(p[["EC50"]]/xv)^p[["HillSlope"]]))',
         dose: { expr, midpoint: "EC50" },
       };
     }
@@ -1015,9 +1045,12 @@ export function modelSpec(
     case "biphasic-x": {
       // B6 Special X #2: the raw-concentration twin — Y=Bottom +
       // Span·Frac/(1+(EC50_1/X)^nH1) + Span·(1−Frac)/(1+(EC50_2/X)^nH2).
-      // At X = 0 both sections vanish, so the curve is its Bottom there.
+      // At X = 0 each section is whole when its nH < 0 and vanishes
+      // when its nH > 0, so the guard sums the negative-slope sections
+      // (Round 2 Issue 36 — the unconditional Bottom assumed both
+      // sections rising).
       const expr =
-        "ifelse(x==0,Bottom,Bottom+(Top-Bottom)*Frac/(1+(EC50_1/x)^nH1)+(Top-Bottom)*(1-Frac)/(1+(EC50_2/x)^nH2))";
+        "ifelse(x==0,Bottom+(Top-Bottom)*(Frac*ifelse(nH1<0,1,0)+(1-Frac)*ifelse(nH2<0,1,0)),Bottom+(Top-Bottom)*Frac/(1+(EC50_1/x)^nH1)+(Top-Bottom)*(1-Frac)/(1+(EC50_2/x)^nH2))";
       const starts = "list(Bottom=min(y),Top=max(y),EC50_1=median(x[x>0])/10,EC50_2=median(x[x>0])*10,nH1=1,nH2=1,Frac=0.5)";
       return {
         kind: "nls",
@@ -1039,7 +1072,7 @@ export function modelSpec(
         derived: [span],
         nonNegativeX: true,
         curveFn:
-          'g<-function(xv,p) ifelse(xv==0,p[["Bottom"]],p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])*p[["Frac"]]/(1+(p[["EC50_1"]]/xv)^p[["nH1"]])+(p[["Top"]]-p[["Bottom"]])*(1-p[["Frac"]])/(1+(p[["EC50_2"]]/xv)^p[["nH2"]]))',
+          'g<-function(xv,p) ifelse(xv==0,p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])*(p[["Frac"]]*ifelse(p[["nH1"]]<0,1,0)+(1-p[["Frac"]])*ifelse(p[["nH2"]]<0,1,0)),p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])*p[["Frac"]]/(1+(p[["EC50_1"]]/xv)^p[["nH1"]])+(p[["Top"]]-p[["Bottom"]])*(1-p[["Frac"]])/(1+(p[["EC50_2"]]/xv)^p[["nH2"]]))',
       };
     }
     case "bell-shaped-logx": {
@@ -1075,9 +1108,12 @@ export function modelSpec(
     }
     case "bell-shaped-x": {
       // B6 Special X #3: the raw-concentration twin — at X = 0 the first
-      // section vanishes and the second is whole, so the curve is Plateau2.
+      // section is whole when nH1 < 0 (vanishes when nH1 > 0) and the
+      // second is whole when nH2 > 0 (vanishes when nH2 < 0), so the
+      // guard sums the sections that are whole there (Round 2 Issue 36
+      // — the unconditional Plateau2 assumed nH1 > 0 and nH2 > 0).
       const expr =
-        "ifelse(x==0,Plateau2,Dip+(Plateau1-Dip)/(1+(EC50_1/x)^nH1)+(Plateau2-Dip)/(1+(x/EC50_2)^nH2))";
+        "ifelse(x==0,Dip+(Plateau1-Dip)*ifelse(nH1<0,1,0)+(Plateau2-Dip)*ifelse(nH2>0,1,0),Dip+(Plateau1-Dip)/(1+(EC50_1/x)^nH1)+(Plateau2-Dip)/(1+(x/EC50_2)^nH2))";
       const starts = "list(Plateau1=max(y),Plateau2=max(y),Dip=min(y),EC50_1=median(x[x>0])/10,EC50_2=median(x[x>0])*10,nH1=1,nH2=1)";
       return {
         kind: "nls",
@@ -1098,7 +1134,7 @@ export function modelSpec(
         derived: [difference("Plateau1", "Dip", "Span1"), difference("Plateau2", "Dip", "Span2")],
         nonNegativeX: true,
         curveFn:
-          'g<-function(xv,p) ifelse(xv==0,p[["Plateau2"]],p[["Dip"]]+(p[["Plateau1"]]-p[["Dip"]])/(1+(p[["EC50_1"]]/xv)^p[["nH1"]])+(p[["Plateau2"]]-p[["Dip"]])/(1+(xv/p[["EC50_2"]])^p[["nH2"]]))',
+          'g<-function(xv,p) ifelse(xv==0,p[["Dip"]]+(p[["Plateau1"]]-p[["Dip"]])*ifelse(p[["nH1"]]<0,1,0)+(p[["Plateau2"]]-p[["Dip"]])*ifelse(p[["nH2"]]>0,1,0),p[["Dip"]]+(p[["Plateau1"]]-p[["Dip"]])/(1+(p[["EC50_1"]]/xv)^p[["nH1"]])+(p[["Plateau2"]]-p[["Dip"]])/(1+(xv/p[["EC50_2"]])^p[["nH2"]]))',
       };
     }
     case "absolute-ic50-logx": {
@@ -1155,7 +1191,7 @@ export function modelSpec(
         derived: [span, absoluteIC50X],
         nonNegativeX: true,
         curveFn:
-          'g<-function(xv,p) ifelse(xv==0,p[["Bottom"]],p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+(p[["EC50"]]/xv)^p[["HillSlope"]]))',
+          'g<-function(xv,p) ifelse(xv==0,ifelse(p[["HillSlope"]]<0,p[["Top"]],p[["Bottom"]]),p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+(p[["EC50"]]/xv)^p[["HillSlope"]]))',
         asymptotes: ["Bottom", "Top"],
         dose: { expr: FOUR_X, midpoint: "EC50" },
       };
@@ -1340,11 +1376,12 @@ export function modelSpec(
       };
     }
     case "asymmetric-5pl-x": {
-      // Same X = 0 guard as FOUR_X (see above): at x = 0 the curve is its
-      // Bottom; the unguarded ratio is Inf/NaN there whenever a trial
-      // step takes EC50 ≤ 0.
+      // Same X = 0 guard as FOUR_X (see above): at x = 0 the curve is
+      // its Top when HillSlope < 0, its Bottom when HillSlope > 0; the
+      // unguarded ratio is Inf/NaN there whenever a trial step takes
+      // EC50 ≤ 0.
       const expr =
-        "ifelse(x==0,Bottom,Bottom+(Top-Bottom)/(1+(EC50*(2^(1/S)-1)^(1/HillSlope)/x)^HillSlope)^S)";
+        "ifelse(x==0,ifelse(HillSlope<0,Top,Bottom),Bottom+(Top-Bottom)/(1+(EC50*(2^(1/S)-1)^(1/HillSlope)/x)^HillSlope)^S)";
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, `c(as.list(coef(${nls200(FOUR_X, `list(Bottom=min(y),Top=max(y),EC50=median(x[x>0]),HillSlope=${SIGN})`)})),S=1)`)}`,
@@ -1352,7 +1389,7 @@ export function modelSpec(
         derived: [span],
         nonNegativeX: true,
         curveFn:
-          'g<-function(xv,p) ifelse(xv==0,p[["Bottom"]],p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+((p[["EC50"]]*(2^(1/p[["S"]])-1)^(1/p[["HillSlope"]]))/xv)^p[["HillSlope"]])^p[["S"]])',
+          'g<-function(xv,p) ifelse(xv==0,ifelse(p[["HillSlope"]]<0,p[["Top"]],p[["Bottom"]]),p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+((p[["EC50"]]*(2^(1/p[["S"]])-1)^(1/p[["HillSlope"]]))/xv)^p[["HillSlope"]])^p[["S"]])',
         asymptotes: ["Bottom", "Top"],
         dose: { expr, midpoint: "EC50" },
       };
@@ -2038,6 +2075,26 @@ function startVariables(expr: string): string[] | undefined {
     }
     return out;
   }
+  if (s.startsWith("local(")) {
+    // The growth models start from a local block whose last statement is
+    // the start list (logistic-growth, gompertz-growth): the names are
+    // that list's, in order (Round 2 Issue 37 — without this the rewrite
+    // refuses the fit outright).
+    const close = matchParen(s, 5);
+    if (close < 0) return undefined;
+    const inner = s.slice(7, close - 1);
+    const listAt = inner.lastIndexOf("list(");
+    if (listAt < 0) return undefined;
+    const listClose = matchParen(inner, listAt + 4);
+    if (listClose < 0) return undefined;
+    const names: string[] = [];
+    for (const e of splitTopLevel(inner.slice(listAt + 5, listClose))) {
+      const m = e.trim().match(/^([A-Za-z][A-Za-z0-9_]*)\s*=/);
+      if (!m) return undefined;
+      names.push(m[1]);
+    }
+    return names;
+  }
   return undefined;
 }
 
@@ -2161,6 +2218,26 @@ function transformStart(start: string, fixedByVar: Record<string, number>): stri
       });
     return `c(${kept.join(",")})`;
   }
+  if (s.startsWith("local(")) {
+    // The growth models' start block (logistic-growth, gompertz-growth):
+    // rewrite its final list(...) the same way — drop the fixed entries
+    // (substituting their values into the surviving expressions, which
+    // name only the block's locals) and keep the setup statements verbatim.
+    const close = matchParen(s, 5);
+    if (close < 0) throw new Error("Cannot parse the fit's start list.");
+    const inner = s.slice(7, close - 1);
+    const listAt = inner.lastIndexOf("list(");
+    if (listAt < 0) throw new Error("Cannot parse the fit's start list.");
+    const listClose = matchParen(inner, listAt + 4);
+    if (listClose < 0) throw new Error("Cannot parse the fit's start list.");
+    const kept = splitTopLevel(inner.slice(listAt + 5, listClose))
+      .filter((e) => {
+        const m = e.trim().match(/^([A-Za-z][A-Za-z0-9_]*)\s*=/);
+        return !m || !Object.hasOwn(fixedByVar, m[1]);
+      })
+      .map((e) => substituteNames(e, fixedByVar));
+    return `local({${inner.slice(0, listAt)}list(${kept.join(",")})${inner.slice(listClose + 1)}})`;
+  }
   throw new Error("Cannot parse the fit's start list.");
 }
 
@@ -2168,7 +2245,11 @@ function transformStart(start: string, fixedByVar: Record<string, number>): stri
  *  `m<-` assignment): fixed variables substituted into the formula and
  *  dropped from the start list, bounds (when given, aligned with
  *  `remainingVars`) switching the call to algorithm="port". `bounds` is
- *  keyed by variable name. */
+ *  keyed by variable name. A model's own built-in lower=/upper= bounds
+ *  survive the rewrite — the caller's bounds override them per variable,
+ *  the rest carry over (Round 2 Issue 37: the old code dropped the
+ *  built-in bounds whenever weights, fixed parameters, bounds or IRLS
+ *  rewrote the call, silently unbounding e.g. FractionHi). */
 function transformNlsCall(
   call: string,
   fixedByVar: Record<string, number>,
@@ -2181,16 +2262,18 @@ function transformNlsCall(
   const head = call.slice(0, yAt + 2);
   const expr = substituteFormula(call.slice(yAt + 2, startAt), fixedByVar);
   const rest = call.slice(startAt + 7);
-  // The start expression (`list(...)` / `c(...)`) ends at its matching
-  // paren; everything after it is the call's trailing arguments plus the
-  // closing paren of nls(. They are parsed, not matched against a fixed
-  // list: `,algorithm="port"`, `,control=nls.control(maxiter=200)` (or
-  // with `,tol=1e-3` — the 4PL retry), `,lower=...`, `,upper=...`. The
-  // control call is preserved verbatim — its tolerance is the retry's
-  // point, and dropping it would silently re-impose tol=1e-5 on a retried
-  // fit. lower/upper are dropped and regenerated below when bounds are
-  // given; anything else unrecognised still throws rather than guessing.
-  if (!rest.startsWith("list(") && !rest.startsWith("c(")) throw new Error("Cannot parse the fit's start list.");
+  // The start expression (`list(...)` / `c(...)` / the growth models'
+  // `local({...})`) ends at its matching paren; everything after it is
+  // the call's trailing arguments plus the closing paren of nls(. They
+  // are parsed, not matched against a fixed list: `,algorithm="port"`,
+  // `,control=nls.control(maxiter=200)` (or with `,tol=1e-3` — the 4PL
+  // retry), `,lower=...`, `,upper=...`. The control call is preserved
+  // verbatim — its tolerance is the retry's point, and dropping it would
+  // silently re-impose tol=1e-5 on a retried fit. lower/upper are merged
+  // with the caller's bounds below; anything else unrecognised still
+  // throws rather than guessing.
+  if (!rest.startsWith("list(") && !rest.startsWith("c(") && !rest.startsWith("local("))
+    throw new Error("Cannot parse the fit's start list.");
   const openAt = rest.indexOf("(");
   const startClose = matchParen(rest, openAt);
   if (startClose < 0) throw new Error("Cannot parse the fit's start list.");
@@ -2204,16 +2287,44 @@ function transformNlsCall(
     if (t !== 'algorithm="port"' && !t.startsWith("control=") && !t.startsWith("lower=") && !t.startsWith("upper="))
       throw new Error("Cannot parse the fit's trailing arguments.");
   }
+  // The call's own bounds, as written (`lower=c(-Inf,-Inf,0)`), aligned
+  // with the start list's variables — the base the caller's bounds
+  // override per variable. They are positional, so the start variables
+  // (before fixed parameters are dropped) are the alignment.
+  const boundVec = (name: "lower" | "upper"): string[] | undefined => {
+    const arg = trailingArgs.find((a) => a.trim().startsWith(`${name}=c(`));
+    if (!arg) return undefined;
+    return splitTopLevel(arg.trim().slice(name.length + 3, -1)).map((e) => e.trim());
+  };
+  const builtinLower = boundVec("lower");
+  const builtinUpper = boundVec("upper");
+  const startVars = builtinLower || builtinUpper ? startVariables(rest.slice(0, startClose + 1)) : undefined;
+  if (
+    (builtinLower || builtinUpper) &&
+    (!startVars ||
+      (builtinLower && builtinLower.length !== startVars.length) ||
+      (builtinUpper && builtinUpper.length !== startVars.length))
+  )
+    throw new Error("Cannot parse the fit's bounds.");
   const start = transformStart(rest.slice(0, startClose + 1), fixedByVar);
   const boundNames = Object.keys(boundsByVar);
+  const hasBounds = boundNames.length > 0 || builtinLower !== undefined || builtinUpper !== undefined;
   let args = "";
   // The "port" algorithm must survive the rewrite (the exponential/enzyme
   // fits use it even unbounded); bounds switch a Gauss-Newton fit to it.
-  if (boundNames.length || hadPort) args += `,algorithm="port"`;
-  if (boundNames.length) {
+  if (hasBounds || hadPort) args += `,algorithm="port"`;
+  if (hasBounds) {
     if (!remainingVars) throw new Error("Bounds need the parameter order.");
-    const lower = remainingVars.map((v) => (boundsByVar[v] ? rNum(boundsByVar[v][0]) : "-Inf"));
-    const upper = remainingVars.map((v) => (boundsByVar[v] ? rNum(boundsByVar[v][1]) : "Inf"));
+    const lower = remainingVars.map((v) => {
+      if (boundsByVar[v]) return rNum(boundsByVar[v][0]);
+      const i = startVars?.indexOf(v) ?? -1;
+      return i >= 0 && builtinLower ? builtinLower[i]! : "-Inf";
+    });
+    const upper = remainingVars.map((v) => {
+      if (boundsByVar[v]) return rNum(boundsByVar[v][1]);
+      const i = startVars?.indexOf(v) ?? -1;
+      return i >= 0 && builtinUpper ? builtinUpper[i]! : "Inf";
+    });
     args += `,lower=c(${lower.join(",")}),upper=c(${upper.join(",")})`;
   }
   if (control) args += `,${control.trim()}`;
@@ -2661,9 +2772,18 @@ export function applyAmbiguousFlags(
 export function fitSummaryStatements(spec: ModelSpec, weighted = false): string {
   // R² for lm comes from summary(); for nls we compute it from residual/total SS.
   // (A weighted lm's R² is 1 − weighted SS / weighted SST, like an nls's.)
+  // A log-Y model fits log(y), so its residuals are on the log scale — its
+  // total SS must be too (Round 2 Issue 38): dividing log-scale SS by a
+  // raw-Y SST gives an absurd negative R² on small-Y data.
   const r2 = spec.kind === "lm" && !weighted ? "s$r.squared" : "1-ss/sst";
   const ss = weighted ? "sum(w*residuals(m)^2)" : "sum(residuals(m)^2)";
-  const sst = weighted ? "sum(w*(y-sum(w*y)/sum(w))^2)" : "sum((y-mean(y))^2)";
+  const sst = spec.logY
+    ? weighted
+      ? "sum(w*(log(y)-sum(w*log(y))/sum(w))^2)"
+      : "sum((log(y)-mean(log(y)))^2)"
+    : weighted
+      ? "sum(w*(y-sum(w*y)/sum(w))^2)"
+      : "sum((y-mean(y))^2)";
   // Seq 323 (nls only — lm objects have no $m$gradient): the Gauss–Newton
   // Hessian HGᵀHG for the unstable-parameter check. nls's gradient is
   // already √w-weighted (it is the gradient of the weighted residuals), so
@@ -2894,18 +3014,28 @@ function warmStartFit(call: string): string {
  *    negative fitted value cannot make an infinite weight). For a direct
  *    mean model the weighted-LS score with weights 1/μ is the Poisson
  *    score, so the fixed point is the Poisson MLE (verified against
- *    scipy's MLE in Python). */
+ *    scipy's MLE in Python). Not for log-Y models: their fitted values
+ *    are log-scale, so 1/fitted would weight by 1/log(y_hat) — refused
+ *    before R runs (see fitModelSpec), with a stop() backstop here. */
 function irlsLoop(
   weightedFit: string,
   initialFit: string,
   method: "robust" | "poisson",
   baseWeights: string,
+  /** A log-Y model fits log(y): its fitted values are log-scale, so a
+   *  Poisson 1/fitted weight would be 1/log(y_hat) — meaningless (and
+   *  negative when y_hat < 1). fitModelSpec refuses Poisson on log-Y
+   *  models before R runs; this stop is the backstop so the generated R
+   *  can never silently emit those weights (Round 2 Issue 38). */
+  logY = false,
 ): string {
   const update =
     method === "robust"
       ? `r<-residuals(m);s<-1.4826*median(abs(r-median(r)));if(!is.finite(s)||s==0)break;` +
         `u<-r/(4.685*s);wr<-(1-pmin(u^2,1))^2;`
-      : `mu<-fitted(m);mu[mu<1e-6]<-1e-6;wr<-1/mu;`;
+      : logY
+        ? `stop("Poisson fits are not supported for log-Y models")`
+        : `mu<-fitted(m);mu[mu<1e-6]<-1e-6;wr<-1/mu;`;
   return (
     `${baseWeights};` +
     `for(it in 1:25){cf0<-coef(m);if(any(!is.finite(cf0)))break;${update}w<-wb*wr;` +
@@ -2934,11 +3064,20 @@ export async function fitModelSpec(
   labelTerm: (term: string) => string = (t) => t,
   options?: FitOptions,
 ): Promise<NonlinearFit> {
+  const method = options?.fitMethod ?? "least-squares";
+  // A Poisson fit weights by 1/fitted, but a log-Y model's fitted values
+  // are log(y_hat) — 1/log(y_hat) is not a Poisson weight (and goes
+  // negative when y_hat < 1). Refuse it plainly instead of fitting
+  // nonsense (Round 2 Issue 38); robust IRLS on log-Y models is fine
+  // (its weights come from the log-scale residuals).
+  if (method === "poisson" && spec.logY)
+    throw new Error(
+      "Poisson fitting is not supported for log-Y models — the Poisson weights 1/fitted would be 1/log(Y), not 1/Y. Fit the model on the raw Y scale instead.",
+    );
   const applied = applyFitOptions(spec, options ?? {});
   const eff = applied.spec;
   const extra = extraAssignments + applied.extraAssignments;
   const weighted = !!(options?.weights);
-  const method = options?.fitMethod ?? "least-squares";
   // The weights-reading variant of the spec: when the user weighted, the
   // effective spec already reads `w`; otherwise it is the same spec with
   // weights appended (the dummy vector's assignment is discarded — the
@@ -2962,11 +3101,16 @@ export async function fitModelSpec(
       // (see warmStartFit) — cold starts stall under the IRLS weights.
       const weightedFit = warmStartFit(j === 0 ? wSpec.fit : wSpec.retryFits![j - 1].fit);
       const initialFit = attempt?.fit ?? eff.fit;
+      // R² and the sum of squares are computed on the fitted scale: a
+      // log-Y model's residuals are log-scale, so its SST is log-scale
+      // too (Round 2 Issue 38 — the old code divided log-scale SS by a
+      // raw-Y SST here).
+      const sstR = eff.logY ? "sum((log(y)-mean(log(y)))^2)" : "sum((y-mean(y))^2)";
       rCode =
         `x<-${rVec(xs)};y<-${rVec(ys)};${extra}${initialFit};` +
-        irlsLoop(weightedFit, initialFit, method, options?.weights ? "wb<-w" : "wb<-rep(1,length(x))") +
+        irlsLoop(weightedFit, initialFit, method, options?.weights ? "wb<-w" : "wb<-rep(1,length(x))", eff.logY) +
         fitSummaryStatements(eff, false) +
-        `ss<-sum(residuals(m)^2);sst<-sum((y-mean(y))^2);r2<-1-ss/sst;syx<-sqrt(ss/df);` +
+        `ss<-sum(residuals(m)^2);sst<-${sstR};r2<-1-ss/sst;syx<-sqrt(ss/df);` +
         `c(${fitEntries(eff)})`;
     }
     try {
