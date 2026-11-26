@@ -20533,7 +20533,7 @@ check("error-log-452: opt-in anonymous error logging via the feedback channel", 
   ok(mainRs.includes("mcp_set_error_log_consent,"), "main.rs registers mcp_set_error_log_consent");
   // Nothing leaves the machine while opted out: the send path is inside
   // the consent check, and the hook only writes locally.
-  ok(/if !error_log_sharing_enabled\(dir\) \{\s*return false;/.test(mcp), "send is refused before any POST when sharing is off");
+  ok(/if !error_log_sharing_enabled\(dir\) \{\s*return ErrorSendOutcome::Unsent;/.test(mcp), "send is refused before any POST when sharing is off");
   ok(!/set_hook[\s\S]{0,800}post_feedback_entry/.test(mainRs), "the panic hook never posts — it only writes locally");
 });
 
