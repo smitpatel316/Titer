@@ -17,6 +17,7 @@ import { infoSheetsOf, resolveGraphOptions } from "../../lib/info-sheets";
 import { mergedGraphData } from "../../lib/multi-table";
 import { GRAPHS, graphSeriesDataset, plotColumns, type GraphFigure } from "../graphs";
 import { applyNumberFormats, paintOf } from "../graphs/plot-helpers";
+import { formatFigureLabels } from "../../lib/label-format";
 
 /** The panel's figure, or null when its graph has nothing to draw (no table,
  *  no numeric columns, or an unknown graph type). With `hideLegend`, the
@@ -51,5 +52,7 @@ export function buildPanelFigure(
   const paint = paintOf(options, graphSeriesDataset(graph.graphType, dataset, parent.tableType, options).length);
   const fig = GRAPHS[graph.graphType].build(columns, options, paint, dataset.titles);
   applyNumberFormats(fig, options);
-  return opts.hideLegend ? { ...fig, layout: { ...fig.layout, showlegend: false } } : fig;
+  // Labels render with super/subscripts (seq 548).
+  const formatted = formatFigureLabels(fig);
+  return opts.hideLegend ? { ...formatted, layout: { ...formatted.layout, showlegend: false } } : formatted;
 }

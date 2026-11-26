@@ -168,6 +168,12 @@ export interface SvgNode {
   attrs: Record<string, string>;
   children: SvgNode[];
   text: string;
+  /** This node's direct text segments and element children, in document
+   *  order (seq 548): `text` concatenates the segments, so a label like
+   *  `H<sub>2</sub>O` would read as `HO` + `2` — the parts keep the
+   *  script mid-label. Consecutive text segments are merged into one
+   *  entry. Absent only on nodes built without the parser. */
+  parts?: (string | SvgNode)[];
 }
 
 const decodeEntities = (s: string): string =>
@@ -224,7 +230,7 @@ export function parseSvg(svg: string): SvgNode {
       if (at >= n) throw new VectorExportError("Unterminated element in SVG.");
       if (svg.startsWith("/>", at)) {
         at += 2;
-        return { tag, attrs, children: [], text: "" };
+        return { tag, attrs, children: [], text: "", parts: [] };
       }
       if (svg[at] === ">") {
         at++;
@@ -250,6 +256,16 @@ export function parseSvg(svg: string): SvgNode {
     }
     const children: SvgNode[] = [];
     let text = "";
+    const parts: (string | SvgNode)[] = [];
+    /** A direct text segment: appended to `text`, merged into the last
+     *  part when it is also text, so the parts stay in document order. */
+    const addText = (segment: string) => {
+      if (!segment) return;
+      text += segment;
+      const last = parts[parts.length - 1];
+      if (typeof last === "string") parts[parts.length - 1] = last + segment;
+      else parts.push(segment);
+    };
     for (;;) {
       if (at >= n) throw new VectorExportError(`Unterminated <${tag}> in SVG.`);
       if (svg.startsWith("</", at)) {
@@ -258,12 +274,12 @@ export function parseSvg(svg: string): SvgNode {
         const close = svg.slice(at + 2, end).trim();
         if (close !== tag) throw new VectorExportError(`Mismatched close tag </${close}> for <${tag}>.`);
         at = end + 1;
-        return { tag, attrs, children, text };
+        return { tag, attrs, children, text, parts };
       }
       if (svg.startsWith("<![CDATA[", at)) {
         const end = svg.indexOf("]]>", at + 9);
         if (end < 0) throw new VectorExportError("Unterminated CDATA in SVG.");
-        text += svg.slice(at + 9, end);
+        addText(svg.slice(at + 9, end));
         at = end + 3;
         continue;
       }
@@ -275,11 +291,14 @@ export function parseSvg(svg: string): SvgNode {
       }
       if (svg[at] === "<") {
         const child = parseNode();
-        if (child) children.push(child);
+        if (child) {
+          children.push(child);
+          parts.push(child);
+        }
         continue;
       }
       const end = svg.indexOf("<", at);
-      text += decodeEntities(svg.slice(at, end < 0 ? n : end));
+      addText(decodeEntities(svg.slice(at, end < 0 ? n : end)));
       at = end < 0 ? n : end;
     }
   };
@@ -340,6 +359,25 @@ function parseStyle(style: string): Record<string, string> {
   return out;
 }
 
+/** A font size with units: `12` / `12px` is absolute, `70%` / `0.7em` is
+ *  of the inherited size — Plotly writes `font-size:70%` on its
+ *  super/subscript tspans (seq 548). Anything unparseable keeps the
+ *  inherited size, as `num` does for the other lengths. */
+function fontSizeOf(value: string | undefined, parent: number): number {
+  if (value === undefined) return parent;
+  const v = value.trim().toLowerCase();
+  if (v.endsWith("%")) {
+    const n = Number(v.slice(0, -1));
+    return Number.isFinite(n) && n > 0 ? (parent * n) / 100 : parent;
+  }
+  if (v.endsWith("em")) {
+    const n = Number(v.slice(0, -2));
+    return Number.isFinite(n) && n > 0 ? parent * n : parent;
+  }
+  const n = Number(v.replace(/px$/, ""));
+  return Number.isFinite(n) && n > 0 ? n : parent;
+}
+
 function presentationOf(node: SvgNode, parent: Presentation): Presentation {
   const merged = { ...node.attrs };
   if (merged.style) Object.assign(merged, parseStyle(merged.style));
@@ -367,7 +405,7 @@ function presentationOf(node: SvgNode, parent: Presentation): Presentation {
     // has its own transform).
     clipPath: merged["clip-path"],
     fontFamily: merged["font-family"] ?? parent.fontFamily,
-    fontSize: num(merged["font-size"], parent.fontSize),
+    fontSize: fontSizeOf(merged["font-size"], parent.fontSize),
     fontWeight: merged["font-weight"] ?? parent.fontWeight,
     textAnchor:
       merged["text-anchor"] === "middle" || merged["text-anchor"] === "end" ? merged["text-anchor"] : merged["text-anchor"] === "start" ? "start" : parent.textAnchor,
@@ -699,6 +737,124 @@ const fmt = (n: number) => {
   return n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
 };
 
+// ── Text runs (seq 548) ────────────────────────────────────────────────
+// Plotly renders <sup>/<sub> as nested <tspan>s — the script tspan at 70%
+// size with a dy shift (-0.6em super, +0.3em sub), then an empty tspan
+// with the restoring dy (+0.42em / -0.21em) — plus U+200B markers around
+// them. The walker used to flatten a <text> to one string at one size, so
+// "GFP^hi" came out "GFPhi" in vector PDF/EPS. These runs keep each
+// tspan's size, family, weight and baseline shift, so the PDF/EPS draw
+// them raised and shrunk like the screen does. (The log-axis powers
+// `powerLabel` writes in plot-helpers.ts ride the same mechanism.)
+//
+// The cursor follows the SVG text model: a tspan's x/y reset it
+// absolutely, its dy shifts it relatively (em of that tspan's own font
+// size), otherwise text continues where the previous run ended. Runs are
+// grouped by line (a direct child tspan of the <text>), and each line
+// anchors on its own start x — Plotly's positionText sets every line
+// tspan's x/y to the text's anchor point, so a middle-anchored title
+// still centres per line.
+
+/** One drawn run of a <text>: its text at its own size and baseline
+ *  shift (`dy` from the text's y), starting at `x`, on `line`. A line
+ *  whose start x is an anchor point (`anchored`) is shifted by the
+ *  line's total width for middle/end anchoring; a continuation line is
+ *  drawn where the cursor left it. */
+export interface TextRun {
+  text: string;
+  size: number;
+  family: string;
+  bold: boolean;
+  dy: number;
+  x: number;
+  line: number;
+  anchored: boolean;
+}
+
+/** A length with units, in px: `12` / `12px` is absolute, `70%` / `0.7em`
+ *  is of `base` (the tspan's own font size for dy, per SVG). */
+function svgLength(value: string | undefined, base: number): number | undefined {
+  if (value === undefined) return undefined;
+  const v = value.trim().toLowerCase();
+  if (!v) return undefined;
+  if (v.endsWith("%")) {
+    const n = Number(v.slice(0, -1));
+    return Number.isFinite(n) ? (base * n) / 100 : undefined;
+  }
+  if (v.endsWith("em")) {
+    const n = Number(v.slice(0, -2));
+    return Number.isFinite(n) ? base * n : undefined;
+  }
+  const n = Number(v.replace(/px$/, ""));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+const isBold = (pres: Presentation): boolean => pres.fontWeight === "bold" || Number(pres.fontWeight) >= 600;
+
+/** A <text>'s runs: its own text plus every nested tspan / <a>, each at
+ *  its inherited presentation, with Plotly's U+200B markers stripped (they
+ *  are not content, and would force the whole PDF string to UTF-16BE). */
+export function textRuns(node: SvgNode, parent: Presentation): TextRun[] {
+  const runs: TextRun[] = [];
+  const baseX = Number(node.attrs.x ?? 0);
+  const baseY = Number(node.attrs.y ?? 0);
+  let cx = baseX;
+  let cy = baseY;
+  let line = 0;
+  let anchored = true; // the <text>'s own text anchors on its x
+  const pushText = (text: string, pres: Presentation) => {
+    const clean = text.replace(/\u200B/g, "");
+    if (!clean) return;
+    runs.push({ text: clean, size: pres.fontSize, family: pres.fontFamily, bold: isBold(pres), dy: cy - baseY, x: cx, line, anchored });
+    cx += measureTextWidth(clean, pres.fontSize, pres.fontFamily, isBold(pres));
+  };
+  /** A tspan's x/y/dy move the cursor: x/y reset it absolutely, dy shifts
+   *  it relatively. Returns whether the tspan carried its own x. */
+  const shiftCursor = (el: SvgNode, pres: Presentation): boolean => {
+    if (el.tag !== "tspan") return false;
+    const x = svgLength(el.attrs.x, pres.fontSize);
+    const y = svgLength(el.attrs.y, pres.fontSize);
+    if (x !== undefined) cx = x;
+    if (y !== undefined) cy = y;
+    const dy = svgLength(el.attrs.dy, pres.fontSize);
+    if (dy !== undefined) cy += dy;
+    return x !== undefined;
+  };
+  /** One element's parts in document order: direct text is a run at the
+   *  cursor, a child tspan shifts the cursor and recurses. Falls back to
+   *  the concatenated text + children on nodes built without the parser. */
+  const walkParts = (el: SvgNode, pres: Presentation): void => {
+    const parts = el.parts ?? [el.text, ...el.children];
+    for (const part of parts) {
+      if (typeof part === "string") {
+        pushText(part, pres);
+        continue;
+      }
+      if (part.tag !== "tspan" && part.tag !== "a") continue;
+      const childPres = presentationOf(part, pres);
+      shiftCursor(part, childPres);
+      walkParts(part, childPres);
+    }
+  };
+  // The <text>'s own parts in order — except a direct child tspan starts
+  // a new line (Plotly's line tspans, one per wrapped line). A first line
+  // without its own x still anchors on the text's x when nothing was
+  // drawn before it.
+  const topParts = node.parts ?? [node.text, ...node.children];
+  for (const part of topParts) {
+    if (typeof part === "string") {
+      pushText(part, parent);
+      continue;
+    }
+    if (part.tag !== "tspan" && part.tag !== "a") continue;
+    line++;
+    const childPres = presentationOf(part, parent);
+    anchored = shiftCursor(part, childPres) || (line === 1 && runs.length === 0);
+    walkParts(part, childPres);
+  }
+  return runs;
+}
+
 // Text measurement: the browser measures with the real font (canvas); in
 // Node the approximation (0.6 em/char) only centres anchored text roughly.
 let canvasCtx: { font: string; measureText: (s: string) => { width: number } } | null | undefined;
@@ -929,20 +1085,45 @@ function walk(node: SvgNode, pres: Presentation, matrix: Matrix, state: WalkStat
     case "text": {
       const text = textContent(node);
       if (!text) return;
+      // Super/subscripts (seq 548) are runs at their own size and
+      // baseline shift — one `drawText` per run, advancing x by the
+      // measured widths, each line anchored on its own start x. A plain
+      // <text> (no tspans) is one run, drawn exactly as before.
+      const runs = textRuns(node, p);
+      if (!runs.length) return;
       withMatrix(() => {
         const fill = paintOf(p.fill, colorMode);
         if (fill.kind === "none") return;
-        backend.drawText(
-          Number(node.attrs.x ?? 0),
-          Number(node.attrs.y ?? 0),
-          text,
-          p.fontSize,
-          p.fontFamily,
-          p.fontWeight === "bold" || Number(p.fontWeight) >= 600,
-          p.textAnchor,
-          fill,
-          effOpacity * p.fillOpacity,
-        );
+        const lines = new Map<number, TextRun[]>();
+        for (const run of runs) {
+          const lineRuns = lines.get(run.line) ?? [];
+          lineRuns.push(run);
+          lines.set(run.line, lineRuns);
+        }
+        for (const lineRuns of lines.values()) {
+          const widths = lineRuns.map((r) => measureTextWidth(r.text, r.size, r.family, r.bold));
+          const total = widths.reduce((a, b) => a + b, 0);
+          const first = lineRuns[0]!;
+          const shift =
+            !first.anchored || p.textAnchor === "start"
+              ? 0
+              : p.textAnchor === "middle"
+                ? -total / 2
+                : -total;
+          for (const run of lineRuns) {
+            backend.drawText(
+              run.x + shift,
+              Number(node.attrs.y ?? 0) + run.dy,
+              run.text,
+              run.size,
+              run.family,
+              run.bold,
+              "start",
+              fill,
+              effOpacity * p.fillOpacity,
+            );
+          }
+        }
       });
       return;
     }

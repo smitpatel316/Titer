@@ -431,7 +431,7 @@ import {
   sharedLegendCheck,
   validateFigureSize,
 } from "../src/lib/figure";
-import { buildGraphFigure, type AnalysisRunner } from "../src/views/graphs/graph-figure";
+import { buildBaseFigure, buildGraphFigure, type AnalysisRunner } from "../src/views/graphs/graph-figure";
 import {
   beginFigureDrag,
   endFigureDrag,
@@ -508,6 +508,7 @@ import {
   type ColorMode,
 } from "../src/lib/vector-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
+import { formatFigureLabels, formatLabelForPlotly, labelRuns } from "../src/lib/label-format";
 import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnalysisType, AnovaParams, ChiSquareGofParams, ComparedCell, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, RemoveBaselineParams, SimulationSpec, ThreeWayAnovaParams } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
@@ -19553,6 +19554,149 @@ check("seq 216: EPS is true vector PostScript with a BoundingBox", () => {
   const cmyk = new TextDecoder().decode(svgToEps(seq216Svg, { colorMode: "cmyk" }));
   ok(cmyk.includes("setcmykcolor"), "CMYK EPS sets CMYK colour");
   ok(!cmyk.includes("setrgbcolor"), "CMYK EPS sets no RGB colour");
+});
+
+// ── Superscript / subscript labels (seq 548) ───────────────────────────
+// Pre-fix pins (Nov 25): Mansi's Grouped labels "GFP^hi" / "GFP^lo" drew
+// with a literal caret — the figure carried the raw names, and the vector
+// PDF/EPS flattened Plotly's super/subscript tspans to one run at one
+// size ("GFPhi"). Each check below failed on the 0b80c30 base and passes
+// with the lane. The representative SVGs are Plotly-shaped (a script
+// tspan at 70% size with its dy shift, then the restoring-dy tspan) — a
+// live Plotly SVG was not generatable in this container, so the
+// real-Plotly end-to-end proof is owed on the Mac.
+check("seq 548: ^/_ labels superscript/subscript in the shared formatter", () => {
+  // A bare marker takes the next word piece: the whole suffix raises,
+  // while a subscript stops at the class change (H_2O lowers just "2").
+  strictEqual(formatLabelForPlotly("GFP^hi"), "GFP<sup>hi</sup>");
+  strictEqual(formatLabelForPlotly("GFP^lo"), "GFP<sup>lo</sup>");
+  strictEqual(formatLabelForPlotly("H_2O"), "H<sub>2</sub>O");
+  strictEqual(formatLabelForPlotly("Ca^{2+}"), "Ca<sup>2+</sup>");
+  strictEqual(formatLabelForPlotly("10^-6"), "10<sup>-6</sup>");
+  strictEqual(formatLabelForPlotly("10^6"), "10<sup>6</sup>");
+  strictEqual(formatLabelForPlotly("2^nd"), "2<sup>nd</sup>");
+  strictEqual(formatLabelForPlotly("plain"), "plain");
+  deepStrictEqual(labelRuns("A^hi_B"), [
+    { text: "A", script: "normal" },
+    { text: "hi", script: "super" },
+    { text: "B", script: "sub" },
+  ]);
+  deepStrictEqual(labelRuns("H_2O"), [
+    { text: "H", script: "normal" },
+    { text: "2", script: "sub" },
+    { text: "O", script: "normal" },
+  ]);
+  // Escapes are literal, typos stay literal, formatting is idempotent
+  // (the build, overlay and draw layers each format the figure).
+  strictEqual(formatLabelForPlotly("A\\_B"), "A&#95;B");
+  strictEqual(formatLabelForPlotly("A\\^B"), "A&#94;B");
+  strictEqual(formatLabelForPlotly("GFP^"), "GFP&#94;");
+  strictEqual(formatLabelForPlotly("GFP^{hi"), "GFP&#94;{hi");
+  strictEqual(formatLabelForPlotly("GFP<sup>hi</sup>"), "GFP<sup>hi</sup>");
+  const once = formatLabelForPlotly("A\\_B ^hi");
+  strictEqual(formatLabelForPlotly(once), once);
+  strictEqual(formatLabelForPlotly("a<b"), "a&lt;b");
+});
+
+check("seq 548: a Grouped graph superscripts GFP^hi / GFP^lo in its legend and title", () => {
+  const table: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Grouped",
+    parentId: null,
+    tableType: "grouped",
+    data: {
+      columns: ["Title", "GFP^hi:Y1", "GFP^hi:Y2", "GFP^lo:Y1", "GFP^lo:Y2"],
+      rows: [
+        ["Control", "10", "12", "8", "9"],
+        ["Treated", "20", "22", "15", "16"],
+      ],
+    },
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Grouped bars",
+    parentId: "t1",
+    graphType: "grouped-bars",
+    graphOptions: { ...newGraphOptions("grouped-bars"), title: "GFP^hi vs GFP^lo" },
+  };
+  const fig = buildBaseFigure(graph, { t1: table, g1: graph });
+  ok(fig, "the grouped-bars figure builds");
+  // The pre-fix figure carried the raw names ("GFP^hi") in its legend.
+  const names = (fig!.data as { name?: string }[]).map((t) => t.name);
+  ok(names.includes("GFP<sup>hi</sup>"), `trace names ${JSON.stringify(names)} lack GFP<sup>hi</sup>`);
+  ok(names.includes("GFP<sup>lo</sup>"), `trace names ${JSON.stringify(names)} lack GFP<sup>lo</sup>`);
+  ok(!names.some((n) => n?.includes("^")), "no raw caret left in a trace name");
+  strictEqual((fig!.layout.title as { text?: string }).text, "GFP<sup>hi</sup> vs GFP<sup>lo</sup>");
+  // Row categories without carets are untouched.
+  const xs = (fig!.data as { x?: string[] }[]).flatMap((t) => t.x ?? []);
+  deepStrictEqual([...new Set(xs)].sort(), ["Control", "Treated"]);
+});
+
+check("seq 548: the figure walk converts labels, never format strings", () => {
+  const fig = formatFigureLabels({
+    data: [
+      {
+        name: "GFP^hi",
+        x: ["CD4^hi", "Control"],
+        y: [1, 2],
+        text: ["H_2O"],
+        hovertemplate: "%{x}: %{y} ^2",
+        texttemplate: "%{y}",
+      },
+    ],
+    layout: {
+      title: { text: "T^2" },
+      xaxis: { title: { text: "Dose^hi" }, ticktext: ["A_1"], tickformat: "^.2f" },
+    },
+  });
+  const trace = fig.data[0] as Record<string, unknown>;
+  strictEqual(trace.name, "GFP<sup>hi</sup>");
+  deepStrictEqual(trace.x, ["CD4<sup>hi</sup>", "Control"]);
+  deepStrictEqual(trace.text, ["H<sub>2</sub>O"]);
+  // Plotly format strings keep their carets: ^ is centre-align in d3.
+  strictEqual(trace.hovertemplate, "%{x}: %{y} ^2");
+  strictEqual(trace.texttemplate, "%{y}");
+  const layout = fig.layout as Record<string, Record<string, unknown>>;
+  strictEqual((layout.title as Record<string, unknown>).text, "T<sup>2</sup>");
+  strictEqual(((layout.xaxis as Record<string, unknown>).title as Record<string, unknown>).text, "Dose<sup>hi</sup>");
+  deepStrictEqual((layout.xaxis as Record<string, unknown>).ticktext, ["A<sub>1</sub>"]);
+  strictEqual((layout.xaxis as Record<string, unknown>).tickformat, "^.2f");
+});
+
+/** The Tm baseline y of the Tj drawing `text` in a PDF content stream. */
+const seq548TmY = (stream: string, text: string): number | null => {
+  const m = new RegExp(`1 0 0 -1 [\\d.]+ ([\\d.]+) Tm \\(${text}\\) Tj`).exec(stream);
+  return m ? Number(m[1]) : null;
+};
+
+check("seq 548: vector PDF/EPS draw super/subscripts as raised/lowered runs", () => {
+  // Plotly-shaped: a script tspan at 70% size with its dy shift, then the
+  // restoring-dy tspan, plus U+200B markers (as &#8203;).
+  const supSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><rect x="0" y="0" width="640" height="480" fill="#ffffff"/><text x="100" y="100" text-anchor="start" font-family="Arial" font-size="12" fill="#000000"><tspan class="line" x="100" y="100" dy="0em">GFP<tspan style="font-size:70%" dy="-0.6em">hi</tspan><tspan dy="0.42em"></tspan>&#8203;</tspan></text></svg>`;
+  const subSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><rect x="0" y="0" width="640" height="480" fill="#ffffff"/><text x="100" y="100" text-anchor="start" font-family="Arial" font-size="12" fill="#000000"><tspan class="line" x="100" y="100" dy="0em">H<tspan style="font-size:70%" dy="0.3em">2</tspan><tspan dy="-0.21em"></tspan>O&#8203;</tspan></text></svg>`;
+  const sup = pdfContentStream(svgToPdf(supSvg));
+  // Pre-fix the PDF drew one flattened "(GFPhi)" run at 12pt.
+  ok(!sup.includes("(GFPhi)"), "PDF flattened the superscript");
+  ok(sup.includes("(GFP)") && sup.includes("(hi)"), "PDF draws the base and script runs");
+  ok(/\/F1 8\.4 Tf/.test(sup), "the script run is set at 70% size (8.4pt of 12pt)");
+  const yBase = seq548TmY(sup, "GFP");
+  const ySup = seq548TmY(sup, "hi");
+  ok(yBase !== null && ySup !== null, "both runs carry a text matrix");
+  ok(ySup! < yBase!, `superscript baseline ${ySup} is not above base ${yBase}`);
+  const sub = pdfContentStream(svgToPdf(subSvg));
+  ok(!sub.includes("(HO2)") && !sub.includes("(HO)"), "PDF misordered the mid-label subscript");
+  for (const t of ["(H)", "(2)", "(O)"]) ok(sub.includes(t), `PDF lacks run ${t}`);
+  ok(sub.indexOf("(H)") < sub.indexOf("(2)") && sub.indexOf("(2)") < sub.indexOf("(O)"), "runs out of order");
+  const ySub = seq548TmY(sub, "2");
+  const yH = seq548TmY(sub, "H");
+  ok(yH !== null && ySub !== null, "both runs carry a text matrix");
+  ok(ySub! > yH!, `subscript baseline ${ySub} is not below base ${yH}`);
+  const eps = new TextDecoder().decode(svgToEps(supSvg));
+  ok(!eps.includes("(GFPhi)"), "EPS flattened the superscript");
+  ok(eps.includes("(GFP) show") && eps.includes("(hi) show"), "EPS draws the base and script runs");
+  ok(eps.includes("8.4 scalefont"), "EPS sets the 8.4pt script size");
 });
 
 check("copy-431: graph/figure copy writes a vector PDF item with a PNG fallback", async () => {
