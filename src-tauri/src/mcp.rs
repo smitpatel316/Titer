@@ -449,6 +449,17 @@ impl McpState {
         id
     }
 
+    /// The disable half of `mcp_set_enabled(false)`: mark disabled, drop
+    /// every registered peer (a disabled server must never notify a dead
+    /// session on a later re-enable), and take the running server (the
+    /// caller cancels/aborts it).
+    fn disable_server(&self) -> Option<RunningServer> {
+        let mut inner = self.lock();
+        inner.enabled = false;
+        inner.peers.clear();
+        inner.server.take()
+    }
+
     /// Send `notifications/tools/list_changed` to every registered
     /// session, so clients that honor it re-list without a restart (seq
     /// 540). Fire-and-forget: the caller is a sync Tauri command, so the
@@ -1095,11 +1106,7 @@ pub async fn mcp_set_enabled(app: AppHandle, state: State<'_, McpState>, enabled
     // opt-in is not silently lost; the next launch retries the autostart.
     write_opt_in_file(&dir.join(OPT_IN_FILE), enabled)?;
     if !enabled {
-        let stopped = {
-            let mut inner = state.lock();
-            inner.enabled = false;
-            inner.server.take()
-        };
+        let stopped = state.disable_server();
         if let Some(server) = stopped {
             server.cancel.cancel();
             // Give in-flight requests (and the SSE stream) a moment to end
@@ -2533,15 +2540,32 @@ pub async fn mcp_connect_antigravity(
 }
 
 /// Whether an already-written Antigravity `titer` entry needs re-writing
-/// with the current expected entry: true only when a `titer` entry exists
-/// and differs from the one this build writes. Pure: unit-tested below.
+/// with the current expected entry: true only when a `titer` entry exists,
+/// is one Titer itself manages (its `command` is this build's bridge
+/// binary), and differs from the one this build writes. Pure:
+/// unit-tested below.
 /// (No entry at all — the user never connected — is false: re-applying
 /// must never create an Antigravity config for someone who never asked
-/// for one.)
-fn antigravity_entry_needs_reapply(current: &serde_json::Value, entry: &serde_json::Value) -> bool {
+/// for one. A remote entry — a URL, no `command` — or a user-customized
+/// local entry — a different `command` — is the user's configuration,
+/// not ours: also false, even though it differs from the expected entry.
+/// Issue 94: the old unconditional `existing != entry` re-applied those
+/// on every launch, clobbering them.)
+fn antigravity_entry_needs_reapply(
+    current: &serde_json::Value,
+    entry: &serde_json::Value,
+    bridge: &std::path::Path,
+) -> bool {
     match current.get("mcpServers").and_then(|s| s.get("titer")) {
         None => false,
-        Some(existing) => existing != entry,
+        Some(existing) => {
+            let bridge_str = bridge.to_string_lossy();
+            let managed = existing
+                .get("command")
+                .and_then(|c| c.as_str())
+                == Some(bridge_str.as_ref());
+            managed && existing != entry
+        }
     }
 }
 
@@ -2557,18 +2581,32 @@ fn antigravity_entry_needs_reapply(current: &serde_json::Value, entry: &serde_js
 /// and silent: a missing bridge, an unreadable config, or a failed write
 /// must never fail the Settings change that triggered it.
 fn reapply_antigravity_entry_if_connected(app: &AppHandle, state: &McpState) {
-    // Resolve the mcp dir first: at startup `state.dir()` is still None,
-    // and deriving from the default allowlist would DOWNGRADE an entry
-    // written for a wider allowlist (seq 540). ensure_dir is idempotent
-    // — the Settings callers already ensured it, so this is a no-op there.
-    if state.ensure_dir(app).is_err() {
-        return;
-    }
+    // Issue 94: check the Antigravity config FIRST, before creating any
+    // directory. The old order called `ensure_dir` (which `create_dir_all`s
+    // `<app_data>/mcp/`) before looking at `mcp_config.json` at all, so
+    // every launch created the dir for users who never connected. A
+    // missing config, or a config with no `titer` entry, returns here with
+    // nothing created and nothing modified.
     let Ok(bridge) = antigravity_bridge_path() else { return };
     let Ok(config_path) = antigravity_config_path(app) else { return };
     let Ok(Some(current)) = read_antigravity_config(&config_path) else { return };
+    if current
+        .get("mcpServers")
+        .and_then(|s| s.get("titer"))
+        .is_none()
+    {
+        return;
+    }
+    // Resolve the mcp dir now (not before the config check above): at
+    // startup `state.dir()` is still None, and deriving from the default
+    // allowlist would DOWNGRADE an entry written for a wider allowlist
+    // (seq 540). ensure_dir is idempotent — the Settings callers already
+    // ensured it, so this is a no-op there.
+    if state.ensure_dir(app).is_err() {
+        return;
+    }
     let entry = expected_antigravity_entry(&bridge, &load_allowlist(state));
-    if !antigravity_entry_needs_reapply(&current, &entry) {
+    if !antigravity_entry_needs_reapply(&current, &entry, &bridge) {
         return;
     }
     if write_antigravity_entry(&config_path, Some(current), &entry).is_ok() {
@@ -10088,7 +10126,12 @@ impl ServerHandler for TiterMcpServer {
     }
 
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .build(),
+        )
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
@@ -14318,12 +14361,13 @@ mod tests {
         let bridge = std::path::Path::new("/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
         let entry = expected_antigravity_entry(bridge, &allowed_for(&["read", "read_more"]));
         // No titer entry at all (never connected): never create one.
-        assert!(!antigravity_entry_needs_reapply(&json!({ "mcpServers": {} }), &entry));
-        assert!(!antigravity_entry_needs_reapply(&json!({ "mcpServers": { "other": {} } }), &entry));
+        assert!(!antigravity_entry_needs_reapply(&json!({ "mcpServers": {} }), &entry, bridge));
+        assert!(!antigravity_entry_needs_reapply(&json!({ "mcpServers": { "other": {} } }), &entry, bridge));
         // Already the current entry: nothing to do.
         assert!(!antigravity_entry_needs_reapply(
             &json!({ "mcpServers": { "titer": entry } }),
-            &entry
+            &entry,
+            bridge
         ));
         // The pre-seq-540 five-tool entry: stale, must be re-applied.
         let stale = json!({
@@ -14340,8 +14384,77 @@ mod tests {
         });
         assert!(antigravity_entry_needs_reapply(
             &json!({ "mcpServers": { "titer": stale } }),
-            &entry
+            &entry,
+            bridge
         ));
+        // Issue 94: a remote "titer" entry (URL, no command) is the user's
+        // configuration, not ours — it differs from the expected entry but
+        // must never be re-applied. Pre-fix this assertion fails.
+        let remote = json!({
+            "url": "https://example.com/mcp",
+            "headers": { "Authorization": "Bearer x" }
+        });
+        assert!(!antigravity_entry_needs_reapply(&json!({ "mcpServers": { "titer": remote } }), &entry, bridge));
+        // Issue 94: a user-customized local entry (a different bridge) is
+        // the user's configuration too — never re-applied. Pre-fix this
+        // assertion fails.
+        let custom = json!({
+            "command": "/usr/local/bin/other-bridge",
+            "tools": { "titer_list_projects": { "eager": true } },
+            "timeoutSeconds": 300
+        });
+        assert!(!antigravity_entry_needs_reapply(&json!({ "mcpServers": { "titer": custom } }), &entry, bridge));
+    }
+
+    #[test]
+    fn get_info_advertises_tools_list_changed() {
+        // Issue 93: compliant MCP clients ignore `notifications/tools/
+        // list_changed` unless the initialize result advertises
+        // `capabilities.tools.listChanged`. Pre-fix this test fails
+        // (list_changed is None).
+        let info = TiterMcpServer::new(job_state()).get_info();
+        assert_eq!(
+            info.capabilities.tools.as_ref().and_then(|t| t.list_changed),
+            Some(true),
+            "get_info must advertise tools.listChanged: {:?}",
+            info.capabilities.tools
+        );
+    }
+
+    #[tokio::test]
+    async fn disable_server_drops_registered_peers() {
+        // Issue 93: `mcp_set_enabled(false)` left disconnected peer
+        // handles in `inner.peers`, so a later re-enable could notify a
+        // dead session. A live session registers its peer in `initialize`
+        // (seq 540); disabling must drop it. Pre-fix this test fails
+        // (the dead handle is still in `peers`).
+        let state = job_state();
+        state.lock().token = Some(SMOKE_TOKEN.to_string());
+        let cancel = CancellationToken::new();
+        let router = mcp_router(state.clone(), cancel.child_token());
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        let url = format!("http://127.0.0.1:{port}{MCP_PATH}");
+        let client = reqwest::Client::new();
+        let (_init, session) = mcp_post(
+            &client,
+            &url,
+            None,
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": { "protocolVersion": "2025-11-25", "capabilities": {},
+                                "clientInfo": { "name": "br-93-94-pin", "version": "0" } } }),
+        )
+        .await;
+        let _session = session.expect("session id");
+        assert_eq!(state.lock().peers.len(), 1, "initialize registers the peer");
+        let stopped = state.disable_server();
+        assert!(stopped.is_none(), "no server was running in-process");
+        assert!(state.lock().peers.is_empty(), "disable drops every registered peer");
+        assert!(!state.lock().enabled, "disable marks the server off");
+        server.abort();
     }
 
     #[test]
