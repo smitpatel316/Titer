@@ -72,13 +72,18 @@ t<-${rVec(groups.flatMap((g) => g.x))};s<-${rVec(groups.flatMap((g) => g.y))}
 g<-${rVec(groups.flatMap((g, i) => g.x.map(() => i + 1)))};k<-${k}
 x<-tryCatch(chi(t,s,g,k,"${test}"),error=function(e) NA_real_);df<-${test === "trend" ? 1 : k - 1}
 q<-quantile(survival::survfit(survival::Surv(t,s)~factor(g,levels=1:k),conf.type="log-log"),0.5)
-d<-survival::survdiff(survival::Surv(t,s)~factor(g,levels=1:k));v<-d$var[1,1];L<-(d$obs[1]-d$exp[1])/v
+d<-survival::survdiff(survival::Surv(t,s)~factor(g,levels=1:k));v<-d$var[1,1]
+# BUG-REPORT Round 2 #66: mh/lr are 2-group ratios only (k==2), and
+# undefined when the risk sets never overlap (v==0) — NA, never Inf/NaN.
+hrOk<-k==2&&is.finite(v)&&v>0;L<-if(hrOk)(d$obs[1]-d$exp[1])/v else NA_real_
+lr0<-d$obs[1]/d$exp[1]/(d$obs[2]/d$exp[2]);lr0<-if(k==2&&is.finite(lr0))lr0 else NA_real_
 c(chi=x,df=df,p=pchisq(x,df,lower.tail=FALSE),
 ${groups.map((_, i) => `m_${i}=unname(q$quantile[${i + 1}]),lo_${i}=unname(q$lower[${i + 1}]),hi_${i}=unname(q$upper[${i + 1}])`).join(",")},
-mh=exp(L),mhlo=exp(L-qnorm(0.975)/sqrt(v)),mhhi=exp(L+qnorm(0.975)/sqrt(v)),
-lr=d$obs[1]/d$exp[1]/(d$obs[2]/d$exp[2]),
-lrlo=d$obs[1]/d$exp[1]/(d$obs[2]/d$exp[2])*exp(-qnorm(0.975)*sqrt(1/d$exp[1]+1/d$exp[2])),
-lrhi=d$obs[1]/d$exp[1]/(d$obs[2]/d$exp[2])*exp(qnorm(0.975)*sqrt(1/d$exp[1]+1/d$exp[2])),
+v=v,
+mh=if(hrOk)exp(L) else NA_real_,mhlo=if(hrOk)exp(L-qnorm(0.975)/sqrt(v)) else NA_real_,mhhi=if(hrOk)exp(L+qnorm(0.975)/sqrt(v)) else NA_real_,
+lr=lr0,
+lrlo=if(k==2&&is.finite(lr0))lr0*exp(-qnorm(0.975)*sqrt(1/d$exp[1]+1/d$exp[2])) else NA_real_,
+lrhi=if(k==2&&is.finite(lr0))lr0*exp(qnorm(0.975)*sqrt(1/d$exp[1]+1/d$exp[2])) else NA_real_,
 ${groups.map((_, i) => `sub_${i}=sum(g==${i + 1}),ev_${i}=sum(s[g==${i + 1}])`).join(",")}${
       pairs.length
         ? `,setNames(p.adjust(c(${pairs
@@ -91,10 +96,17 @@ ${groups.map((_, i) => `sub_${i}=sum(g==${i + 1}),ev_${i}=sum(s[g==${i + 1}])`).
     })`,
   );
 
+  // BUG-REPORT Round 2 #66: with disjoint risk sets — no event time has
+  // both groups at risk — survdiff's variance is 0, so the comparison is
+  // undefined: its chi-square 0 (P = 1) is an artefact of the generalized
+  // inverse, and the hazard ratios are undefined. Show the comparison as
+  // missing and say why, instead of a vacuous P = 1 with blank ratios.
+  // (The per-group medians are still meaningful.)
+  const disjoint = k === 2 && r.v === 0;
   const stats: StatRow[] = [
-    { label: "Chi-square", value: r.chi ?? null },
+    { label: "Chi-square", value: disjoint ? null : (r.chi ?? null) },
     { label: "df", value: r.df ?? null },
-    { label: "P value", value: r.p ?? null, p: true },
+    { label: "P value", value: disjoint ? null : (r.p ?? null), p: true },
   ];
   // Two groups: the hazard ratio of the first to the second, by Mantel-Haenszel and by log-rank.
   if (k === 2) {
@@ -138,7 +150,10 @@ ${groups.map((_, i) => `sub_${i}=sum(g==${i + 1}),ev_${i}=sum(s[g==${i + 1}])`).
       "Kaplan-Meier curves (R's survival package). A median survival is the time the curve falls to 50%; " +
       "its 95% interval (log-log) is open (—) where the band never reaches 50%. " +
       (test === "trend" ? "The test for trend takes the groups in their table order as equally spaced. " : "") +
-      (k === 2 ? "A hazard ratio above 1: the first group's events come sooner. " : "") +
+      (disjoint
+        ? "The two groups' risk sets do not overlap — no subject from one group was at risk when the other group's events occurred — so the comparison and the hazard ratios cannot be computed; only the per-group medians above are meaningful. "
+        : "") +
+      (k === 2 && !disjoint ? "A hazard ratio above 1: the first group's events come sooner. " : "") +
       (k > 2 ? "A pairwise hazard ratio is the first group's to the second's (log-rank method)." : ""),
   };
 }

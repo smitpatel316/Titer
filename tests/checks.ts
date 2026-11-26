@@ -32593,6 +32593,71 @@ check("an engine restart clears package states, so the next analysis reinstalls 
   );
 });
 
+// BUG-REPORT Round 2 #66 (webr-survival), three limbs. (1) ensurePackages
+// used to hand installBatch a fresh full timeoutMs after the claim phase
+// had already spent its budgetMs — and the wait race then ran a second
+// full timeoutMs — doubling the call's total budget. Both now use what is
+// left of the deadline. A runtime repro would need a hung engine, so this
+// pins the calls themselves (same pattern as the FL-R3-26 pin above).
+// (2) runSurvival used to compute the 2-group mh/lr hazard ratios in R
+// even when k >= 3 (only the display was guarded). They are now NA unless
+// k == 2 with a positive finite variance. (3) With disjoint risk sets
+// (survdiff's variance 0) the comparison is undefined — survdiff's
+// chi-square 0 (P = 1) is an artefact — so chi/P are now missing and the
+// notes say why, instead of a vacuous P = 1 with blank ratios.
+check("ensurePackages spends one timeout budget, and survival explains disjoint risk sets (R2-66)", async () => {
+  const webr = readFileSync("src/stats/webr.ts", "utf8");
+  const ensure = webr.slice(webr.indexOf("export async function ensurePackages"));
+  ok(
+    /installBatch\(missing, cancel, remaining\)/.test(ensure),
+    "installBatch must get the remaining budget, not a fresh full timeoutMs",
+  );
+  ok(
+    !/installBatch\(missing, cancel, timeoutMs\)/.test(ensure),
+    "installBatch must not be called with the full timeoutMs after the claim phase",
+  );
+  ok(
+    /Math\.max\(0, deadline - Date\.now\(\)\)/.test(ensure),
+    "the install and the wait race must be bounded by the remaining deadline",
+  );
+  const survival = readFileSync("src/stats/survival/survival-analysis.ts", "utf8");
+  const rCode = survival.slice(survival.indexOf("const r = await evalNamedVector"));
+  ok(
+    /hrOk<-k==2&&is\.finite\(v\)&&v>0/.test(rCode),
+    "the 2-group hazard ratios must be guarded to k == 2 with a positive finite variance",
+  );
+  ok(!/mh=exp\(L\),mhlo=exp\(L-qnorm/.test(rCode), "mh/lr must not be computed unconditionally");
+  // Disjoint risk sets: group A events at t=1,2,3; group B all censored
+  // before A's first event, so at every event time only A is at risk.
+  const disjoint: TableData = {
+    columns: ["Title", "Days", "A", "B"],
+    rows: [
+      ["", "1", "1", null],
+      ["", "2", "1", null],
+      ["", "3", "1", null],
+      ["", "4", "0", null],
+      ["", "5", "0", null],
+      ["", "0.5", null, "0"],
+      ["", "0.6", null, "0"],
+      ["", "0.7", null, "0"],
+      ["", "0.8", null, "0"],
+      ["", "0.9", null, "0"],
+    ],
+  };
+  const out = await runAnalysis("survival", disjoint, { curveTest: "logrank", correction: "holm" });
+  if ("error" in out) throw new Error(`expected a result, got ${out.error}`);
+  strictEqual(out.stats.find((s) => s.label === "Chi-square")?.value, null, "a disjoint comparison has no chi-square");
+  strictEqual(out.stats.find((s) => s.label === "P value")?.value, null, "a disjoint comparison has no P value");
+  ok(/risk sets do not overlap/.test(out.notes), `notes must explain the disjoint risk sets, got: ${out.notes}`);
+  ok(
+    !out.notes.includes("A hazard ratio above 1"),
+    "no hazard-ratio reading when the ratios cannot be computed",
+  );
+  // The medians are still meaningful: A falls to 50% at t=3, B never does.
+  strictEqual(out.survivalGroups?.[0]?.median, 3);
+  strictEqual(out.survivalGroups?.[1]?.median, null);
+});
+
 // R3-03: a cancel in the engine never escalated — both listeners called a
 // bare interruptR(), a no-op on Tauri's PostMessage channel, so a wedged
 // engine sat out the full 5-minute watchdog budget instead of the

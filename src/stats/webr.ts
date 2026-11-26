@@ -853,7 +853,13 @@ export async function ensurePackages(names: string[], opts?: { timeoutMs?: numbe
       // Evicted while queued behind a hung batch: never start the install —
       // a zombie install would only contend with the retry that replaced it.
       if (cancel.current) return;
-      return installBatch(missing, cancel, timeoutMs);
+      // BUG-REPORT Round 2 #66: the claim phase above already spent part of
+      // this call's budget — the install gets only what is left of the
+      // deadline, not a fresh full timeout, or the call's total budget
+      // doubles. Nothing left means the race below fires instead.
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return;
+      return installBatch(missing, cancel, remaining);
     });
     batch.then(
       () => releaseGate(),
@@ -882,10 +888,15 @@ export async function ensurePackages(names: string[], opts?: { timeoutMs?: numbe
     await Promise.race([
       Promise.all([...joined.map((p) => p.catch(() => {})), ...(batch ? [batch] : [])]),
       new Promise<never>((_, reject) => {
+        // BUG-REPORT Round 2 #66: the race is bounded by the same deadline
+        // as the claim phase above, not a fresh full timeoutMs — otherwise
+        // the call waits out the claim budget and then a whole second
+        // timeout. The message still names the full budget: that is what
+        // the whole call was allowed.
         timer = setTimeout(() => {
           timedOut = true;
           reject(timeoutError(wanted, timeoutMs));
-        }, timeoutMs);
+        }, Math.max(0, deadline - Date.now()));
       }),
     ]);
   } catch (err) {
