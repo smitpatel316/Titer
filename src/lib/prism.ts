@@ -46,6 +46,7 @@ import type { NonlinearModel } from "../stats/types";
 import { parseCsv } from "./prism-csv";
 import { parseDateCell, parseElapsedCell, prismDateTimeConversion, type XColumnFormat, type XConversion } from "./date-time";
 import { newConstantId, readInfoConstants } from "./info-sheets";
+import { summarySubcolumns, type SummaryFormat } from "./summary-format";
 
 export interface ConvertIssue {
   severity: "error" | "warning";
@@ -363,6 +364,22 @@ const SUBCOLUMN_SUFFIXES: Record<string, string[] | null> = {
   y_high_low: ["_MEAN", "_PLUSERROR", "_MINUSERROR"],
 };
 
+/** Prism dataFormat → Titer summary format, for grouped import: the
+ *  labels a summary table's subcolumns carry ("Mean"/"SD"/"N" …). Only
+ *  summary formats are here — y_replicates / y_single have no summary
+ *  format — and y_high_low is its own format (upper/lower limits), even
+ *  though the writer emits y_plus_minus for both. */
+const SUMMARY_FORMAT_BY_PRISM_DATAFORMAT: Record<string, SummaryFormat> = {
+  y_sd_n: "mean-sd-n",
+  y_se_n: "mean-sem-n",
+  y_cv_n: "mean-cv-n",
+  y_sd: "mean-sd",
+  y_se: "mean-sem",
+  y_cv: "mean-cv",
+  y_plus_minus: "mean-plus-minus",
+  y_high_low: "mean-upper-lower",
+};
+
 /** Prism nonlinear-regression equation name → Titer model. Only equations
  *  whose formula matches a Titer model exactly (checked against
  *  src/stats/xy/nonlinear-fit.ts modelSpec, not just the label):
@@ -580,6 +597,23 @@ const cleanText = (value: string): string => {
 };
 
 /**
+ * A Prism multi-line text value (Info Sheet notes) as plain text: unwrap a
+ * rich-text `{ string }` like plainTitle, but KEEP the line breaks — notes
+ * are multi-line prose, and cleanText would collapse every break into a
+ * space and destroy them on import (R2-60). Carriage returns become
+ * newlines; nothing else is folded.
+ */
+const plainMultiline = (value: unknown): string => {
+  const s =
+    typeof value === "string"
+      ? value
+      : value !== null && typeof value === "object"
+        ? (value as { string?: unknown }).string
+        : undefined;
+  return typeof s === "string" ? s.replace(/\r\n?/g, "\n") : "";
+};
+
+/**
  * Parse a Prism date cell as UTC — one frame for every shape, so a
  * duration never depends on the machine's timezone. Prism writes naive
  * datetimes (no zone); reading them as UTC is the only reading that is
@@ -697,6 +731,21 @@ export function resolveDataFormat(tableDataFormat: string, datasetFormat: string
 
 // ── The converter ────────────────────────────────────────────────────────
 
+/** Ceiling for a .prism content.json declaration used to size the import:
+ *  rows padded for a short CSV, columns inferred for an unknown dataset —
+ *  the tabular importer's MAX_IMPORT_ROWS ceiling, applied here too. A 1e9
+ *  declaration would otherwise pad a billion empty rows or infer a
+ *  billion columns (R2-60). */
+const MAX_PRISM_DECLARED = 50_000;
+
+/** A content.json row/column declaration, validated: a finite number >= 0,
+ *  capped at MAX_PRISM_DECLARED — anything else is undefined, and the
+ *  caller warns and ignores the declaration (R2-60). */
+const cappedDeclaredCount = (value: unknown): number | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
+  return Math.min(Math.floor(value), MAX_PRISM_DECLARED);
+};
+
 /** Load a `.prism` ZIP, or throw the plain-language refusal `convertPrism`
  *  throws. Exported so the graph-regen planner can share the one JSZip
  *  instance `convertPrism` already opened — the source is never unzipped
@@ -747,8 +796,36 @@ export async function convertPrism(
   } catch {
     throw new Error(`“${sourceName}” has a document.json that isn't valid JSON — the file may be corrupt.`);
   }
+  // document.json is file data: a null document, or a list where an object
+  // belongs, must refuse cleanly — never throw an uncaught TypeError
+  // mid-import (R2-60).
+  if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
+    throw new Error(
+      `“${sourceName}” has a document.json that isn't a Prism document — it holds ${Array.isArray(doc) ? "a list" : typeof doc}, not an object. The file may be corrupt.`,
+    );
+  }
   const sheets = doc.sheets ?? {};
   const titles = doc.sheetAttributesMap ?? {};
+  // A sheet list that isn't a list is left out with a warning; non-string
+  // entries are dropped (a sheet uid is a string). Every loop below reads
+  // these lists, never the raw document, so a malformed document.json
+  // can't throw mid-import (R2-60).
+  const sheetUids = (value: unknown, key: string): string[] => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) {
+      issues.push({
+        severity: "warning",
+        message: `document.json lists “${key}” as a ${typeof value}, not a list of sheets; it was left out.`,
+      });
+      return [];
+    }
+    return value.filter((v): v is string => typeof v === "string");
+  };
+  const dataSheets = sheetUids(sheets.data, "data");
+  const graphSheets = sheetUids(sheets.graphs, "graphs");
+  const layoutSheets = sheetUids(sheets.layouts, "layouts");
+  const analysisSheets = sheetUids(sheets.analyses, "analyses");
+  const infoSheets = sheetUids(sheets.info, "info");
   const titleOf = (uid: string, fallback: string) => {
     const t = plainTitle(titles[uid]?.title);
     return t !== "" ? t : fallback;
@@ -767,9 +844,9 @@ export async function convertPrism(
     tables: [],
     analyses: [],
     analysesUnsupported: [],
-    graphsNotTransferred: (sheets.graphs ?? []).length,
-    layoutsNotTransferred: (sheets.layouts ?? []).length,
-    infoSheets: (sheets.info ?? []).length,
+    graphsNotTransferred: graphSheets.length,
+    layoutsNotTransferred: layoutSheets.length,
+    infoSheets: infoSheets.length,
     infoSheetNames: [],
     orphanSheetsIgnored: 0,
     unreferencedTablesIgnored: 0,
@@ -811,7 +888,7 @@ export async function convertPrism(
   }
 
   // ── Data tables ──
-  for (const sheetUid of sheets.data ?? []) {
+  for (const sheetUid of dataSheets) {
     const sheet = await readJson<PrismDataSheet>(`data/sheets/${sheetUid}/sheet.json`);
     if (!sheet || !sheet.table?.uid) {
       issues.push({ severity: "warning", message: `Data sheet “${sheetUid}” has no table; it was left out.` });
@@ -825,28 +902,58 @@ export async function convertPrism(
     const content = await readJson<{ numberOfColumns?: number; numberOfRows?: number }>(
       `data/tables/${tableUid}/content.json`,
     );
+    // A declared row/column count is file data, never trusted blindly: a
+    // non-finite or negative count is ignored, and an over-large one is
+    // capped — a 1e9 declaration would otherwise pad a billion empty rows,
+    // and Infinity would loop forever (R2-60).
+    const numberOfRows = cappedDeclaredCount(content?.numberOfRows);
+    if (numberOfRows === undefined && content?.numberOfRows !== undefined) {
+      issues.push({
+        severity: "warning",
+        message: `${displayName}: content.json declares numberOfRows as ${String(content.numberOfRows)} — not a usable count, so the declaration was ignored.`,
+      });
+    } else if (typeof content?.numberOfRows === "number" && content.numberOfRows > MAX_PRISM_DECLARED) {
+      issues.push({
+        severity: "warning",
+        message: `${displayName}: content.json declares numberOfRows as ${content.numberOfRows}, over the ${MAX_PRISM_DECLARED.toLocaleString()} import ceiling — it was clamped to ${MAX_PRISM_DECLARED.toLocaleString()}.`,
+      });
+    }
+    const numberOfColumns = cappedDeclaredCount(content?.numberOfColumns);
+    if (numberOfColumns === undefined && content?.numberOfColumns !== undefined) {
+      issues.push({
+        severity: "warning",
+        message: `${displayName}: content.json declares numberOfColumns as ${String(content.numberOfColumns)} — not a usable count, so the declaration was ignored.`,
+      });
+    } else if (typeof content?.numberOfColumns === "number" && content.numberOfColumns > MAX_PRISM_DECLARED) {
+      issues.push({
+        severity: "warning",
+        message: `${displayName}: content.json declares numberOfColumns as ${content.numberOfColumns}, over the ${MAX_PRISM_DECLARED.toLocaleString()} import ceiling — it was clamped to ${MAX_PRISM_DECLARED.toLocaleString()}.`,
+      });
+    }
     const csvText = await readText(`data/tables/${tableUid}/data.csv`);
     if (csvText === null) {
       issues.push({ severity: "warning", message: `${displayName} has no data.csv; it was left out.` });
       continue;
     }
     let csv = parseCsv(csvText);
-    if (typeof content?.numberOfRows === "number") {
-      if (csv.length > content.numberOfRows) csv = csv.slice(0, content.numberOfRows);
+    if (numberOfRows !== undefined) {
+      if (csv.length > numberOfRows) csv = csv.slice(0, numberOfRows);
       // A CSV shorter than the declared rows is padded with empty rows
       // (kept behaviour) — but say so, instead of inventing rows silently.
-      if (csv.length < content.numberOfRows) {
+      if (csv.length < numberOfRows) {
         issues.push({
           severity: "warning",
-          message: `${displayName}: the file holds ${csv.length} rows but content.json declares ${content.numberOfRows}; the missing rows were left empty.`,
+          message: `${displayName}: the file holds ${csv.length} rows but content.json declares ${numberOfRows}; the missing rows were left empty.`,
         });
       }
-      while (csv.length < content.numberOfRows) csv.push([]);
+      while (csv.length < numberOfRows) csv.push([]);
     }
 
     const format = table.format ?? "";
     const dataFormat = table.dataFormat ?? "";
-    const setUids = table.dataSets ?? [];
+    const setUids = Array.isArray(table.dataSets)
+      ? table.dataSets.filter((u): u is string => typeof u === "string")
+      : [];
     // ── Layout: resolve every dataset's subcolumn count BEFORE reading
     // any values (B1/B2/B3). A count is known from the dataset JSON
     // (replicates / replicate ranges / table replicatesCount); a missing
@@ -855,7 +962,7 @@ export async function convertPrism(
     // inferred from content.json's numberOfColumns when it is the ONLY
     // unknown. Two or more unknowns, or an inference that doesn't fit
     // the declared width, refuses the table — never silently shift.
-    const declaredCols = typeof content?.numberOfColumns === "number" ? content.numberOfColumns : (csv[0]?.length ?? 0);
+    const declaredCols = numberOfColumns ?? (csv[0]?.length ?? 0);
     // The CSV's first column holds row titles only when the table has a
     // row-titles dataset. Never assume it from the format: column tables
     // usually have none, and XY tables sometimes have one (empty titles).
@@ -1052,20 +1159,59 @@ export async function convertPrism(
     }
     let groups: number | undefined;
     let replicates: number | undefined;
+    let summaryFormat: SummaryFormat | undefined;
     if (format === "grouped") {
       groups = layoutSets.filter((e) => e.set !== null).length;
       replicates = table.replicatesCount ?? Math.max(...layoutSets.filter((e) => e.set !== null).map((e) => e.count));
+      // One group's summary format: the format whose subcolumn labels
+      // span the group's full width — the dataset's own format first,
+      // then the table's — unless the dataset explicitly says replicates
+      // (y_replicates), which stays Y1…Yn. A format that doesn't span
+      // the width never mislabels columns.
+      const groupFormat = (setFormat: string): SummaryFormat | undefined => {
+        if (setFormat === "y_replicates") return undefined;
+        const own = SUMMARY_FORMAT_BY_PRISM_DATAFORMAT[setFormat];
+        if (own !== undefined && summarySubcolumns(own).length === replicates) return own;
+        const table = SUMMARY_FORMAT_BY_PRISM_DATAFORMAT[dataFormat];
+        if (table !== undefined && summarySubcolumns(table).length === replicates) return table;
+        return undefined;
+      };
+      const formatsUsed: (SummaryFormat | undefined)[] = [];
       for (const entry of layoutSets) {
         if (entry.set === null) {
           cursor += entry.count;
           continue;
         }
-        const group = plainTitle(entry.set.title) || "Group";
-        for (let i = 0; i < entry.count; i++) {
-          columns.push({ name: `${group}:Y${i + 1}`, values: csvCol(cursor) });
-          cursor++;
+        // A group name must be colon-free — seriesKeyOf splits at the
+        // first ":" (the .pzfx importer sanitizes the same way): a title
+        // like "1:10" would become "1:10:Y1" and split into group "1".
+        const group = (plainTitle(entry.set.title) || "Group").replace(/:/g, "-");
+        const formatUsed = groupFormat(entry.set.format ?? "");
+        formatsUsed.push(formatUsed);
+        const labels = formatUsed !== undefined ? summarySubcolumns(formatUsed) : [];
+        const names =
+          labels.length > 0
+            ? labels.map((s) => `${group}:${s}`)
+            : Array.from({ length: replicates as number }, (_, i) => `${group}:Y${i + 1}`);
+        // A ragged group is padded with empty subcolumns to `replicates`,
+        // so the grid stays rectangular and leadOf sees a full group.
+        for (let i = 0; i < (replicates as number); i++) {
+          if (i < entry.count) {
+            columns.push({ name: names[i], values: csvCol(cursor) });
+            cursor++;
+          } else {
+            columns.push({ name: names[i], values: Array.from({ length: csv.length }, () => null) });
+          }
         }
       }
+      // The table's summaryFormat: set only when every present group was
+      // named with the same summary format — a mixed table stays
+      // replicates at the table level, so no group is misread as
+      // summaries.
+      summaryFormat =
+        formatsUsed.length > 0 && formatsUsed.every((f) => f !== undefined && f === formatsUsed[0])
+          ? formatsUsed[0]
+          : undefined;
     } else {
       for (const entry of layoutSets) {
         if (entry.set === null) {
@@ -1113,10 +1259,10 @@ export async function convertPrism(
     // (missing datasets consume CSV columns without becoming Titer ones,
     // and multi-subcolumn X collapses into one Titer column).
     const consumedCols = titleCols + (xCount as number) + layoutSets.reduce((n, e) => n + e.count, 0);
-    if (typeof content?.numberOfColumns === "number" && content.numberOfColumns > consumedCols) {
+    if (numberOfColumns !== undefined && numberOfColumns > consumedCols) {
       issues.push({
         severity: "warning",
-        message: `${displayName}: the file holds ${content.numberOfColumns} columns but only ${consumedCols} map to Titer columns; the extra columns were left out.`,
+        message: `${displayName}: the file holds ${numberOfColumns} columns but only ${consumedCols} map to Titer columns; the extra columns were left out.`,
       });
     }
 
@@ -1162,6 +1308,7 @@ export async function convertPrism(
         ...columns.map((c) => c.values[r] ?? null),
       ]),
       ...(groups !== undefined && replicates !== undefined ? { groups, replicates } : {}),
+      ...(summaryFormat !== undefined ? { summaryFormat } : {}),
       ...(xDateFormat === undefined
         ? {}
         : { xFormat: xDateFormat, ...(xDateConversion === undefined ? {} : { xConversion: xDateConversion }) }),
@@ -1243,7 +1390,7 @@ export async function convertPrism(
     notesText?: string | { string?: string };
     constants?: { name?: string | { string?: string }; value?: string | number | { string?: string } }[];
   }
-  for (const infoUid of sheets.info ?? []) {
+  for (const infoUid of infoSheets) {
     const sheet = await readJson<PrismInfoSheet>(`info/${infoUid}/sheet.json`);
     if (!sheet) {
       issues.push({ severity: "warning", message: `Info sheet “${infoUid}” has no sheet.json; it was left out.` });
@@ -1253,7 +1400,7 @@ export async function convertPrism(
     // unwrapped — it can also be a rich-text object.
     const name = titleOf(infoUid, plainTitle(sheet.title) || "Project info");
     const constants = readInfoConstants(
-      (sheet.constants ?? []).map((c) => ({
+      (Array.isArray(sheet.constants) ? sheet.constants : []).map((c) => ({
         id: newConstantId(),
         name: plainTitle(c.name),
         value:
@@ -1269,7 +1416,7 @@ export async function convertPrism(
       type: "info",
       name,
       parentId: null,
-      info: { constants, notes: plainTitle(sheet.notesText), linkedTableId: null },
+      info: { constants, notes: plainMultiline(sheet.notesText), linkedTableId: null },
     };
     nodes[node.id] = node;
     rootOrder.push(node.id);
@@ -1277,7 +1424,7 @@ export async function convertPrism(
   }
 
   // ── Analyses ──
-  for (const analysisUid of sheets.analyses ?? []) {
+  for (const analysisUid of analysisSheets) {
     const sheet = await readJson<PrismAnalysisSheet>(`analyses/${analysisUid}/sheet.json`);
     if (!sheet) {
       issues.push({ severity: "warning", message: `Analysis “${analysisUid}” has no sheet.json; it was left out.` });
@@ -1354,11 +1501,11 @@ export async function convertPrism(
 
   // ── Orphans: sheets and tables document.json doesn't list ──
   const listedSheets = new Set([
-    ...(sheets.data ?? []),
-    ...(sheets.graphs ?? []),
-    ...(sheets.layouts ?? []),
-    ...(sheets.analyses ?? []),
-    ...(sheets.info ?? []),
+    ...dataSheets,
+    ...graphSheets,
+    ...layoutSheets,
+    ...analysisSheets,
+    ...infoSheets,
   ]);
   for (const path of Object.keys(zip.files)) {
     const m = /^data\/sheets\/([^/]+)\/sheet\.json$/i.exec(path);
@@ -1383,9 +1530,9 @@ export async function convertPrism(
   // parser rejects it ("no readable data tables"). Refuse cleanly instead
   // of writing a .hlx that Titer itself won't read.
   if (report.tables.length === 0) {
-    const dataSheets = sheets.data?.length ?? 0;
+    const dataSheetCount = dataSheets.length;
     throw new Error(
-      `“${sourceName}” has no data tables Titer can use — all ${dataSheets} data sheet(s) were left out, ` +
+      `“${sourceName}” has no data tables Titer can use — all ${dataSheetCount} data sheet(s) were left out, ` +
         `and graphs/layouts are not transferred. Nothing was written.`,
     );
   }
