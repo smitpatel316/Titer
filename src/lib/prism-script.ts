@@ -23,6 +23,8 @@ import { DEFAULT_FIGURE_DPI, DEFAULT_FIGURE_SIZE, DEFAULT_LABEL_STYLE, figureLab
 import { largestAt } from "./image-dpi";
 import { PALETTES, savedPalette } from "./palettes";
 import { parseCsv } from "./prism-csv";
+import { recomputeCalculated } from "./calcvars";
+import { transformTable } from "./transform";
 import { isGrouped } from "./dataset";
 import { seriesKeyOf } from "./columns";
 import { regroupTable, renestTable, replicateXY, writeBlock } from "../views/tables/table-data";
@@ -440,12 +442,23 @@ function uniqueRootName(doc: ScriptDoc, base: string): string {
 }
 
 /** A table's analyses and graphs follow its columns after a scripted change
- *  (the store does the same for a hand edit). */
+ *  (the store does the same for a hand edit). Calculated variables follow
+ *  every edit too, and tables computed from this one take their new values
+ *  through transformTable — otherwise a scripted edit leaves them stale. */
 function followChildren(doc: ScriptDoc, tableId: string) {
   const table = doc.nodes[tableId];
   if (!table?.data) return;
+  // A Transform's values come from its source table, not from formulas.
+  if (!table.transform) table.data = recomputeCalculated(table.data);
   for (const child of Object.values(doc.nodes)) {
     if (child.parentId === tableId) doc.nodes[child.id] = followTable(child, {}, table.data.columns);
+  }
+  // The tables computed from this one follow its new values, recursively.
+  for (const t of Object.values(doc.nodes)) {
+    if (t.transform?.from === tableId && t.data) {
+      t.data = transformTable(table.data, t.tableType!, t.transform, t.data);
+      followChildren(doc, t.id);
+    }
   }
 }
 
@@ -467,7 +480,7 @@ function dataSets(data: TableData, tableType: string | undefined): { name: strin
       cols: data.columns.map((_, i) => i).filter((i) => i >= 1 && seriesKeyOf(data.columns[i]) === key),
     }));
   }
-  if (tableType === "xy") return data.columns.slice(2).map((name, i) => ({ name, cols: [i + 2] }));
+  if (tableType === "xy" || tableType === "survival") return data.columns.slice(2).map((name, i) => ({ name, cols: [i + 2] }));
   return data.columns.slice(1).map((name, i) => ({ name, cols: [i + 1] }));
 }
 
@@ -735,6 +748,7 @@ function execCommand(st: Extract<Statement, { kind: "command" }>, ctx: Ctx) {
           excluded: undefined,
         };
         log(ctx, `ClearTable: erased ${cleared} value${cleared === 1 ? "" : "s"}; the table's links stay.`);
+        followChildren(ctx.doc, table.id);
         return;
       }
       const row = reqInt(line, args[0], "ClearTable's row");
@@ -761,6 +775,7 @@ function execCommand(st: Extract<Statement, { kind: "command" }>, ctx: Ctx) {
       });
       table.data = { ...data, rows, excluded: excluded.length ? excluded : undefined };
       log(ctx, `ClearTable: erased ${cleared} value${cleared === 1 ? "" : "s"} left-and-below the cell.`);
+      followChildren(ctx.doc, table.id);
       return;
     }
     case "deletealldatasets": {
@@ -786,7 +801,12 @@ function execCommand(st: Extract<Statement, { kind: "command" }>, ctx: Ctx) {
       const clear = (args[0] ?? "").toLowerCase() === "clear";
       const id = newId("table");
       const data = structuredClone(table.data!);
-      if (clear) data.rows = data.rows.map((row) => row.map(() => null));
+      if (clear) {
+        // Clearing the copy clears its exclusions too — otherwise the
+        // cleared cells keep phantom `*` markers (Round 2 Issue 57).
+        data.rows = data.rows.map((row) => row.map(() => null));
+        data.excluded = undefined;
+      }
       const node: ProjectNode = {
         ...structuredClone(table),
         id,
@@ -893,7 +913,21 @@ function execCommand(st: Extract<Statement, { kind: "command" }>, ctx: Ctx) {
       const subcol = optInt(line, args[3], "Import's subcolumn", 1);
       const pos = cellPos(table.data!, table.tableType, row, col, subcol, line);
       const block = parseCsv(text).map((r) => r.map((c) => (c === "" ? null : c)));
-      table.data = writeBlock(table.data!, pos.r, pos.c, block, table.tableType ?? "column");
+      if (pos.r === -1) {
+        // Row 0 is the title row, as in InsertData: the first line renames
+        // columns, the rest go to the data rows — passing -1 to writeBlock
+        // would drop the first CSV row (Round 2 Issue 57).
+        const columns = [...table.data!.columns];
+        block[0].forEach((value, j) => {
+          if (value != null && value !== "" && pos.c + j < columns.length) columns[pos.c + j] = value;
+        });
+        const rest = block.slice(1);
+        table.data = rest.length
+          ? writeBlock({ ...table.data!, columns }, 0, pos.c, rest, table.tableType ?? "column")
+          : { ...table.data!, columns };
+      } else {
+        table.data = writeBlock(table.data!, pos.r, pos.c, block, table.tableType ?? "column");
+      }
       followChildren(ctx.doc, table.id);
       return;
     }
@@ -905,10 +939,16 @@ function execCommand(st: Extract<Statement, { kind: "command" }>, ctx: Ctx) {
           .map((id) => ctx.doc.nodes[id])
           .filter((n): n is ProjectNode => !!n && n.type === "table" && !!n.data);
         for (const table of tables) {
-          const dir = filename?.includes("/")
-            ? filename.slice(0, filename.lastIndexOf("/"))
+          // A bare file name writes under SetPath — but an empty SetPath is
+          // no path at all: leaving dir as "" would write "/<table>.csv"
+          // (Round 2 Issue 57), so it falls through to resolveFilePath,
+          // which errors and names SetPath instead.
+          const dir =
+            filename?.includes("/") ? filename.slice(0, filename.lastIndexOf("/"))
             : filename !== undefined
-              ? ctx.path
+              ? ctx.path === ""
+                ? undefined
+                : ctx.path
               : undefined;
           const path =
             dir !== undefined

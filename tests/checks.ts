@@ -37607,6 +37607,75 @@ check("script: DuplicateDataTable copies the table without its children", () => 
   deepStrictEqual(result.doc.childOrder.t1, ["g1"]);
 });
 
+check("script: Round 2 Issue 57 — DuplicateDataTable Clear drops exclusions, Import at row 0 keeps the header row, Survival Y sets skip X, ExportTable All needs SetPath, scripted edits recompute + refresh transforms", () => {
+  // 1. DuplicateDataTable Clear clears the copy's exclusions too — a cleared
+  // cell must not keep a phantom `*` marker.
+  const dupDoc = scriptDoc();
+  dupDoc.nodes.t1.data!.excluded = ["0,2"];
+  const dup = runScript(dupDoc, "DuplicateDataTable Clear");
+  strictEqual(dup.stopped, false);
+  const copy = Object.values(dup.doc.nodes).find((n) => n.type === "table" && n.id !== "t1")!;
+  strictEqual(copy.data!.excluded, undefined);
+  ok(copy.data!.rows.every((row) => row.every((c) => c === null)));
+  // 2. Import at row 0 treats the first line as the header (like InsertData),
+  // not as a data row that writeBlock drops.
+  const imp = runScript(scriptDoc(), `Import "data.csv", 0`, { "data.csv": "Time,Drug\n10,20\n30,40\n50,60" });
+  strictEqual(imp.stopped, false);
+  deepStrictEqual(imp.doc.nodes.t1.data!.columns, ["Title", "Time", "Drug", "Y2"]);
+  deepStrictEqual(imp.doc.nodes.t1.data!.rows[0], ["a", "10", "20", "3"]);
+  deepStrictEqual(imp.doc.nodes.t1.data!.rows[2], ["c", "50", "60", "7"]);
+  // 3. A Survival table's first Y set is its first Y column, not its X (time) column.
+  const surv = scriptDoc();
+  surv.nodes.t1 = {
+    ...scriptTable(),
+    tableType: "survival",
+    name: "Survival",
+    data: {
+      columns: ["Title", "Time", "Ctrl", "Drug"],
+      rows: [
+        ["d1", "0", "5", "6"],
+        ["d2", "1", "7", "8"],
+      ],
+    },
+  };
+  const ins = runScript(surv, "InsertData 1, 1, 1, <Data>, 9, </Data>");
+  strictEqual(ins.stopped, false);
+  deepStrictEqual(ins.doc.nodes.t1.data!.rows[0], ["d1", "0", "9", "6"]);
+  // 4. ExportTable All with a bare file name and no SetPath stops instead of
+  // writing to "/<table>.csv".
+  const exp = runScript(scriptDoc(), `ExportTable All "out.csv"`);
+  strictEqual(exp.stopped, true);
+  ok(scriptLog(exp).includes("no SetPath"), scriptLog(exp));
+  strictEqual(exp.effects.length, 0);
+  // 5. A scripted edit recomputes calculated variables and refreshes the
+  // tables computed from the edited table.
+  const calc = scriptDoc();
+  calc.nodes.t1.data = {
+    columns: ["Title", "X", "Y1", "Y2", "D"],
+    rows: [
+      ["a", "1", "2", "3", "4"],
+      ["b", "2", "4", "5", "8"],
+      ["c", "3", "6", "7", "12"],
+    ],
+    calculated: [{ name: "D", formula: "Y1 * 2" }],
+  };
+  calc.nodes.t2 = {
+    id: "t2",
+    type: "table",
+    name: "Log",
+    parentId: null,
+    tableType: "xy",
+    data: transformTable(calc.nodes.t1.data!, "xy", { from: "t1", kind: "log10" }),
+    transform: { from: "t1", kind: "log10" },
+  };
+  calc.rootOrder = ["t1", "t2"];
+  calc.childOrder.t2 = [];
+  const edited = runScript(calc, "InsertData 1, 1, 1, <Data>, 10, </Data>");
+  strictEqual(edited.stopped, false);
+  strictEqual(edited.doc.nodes.t1.data!.rows[0]?.[4], "20");
+  strictEqual(edited.doc.nodes.t2.data!.rows[0]?.[2], "1");
+});
+
 check("script: ExportTIF validates resolution and mode, and resolves paths through SetPath", () => {
   const badRes = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportTIF "g.tif", 200');
   strictEqual(badRes.stopped, true);
