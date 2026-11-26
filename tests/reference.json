@@ -10458,8 +10458,8 @@
     "x": -0.8483782477,
     "concentration": 0.1417822135,
     "extrapolated": false,
-    "low": -0.8839460931,
-    "high": -0.8132578489
+    "low": -0.883920334,
+    "high": -0.8132425079
    },
    {
     "label": "Sample 2",
@@ -10467,8 +10467,8 @@
     "x": -1.873926759,
     "concentration": 0.01336820945,
     "extrapolated": false,
-    "low": -1.957612247,
-    "high": -1.796313312
+    "low": -1.957589764,
+    "high": -1.796313186
    }
   ],
   "analyzed": {
@@ -14589,11 +14589,11 @@
    },
    {
     "label": "AICc",
-    "value": -19.57336666
+    "value": -13.97336666
    },
    {
     "label": "ΔAICc (primary − comparison)",
-    "value": -4.620140291
+    "value": -8.353473624
    },
    {
     "label": "Sum of squares (comparison model)",
@@ -14655,7 +14655,7 @@
     "n": 9
    }
   ],
-  "notes": "Least-squares fit (\"Line\") of “Y1” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Compared with “Second order polynomial (quadratic)”. Extra sum-of-squares F test: the extra parameters of the “Second order polynomial (quadratic)” model are not justified (F = 0.6515, P = 0.4562). AICc prefers “Line” (ΔAICc = -4.62).",
+  "notes": "Least-squares fit (\"Line\") of “Y1” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Compared with “Second order polynomial (quadratic)”. Extra sum-of-squares F test: the extra parameters of the “Second order polynomial (quadratic)” model are not justified (F = 0.6515, P = 0.4562). AICc prefers “Line” (ΔAICc = -8.353).",
   "coefficients": [
    {
     "term": "Intercept",
@@ -14692,7 +14692,7 @@
     "Y3"
    ]
   },
-  "summary": "The data don't show that “Y1” and “undefined” reach half of their effect at different concentrations (their midpoints; extra sum-of-squares F test, P = 0.4562)."
+  "summary": "The data don't show that the “Line” and “Second order polynomial (quadratic)” models fit “Y1” differently (extra sum-of-squares F test, P = 0.4562): the simpler model describes the data as well."
  },
  "nonlinear-regression xy {\"y\":\"Y1\",\"model\":\"line\",\"weights\":\"1/y2\"}": {
   "testType": "nonlinear-regression",
@@ -14868,7 +14868,7 @@
   "checks": [
    {
     "ok": true,
-    "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the residuals P = 0.2174)."
+    "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the weighted residuals P = 0.1933)."
    }
   ]
  },
@@ -14895,11 +14895,11 @@
    },
    {
     "label": "AICc",
-    "value": -5.191034659
+    "value": 3.808965341
    },
    {
     "label": "ΔAICc (primary − comparison)",
-    "value": 3.107652086
+    "value": 6.107652086
    },
    {
     "label": "Sum of squares (comparison model)",
@@ -14991,7 +14991,7 @@
     "n": 10
    }
   ],
-  "notes": "Least-squares fit (\"Sigmoidal, 4PL, X is log(concentration)\") of “Response” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Compared with “log(agonist) vs. response, standard slope (3PL)”. Extra sum-of-squares F test: the extra parameters of the “Sigmoidal, 4PL, X is log(concentration)” model are not justified (F = 2.012, P = 0.2058). AICc prefers “log(agonist) vs. response, standard slope (3PL)” (ΔAICc = 3.108).",
+  "notes": "Least-squares fit (\"Sigmoidal, 4PL, X is log(concentration)\") of “Response” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Compared with “log(agonist) vs. response, standard slope (3PL)”. Extra sum-of-squares F test: the extra parameters of the “Sigmoidal, 4PL, X is log(concentration)” model are not justified (F = 2.012, P = 0.2058). AICc prefers “log(agonist) vs. response, standard slope (3PL)” (ΔAICc = 6.108).",
   "coefficients": [
    {
     "term": "Bottom",
@@ -15045,7 +15045,7 @@
    "detail": "on “X”",
    "left": []
   },
-  "summary": "The data don't show that “Response” and “undefined” reach half of their effect at different concentrations (their EC50s; extra sum-of-squares F test, P = 0.2058)."
+  "summary": "The data don't show that the “Sigmoidal, 4PL, X is log(concentration)” and “log(agonist) vs. response, standard slope (3PL)” models fit “Response” differently (extra sum-of-squares F test, P = 0.2058): the simpler model describes the data as well."
  },
  "nonlinear-regression doseLog {\"model\":\"sigmoidal-4pl-logx\",\"fixed\":{\"HillSlope\":1}}": {
   "testType": "nonlinear-regression",
@@ -15704,11 +15704,11 @@
   "stats": [
    {
     "label": "AICc",
-    "value": -4.713327053
+    "value": 13.95333961
    },
    {
     "label": "ΔAICc (primary − comparison)",
-    "value": -8.532046258
+    "value": 4.534620409
    },
    {
     "label": "Sum of squares (comparison model)",
@@ -15785,7 +15785,7 @@
     "n": 8
    }
   ],
-  "notes": "Least-squares fit (\"Sigmoidal, 4PL, X is concentration\") of “Response” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Compared with “Hyperbola (X is concentration)”. The models are not nested, so no F test applies — the AICc comparison is the valid one. AICc prefers “Sigmoidal, 4PL, X is concentration” (ΔAICc = -8.532).",
+  "notes": "Least-squares fit (\"Sigmoidal, 4PL, X is concentration\") of “Response” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Compared with “Hyperbola (X is concentration)”. The models are not nested, so no F test applies — the AICc comparison is the valid one. AICc prefers “Hyperbola (X is concentration)” (ΔAICc = 4.535).",
   "coefficients": [
    {
     "term": "Bottom",
@@ -15839,7 +15839,7 @@
    "detail": "on “X”",
    "left": []
   },
-  "summary": "“Response” runs between two plateaus, 0.9957 and 99.38, and is halfway between them when “X” is 1.134 (the EC50; 95% CI 1.095 to 1.172). The curve accounts for 100% of the variation in “Response” (R²)."
+  "summary": "On “Response”, the “Hyperbola (X is concentration)” model is preferred over the “Sigmoidal, 4PL, X is concentration” model (ΔAICc = 4.535; the lower AICc wins)."
  },
  "nonlinear-regression xyRep {\"y\":\"R1\",\"model\":\"line\",\"weights\":\"1/sd2\"}": {
   "testType": "nonlinear-regression",
@@ -16086,8 +16086,8 @@
     "x": -0.8467045144,
     "concentration": 0.1423296841,
     "extrapolated": false,
-    "low": -0.8604134836,
-    "high": -0.8330681834
+    "low": -0.8603871587,
+    "high": -0.8330332214
    },
    {
     "label": "Sample 2",
@@ -16095,8 +16095,8 @@
     "x": -1.875777829,
     "concentration": 0.01331135209,
     "extrapolated": false,
-    "low": -1.90923885,
-    "high": -1.843279715
+    "low": -1.909247291,
+    "high": -1.843280638
    },
    {
     "label": "Row 13",
@@ -16105,7 +16105,7 @@
     "concentration": 0.0002826812518,
     "extrapolated": true,
     "low": null,
-    "high": -2.889720047
+    "high": -2.889719056
    },
    {
     "label": "Sample 4",
@@ -16609,8 +16609,8 @@
     "y": 15,
     "x": 6.960767219,
     "extrapolated": false,
-    "low": 6.80229467,
-    "high": 7.129515706
+    "low": 6.802298107,
+    "high": 7.129511821
    }
   ],
   "analyzed": {
@@ -22816,7 +22816,7 @@
     "N3B"
    ]
   },
-  "summary": "“N3A” runs between two plateaus, — and —, and is halfway between them at a concentration of 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N3A” (R²)."
+  "summary": "“N3A” runs between two plateaus, 0 and 100, and is halfway between them at a concentration of 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N3A” (R²)."
  },
  "nonlinear-regression doseLogB6X {\"y\":\"N4A\",\"model\":\"agonist-4pl-normalized-logx\"}": {
   "testType": "nonlinear-regression",
@@ -22937,7 +22937,7 @@
     "N3B"
    ]
   },
-  "summary": "“N4A” runs between two plateaus, — and —, and is halfway between them at a concentration of 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N4A” (R²)."
+  "summary": "“N4A” runs between two plateaus, 0 and 100, and is halfway between them at a concentration of 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N4A” (R²)."
  },
  "nonlinear-regression doseLogB6X {\"y\":\"N3I\",\"model\":\"inhibitor-3pl-normalized-logx\"}": {
   "testType": "nonlinear-regression",
@@ -23048,7 +23048,7 @@
     "N3B"
    ]
   },
-  "summary": "“N3I” runs between two plateaus, — and —, and is halfway between them at a concentration of 1 (the IC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N3I” (R²)."
+  "summary": "“N3I” runs between two plateaus, 0 and 100, and is halfway between them at a concentration of 1 (the IC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N3I” (R²)."
  },
  "nonlinear-regression doseLogB6X {\"y\":\"N4I\",\"model\":\"inhibitor-4pl-normalized-logx\"}": {
   "testType": "nonlinear-regression",
@@ -23169,7 +23169,7 @@
     "N3B"
    ]
   },
-  "summary": "“N4I” runs between two plateaus, — and —, and is halfway between them at a concentration of 1 (the IC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N4I” (R²)."
+  "summary": "“N4I” runs between two plateaus, 0 and 100, and is halfway between them at a concentration of 1 (the IC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N4I” (R²)."
  },
  "nonlinear-regression doseLogB6X {\"y\":\"N3A\",\"model\":\"agonist-3pl-normalized-logx\",\"compareWith\":\"N3B\",\"compare\":\"ec50\"}": {
   "testType": "nonlinear-regression",
@@ -23680,7 +23680,7 @@
     "N4IX"
    ]
   },
-  "summary": "“N3AX” runs between two plateaus, — and —, and is halfway between them when “X” is 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N3AX” (R²)."
+  "summary": "“N3AX” runs between two plateaus, 0 and 100, and is halfway between them when “X” is 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N3AX” (R²)."
  },
  "nonlinear-regression doseXB6X {\"y\":\"N4AX\",\"model\":\"agonist-4pl-normalized-x\"}": {
   "testType": "nonlinear-regression",
@@ -23787,7 +23787,7 @@
     "N4IX"
    ]
   },
-  "summary": "“N4AX” runs between two plateaus, — and —, and is halfway between them when “X” is 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N4AX” (R²)."
+  "summary": "“N4AX” runs between two plateaus, 0 and 100, and is halfway between them when “X” is 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N4AX” (R²)."
  },
  "nonlinear-regression doseXB6X {\"y\":\"N3IX\",\"model\":\"inhibitor-3pl-normalized-x\"}": {
   "testType": "nonlinear-regression",
@@ -23884,7 +23884,7 @@
     "N4IX"
    ]
   },
-  "summary": "“N3IX” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “N3IX” (R²)."
+  "summary": "“N3IX” runs between two plateaus, 0 and 100, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “N3IX” (R²)."
  },
  "nonlinear-regression doseXB6X {\"y\":\"N4IX\",\"model\":\"inhibitor-4pl-normalized-x\"}": {
   "testType": "nonlinear-regression",
@@ -23991,7 +23991,7 @@
     "N3IX"
    ]
   },
-  "summary": "“N4IX” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “N4IX” (R²)."
+  "summary": "“N4IX” runs between two plateaus, 0 and 100, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “N4IX” (R²)."
  },
  "nonlinear-regression linesX {\"y\":\"LO\",\"model\":\"line-through-origin\"}": {
   "testType": "nonlinear-regression",
@@ -27442,7 +27442,7 @@
   "stats": [
    {
     "label": "AICc",
-    "value": -960.3671694
+    "value": -958.8671694
    },
    {
     "label": "R squared",
@@ -27550,7 +27550,7 @@
   "stats": [
    {
     "label": "AICc",
-    "value": -955.0667448
+    "value": -953.9785095
    },
    {
     "label": "R squared",
@@ -27648,7 +27648,7 @@
   "stats": [
    {
     "label": "AICc",
-    "value": -369.890701
+    "value": -368.390701
    },
    {
     "label": "R squared",
@@ -27918,7 +27918,7 @@
   "stats": [
    {
     "label": "AICc",
-    "value": -960.3671694
+    "value": -958.8671694
    },
    {
     "label": "R squared",
@@ -41053,7 +41053,7 @@
    "detail": "5 rows, each compared",
    "left": []
   },
-  "summary": "The data don't show a difference between “A” and “B” in any of the 5 rows (each row's P value corrected for testing every row)."
+  "summary": "“A” and “B” differ significantly in 4 of 5 rows (each row's P value corrected for testing every row)."
  },
  "multiple-t-tests twoGroups {\"paired\":true,\"gaussian\":true,\"pooledSd\":false,\"correction\":\"none\"}": {
   "testType": "multiple-t-tests",
@@ -42097,7 +42097,7 @@
    "detail": "5 rows, each compared",
    "left": []
   },
-  "summary": "The data don't show a difference between “A” and “B” in any of the 5 rows (each row's P value corrected for testing every row)."
+  "summary": "“A” and “B” differ significantly in 4 of 5 rows (each row's P value corrected for testing every row)."
  },
  "multiple-t-tests twoGroups {\"paired\":false,\"gaussian\":true,\"pooledSd\":false,\"correction\":\"fdr-by\"}": {
   "testType": "multiple-t-tests",
@@ -42249,7 +42249,7 @@
    "detail": "5 rows, each compared",
    "left": []
   },
-  "summary": "The data don't show a difference between “A” and “B” in any of the 5 rows (each row's P value corrected for testing every row)."
+  "summary": "“A” and “B” differ significantly in 3 of 5 rows (each row's P value corrected for testing every row)."
  },
  "multiple-t-tests twoGroups {\"paired\":false,\"gaussian\":true,\"pooledSd\":false,\"correction\":\"fdr\",\"q\":1}": {
   "testType": "multiple-t-tests",
@@ -42401,7 +42401,7 @@
    "detail": "5 rows, each compared",
    "left": []
   },
-  "summary": "The data don't show a difference between “A” and “B” in any of the 5 rows (each row's P value corrected for testing every row)."
+  "summary": "“A” and “B” differ significantly in 3 of 5 rows (each row's P value corrected for testing every row)."
  },
  "three-way-anova grouped3way {\"posthoc\":\"none\"}": {
   "testType": "three-way-anova",
@@ -48389,7 +48389,6 @@
    "how": "list",
    "detail": "on “Height”",
    "left": [
-    "Height",
     "Age",
     "Dose"
    ]
@@ -48462,7 +48461,7 @@
    "how": "list",
    "detail": "on “Age”",
    "left": [
-    "Age",
+    "Weight",
     "Dose"
    ]
   },
@@ -54454,7 +54453,7 @@
    "detail": "counted in 4 rows",
    "left": []
   },
-  "summary": "The share of “Success” rises or falls steadily down the rows, in their order (P = 0.0006189).",
+  "summary": "The share of “Success” rises or falls steadily down the rows, in their order (P < 0.0001).",
   "checks": [
    {
     "ok": true,
@@ -54628,7 +54627,7 @@
    "detail": "counted in 2 rows",
    "left": []
   },
-  "summary": "The share of “Dose 1” rises or falls steadily down the rows, in their order (P = 0.0006189).",
+  "summary": "The share of “Dose 1” rises or falls steadily down the rows, in their order (P < 0.0001).",
   "checks": [
    {
     "ok": true,
