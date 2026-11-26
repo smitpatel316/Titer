@@ -1591,8 +1591,9 @@ fn accent_color() -> Option<String> {
     }
 }
 
-/// The text on the clipboard, if it holds some: what a command of Helix's own reads (Paste
+/// The text on the clipboard, if it holds some: what a command of Titer's own reads (Paste
 /// Column Names), which the web view could only do after asking, unlike a paste.
+#[cfg(target_os = "macos")]
 #[tauri::command]
 fn clipboard_text() -> Option<String> {
     unsafe {
@@ -1603,6 +1604,14 @@ fn clipboard_text() -> Option<String> {
         let utf8: *const std::ffi::c_char = objc2::msg_send![text.as_ref()?, UTF8String];
         Some(std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned())
     }
+}
+
+/// Linux: no NSPasteboard here — the page's Paste Names reads nothing, like an
+/// empty clipboard (the regular paste path still works).
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn clipboard_text() -> Option<String> {
+    None
 }
 
 /// macOS's own spinning wheel over a project window while an analysis runs, centered
