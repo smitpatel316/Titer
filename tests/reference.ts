@@ -2764,6 +2764,29 @@ const demingConstY = table(
   ],
 );
 
+// 1e13-scale precision fixtures (Nov 2026 precision lane): values ~1e13 with
+// O(1) spread — the scale at which uncentered lm/aov lose the differences
+// between groups (ANOVA F 159.5 vs exact 1509.9 on the NIST-SmLs09 shape;
+// linear regression erroring outright). The tables are the doubles the TS
+// side sees (repr strings round-trip exactly); the exact values (mpmath,
+// 50 digits, computed from those doubles) live in probe/expected-precision.json.
+// The intercept at x = 0 is genuinely ~-1.2e10 here — the slope's sampling
+// error times 1e13 — not a bug, so do not "fix" the pins.
+const precisionFix = JSON.parse(
+  readFileSync(new URL("./testdata/precision-1e13.json", import.meta.url), "utf8"),
+) as Record<string, TableData>;
+const anovaBig = precisionFix.anovaBig;
+const anovaSmall = precisionFix.anovaSmall;
+const xyBig = precisionFix.xyBig;
+const xyBigOrigin = precisionFix.xyBigOrigin;
+const multiBig = precisionFix.multiBig;
+// Multi-Y twin of xyBig: Y2 is the origin table's Y (a second 1e13 series),
+// so the per-set fit path is pinned too.
+const xyBigMulti: TableData = {
+  columns: ["Title", "X", "Y", "Y2"],
+  rows: xyBig.rows.map((r, i) => [r[0], r[1], r[2], xyBigOrigin.rows[i][2]]),
+};
+
 // ── What to run ──────────────────────────────────────────────────────────
 
 const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
@@ -2843,6 +2866,11 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["column", column, "anova", { posthoc: "none", equalSd: false }],
   ["column", column, "anova", { posthoc: "games-howell", equalSd: false }],
   ["column", column, "anova", { posthoc: "t3", equalSd: false }],
+  // 1e13-scale precision (Nov 2026): the NIST-SmLs09 shape (9 groups × 201)
+  // and the small-n twin — pre-fix the big F was 5798.79, post-fix 5801.207
+  // (exact 5801.207149667295); the pins are the centered-aov values.
+  ["anovaBig", anovaBig, "anova", { posthoc: "none" }],
+  ["anovaSmall", anovaSmall, "anova", { posthoc: "none" }],
   // One-way ANOVA completion (seq 191): the Brown-Forsythe ANOVA beside
   // Welch's (its F*/df/P ride in the `equalSd: false` case above), the False
   // Discovery Rate after the ordinary ANOVA (pooled-SD t tests) and after
@@ -2935,6 +2963,13 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["xy", xy, "linear-regression", { forceOrigin: false }],
   ["xy", xy, "linear-regression", { y: "Y2", forceOrigin: false }],
   ["xy", xy, "linear-regression", { y: "Y3", forceOrigin: true }],
+  // 1e13-scale precision (Nov 2026): pre-fix the unweighted fit errored
+  // ("subscript out of bounds") and the weighted one too; post-fix both match
+  // the mpmath exact values to ~1e-12. The multi-Y case pins the per-set fit
+  // path (Y2 is the origin table's Y, fitted with an intercept).
+  ["xyBig", xyBig, "linear-regression", { forceOrigin: false }],
+  ["xyBig", xyBig, "linear-regression", { forceOrigin: false, weights: "1/y" }],
+  ["xyBigMulti", xyBigMulti, "linear-regression", { ys: ["Y", "Y2"], forceOrigin: false }],
   // Deming regression (plan 13): the reference case at λ = 1 and λ = 0.25
   // (the λ-sensitivity check lives in disagreements() below), plus the
   // error paths — λ ≤ 0, no covariation, too few pairs, constant X/Y.
@@ -3512,6 +3547,10 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["multiple", multiple, "correlation-matrix", { method: "spearman" }],
   ["multiple", multiple, "multiple-regression", { dependent: "Weight" }],
   ["multiple", multiple, "multiple-regression", { dependent: "Weight", predictors: ["Height", "Age"] }],
+  // 1e13-scale precision (Nov 2026): pre-fix b0 was off by 5.4e-4 relative
+  // and F by 5.0e-3; post-fix all coefficients, SEs and the ANOVA table match
+  // the mpmath exact values to ~1e-15.
+  ["multiBig", multiBig, "multiple-regression", { dependent: "Y" }],
   ["multiple", multiple, "linear-regression", { x: "Height", y: "Weight", forceOrigin: false }],
   ["multiple", multiple, "linear-regression", { x: "Age", y: "Height", forceOrigin: true }],
   ["multiple", multiple, "descriptive-statistics"],
@@ -4022,6 +4061,37 @@ async function disagreements(): Promise<string[]> {
       if (!forceOrigin && (rR == null || js == null || Math.abs(rR - js.r) > 1e-9))
         out.push(`Regression of ${y.name}: graph r ${js?.r}, R's ${rR}`);
     }
+  }
+  // 1e13-scale precision, through the origin (Nov 2026): the origin fit's
+  // slope, CI and R² match the mpmath exact values (probe/expected-precision.json)
+  // to ~1e-15 — the scaled fit. Its P value is NOT pinned to 10 digits: at
+  // this scale the residuals are ~25 ULPs, so the SSE is only accurate to
+  // ~1% in double precision no matter the rearrangement, and p ∝ t^-9
+  // amplifies that to ~12% (measured 1.94e-133 vs exact 2.21e-133; the
+  // unscaled fit was 34% off). The loose bound below still catches a
+  // regression to the unscaled fit or a gross error.
+  {
+    const o = await runAnalysis("linear-regression", xyBigOrigin, { forceOrigin: true });
+    const oStat = (label: string) =>
+      "error" in o ? null : o.stats.find((s) => s.label === label)?.value;
+    const [oSlope, oLo, oHi, oR2, oP] = [
+      oStat("Slope"),
+      oStat("Slope 95% CI lower"),
+      oStat("Slope 95% CI upper"),
+      oStat("R squared"),
+      oStat("P value (slope ≠ 0)"),
+    ];
+    const rel = (got: number | null | undefined, want: number) =>
+      got == null ? Infinity : Math.abs(got - want) / Math.abs(want);
+    if (
+      rel(oSlope, 2.0000000000000036) > 1e-9 ||
+      rel(oLo, 2.0000000000000004) > 1e-9 ||
+      rel(oHi, 2.0000000000000067) > 1e-9 ||
+      rel(oR2, 1) > 1e-9 ||
+      oP == null ||
+      rel(oP, 2.2055762756384253e-133) > 0.25
+    )
+      out.push(`Origin fit at 1e13: slope ${oSlope}, CI [${oLo}, ${oHi}], R² ${oR2}, P ${oP}`);
   }
   // Deming regression (plan 13): the TS closed form must match the R closed
   // form on the reference table, and λ must run the right way round. The

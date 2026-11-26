@@ -213,7 +213,9 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
     const logs = lognormal(p) ? `;${g.map((x) => `${x}<-log(${x})`).join(";")};v<-log(v)` : "";
     const setup =
       `${R_EFFECT_CI};${groupsSetup(groups)}${logs};G<-list(${g.join(",")});` +
-      `n<-lengths(G);m<-sapply(G,mean);s2<-sapply(G,var);a<-summary(aov(v~gr))[[1]]`;
+      // Centered first: aov's QR on values alike in their first digits (1000000000000.4…) loses
+      // the differences between groups (NIST's SmLs09: F 687 instead of 2001).
+      `n<-lengths(G);m<-sapply(G,mean);s2<-sapply(G,var);a<-summary(aov(I(v-mean(v))~gr))[[1]]`;
     // Brown-Forsythe's F* (Brown and Forsythe, 1974): the between-group sum of squares
     // over Σ(1 − n_i/N)·s_i², its denominator df from the weights c_i =
     // (1 − n_i/N)·s_i² / Σ(1 − n_j/N)·s_j² — the second unequal-variance ANOVA Prism

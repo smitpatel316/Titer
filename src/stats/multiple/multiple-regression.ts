@@ -74,36 +74,45 @@ export async function runMultipleRegression(
   // Diagnostics (seq 198): the ANOVA table's sums of squares, AIC/AICc
   // (k = coefficients + residual variance; AICc undefined when n − k − 1 ≤
   // 0), one VIF per predictor (1/(1 − R²ⱼ), predictor j regressed on the
-  // others — invariant to the centering above, so the raw X is used; a
-  // single predictor has VIF 1 by definition), and the coefficients'
-  // covariance matrix on the uncentered scale (J·vcov(m)·J′, J the
-  // centering back-transform — the same transform the intercept's SE
-  // above uses, extended to the whole matrix; verified against the
-  // direct uncentered vcov in Python).
+  // others — R² is translation-invariant, so the auxiliary regression is
+  // centered the same way as the main fit; uncentered it returns R² = 0 at
+  // 1e13 scale and every VIF reads 1 — a single predictor has VIF 1 by
+  // definition), and the coefficients' covariance matrix on the uncentered
+  // scale (J·vcov(m)·J′, J the centering back-transform — the same transform
+  // the intercept's SE above uses, extended to the whole matrix; verified
+  // against the direct uncentered vcov in Python).
   const vifAssigns =
     p === 1
       ? "vf0=1"
       : predictors
-          .map((_, j) => `vf${j}=1/(1-summary(lm(X[,${j + 1}]~X[,-${j + 1}]))$r.squared)`)
+          .map(
+            (_, j) =>
+              `vf${j}=1/(1-summary(lm(I(X[,${j + 1}]-mean(X[,${j + 1}]))~sweep(X[,-${j + 1},drop=FALSE],2,colMeans(X[,-${j + 1},drop=FALSE]))))$r.squared)`,
+          )
           .join(",");
   const cvAssigns = Array.from({ length: p + 1 }, (_, i) =>
     Array.from({ length: p + 1 }, (_, j) => `cv${i}_${j}=V0[${i + 1},${j + 1}]`).join(","),
   ).join(",");
   const diagCode =
-    `nn<-length(y);k<-length(coef(m))+1;ssr<-sum((fitted(m)-mean(y))^2);sse<-sum(residuals(m)^2);` +
+    // On the centered fit the fitted values already sit about 0 (their mean is
+    // the centered Y's mean), so the regression sum of squares is the sum of
+    // their squares — the old (fitted − mean(y))² reads 8e26 garbage here,
+    // fitted ~0 against mean(y) ~1e13.
+    `nn<-length(y);k<-length(coef(m))+1;ssr<-sum(fitted(m)^2);sse<-sum(residuals(m)^2);` +
     `aic<-AIC(m);aicc<-if(nn-k-1>0)aic+2*k*(k+1)/(nn-k-1) else NA;` +
     `Vcf<-vcov(m);J<-rbind(c(1,-mx),cbind(0,diag(${p})));V0<-J%*%Vcf%*%t(J);`;
-  // The predictors centered (upstream 1.1.0: the same fit, more precise for values
-  // far from 0 for their spread); the intercept is taken back to 0 with its exact
-  // SE (the centered intercept is uncorrelated with the slopes). Centering via
-  // `sweep` keeps coef(m)'s NA positions, so Titer's `nal`-based alias indexing
-  // below composes with it — the back-transformation only runs when no
-  // coefficient is NA (when one is, the aliased-predictor error fires first).
-  // Dummy columns centre like any other column (0/1 → mean = level share).
+  // The predictors and Y centered (upstream 1.1.1: the same fit, more precise in
+  // lm's QR for values far from 0 for their spread); the intercept is taken back
+  // to 0 with its exact SE (the centered intercept is uncorrelated with the
+  // slopes). Centering via `sweep` keeps coef(m)'s NA positions, so Titer's
+  // `nal`-based alias indexing below composes with it — the back-transformation
+  // only runs when no coefficient is NA (when one is, the aliased-predictor
+  // error fires first). Dummy columns centre like any other column (0/1 → mean
+  // = level share).
   const code =
     `y<-${rVec(aligned[0])};X<-cbind(${design.map((_, i) => rVec(aligned[i + 1])).join(",")});` +
-    `mx<-colMeans(X);m<-lm(y~sweep(X,2,mx));s<-summary(m);co<-s$coefficients;na<-is.na(coef(m));nal<-any(na);f<-s$fstatistic;` +
-    `if(!nal){V<-vcov(m)[-1,-1,drop=FALSE];b0<-co[1,1]-sum(co[-1,1]*mx);se0<-sqrt(co[1,2]^2+drop(mx%*%V%*%mx));` +
+    `mx<-colMeans(X);my<-mean(y);m<-lm(I(y-my)~sweep(X,2,mx));s<-summary(m);co<-s$coefficients;na<-is.na(coef(m));nal<-any(na);f<-s$fstatistic;` +
+    `if(!nal){V<-vcov(m)[-1,-1,drop=FALSE];b0<-co[1,1]+my-sum(co[-1,1]*mx);se0<-sqrt(co[1,2]^2+drop(mx%*%V%*%mx));` +
     `t0<-b0/se0;co[1,]<-c(b0,se0,t0,2*pt(-abs(t0),df.residual(m)))};` +
     diagCode +
     `c(r2=s$r.squared,adjr2=s$adj.r.squared,aic=aic,aicc=aicc,ssr=ssr,sse=sse,` +
