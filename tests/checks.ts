@@ -19506,10 +19506,11 @@ check("a shared legend hides each panel's own legend (BUG-REPORT #15)", () => {
   const view = readFileSync("src/views/figures/figure-view.tsx", "utf8");
   ok(view.includes('hideLegend={sharedLegend === "shared" && legend.ok}'), "the preview must pass hideLegend");
   const exporter = readFileSync("src/views/figures/figure-export.ts", "utf8");
-  // seq 216: both call sites gained a trailing colorMode argument; the
+  // seq 216: both call sites gained a trailing colorMode argument; R2
+  // Issues 50/51 added a trailing opts argument (run/rootOrder); the
   // legend.ok position (hideLegend) is unchanged.
-  ok(exporter.includes("}, format, dpi, legend.ok, colorMode)"), "the raster export must pass legend.ok");
-  ok(exporter.includes('}, "svg", dpi, legend.ok, colorMode)'), "the SVG export must pass legend.ok");
+  ok(exporter.includes("}, format, dpi, legend.ok, colorMode, opts)"), "the raster export must pass legend.ok");
+  ok(exporter.includes('}, "svg", dpi, legend.ok, colorMode, opts)'), "the SVG export must pass legend.ok");
 });
 
 // ── seq 173: MCP headless export draws graph overlays ────────────────
