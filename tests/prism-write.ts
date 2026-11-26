@@ -738,6 +738,32 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
     if (d.uid) dataSetUids.add(d.uid);
   }
   const w13Problems: string[] = [];
+  // Positional letter of every written dataset within its parent table
+  // (A…Z, then AA, AB…): real Prism writes the dataset's TABLE letter,
+  // not its ordinal within the analysis's input list — verified across
+  // the public .prism corpus (2021/2021 inputs match positional, 139
+  // decisive for positional, 0 for ordinal; e.g. an analysis taking only
+  // a table's 2nd dataset writes input 0 idx "B"). The old check here
+  // asserted input i → letter(i), which contradicts that: the demo's
+  // Treated-only NLREG (params.y "Treated", dataset position 1) must
+  // write idx "B", and the R2-26 writer does. Same lettering as the
+  // writer's datasetLetterIdx, duplicated so the check stays independent.
+  const w13LetterIdx = (i: number): string => {
+    let n = i + 1;
+    let s = "";
+    while (n > 0) {
+      const r = (n - 1) % 26;
+      s = String.fromCharCode(65 + r) + s;
+      n = Math.floor((n - 1) / 26);
+    }
+    return s;
+  };
+  const w13DatasetLetter = new Map<string, string>();
+  for (const p of Object.keys(w13Zip.files)) {
+    if (!p.startsWith("data/sheets/") || !p.endsWith("/sheet.json") || w13Zip.files[p].dir) continue;
+    const d = JSON.parse(await w13Zip.file(p)!.async("string")) as { table?: { dataSets?: string[] } };
+    (d.table?.dataSets ?? []).forEach((uid, pos) => w13DatasetLetter.set(uid, w13LetterIdx(pos)));
+  }
   let w13Nlreg = 0;
   let w13Survival = 0;
   let w13Mtt = 0;
@@ -785,7 +811,9 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
     const inputs = sheet.inputDataSets ?? [];
     const seenUids = new Set<string>();
     inputs.forEach((inp, i) => {
-      if (typeof inp.idx !== "string" || inp.idx !== String.fromCharCode(65 + i))
+      // idx is the input dataset's positional letter in its parent table
+      // (see the w13DatasetLetter note above), not letter(i).
+      if (typeof inp.idx !== "string" || inp.idx !== w13DatasetLetter.get(inp.uid ?? ""))
         w13Problems.push(`${dirUid}: input ${i} idx ${JSON.stringify(inp.idx)}`);
       if (!inp.uid || !dataSetUids.has(inp.uid)) w13Problems.push(`${dirUid}: input ${i} uid not a dataset`);
       if (inp.uid && seenUids.has(inp.uid)) w13Problems.push(`${dirUid}: duplicate input uid ${inp.uid}`);
