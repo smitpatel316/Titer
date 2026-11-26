@@ -18,12 +18,12 @@ it doesn't.
   also computes, the test checks both agree. The survival analyses are checked against the
   published results of the Freireich leukemia trial.
 - **Checked against independent references.** NIST's Statistical Reference Datasets, every
-  one a Helix analysis can fit (`tests/nist/`, their certified values read from the files
+  one a Titer analysis can fit (`tests/nist/`, their certified values read from the files
   themselves): all 9 for the mean and SD, all 11 for one-way ANOVA, linear regression with
   and without the origin, polynomials up to degree 10 (Filip, which many programs fail),
-  multiple regression (Longley) and the nonlinear models Helix has (Misra1d, Rat42; MGH17,
+  multiple regression (Longley) and the nonlinear models Titer has (Misra1d, Rat42; MGH17,
   whose curve isn't a decay's, is refused, never fitted wrong). Where NIST's values can't be
-  held exactly by a computer, Helix gives the result of the values as stored, checked with
+  held exactly by a computer, Titer gives the result of the values as stored, checked with
   exact arithmetic. Values far from 0 for their spread (1000000000000.4…) are centered before
   an ANOVA or a regression, so they lose no precision. Also published examples (Dunnett's tables, Grubbs' critical
   values, the space shuttle O-ring data, Freireich's leukemia trial, Lakens' effect sizes,

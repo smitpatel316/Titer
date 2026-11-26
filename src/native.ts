@@ -703,7 +703,7 @@ export function onCloseRequested(canClose: () => Promise<boolean>) {
 /** The accent color chosen in System Settings ▸ Appearance (#RRGGBB), or null. */
 export const accentColor = () => (isNative ? invoke<string | null>("accent_color") : Promise.resolve(null));
 
-/** The text on the clipboard, read for a command of Helix's own (a paste gets it with its
+/** The text on the clipboard, read for a command of Titer's own (a paste gets it with its
  *  event); in a browser, as it allows. */
 export const clipboardText = () =>
   isNative ? invoke<string | null>("clipboard_text") : navigator.clipboard.readText().catch(() => null);
