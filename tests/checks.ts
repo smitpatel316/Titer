@@ -20324,6 +20324,87 @@ check("seq 548: vector PDF/EPS draw super/subscripts as raised/lowered runs", ()
   ok(eps.includes("8.4 scalefont"), "EPS sets the 8.4pt script size");
 });
 
+// ── Label-format recheck fixes (seq 554/555/563/569; BUG-REPORT #82/83/91/97) ──
+// Pre-fix pins: every check below failed on the 60f3da5 base — `<b>`/`<br>`
+// escaped to literals, a second format pass double-escaped `&`/`\_`, a
+// `<sup>` in the input skipped all escaping (XSS), annotation `name`s were
+// rewritten (breaking point-label drag keys), and `10^−6` / `ctrl_1_a`
+// mis-split. Each passes with the lane.
+check("seq 554: safe <br>/<b>/<i> formatting survives label formatting", () => {
+  // The survival number-at-risk header is built as internal HTML.
+  strictEqual(formatLabelForPlotly("<b>Number at risk</b>"), "<b>Number at risk</b>");
+  strictEqual(formatLabelForPlotly("GeneX<br>log2FC: 1.5"), "GeneX<br>log2FC: 1.5");
+  strictEqual(formatLabelForPlotly("<i>italic</i> note"), "<i>italic</i> note");
+  // A safe tag does not excuse the rest of the string from escaping.
+  strictEqual(formatLabelForPlotly("A & B<br>line2"), "A &amp; B<br>line2");
+  // Through the whole-figure walk, on the survival header annotation.
+  const fig = formatFigureLabels({
+    data: [],
+    layout: { annotations: [{ name: "hdr", text: "<b>Number at risk</b>" }] },
+  });
+  strictEqual(
+    ((fig.layout as { annotations: { text: string }[] }).annotations[0]!).text,
+    "<b>Number at risk</b>",
+  );
+});
+
+check("seq 555: label formatting is idempotent — no double-escaping", () => {
+  const amp = formatLabelForPlotly("A & B");
+  strictEqual(amp, "A &amp; B");
+  strictEqual(formatLabelForPlotly(amp), amp);
+  const esc = formatLabelForPlotly("WT\\_1");
+  strictEqual(esc, "WT&#95;1");
+  strictEqual(formatLabelForPlotly(esc), esc);
+  // The build formats the figure twice (buildBaseFigure, then
+  // buildGraphFigure over its overlays): the second pass is a no-op.
+  const fig = { data: [{ name: "A & B", x: ["WT\\_1"], y: [1] }], layout: {} };
+  const once = formatFigureLabels(fig);
+  strictEqual(JSON.stringify(formatFigureLabels(once)), JSON.stringify(once));
+  strictEqual((once.data[0] as { name: string }).name, "A &amp; B");
+});
+
+check("seq 555: crafted markup beside <sup>/<sub> is escaped, never passed through", () => {
+  const a = formatLabelForPlotly("<a href='javascript:alert(1)'>x</a><sup>1</sup>");
+  ok(!a.includes("<a") && !a.includes("<sup>") && !a.includes("</a>"), `markup survived: ${a}`);
+  ok(a.includes("&lt;a"), `tag opener not escaped: ${a}`);
+  const img = formatLabelForPlotly("<img src=x onerror=alert(1)><sub>1</sub>");
+  ok(!img.includes("<img") && !img.includes("<sub>"), `markup survived: ${img}`);
+  ok(img.includes("&lt;img"), `tag opener not escaped: ${img}`);
+  // A script tag with no sup/sub at all is escaped the same way.
+  ok(!formatLabelForPlotly("<script>alert(1)</script>").includes("<script>"));
+});
+
+check("seq 563: formatFigureLabels leaves annotation.name alone", () => {
+  const fig = formatFigureLabels({
+    data: [{ name: "GFP^hi", x: ["Control"], y: [1] }],
+    layout: { annotations: [{ name: "CO_2", text: "CO_2" }, { name: "A & B", text: "A & B" }] },
+  });
+  const anns = (fig.layout as { annotations: { name: string; text: string }[] }).annotations;
+  // The drag key round-trips: the name stays the raw point key.
+  strictEqual(anns[0]!.name, "CO_2");
+  strictEqual(anns[1]!.name, "A & B");
+  // …while the displayed text still formats.
+  strictEqual(anns[0]!.text, "CO<sub>2</sub>");
+  strictEqual(anns[1]!.text, "A &amp; B");
+  // The guard is annotation-scoped: a trace name still formats.
+  strictEqual((fig.data[0] as { name: string }).name, "GFP<sup>hi</sup>");
+});
+
+check("seq 569: Unicode minus exponents and chained _ runs", () => {
+  strictEqual(formatLabelForPlotly("10^\u22126"), "10<sup>\u22126</sup>");
+  strictEqual(formatLabelForPlotly("10^-6"), "10<sup>-6</sup>");
+  strictEqual(formatLabelForPlotly("ctrl_1_a"), "ctrl<sub>1</sub><sub>a</sub>");
+  deepStrictEqual(labelRuns("ctrl_1_a"), [
+    { text: "ctrl", script: "normal" },
+    { text: "1", script: "sub" },
+    { text: "a", script: "sub" },
+  ]);
+  deepStrictEqual(labelRuns("10^\u22126"), [
+    { text: "10", script: "normal" },
+    { text: "\u22126", script: "super" },
+  ]);
+});
+
 check("seq 485 (r2-27): EPS text has a current point and clips do not leak", () => {
   const textSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><text x="10" y="20" font-size="12">Hi</text><text x="100" y="20" font-size="12" text-anchor="middle">Mid</text></svg>`;
   const epsText = new TextDecoder().decode(svgToEps(textSvg));
