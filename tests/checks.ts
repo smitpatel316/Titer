@@ -94,6 +94,9 @@ import {
   isFdrCorrection,
   significanceThreshold,
 } from "../src/stats/grouped/multiple-t-tests";
+import { analyzedOf } from "../src/stats/report/analyzed";
+import { checksOf } from "../src/stats/report/checks";
+import { conclusionOf } from "../src/stats/report/conclusion";
 import { transformTable } from "../src/lib/transform";
 import {
   MAX_SERIES_VALUES,
@@ -241,7 +244,7 @@ import {
 } from "../src/lib/palettes";
 import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-palettes";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, graphSeriesDataset, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
-import { datasetColumns, isGrouped, isNested, levelsOf, readTable, seriesOf, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
+import { datasetColumns, isGrouped, isNested, levelsOf, readTable, seriesOf, setColumns, splitXY, xyPoints, type Column, type Dataset } from "../src/lib/dataset";
 import {
   convertXCell,
   displayXCell,
@@ -507,7 +510,7 @@ import {
   type ColorMode,
 } from "../src/lib/vector-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
-import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnalysisType, AnovaParams, ChiSquareGofParams, ComparedCell, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, RemoveBaselineParams, SimulationSpec, ThreeWayAnovaParams } from "../src/stats/types";
+import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnalysisType, AnovaParams, ChiSquareGofParams, ComparedCell, DoseResponseSpecialParams, GroupDescriptives, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, RemoveBaselineParams, SimulationSpec, ThreeWayAnovaParams } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
@@ -9992,6 +9995,262 @@ check("the linear-regression wizard weights every Y set it is asked to fit", asy
   const plain = await runAnalysis("linear-regression", data, { y: "Y1", forceOrigin: false });
   if ("error" in plain) throw new Error(plain.error);
   ok(plain.stats.some((s) => s.label === "Pearson r"));
+});
+
+// Report conclusions and analyzed sets (Round 2 #61): an FDR run's
+// "Significant rows (adjusted P < Q%)" must conclude a difference, a
+// compareModel run must compare two models (never "Y" and "undefined"),
+// a trend test must read its own P, a normalized curve's plateaus are 0
+// and 100, all-null correlations never print a bare scale, weighted
+// linear-regression checks read standardized residuals, XY correlation
+// checks pool every replicate subcolumn, chi-square honors params.sets
+// and complete rows, and a Multiple Variables linear regression keeps
+// its first data set (its X is params.x, not sets[0]).
+check("report conclusions and analyzed sets (Round 2 #61)", async () => {
+  const group = (name: string, n = 10): GroupDescriptives => ({ name, mean: 1, sd: 1, sem: 0.3, median: 1, n });
+  const result = (over: Partial<AnalysisResult>): AnalysisResult => ({
+    testType: "correlation",
+    stats: [],
+    groups: [],
+    notes: "",
+    ...over,
+  });
+  const table = (over: Partial<Dataset>): Dataset => ({
+    titles: [],
+    columns: [],
+    numeric: [],
+    sets: [],
+    nested: [],
+    summary: "replicates",
+    ...over,
+  });
+  const col = (name: string, byRow: (number | null)[], set?: string): Column => ({
+    name,
+    cells: byRow.map((v) => (v == null ? null : String(v))),
+    byRow,
+    values: byRow.filter((v): v is number => v != null),
+    rows: byRow.map((_, i) => i).filter((i) => byRow[i] != null),
+    ...(set ? { set } : {}),
+  });
+
+  // FDR multiple t tests: 3 of 10 rows significant under the adjusted label.
+  const fdr = conclusionOf(
+    "multiple-t-tests",
+    { correction: "fdr", q: 5 } as AnalysisParams,
+    result({
+      testType: "multiple-t-tests",
+      groups: [group("A"), group("B")],
+      stats: [
+        { label: "Rows compared", value: 10 },
+        { label: "Significant rows (adjusted P < 5%)", value: 3 },
+      ],
+    }),
+    undefined,
+    table({}),
+  );
+  ok(fdr?.includes("differ significantly in 3 of 10 rows"), `FDR conclusion: ${fdr}`);
+  // …and the plain label still concludes the same way.
+  const plain = conclusionOf(
+    "multiple-t-tests",
+    {} as AnalysisParams,
+    result({
+      testType: "multiple-t-tests",
+      groups: [group("A"), group("B")],
+      stats: [
+        { label: "Rows compared", value: 10 },
+        { label: "Significant rows (P < 0.05)", value: 2 },
+      ],
+    }),
+    undefined,
+    table({}),
+  );
+  ok(plain?.includes("differ significantly in 2 of 10 rows"), `plain conclusion: ${plain}`);
+
+  // compareModel, nested F test: two models on the one data set "Y".
+  const cmp = conclusionOf(
+    "nonlinear-regression",
+    { model: "sigmoidal-4pl-logx", compareModel: "agonist-3pl-logx", y: "Y" } as AnalysisParams,
+    result({
+      testType: "nonlinear-regression",
+      groups: [group("Y")],
+      stats: [
+        { label: "P value", value: 0.01, p: true },
+        { label: "AICc", value: 12 },
+        { label: "ΔAICc (primary − comparison)", value: -2.5 },
+      ],
+      fit: { sets: ["Y"], rows: [] },
+    }),
+    undefined,
+    table({ sets: [{ name: "X", columns: [] }, { name: "Y", columns: [] }] }),
+  );
+  ok(cmp && !cmp.includes("undefined"), `compareModel conclusion: ${cmp}`);
+  ok(
+    cmp?.includes("Sigmoidal, 4PL, X is log(concentration)") &&
+      cmp?.includes("log(agonist) vs. response, standard slope (3PL)") &&
+      cmp?.includes("fit differently"),
+    `compareModel conclusion: ${cmp}`,
+  );
+  // compareModel, non-nested pair: the AICc names the preferred model.
+  const cmpAicc = conclusionOf(
+    "nonlinear-regression",
+    { model: "sigmoidal-4pl-logx", compareModel: "agonist-3pl-logx", y: "Y" } as AnalysisParams,
+    result({
+      testType: "nonlinear-regression",
+      groups: [group("Y")],
+      stats: [
+        { label: "AICc", value: 12 },
+        { label: "ΔAICc (primary − comparison)", value: 2.5 },
+      ],
+      fit: { sets: ["Y"], rows: [] },
+    }),
+    undefined,
+    table({ sets: [{ name: "X", columns: [] }, { name: "Y", columns: [] }] }),
+  );
+  ok(cmpAicc?.includes("is preferred over"), `compareModel AICc conclusion: ${cmpAicc}`);
+
+  // Chi-square for trend: overall P 0.4, trend P 0.01 — the trend is real.
+  const trend = conclusionOf(
+    "chi-square",
+    { test: "trend", trendOrdered: true } as AnalysisParams,
+    result({
+      testType: "chi-square",
+      groups: [],
+      stats: [
+        { label: "P value", value: 0.4, p: true },
+        { label: "Chi-square for trend", value: 5.1 },
+        { label: "P value (test for trend)", value: 0.01, p: true },
+      ],
+    }),
+    { sets: [{ name: "Outcome" }], how: "list", left: [] },
+    table({}),
+  );
+  ok(trend?.includes("rises or falls steadily"), `trend conclusion: ${trend}`);
+
+  // Normalized curve: Bottom/Top are not fitted, so the plateaus read 0/100.
+  const norm = conclusionOf(
+    "nonlinear-regression",
+    { model: "agonist-4pl-normalized-logx", y: "Y" } as AnalysisParams,
+    result({
+      testType: "nonlinear-regression",
+      groups: [group("Y")],
+      stats: [],
+      coefficients: [{ term: "LogEC50", estimate: -6, stdError: 0.1, t: -60, p: 0.001, low: -6.2, high: -5.8 }],
+      fit: {
+        sets: ["Y"],
+        rows: [
+          { label: "LogEC50", values: [-6], ranges: [[-6.2, -5.8]] },
+          { label: "R squared", values: [0.99] },
+        ],
+      },
+    }),
+    undefined,
+    table({ sets: [{ name: "X", columns: [] }, { name: "Y", columns: [] }] }),
+  );
+  ok(norm?.includes("between two plateaus, 0 and 100"), `normalized conclusion: ${norm}`);
+
+  // Every correlation null: a sentence, never a bare scale.
+  const nocorr = conclusionOf(
+    "correlation",
+    {} as AnalysisParams,
+    result({
+      testType: "correlation",
+      groups: [],
+      correlations: [
+        { variable: "A", r: null, p: null },
+        { variable: "B", r: null, p: null },
+      ],
+    }),
+    undefined,
+    table({ sets: [{ name: "X", columns: [] }, { name: "A", columns: [] }, { name: "B", columns: [] }] }),
+  );
+  ok(nocorr?.startsWith("No correlation could be calculated"), `null-correlation conclusion: ${nocorr}`);
+
+  // Chi-square analyzed: only the chosen sets, only complete rows (rows 1
+  // and 4; rows 2 and 3 each miss one count), the rest left out.
+  const g1 = col("G1", [10, 20, null, 40]);
+  const g2 = col("G2", [5, null, 15, 25]);
+  const g3 = col("G3", [1, 2, 3, 4]);
+  const chi = analyzedOf(
+    "chi-square",
+    { sets: ["G1", "G2"] } as AnalysisParams,
+    table({
+      titles: ["r1", "r2", "r3", "r4"],
+      columns: [g1, g2, g3],
+      numeric: [g1, g2, g3],
+      sets: [
+        { name: "G1", columns: [g1] },
+        { name: "G2", columns: [g2] },
+        { name: "G3", columns: [g3] },
+      ],
+    }),
+    result({ testType: "chi-square", groups: [] }),
+  );
+  deepStrictEqual(chi?.sets.map((s) => s.name), ["G1", "G2"]);
+  strictEqual(chi?.detail, "counted in 2 rows");
+  deepStrictEqual(chi?.left, ["G3"]);
+
+  // Multiple Variables linear regression on X "B": sets[0] ("A") is a real
+  // data set and stays in "left out"; the X ("B") is the one dropped.
+  const a = col("A", [1, 2, 3]);
+  const b = col("B", [2, 4, 6]);
+  const c = col("C", [1, 3, 5]);
+  const mv = analyzedOf(
+    "linear-regression",
+    { x: "B", y: "C", forceOrigin: false } as AnalysisParams,
+    table({
+      titles: ["r1", "r2", "r3"],
+      columns: [a, b, c],
+      numeric: [a, b, c],
+      sets: [
+        { name: "A", columns: [a] },
+        { name: "B", columns: [b] },
+        { name: "C", columns: [c] },
+      ],
+    }),
+    result({ testType: "linear-regression", groups: [group("B", 3), group("C", 3)] }),
+  );
+  deepStrictEqual(mv?.sets.map((s) => s.name), ["C"]);
+  deepStrictEqual(mv?.left, ["A"]);
+
+  // Weighted linear regression: heteroscedastic y (variance growing in x,
+  // R set.seed(1), y = 2x + N(0, 0.3x)). The unweighted residuals fail
+  // Shapiro-Wilk (P = 0.0036); the 1/x²-standardized residuals pass
+  // (P = 0.21) — the check must read the weighted fit.
+  const xs = Array.from({ length: 20 }, (_, i) => i + 1);
+  const ys = [
+    1.8120638567773002, 4.110185994533249, 5.2479342488309575, 9.91433696256535, 10.49426165772304,
+    10.523156908587573, 15.023601010099819, 17.77197929231012, 19.554609649464428, 19.083834838530933,
+    26.9888778558878, 25.403435651081153, 23.577161735886964, 18.6982604738545, 35.06218913164399,
+    31.78431867672689, 33.917429658195374, 41.09671553770062, 42.680960812059105, 43.56340792730505,
+  ];
+  const wchecks = await checksOf(
+    "linear-regression",
+    { y: "Y1", forceOrigin: false, weights: "1/x2" } as AnalysisParams,
+    [col("X", xs), col("Y1", ys)],
+    result({ testType: "linear-regression", groups: [] }),
+  );
+  strictEqual(wchecks.length, 1);
+  ok(wchecks[0].ok === true, `weighted residuals check: ${wchecks[0].text}`);
+  ok(wchecks[0].text.includes("the weighted residuals"), `weighted residuals check: ${wchecks[0].text}`);
+
+  // XY correlation over replicates: Y1 alone looks normal (P = 0.99) but
+  // the pooled replicates do not (P = 0.000015) — the check must pool them.
+  const rchecks = await checksOf(
+    "correlation",
+    {} as AnalysisParams,
+    [
+      col("X", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]),
+      col("A:Y1", [10.1, 9.8, 10.3, 9.9, 10.0, 10.2, 9.7, 10.4, 10.0, 9.9, 10.1, 10.2], "A"),
+      col("A:Y2", [1.1, 1.3, 1.2, 4.5, 9.8, 1.4, 1.1, 1.2, 6.7, 1.3, 1.2, 1.5], "A"),
+    ],
+    result({
+      testType: "correlation",
+      groups: [],
+      correlations: [{ variable: "A", r: 0.5, p: 0.01 }],
+    }),
+  );
+  strictEqual(rchecks.length, 1);
+  ok(rchecks[0].ok === false, `pooled-replicate correlation check: ${rchecks[0].text}`);
 });
 
 check("compare-slopes compares slopes then intercepts with Prism's two F tests (#46)", async () => {

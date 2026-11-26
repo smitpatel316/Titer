@@ -30,9 +30,18 @@ export function analyzedOf(
   const p = params as Params;
   const withX = ON_X.has(type) || (type === "correlation" && (p?.mode ?? "x-vs-every-y") === "x-vs-every-y");
   const xName = table.sets[0]?.name;
+  // The X is the set the params name on a multiple-variables table
+  // (params.x), else the table's first set — drop it by name, never by
+  // position, or a multiple-variables table loses its first data set.
+  const xSet = withX ? ((p?.x as string | undefined) ?? xName) : undefined;
   // The table's data sets holding numbers (an X aside).
   const all = table.sets
-    .filter((s, i) => !(withX && i === 0) && s.columns.some((c) => c.values.length > 0))
+    .filter(
+      (s) =>
+        // On a multiple-variables table the X is the column params.x names,
+        // not the first set — drop the X by name, never by position.
+        s.name !== xSet && s.columns.some((c) => c.values.length > 0),
+    )
     .map((s) => s.name);
   const make = (sets: Analyzed["sets"], how: Analyzed["how"] = "list", detail?: string): Analyzed => ({
     sets,
@@ -153,9 +162,19 @@ export function analyzedOf(
       );
     }
     case "chi-square": {
-      const rows = table.titles.filter((_, r) => table.columns.some((c) => c.byRow[r] != null)).length;
+      // The run itself reads only the chosen sets (runAnalysis passes
+      // setColumns(table, params.sets)) and only complete rows
+      // (buildContingencyMatrix) — say the same here.
+      const chosen = (p?.sets as string[] | undefined)?.length
+        ? all.filter((n) => (p?.sets as string[]).includes(n))
+        : all;
+      const cols = table.sets
+        .filter((s) => chosen.includes(s.name))
+        .flatMap((s) => s.columns)
+        .filter((c) => c.values.length > 0);
+      const rows = cols.length > 0 ? table.titles.filter((_, r) => cols.every((c) => c.byRow[r] != null)).length : 0;
       return make(
-        all.map((name) => ({ name })),
+        chosen.map((name) => ({ name })),
         "list",
         `counted in ${rows} rows`,
       );
