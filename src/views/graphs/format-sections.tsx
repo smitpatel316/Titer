@@ -69,6 +69,8 @@ export interface SectionContext {
   volcanoBelowZero: number;
   /** The values at or under 0 a log axis can't show, on X, on Y, and on the right Y. */
   logLeftOut: { x: number; y: number; y2: number };
+  /** Every row holding data is titled by a number: connected lines can stand at them. */
+  atValues: boolean;
   /** A histogram's typed bin width makes too many bins (its automatic ones are drawn). */
   binsTooMany: boolean;
   /** An XY table whose data sets hold replicates. */

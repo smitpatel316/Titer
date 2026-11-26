@@ -10,6 +10,7 @@ import type { GraphModule, GraphFigure } from ".";
 import { groupsOf, type Column } from "../../lib/dataset";
 import {
   boxTrace,
+  CATEGORY_AXES,
   groupOffset,
   groupedScatterLayout,
   rowCountOf,
@@ -140,6 +141,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, titles?: 
 export const groupedBox: GraphModule = {
   label: "Box and violin",
   family: "grouped",
+  axes: CATEGORY_AXES,
   defaults: { fill: 0.5, pointSize: 5, outline: 2 },
   points: (options) => options.showPoints || options.whisker === "min-max-all",
   build,

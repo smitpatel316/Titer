@@ -8,7 +8,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult } from "../../stats/types";
 import type { Column } from "../../lib/dataset";
-import { addNote, GUIDE, INK, xyLayout, type Paint } from "./plot-helpers";
+import { addNote, GUIDE, INK, type Paint, xyLayout } from "./plot-helpers";
 import { num } from "../../lib/format";
 import type { GraphFigure, GraphModule } from ".";
 
@@ -139,4 +139,4 @@ export function addForestPlot(
   ];
 }
 
-export const forestPlot: GraphModule = { label: "Forest plot", family: "xy", points: () => true, build };
+export const forestPlot: GraphModule = { label: "Forest plot", family: "xy", axes: () => ({ x: "scale", y: "labels" }), points: () => true, build };

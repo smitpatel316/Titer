@@ -57383,6 +57383,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -57394,6 +57395,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }
@@ -57869,6 +57871,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -57880,6 +57883,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }
@@ -58045,6 +58049,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -58056,6 +58061,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "rangemode": "tozero"
@@ -58495,6 +58501,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -58506,6 +58513,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -59627,6 +59635,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -59866,6 +59875,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "rangemode": "tozero",
@@ -60290,6 +60300,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -60305,6 +60316,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }
@@ -60433,6 +60445,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -60448,6 +60461,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "rangemode": "tozero"
@@ -60570,6 +60584,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -60585,6 +60600,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }
@@ -60885,6 +60901,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -60900,6 +60917,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }
@@ -61013,6 +61031,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -61028,6 +61047,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "rangemode": "tozero"
@@ -61119,6 +61139,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -61134,6 +61155,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "rangemode": "tozero"
@@ -61263,6 +61285,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -61278,6 +61301,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "rangemode": "tozero"
@@ -62678,6 +62702,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -62708,6 +62733,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "rangemode": "tozero",
@@ -63378,6 +63404,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -63689,6 +63716,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "autorange": "reversed"
@@ -64420,6 +64448,10 @@
      "Day 4",
      "Day 5"
     ],
+    "autotickangles": [
+     0,
+     90
+    ],
     "range": [
      -0.5,
      4.5
@@ -64431,6 +64463,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -64442,6 +64475,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }
@@ -64627,6 +64661,10 @@
      "Day 4",
      "Day 5"
     ],
+    "autotickangles": [
+     0,
+     90
+    ],
     "range": [
      -0.5,
      16.5
@@ -64638,6 +64676,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -64649,6 +64688,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "rangemode": "tozero"
@@ -64840,6 +64880,10 @@
      "Day 4",
      "Day 5"
     ],
+    "autotickangles": [
+     0,
+     90
+    ],
     "range": [
      -0.5,
      4.5
@@ -64851,6 +64895,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -64862,6 +64907,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }
@@ -64974,6 +65020,10 @@
    },
    "xaxis": {
     "type": "category",
+    "autotickangles": [
+     0,
+     90
+    ],
     "showgrid": false,
     "zeroline": false,
     "linecolor": "#111827",
@@ -64981,6 +65031,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -64992,6 +65043,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "rangemode": "tozero"
@@ -65151,12 +65203,17 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "rangemode": "tozero"
    },
    "yaxis": {
     "type": "category",
+    "autotickangles": [
+     0,
+     90
+    ],
     "showgrid": false,
     "zeroline": false,
     "linecolor": "#111827",
@@ -65164,6 +65221,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -66241,6 +66299,9 @@
      ]
     ],
     "showscale": true,
+    "colorbar": {
+     "exponentformat": "none"
+    },
     "hoverongaps": false,
     "text": [
      [
@@ -66310,6 +66371,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -66331,6 +66393,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }
@@ -66971,6 +67034,10 @@
      "Day 4",
      "Day 5"
     ],
+    "autotickangles": [
+     0,
+     90
+    ],
     "range": [
      -0.5,
      4.5
@@ -66982,6 +67049,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -69591,6 +69659,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }
@@ -69804,6 +69873,10 @@
      "Day 4",
      "Day 5"
     ],
+    "autotickangles": [
+     0,
+     90
+    ],
     "range": [
      -0.5,
      16.5
@@ -69815,6 +69888,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -70614,6 +70688,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }
@@ -71730,6 +71805,9 @@
      ]
     ],
     "showscale": true,
+    "colorbar": {
+     "exponentformat": "none"
+    },
     "hoverongaps": false
    }
   ],
@@ -71769,6 +71847,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -71795,6 +71874,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }
@@ -71931,6 +72011,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -71946,6 +72027,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }
@@ -72506,6 +72588,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -72521,6 +72604,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -72739,6 +72823,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -72754,6 +72839,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -72972,6 +73058,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -72987,6 +73074,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -73167,6 +73255,10 @@
    },
    "xaxis": {
     "type": "category",
+    "autotickangles": [
+     0,
+     90
+    ],
     "showgrid": false,
     "zeroline": false,
     "linecolor": "#111827",
@@ -73174,6 +73266,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -73185,6 +73278,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "rangemode": "tozero"
@@ -74250,6 +74344,9 @@
      ]
     ],
     "showscale": true,
+    "colorbar": {
+     "exponentformat": "none"
+    },
     "hoverongaps": false,
     "text": [
      [
@@ -74309,6 +74406,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    },
@@ -75469,6 +75567,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }
@@ -75506,6 +75605,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true,
     "title": {
@@ -75521,6 +75621,7 @@
     "ticks": "outside",
     "ticklen": 5,
     "tickwidth": 1,
+    "exponentformat": "none",
     "fixedrange": true,
     "automargin": true
    }

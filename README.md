@@ -87,6 +87,8 @@ And a spreadsheet that feels like one:
 
 - Copy and paste with Excel or Numbers, fill down, find, resize columns, keep the titles
   visible as you scroll
+- Name many columns at once: copy a row or a column of names, then right-click a column
+  header ▸ Paste Column Names
 - Name each row (a mouse, a patient, a gene): the names follow into results and graphs
 - Exclude a value from the analyses without deleting it
 - Enter pre-calculated values as summary subcolumns (mean with SD, SEM or N), and change a
@@ -175,6 +177,9 @@ Prism's own saved results and against reference values: the test suite runs 701 
   Finder's color tags to find them in a busy project, saved in the project
 - **One table, many figures:** a graph shows all of a table's data sets or only those you
   tick, each in the same color everywhere; its stars come from an analysis of them
+- **Every kind of figure:** dot plots, bars, box (whiskers min to max or Tukey's, outliers
+  apart) and violin, histograms, lines, heatmaps, volcano plots (from your own results, or
+  computed by Titer from replicates), survival curves
 - **Colors that work:** 15 palettes from the scientific literature (Okabe-Ito, Paul Tol,
   Viridis, Batlow…), colorblind-friendly ones first, each reversible; or make your own,
   kept on your machine
@@ -186,7 +191,8 @@ Prism's own saved results and against reference values: the test suite runs 701 
 - **Match:** give a graph the look of another one, choosing what it takes; **Batch Magic**
   applies that Match formatting to many graphs at once; **Clone** copies a graph
 - **Lay it out:** move the legend and notes, resize by dragging an axis or typing a size, set
-  each axis's range and step, draw reference lines (a control's level, a threshold) with
+  each axis's range and step (labels never overlap; a time course's rows on a true time
+  axis), draw reference lines (a control's level, a threshold) with
   their text, gridlines (none, major, or major + minor, per axis) and tick
   direction, length and interval, white or transparent background
 - **Export** as PNG, JPG, SVG, PDF or TIFF at 150, 300, 600, 900 or 1200 DPI, at their true

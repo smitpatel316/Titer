@@ -8,7 +8,7 @@ import type { GraphModule, GraphFigure } from ".";
 import type { Column } from "../../lib/dataset";
 import { pointKeyOf } from "../../lib/columns";
 import { colorscaleOf, paletteColor, paletteOf, withOpacity } from "../../lib/palettes";
-import { addNote, xyLayout, type Paint } from "./plot-helpers";
+import { addNote, type Paint, XY_AXES, xyLayout } from "./plot-helpers";
 import { XY_SCATTER_MAX_POINTS } from "./xy-scatter";
 
 /** The smallest bubble, in px of diameter, so a tiny value stays visible. */
@@ -171,6 +171,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, titles?: 
 export const bubblePlot: GraphModule = {
   label: "Bubble plot",
   family: "xy",
+  axes: XY_AXES,
   points: () => true,
   build,
 };

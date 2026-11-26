@@ -62,6 +62,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
 export const histogram: GraphModule = {
   label: "Histogram",
   family: "column",
+  axes: () => ({ x: "range", y: "scale" }),
   // Overlapping columns stay visible through each other.
   defaults: { fill: 0.7 },
   patterns: () => true,

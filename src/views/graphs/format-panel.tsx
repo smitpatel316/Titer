@@ -110,6 +110,7 @@ interface Props extends SectionContext {
 const STYLE_OPTIONS: (keyof GraphOptions)[] = [
   "shape",
   "kind",
+  "whisker",
   "xyStyle",
   "residualsAs",
   "groupLayout",
@@ -183,7 +184,9 @@ function remember(key: string, value: unknown) {
 
 export function FormatPanel(props: Props) {
   const { graphType, options, set, seriesNames, setSeriesStyle, selection } = props;
-  const family = GRAPHS[graphType].family;
+  const { family, horizontal, placesRows } = GRAPHS[graphType];
+  // The keys of an axis as shown: horizontal bars keep their value axis's in y, their rows' in x.
+  const keyOf = (shown: "X" | "Y") => ((shown === "X") === !horizontal ? "x" : "y");
   // The project's info constants, for the axis-limit hook pickers below.
   const { nodes, rootOrder } = useProjectStore();
   const constants = React.useMemo(() => allConstantNames(nodes, rootOrder), [nodes, rootOrder]);
@@ -381,22 +384,24 @@ export function FormatPanel(props: Props) {
         )}
         {hasAxes && (
           <>
-            <TextRow label="X axis title" value={options.xLabel} onChange={(xLabel) => set({ xLabel })} />
-            <TextRow label="Y axis title" value={options.yLabel} onChange={(yLabel) => set({ yLabel })} />
-            <Stepper
-              label="X title spacing"
-              value={options.xTitleGap}
-              {...GRAPH_LIMITS.xTitleGap}
-              step={2}
-              onChange={(xTitleGap) => set({ xTitleGap })}
-            />
-            <Stepper
-              label="Y title spacing"
-              value={options.yTitleGap}
-              {...GRAPH_LIMITS.yTitleGap}
-              step={2}
-              onChange={(yTitleGap) => set({ yTitleGap })}
-            />
+            {(["X", "Y"] as const).map((shown) => (
+              <TextRow
+                key={shown}
+                label={`${shown} axis title`}
+                value={options[`${keyOf(shown)}Label`]}
+                onChange={(label) => set({ [`${keyOf(shown)}Label`]: label })}
+              />
+            ))}
+            {(["X", "Y"] as const).map((shown) => (
+              <Stepper
+                key={shown}
+                label={`${shown} title spacing`}
+                value={options[`${keyOf(shown)}TitleGap`]}
+                {...GRAPH_LIMITS[`${keyOf(shown)}TitleGap`]}
+                step={2}
+                onChange={(gap) => set({ [`${keyOf(shown)}TitleGap`]: gap })}
+              />
+            ))}
           </>
         )}
         <Stepper
@@ -472,6 +477,17 @@ export function FormatPanel(props: Props) {
               axis="Y"
               value={options.yNumberFormat}
               onChange={(yNumberFormat) => set({ yNumberFormat })}
+            />
+          )}
+          {placesRows && props.atValues && (
+            <Choice
+              label="X axis"
+              value={options.rowsAt}
+              onChange={(rowsAt) => set({ rowsAt })}
+              items={[
+                { value: "order", label: "Categories" },
+                { value: "values", label: "Numbers" },
+              ]}
             />
           )}
           {family === "xy" && !isDateX && logScaleOffered(graphType).x && (
@@ -584,7 +600,7 @@ export function FormatPanel(props: Props) {
           {hasValueAxis(family) && (
             <RefLines
               lines={options.refLines ?? []}
-              axis={graphType === "grouped-hbars" ? "X" : "Y"}
+              axis={horizontal ? "X" : "Y"}
               at={props.newLineAt}
               palette={paletteOf(options)}
               onChange={(lines) => set({ refLines: lines.length ? lines : undefined })}

@@ -29,7 +29,7 @@ import { paletteOf } from "../../lib/palettes";
 import { computeGroupedDEG } from "../../lib/deg";
 import { useAnalysis, useAnalyses } from "../analyses/use-analysis";
 import { infoSheetsOf, resolveGraphOptions } from "../../lib/info-sheets";
-import { choosableSets, GRAPHS, graphSeriesDataset, hasValueAxis, plotColumns } from ".";
+import { axisKind, choosableSets, GRAPHS, graphSeriesDataset, hasValueAxis, plotColumns } from ".";
 import { addFittedCurve } from "./fitted-curve";
 import { addBindingCurve, addDoseResponseSpecialCurve, addEnzymeInhibitionCurve } from "./binding-curve";
 import { addGeneratedCurves } from "./generated-curves";
@@ -41,7 +41,7 @@ import { addEstimationPlot } from "./estimation-plot";
 import { coxSurvivalColumns } from "./survival";
 import { FormatPanel } from "./format-panel";
 import { copyGraphImage, drawSizeAtWidth, saveGraphImage, sendGraphToOffice } from "./graph-export";
-import { addNote, applyDateAxis, applyNumberFormats, hasTableXAxis, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, refLineParts, rightYDataset, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
+import { addNote, applyDateAxis, applyNumberFormats, fitLabels, hasTableXAxis, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, refLineParts, rightYDataset, rowValues, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
 import { addLogisticCurve as addAnalysisLogisticCurve } from "./fitted-curve";
 import { useStartAnalysis } from "../analyses/use-analysis-launcher";
 import { loadPlotly } from "./plotly";
@@ -269,19 +269,33 @@ export function GraphView({ node }: { node: ProjectNode }) {
         : options,
     sheets,
   );
+  // Its axes: connected lines' rows can stand at their titles' values when all are numbers.
+  const rowsAt = GRAPHS[type].placesRows ? rowValues(columns, dataset?.titles) : undefined;
+  const atValues = !!rowsAt;
+  const { horizontal } = GRAPHS[type];
+  const scaled = {
+    x: axisKind(type, options, "x", atValues) === "scale",
+    y: axisKind(type, options, "y", atValues) === "scale",
+  };
   // What a graph can't draw, said in its Format panel: values at or under 0 on a log axis
-  // (X: only a numeric one; on XY, its first column is X), a volcano's P values under 0.
+  // (X: only a numeric one, an XY table's first column or the rows' values), a volcano's P
+  // values under 0.
   const atOrUnder0 = (cols: Column[]) => cols.reduce((n, c) => n + c.values.filter((v) => v <= 0).length, 0);
   // The data set on the right Y axis, if the pick is still a series — its
   // values live on the right axis, so they count under y2, not under y.
   const right = family === "xy" ? rightYDataset(options, seriesNames) : undefined;
   const rightCols = right ? drawColumns.slice(1).filter((c) => c.name === right) : [];
   const logLeftOut = {
-    x: family === "xy" && options.xScale !== "linear" ? atOrUnder0(drawColumns.slice(0, 1)) : 0,
+    x:
+      scaled.x && options.xScale !== "linear"
+        ? rowsAt
+          ? rowsAt.filter((v) => v != null && v <= 0).length
+          : atOrUnder0(drawColumns.slice(0, 1))
+        : 0,
     // A histogram's Y counts values: an empty bin is simply not drawn. A bubble
     // plot's size and color columns are not Y data: only its Y column counts.
     y:
-      options.yScale !== "linear" && family !== "histogram"
+      scaled.y && options.yScale !== "linear" && family !== "histogram"
         ? atOrUnder0((family === "xy" ? drawColumns.slice(1, type === "bubble-plot" ? 2 : undefined) : drawColumns).filter((c) => c.name !== right))
         : 0,
     y2: right && options.y2Scale !== "linear" ? atOrUnder0(rightCols) : 0,
@@ -852,13 +866,13 @@ export function GraphView({ node }: { node: ProjectNode }) {
               labelPlotGeometry(fig.data, fig.layout, options),
             ).map((label) => ({
               ...label,
-              // A text sits at the log10 of its place on a log axis (X: only a numeric one).
-              x: family === "xy" ? onAxis(label.x, options.xScale) : label.x,
-              y: onAxis(label.y, options.yScale),
+              // A text sits at the log10 of its place on a log axis.
+              x: scaled.x ? onAxis(label.x, options.xScale) : label.x,
+              y: scaled.y ? onAxis(label.y, options.yScale) : label.y,
             }));
       if (labels.length) fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...labels];
       if (hasValueAxis(family) && options.refLines?.length) {
-        const { shapes, annotations } = refLineParts(options, type === "grouped-hbars");
+        const { shapes, annotations } = refLineParts(options, !!horizontal);
         fig.layout.shapes = [...((fig.layout.shapes as unknown[]) ?? []), ...shapes];
         fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...annotations];
       }
@@ -878,6 +892,9 @@ export function GraphView({ node }: { node: ProjectNode }) {
         { ...formatted.layout, ...size },
         { displayModeBar: false, scrollZoom: false, doubleClick: false, plotGlPixelRatio: glRatio, edits: MOVABLE },
       );
+      // Labels that would overlap, on any axis, are spaced.
+      const thinned = fitLabels(fig.layout, (el as { _fullLayout?: never })._fullLayout ?? {}, options.fontSize);
+      if (thinned) await Plotly.relayout(el, thinned);
       if (plottedRef.current !== el) listen(el as PlotElement);
       plottedRef.current = el;
       if (!current) return;
@@ -887,7 +904,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
         setSelected(new Set([...selected].filter((key) => keys.has(key))));
       const resolved = (el as { _fullLayout?: PlotlyLayout })._fullLayout;
       if (resolved?._size) setMargins(resolved._size);
-      setNewLineAt(middleOf(type === "grouped-hbars" ? resolved?.xaxis : resolved?.yaxis) ?? 0);
+      setNewLineAt(middleOf(horizontal ? resolved?.xaxis : resolved?.yaxis) ?? 0);
     });
     return () => {
       current = false;
@@ -1055,6 +1072,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
           volcanoLeftOut={volcanoLeftOut}
           volcanoBelowZero={volcanoBelowZero}
           logLeftOut={logLeftOut}
+          atValues={atValues}
           binsTooMany={binsTooMany}
           replicates={parent?.tableType === "xy" && Boolean(data && isGrouped(data))}
           summary={dataset?.summary}

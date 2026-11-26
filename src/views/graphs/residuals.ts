@@ -35,7 +35,8 @@ function residualProblems(columns: Column[]): string[] {
   });
 }
 
-function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFigure {
+function build(columns: Column[], given: GraphOptions, paint: Paint): GraphFigure {
+  const options: GraphOptions = { ...given, yScale: "linear" };
   const sets = residualsOf(columns);
   let data: unknown[];
   let layout: Record<string, unknown>;
@@ -68,4 +69,11 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
   return fig;
 }
 
-export const residuals: GraphModule = { label: "Residual plot", family: "xy", points: () => true, build };
+export const residuals: GraphModule = {
+  label: "Residual plot",
+  family: "xy",
+  // Residuals lie either side of 0: no log scale on Y, nor on X for their quantiles.
+  axes: (options) => ({ x: options.residualsAs === "qq" ? "range" : "scale", y: "range" }),
+  points: () => true,
+  build,
+};

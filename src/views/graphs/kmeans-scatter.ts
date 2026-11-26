@@ -11,7 +11,7 @@ import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult } from "../../stats/types";
 import type { Column } from "../../lib/dataset";
 import { pointKeyOf } from "../../lib/columns";
-import { addNote, INK, seriesPoints, xyLayout, type Paint } from "./plot-helpers";
+import { addNote, INK, type Paint, seriesPoints, XY_AXES, xyLayout } from "./plot-helpers";
 import type { GraphFigure, GraphModule } from ".";
 
 /** The centres trace, as the Series section names it. */
@@ -102,6 +102,7 @@ function build(columns: Column[], options: GraphOptions, _paint: Paint): GraphFi
 export const kmeansScatter: GraphModule = {
   label: "Cluster scatter",
   family: "multiple",
+  axes: XY_AXES,
   points: () => true,
   build,
 };

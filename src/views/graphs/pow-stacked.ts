@@ -17,6 +17,7 @@ import type { GraphFigure } from ".";
 export const powStacked: GraphModule = {
   label: "Stacked bar",
   family: "grouped",
+  axes: () => ({ x: "labels", y: "range" }),
   defaults: { stackAs: "percent" },
   patterns: () => true,
   build: (columns: Column[], options: GraphOptions, paint: Paint, titles?: (string | null)[]): GraphFigure => {

@@ -11,7 +11,7 @@ import type { AnalysisResult, DoseResponseSpecialParams } from "../../stats/type
 import type { GraphFigure, GraphModule } from ".";
 import { fitLinear } from "./regression-overlay";
 import { parseInhibitorConcentration } from "../../stats/xy/enzyme-inhibition";
-import { addNote, xyLayout, type Paint } from "./plot-helpers";
+import { addNote, type Paint, XY_AXES, xyLayout } from "./plot-helpers";
 import { num } from "../../lib/format";
 
 export interface SchildPlotPoint {
@@ -127,6 +127,7 @@ export function addSchildPlot(
 export const schildPlot: GraphModule = {
   label: "Schild plot",
   family: "xy",
+  axes: XY_AXES,
   points: () => true,
   build: (_columns, options, _paint) => ({
     data: [],

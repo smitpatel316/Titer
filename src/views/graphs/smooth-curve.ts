@@ -9,12 +9,13 @@ import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult } from "../../stats/types";
 import { xyScatter } from "./xy-scatter";
 import type { GraphModule, GraphFigure } from ".";
-import type { Paint } from "./plot-helpers";
+import { XY_AXES, type Paint } from "./plot-helpers";
 import type { Column } from "../../lib/dataset";
 
 export const smoothCurve: GraphModule = {
   label: "Smooth curve",
   family: "xy",
+  axes: XY_AXES,
   points: () => true,
   build: (columns, options, paint) => xyScatter.build(columns, { ...options, xyStyle: "points" }, paint),
 };

@@ -117,6 +117,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
 export const rocCurveGraph: GraphModule = {
   label: "ROC curve",
   family: "xy",
+  axes: () => ({ x: "range", y: "range" }),
   points: () => true,
   lines: () => true,
   build,

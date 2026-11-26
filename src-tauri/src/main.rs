@@ -1591,6 +1591,20 @@ fn accent_color() -> Option<String> {
     }
 }
 
+/// The text on the clipboard, if it holds some: what a command of Helix's own reads (Paste
+/// Column Names), which the web view could only do after asking, unlike a paste.
+#[tauri::command]
+fn clipboard_text() -> Option<String> {
+    unsafe {
+        let board: *mut AnyObject = objc2::msg_send![objc2::class!(NSPasteboard), generalPasteboard];
+        let kind: *mut AnyObject =
+            objc2::msg_send![objc2::class!(NSString), stringWithUTF8String: c"public.utf8-plain-text".as_ptr()];
+        let text: *mut AnyObject = objc2::msg_send![board.as_ref()?, stringForType: kind];
+        let utf8: *const std::ffi::c_char = objc2::msg_send![text.as_ref()?, UTF8String];
+        Some(std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned())
+    }
+}
+
 /// macOS's own spinning wheel over a project window while an analysis runs, centered
 /// `at` (x, y in points from the window's top left); `None` takes it away.
 /// (Upstream 1.0.9; macOS-only — the Linux twin below is a no-op, like accent_color.)
@@ -2134,6 +2148,7 @@ fn main() {
             backup_delete,
             set_recent_documents,
             accent_color,
+            clipboard_text,
             open_link,
             open_support_email,
             open_file,

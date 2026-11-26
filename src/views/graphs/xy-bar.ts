@@ -5,7 +5,7 @@ import type { GraphOptions } from "../../store/types";
 import type { GraphModule, GraphFigure } from ".";
 import { splitXY, type Column } from "../../lib/dataset";
 import type { SummaryFormat } from "../../lib/summary-format";
-import { rightYDataset, xErrorColumn, xyDrawn, xyLayout, type Paint } from "./plot-helpers";
+import { rightYDataset, xErrorColumn, XY_AXES, xyDrawn, xyLayout, type Paint } from "./plot-helpers";
 
 function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?: (string | null)[], summary?: SummaryFormat): GraphFigure {
   const { x: xCol, ys: allYs } = splitXY(columns);
@@ -45,6 +45,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
 export const xyBar: GraphModule = {
   label: "Column or bar",
   family: "xy",
+  axes: XY_AXES,
   patterns: () => true,
   // A bar stands for one value per X: replicates as their center, whatever `xyReplicates`.
   summarizes: () => true,
