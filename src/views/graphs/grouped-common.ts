@@ -44,7 +44,12 @@ import type { SummaryFormat } from "../../lib/summary-format";
  *  centers, with an explicit `width`, so the bars keep the category axis's
  *  Prism proportions instead of going thin with an inverted gap (seq 547).
  *  Stacked bars and summary tables never draw points (a stack's total is not
- *  its replicates' values, and a summary table has no individual values). */
+ *  its replicates' values, and a summary table has no individual values).
+ *  Superimposed bars keep their row-centered X coordinates (`r`) even with
+ *  `showPoints` on — splitting them into side-by-side numeric positions
+ *  would break the superimposition and desync the bars from the
+ *  significance brackets, which sit at `r` (Issue #92); their points sit
+ *  at the row center too. */
 export function buildGroupedBars(
   columns: Column[],
   options: GraphOptions,
@@ -61,6 +66,16 @@ export function buildGroupedBars(
   const separated =
     mode === "group" && options.groupLayout === "separated" ? separatedPositions(groups.length, labels) : undefined;
   const pointsOn = mode === "group" && options.showPoints && summary === "replicates";
+  // Superimposed (Prism's "Data Sets on Graph" relation): every group's bar
+  // runs from the axis to its value at the same x — Plotly's barmode
+  // "overlay" — instead of standing side by side. Later groups draw over
+  // earlier ones, so a taller bar hides a shorter one behind it unless the
+  // fill is semi-transparent (the Format panel says so); the gap between
+  // bars has nothing to separate here. Stacked bars never superimpose.
+  // Superimposed bars stay row-centered even with points overlaid (Issue
+  // #92): numeric interleaved positions would split them apart and desync
+  // them from the significance brackets at `r`.
+  const superimposed = mode === "group" && options.groupLayout === "superimposed";
   // Numeric category positions whenever the bars leave the "category" axis:
   // separated blocks, or interleaved bars with points overlaid (the points
   // need numeric places to sit on their own bar). Interleaved bars with
@@ -69,15 +84,10 @@ export function buildGroupedBars(
   // made them thin with a bigger gap between paired bars than between
   // conditions (seq 547); the explicit width below restores the
   // category-axis proportions. Separated bars already get their width
-  // from a 1-slot spacing, so they need neither.
-  const barGeom = pointsOn && !separated ? groupedBarGeometry(groups.length, options.barGap) : undefined;
-  const positions = separated ?? (pointsOn ? groupedBarPositions(groups.length, labels, options.barGap) : undefined);
-  // Superimposed (Prism's "Data Sets on Graph" relation): every group's bar
-  // runs from the axis to its value at the same x — Plotly's barmode
-  // "overlay" — instead of standing side by side. Later groups draw over
-  // earlier ones, so a taller bar hides a shorter one behind it unless the
-  // fill is semi-transparent (the Format panel says so); the gap between
-  // bars has nothing to separate here. Stacked bars never superimpose.
+  // from a 1-slot spacing, so they need neither. Superimposed bars need
+  // neither either: they stay on the category axis at the row centers.
+  const barGeom = pointsOn && !separated && !superimposed ? groupedBarGeometry(groups.length, options.barGap) : undefined;
+  const positions = separated ?? (pointsOn && !superimposed ? groupedBarPositions(groups.length, labels, options.barGap) : undefined);
 
   // A summary table's stats and a replicates table's both carry a lower
   // side for the asymmetric kinds (range, IQR, geometric SD/CI) — the two
@@ -131,7 +141,9 @@ export function buildGroupedBars(
   if (pointsOn) {
     const jitterAmp = barGeom ? 2 * barGeom.width : 0.4;
     groups.forEach((g, gi) => {
-      const basePos = (r: number) => positions!.posOf(gi, r);
+      // No numeric positions (superimposed): the points sit at the row
+      // center, on their bar — the same `r` the significance brackets use.
+      const basePos = (r: number) => (positions ? positions.posOf(gi, r) : r);
       const px: number[] = [];
       const py: number[] = [];
       const pointKeys: string[] = [];
@@ -158,10 +170,8 @@ export function buildGroupedBars(
     });
   }
 
-  // A row's bars apart by `barGap`, so their outlines never overlap.
   // A row's bars apart by `barGap`, so their outlines never overlap —
   // except superimposed bars, which share one x by design.
-  const superimposed = mode === "group" && options.groupLayout === "superimposed";
   const gap = mode === "group" && !separated && !superimposed ? { bargroupgap: options.barGap } : {};
   return {
     data,
@@ -185,12 +195,11 @@ export function buildGroupedBars(
  *  there are no individual values to plot — the bars alone. Superimposed
  *  bars put every group's points at the row's center, on their bar; the
  *  interleaved and separated arrangements fan them out with their group.
- *  With `showPoints` on, `buildGroupedBars` already overlaid the points —
- *  adding them again here drew every point twice (with a second legend
- *  entry), so this builder only adds points when they aren't already there.
- *  Interleaved points sit at the grouped-bar centers (what the bars are
- *  actually drawn at on the category axis), not at `groupOffset` — that
- *  put them off-center, toward the bar's outer edge (seq 547). */
+ *  Delegating with `showPoints: true` draws the points inside
+ *  `buildGroupedBars`, on the bars' own numeric positions with the figure's
+ *  numeric axis — drawing them here instead appended float scatter X onto
+ *  the bars' categorical axis (Issue #31), and drawing them in both places
+ *  drew every point twice, with a second legend entry. */
 export function buildGroupedBarsScatter(
   columns: Column[],
   options: GraphOptions,
@@ -198,48 +207,7 @@ export function buildGroupedBarsScatter(
   titles?: (string | null)[],
   summary: SummaryFormat = "replicates",
 ): GraphFigure {
-  const bars = buildGroupedBars(columns, options, "group", false, paint, titles, summary);
-  if (summary !== "replicates") return bars;
-  if (options.showPoints) return bars;
-  const groups = groupsOf(columns);
-  const rows = rowCountOf(columns);
-  const total = groups.length;
-  const separated = options.groupLayout === "separated" ? separatedPositions(total, rowLabels(rows, titles)) : undefined;
-  const superimposed = options.groupLayout === "superimposed";
-  const geom = groupedBarGeometry(total, options.barGap);
-  const data: unknown[] = [...bars.data];
-  groups.forEach((g, gi) => {
-    const basePos = (r: number) =>
-      superimposed ? r : separated ? separated.posOf(gi, r) : r + geom.center(gi);
-    // Same jitter rule as buildGroupedBars: scaled to the bar width on
-    // interleaved bars, the legacy ±0.06 on the wide superimposed/separated
-    // bars (0.8 / 0.72 wide — the spread already fits).
-    const jitterAmp = superimposed || separated ? 0.4 : 2 * geom.width;
-    const px: number[] = [];
-    const py: number[] = [];
-    const pointKeys: string[] = [];
-    for (let r = 0; r < rows; r++) {
-      g.columns.forEach((c, ci) => {
-        const v = c.byRow[r] ?? null;
-        if (v != null) {
-          px.push(basePos(r) + jitter(gi, r * 10 + ci) * jitterAmp);
-          py.push(v);
-          pointKeys.push(pointKeyOf(c.name, r));
-        }
-      });
-    }
-    data.push({
-      type: "scatter",
-      mode: "markers",
-      name: g.name,
-      x: px,
-      y: py,
-      ...seriesPoints(paint, g.name, gi, pointKeys),
-      hoverinfo: "y",
-      showlegend: false,
-    });
-  });
-  return { data, layout: bars.layout };
+  return buildGroupedBars(columns, { ...options, showPoints: true }, "group", false, paint, titles, summary);
 }
 
 /** Connected/interaction lines: one line per group through its per-row centers
