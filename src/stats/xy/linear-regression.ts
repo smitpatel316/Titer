@@ -95,25 +95,43 @@ export const linearRegressionSpec: ColumnTestSpec<LinearRegressionParams> = {
     return undefined;
   },
   parseGroups: pickXY,
-  // NOTE (upstream 1.1.0, deferred): upstream's centered `R_LINE` is NOT ported —
-  // it drops Titer's weighting (Plan 26). Only the validation is taken; a
-  // weight-aware centered fit is a follow-up.
+  // Centered first (upstream 1.1.1, ported weight-aware): X and Y are centered
+  // on their WEIGHTED means, so values far from 0 for their spread (dates in
+  // seconds, 1000000000000.4…) lose no precision in lm's QR — and the fit
+  // stays weighted (Plan 26), which upstream's centered R_LINE drops. The
+  // centered intercept and slope are uncorrelated (the weighted mean of the
+  // centered X is 0), so the intercept comes back to X = 0 with its exact SE:
+  // b = b0c + my − slope·mx, sb² = se(b0c)² + (mx·se(slope))². Through the
+  // origin the line is instead fit on x and y scaled by their joint maximum:
+  // uniform scaling leaves the slope, its SE, R² and P exactly unchanged,
+  // and the scaled fit's residuals are computed at O(1), where the unscaled
+  // fit's residuals (y − slope·x, both ~1e13) lose the P value to rounding.
+  // Pearson's r is computed on the centered values too: cor(x,y) itself is
+  // 3.7e-8 off at 1e13 (R and NumPy agree on the wrong value), while cor on
+  // the centered values matches the exact r to all digits.
   checkGroups: ([x, y], params) => lineProblem(x, y, (params ?? DEFAULTS).forceOrigin),
   rCode: (groups, params) => {
     const origin = (params ?? DEFAULTS).forceOrigin;
-    const formula = origin ? "y~x+0" : "y~x";
-    const slopeIdx = origin ? 1 : 2;
-    const interceptTerms = origin ? "" : ",interceptCiLo=unname(ci[1,1]),interceptCiHi=unname(ci[1,2])";
-    // summary(lm)'s R² is the weighted one when weights are given, so no
-    // further adjustment is needed.
     const weights = (params ?? DEFAULTS).weights ?? "none";
     const wAssign = weights === "none" ? "" : `w<-${WEIGHT_R[weights]};`;
     const wArg = weights === "none" ? "" : ",weights=w";
+    const meanOf = (v: string) => (weights === "none" ? `mean(${v})` : `weighted.mean(${v},w)`);
+    const head = `x<-${rVec(groups[0].values)};y<-${rVec(groups[1].values)};${wAssign}`;
+    // summary(lm)'s R² is the weighted one when weights are given, so no
+    // further adjustment is needed — centering and scaling leave it unchanged.
+    if (origin) {
+      return (
+        `${head}sc<-max(abs(x),abs(y));if(sc==0)sc<-1;m<-lm(I(y/sc)~I(x/sc)+0${wArg});s<-summary(m);co<-s$coefficients;q<-qt(0.975,df.residual(m));` +
+        `c(slope=unname(co[1,1]),intercept=0,r=cor(x-mean(x),y-mean(y)),r2=s$r.squared,p=unname(co[1,4]),` +
+        `slopeCiLo=unname(co[1,1]-q*co[1,2]),slopeCiHi=unname(co[1,1]+q*co[1,2]))`
+      );
+    }
     return (
-      `x<-${rVec(groups[0].values)};y<-${rVec(groups[1].values)};${wAssign}m<-lm(${formula}${wArg});s<-summary(m);ci<-confint(m);` +
-      `c(slope=unname(coef(m)[${slopeIdx}]),intercept=${origin ? "0" : "unname(coef(m)[1])"},` +
-      `r=cor(x,y),r2=s$r.squared,p=unname(s$coefficients[${slopeIdx},4]),` +
-      `slopeCiLo=unname(ci[${slopeIdx},1]),slopeCiHi=unname(ci[${slopeIdx},2])${interceptTerms})`
+      `${head}mx<-${meanOf("x")};my<-${meanOf("y")};m<-lm(I(y-my)~I(x-mx)${wArg});s<-summary(m);co<-s$coefficients;q<-qt(0.975,df.residual(m));` +
+      `b<-co[1,1]+my-co[2,1]*mx;sb<-sqrt(co[1,2]^2+(mx*co[2,2])^2);` +
+      `c(slope=unname(co[2,1]),intercept=unname(b),r=cor(x-mean(x),y-mean(y)),r2=s$r.squared,p=unname(co[2,4]),` +
+      `slopeCiLo=unname(co[2,1]-q*co[2,2]),slopeCiHi=unname(co[2,1]+q*co[2,2]),` +
+      `interceptCiLo=unname(b-q*sb),interceptCiHi=unname(b+q*sb))`
     );
   },
   rows: (v, _groups, params) => {
@@ -207,18 +225,29 @@ export async function runLinearRegressions(
   }
   // Weights are per set: 1/Y and 1/Y² read that set's own Y (1/X and 1/X²
   // read the shared X), so the w vector is built inside each set's R code.
+  // Each set's fit is centered (or scaled, through the origin) exactly as
+  // the single-Y rCode above — same weighted means, same back-transform.
   const wAssign = weights === "none" ? "" : `w<-${WEIGHT_R[weights]};`;
   const wArg = weights === "none" ? "" : ",weights=w";
+  const meanOf = (v: string) => (weights === "none" ? `mean(${v})` : `weighted.mean(${v},w)`);
+  const fitCode = (p: { x: number[]; y: number[] }, i: number) => {
+    const head = `x<-${rVec(p.x)};y<-${rVec(p.y)};${wAssign}`;
+    if (origin) {
+      return (
+        `${head}sc<-max(abs(x),abs(y));if(sc==0)sc<-1;m<-lm(I(y/sc)~I(x/sc)+0${wArg});s<-summary(m);co<-s$coefficients;q<-qt(0.975,df.residual(m));` +
+        `v${i}<-c(slope=unname(co[1,1]),slo=co[1,1]-q*co[1,2],shi=co[1,1]+q*co[1,2],` +
+        `b=0,blo=NA,bhi=NA,r=NA,r2=s$r.squared,p=co[1,4],n=length(y))`
+      );
+    }
+    return (
+      `${head}mx<-${meanOf("x")};my<-${meanOf("y")};m<-lm(I(y-my)~I(x-mx)${wArg});s<-summary(m);co<-s$coefficients;q<-qt(0.975,df.residual(m));` +
+      `b<-co[1,1]+my-co[2,1]*mx;sb<-sqrt(co[1,2]^2+(mx*co[2,2])^2);` +
+      `v${i}<-c(slope=unname(co[2,1]),slo=co[2,1]-q*co[2,2],shi=co[2,1]+q*co[2,2],` +
+      `b=unname(b),blo=b-q*sb,bhi=b+q*sb,r=cor(x-mean(x),y-mean(y)),r2=s$r.squared,p=co[2,4],n=length(y))`
+    );
+  };
   const v = await evalNamedVector(
-    points
-      .map(
-        (p, i) =>
-          `x<-${rVec(p.x)};y<-${rVec(p.y)};${wAssign}m<-lm(${origin ? "y~x+0" : "y~x"}${wArg});s<-summary(m);ci<-confint(m);k<-${origin ? 1 : 2};` +
-          `v${i}<-c(slope=unname(coef(m)[k]),slo=ci[k,1],shi=ci[k,2],` +
-          `b=${origin ? "0" : "unname(coef(m)[1])"},blo=${origin ? "NA" : "ci[1,1]"},bhi=${origin ? "NA" : "ci[1,2]"},` +
-          `r=${origin ? "NA" : "cor(x,y)"},r2=s$r.squared,p=s$coefficients[k,4],n=length(y))`,
-      )
-      .join(";") + `;c(${points.map((_, i) => `setNames(v${i},paste0(names(v${i}),"_${i}"))`).join(",")})`,
+    points.map(fitCode).join(";") + `;c(${points.map((_, i) => `setNames(v${i},paste0(names(v${i}),"_${i}"))`).join(",")})`,
   );
   const of = (key: string) => sets.map((_, i) => v[`${key}_${i}`] ?? null);
   const range = (lo: string, hi: string) =>

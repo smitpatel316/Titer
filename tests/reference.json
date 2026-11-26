@@ -4289,6 +4289,272 @@
    }
   ]
  },
+ "anova anovaBig {\"posthoc\":\"none\"}": {
+  "testType": "anova",
+  "subtitle": "One-way ANOVA",
+  "stats": [
+   {
+    "label": "F",
+    "value": 5801.20715
+   },
+   {
+    "label": "DFn",
+    "value": 8
+   },
+   {
+    "label": "DFd",
+    "value": 1800
+   },
+   {
+    "label": "P value",
+    "value": 0,
+    "p": true
+   },
+   {
+    "label": "R squared (eta squared)",
+    "value": 0.9626630824
+   },
+   {
+    "label": "Cohen's f",
+    "value": 5.077710398
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.9626630824,
+    "partialEta2": 0.9626630824,
+    "cohensF": 5.077710398,
+    "partialEta2Lo": 0.9599036533,
+    "partialEta2Hi": 0.9648126933
+   }
+  ],
+  "groups": [
+   {
+    "name": "G0",
+    "mean": 10000000000000,
+    "sd": 0.3457112629,
+    "sem": 0.02438459237,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G1",
+    "mean": 10000000000000,
+    "sd": 0.3792934555,
+    "sem": 0.0267532976,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G2",
+    "mean": 10000000000000,
+    "sd": 0.3695499343,
+    "sem": 0.0260660426,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G3",
+    "mean": 10000000000000,
+    "sd": 0.3495769396,
+    "sem": 0.02465725618,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G4",
+    "mean": 10000000000000,
+    "sd": 0.4051575277,
+    "sem": 0.02857760859,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G5",
+    "mean": 10000000000000,
+    "sd": 0.3678581963,
+    "sem": 0.0259467166,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G6",
+    "mean": 10000000000000,
+    "sd": 0.3195653324,
+    "sem": 0.02254040062,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G7",
+    "mean": 10000000000000,
+    "sd": 0.3615264711,
+    "sem": 0.02550011114,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G8",
+    "mean": 10000000000000,
+    "sd": 0.3429580722,
+    "sem": 0.02419039726,
+    "median": 10000000000000,
+    "n": 201
+   }
+  ],
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor).",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "G0",
+     "n": 201
+    },
+    {
+     "name": "G1",
+     "n": 201
+    },
+    {
+     "name": "G2",
+     "n": 201
+    },
+    {
+     "name": "G3",
+     "n": 201
+    },
+    {
+     "name": "G4",
+     "n": 201
+    },
+    {
+     "name": "G5",
+     "n": 201
+    },
+    {
+     "name": "G6",
+     "n": 201
+    },
+    {
+     "name": "G7",
+     "n": 201
+    },
+    {
+     "name": "G8",
+     "n": 201
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001). The differences between the groups account for 96.27% of all the variation in the values (R²).",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of each group (Shapiro-Wilk): consistent with a normal distribution (“G0” P = 0.6424, “G1” P = 0.6336, “G2” P = 0.5014, “G3” P = 0.7144, “G4” P = 0.2001, “G5” P = 0.2356, “G6” P = 0.6419, “G7” P = 0.1333, “G8” P = 0.4263)."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.1219, Bartlett's P = 0.06419): consistent with equal SDs."
+   }
+  ]
+ },
+ "anova anovaSmall {\"posthoc\":\"none\"}": {
+  "testType": "anova",
+  "subtitle": "One-way ANOVA",
+  "stats": [
+   {
+    "label": "F",
+    "value": 53.51455314
+   },
+   {
+    "label": "DFn",
+    "value": 2
+   },
+   {
+    "label": "DFd",
+    "value": 12
+   },
+   {
+    "label": "P value",
+    "value": 0.000001049949569,
+    "p": true
+   },
+   {
+    "label": "R squared (eta squared)",
+    "value": 0.8991843224
+   },
+   {
+    "label": "Cohen's f",
+    "value": 2.986484922
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.8991843224,
+    "partialEta2": 0.8991843224,
+    "cohensF": 2.986484922,
+    "partialEta2Lo": 0.6837325229,
+    "partialEta2Hi": 0.9359303969
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 10000000000000,
+    "sd": 0.2852599073,
+    "sem": 0.1275721088,
+    "median": 10000000000000,
+    "n": 5
+   },
+   {
+    "name": "B",
+    "mean": 10000000000000,
+    "sd": 0.1793209151,
+    "sem": 0.0801947512,
+    "median": 10000000000000,
+    "n": 5
+   },
+   {
+    "name": "C",
+    "mean": 10000000000000,
+    "sd": 0.1773099758,
+    "sem": 0.07929543179,
+    "median": 10000000000000,
+    "n": 5
+   }
+  ],
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor).",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 5
+    },
+    {
+     "name": "B",
+     "n": 5
+    },
+    {
+     "name": "C",
+     "n": 5
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001). The differences between the groups account for 89.92% of all the variation in the values (R²).",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of each group (Shapiro-Wilk): consistent with a normal distribution (“A” P = 0.7282, “B” P = 0.5221, “C” P = 0.1759)."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.6994, Bartlett's P = 0.5662): consistent with equal SDs."
+   }
+  ]
+ },
  "anova column {\"posthoc\":\"fdr\"}": {
   "testType": "anova",
   "subtitle": "One-way ANOVA",
@@ -9148,6 +9414,289 @@
     "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the residuals P = 0.9324)."
    }
   ]
+ },
+ "linear-regression xyBig {\"forceOrigin\":false}": {
+  "testType": "linear-regression",
+  "subtitle": "Simple linear regression",
+  "equation": "Y = 2.001*X − 12310000000",
+  "stats": [
+   {
+    "label": "Slope",
+    "value": 2.001231061
+   },
+   {
+    "label": "Slope 95% CI lower",
+    "value": 1.934351615
+   },
+   {
+    "label": "Slope 95% CI upper",
+    "value": 2.068110506
+   },
+   {
+    "label": "Y-intercept",
+    "value": -12310605060
+   },
+   {
+    "label": "Intercept 95% CI lower",
+    "value": -681105059500
+   },
+   {
+    "label": "Intercept 95% CI upper",
+    "value": 656483849300
+   },
+   {
+    "label": "Pearson r",
+    "value": 0.9991609578
+   },
+   {
+    "label": "R squared",
+    "value": 0.9983226195
+   },
+   {
+    "label": "P value (slope ≠ 0)",
+    "value": 2.16608772e-12,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 10000000000000,
+    "sd": 1.513825177,
+    "sem": 0.4787135539,
+    "median": 10000000000000,
+    "n": 10
+   },
+   {
+    "name": "Y",
+    "mean": 20000000000000,
+    "sd": 3.032058101,
+    "sem": 0.9588209598,
+    "median": 20000000000000,
+    "n": 10
+   }
+  ],
+  "notes": "Ordinary least-squares linear regression of “Y” on “X”. Assumes a linear relationship and homoscedastic residuals.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Y",
+     "n": 10
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": []
+  },
+  "summary": "“Y” rises by 2.001 for each unit of “X” (the slope; 95% CI 1.934 to 2.068): significantly different from a flat line (P < 0.0001). “X” accounts for 99.83% of “Y”'s variation (R²).",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the residuals P = 0.9242)."
+   }
+  ]
+ },
+ "linear-regression xyBig {\"forceOrigin\":false,\"weights\":\"1/y\"}": {
+  "testType": "linear-regression",
+  "subtitle": "Simple linear regression",
+  "equation": "Y = 2.001*X − 12310000000",
+  "stats": [
+   {
+    "label": "Slope",
+    "value": 2.001231061
+   },
+   {
+    "label": "Slope 95% CI lower",
+    "value": 1.934351615
+   },
+   {
+    "label": "Slope 95% CI upper",
+    "value": 2.068110506
+   },
+   {
+    "label": "Y-intercept",
+    "value": -12310605060
+   },
+   {
+    "label": "Intercept 95% CI lower",
+    "value": -681105059500
+   },
+   {
+    "label": "Intercept 95% CI upper",
+    "value": 656483849300
+   },
+   {
+    "label": "R squared",
+    "value": 0.9983226195
+   },
+   {
+    "label": "P value (slope ≠ 0)",
+    "value": 2.16608772e-12,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 10000000000000,
+    "sd": 1.513825177,
+    "sem": 0.4787135539,
+    "median": 10000000000000,
+    "n": 10
+   },
+   {
+    "name": "Y",
+    "mean": 20000000000000,
+    "sd": 3.032058101,
+    "sem": 0.9588209598,
+    "median": 20000000000000,
+    "n": 10
+   }
+  ],
+  "notes": "Ordinary least-squares linear regression of “Y” on “X”. Weighted by 1/Y; R² is weighted.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Y",
+     "n": 10
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": []
+  },
+  "summary": "“Y” rises by 2.001 for each unit of “X” (the slope; 95% CI 1.934 to 2.068): significantly different from a flat line (P < 0.0001). “X” accounts for 99.83% of “Y”'s variation (R²).",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the weighted residuals P = 0.9226)."
+   }
+  ]
+ },
+ "linear-regression xyBigMulti {\"ys\":[\"Y\",\"Y2\"],\"forceOrigin\":false}": {
+  "testType": "linear-regression",
+  "subtitle": "Simple linear regression",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "Y",
+    "Y2"
+   ],
+   "rows": [
+    {
+     "label": "Slope",
+     "values": [
+      2.001231061,
+      2.018655303
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       1.934351615,
+       2.068110506
+      ],
+      [
+       2.000048972,
+       2.037261634
+      ]
+     ]
+    },
+    {
+     "label": "Y-intercept",
+     "values": [
+      -12310605060,
+      -186553030300
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       -681105059500,
+       656483849300
+      ],
+      [
+       -372616337100,
+       -489723526.5
+      ]
+     ]
+    },
+    {
+     "label": "Pearson r",
+     "values": [
+      0.9991609578,
+      0.9999361008
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      0.9983226195,
+      0.9998722057
+     ]
+    },
+    {
+     "label": "P value (slope ≠ 0)",
+     "values": [
+      2.16608772e-12,
+      7.293333943e-17
+     ],
+     "p": true
+    },
+    {
+     "label": "N",
+     "values": [
+      10,
+      10
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 10000000000000,
+    "sd": 1.513825177,
+    "sem": 0.4787135539,
+    "median": 10000000000000,
+    "n": 10
+   },
+   {
+    "name": "Y",
+    "mean": 20000000000000,
+    "sd": 3.032058101,
+    "sem": 0.9588209598,
+    "median": 20000000000000,
+    "n": 10
+   },
+   {
+    "name": "Y2",
+    "mean": 20000000000000,
+    "sd": 3.056086947,
+    "sem": 0.9664195479,
+    "median": 20000000000000,
+    "n": 10
+   }
+  ],
+  "notes": "Ordinary least-squares linear regression of each Y data set on “X”, each on its own. Assumes a linear relationship and homoscedastic residuals.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Y",
+     "n": 10
+    },
+    {
+     "name": "Y2",
+     "n": 10
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": []
+  },
+  "summary": "The slope differs significantly from 0 for “Y” (slope 2.001, P < 0.0001), “Y2” (slope 2.019, P < 0.0001)."
  },
  "deming-regression deming {\"y\":\"Y\",\"lambda\":1}": {
   "testType": "deming-regression",
@@ -48316,6 +48865,159 @@
    ]
   },
   "summary": "Together, the predictors account for 97.84% of “Weight”'s variation (R²): a significant model (P < 0.0001). Taking the other predictors into account, “Age” has a significant effect of its own; the data don't show one for “Height”."
+ },
+ "multiple-regression multiBig {\"dependent\":\"Y\"}": {
+  "testType": "multiple-regression",
+  "subtitle": "Multiple linear regression",
+  "stats": [
+   {
+    "label": "R squared",
+    "value": 0.9983558066
+   },
+   {
+    "label": "Adjusted R squared",
+    "value": 0.9979904303
+   },
+   {
+    "label": "AIC",
+    "value": -8.585968555
+   },
+   {
+    "label": "AICc",
+    "value": -2.871682841
+   },
+   {
+    "label": "F",
+    "value": 2732.404388
+   },
+   {
+    "label": "P value (model)",
+    "value": 2.963384435e-13,
+    "p": true
+   },
+   {
+    "label": "Complete rows (n)",
+    "value": 12
+   },
+   {
+    "label": "Predictors",
+    "value": 2
+   }
+  ],
+  "groups": [
+   {
+    "name": "Y",
+    "mean": 1001.077424,
+    "sd": 3.122824315,
+    "sem": 0.9014817294,
+    "median": 1000.963603,
+    "n": 12
+   },
+   {
+    "name": "X1",
+    "mean": 10000000000000,
+    "sd": 1.631420975,
+    "sem": 0.4709506694,
+    "median": 10000000000000,
+    "n": 12
+   },
+   {
+    "name": "X2",
+    "mean": 10000000000000,
+    "sd": 1.284317304,
+    "sem": 0.3707504705,
+    "median": 10000000000000,
+    "n": 12
+   }
+  ],
+  "notes": "Ordinary least-squares regression of “Y” on 2 predictor(s), fit on 12 complete rows. Each coefficient's P value tests whether that predictor's slope differs from zero, holding the others fixed.",
+  "coefficients": [
+   {
+    "term": "Intercept",
+    "estimate": -3460067821000,
+    "stdError": 365126632800,
+    "t": -9.476350147,
+    "p": 0.000005588496939
+   },
+   {
+    "term": "X1",
+    "estimate": 1.922045928,
+    "stdError": 0.02741135516,
+    "t": 70.11860294,
+    "p": 1.233451991e-13
+   },
+   {
+    "term": "X2",
+    "estimate": -1.576039146,
+    "stdError": 0.03481964296,
+    "t": -45.26293242,
+    "p": 6.271894044e-12
+   }
+  ],
+  "vif": [
+   {
+    "term": "X1",
+    "vif": 1.122503072
+   },
+   {
+    "term": "X2",
+    "vif": 1.122503072
+   }
+  ],
+  "anovaTable": [
+   {
+    "source": "Regression",
+    "df": 2,
+    "ss": 107.0959722,
+    "ms": 53.54798611,
+    "f": 2732.404388,
+    "p": 2.963384435e-13
+   },
+   {
+    "source": "Residual",
+    "df": 9,
+    "ss": 0.1763764826,
+    "ms": 0.01959738696,
+    "f": null,
+    "p": null
+   }
+  ],
+  "covariance": {
+   "variables": [
+    "Intercept",
+    "X1",
+    "X2"
+   ],
+   "values": [
+    [
+     1.33317458e+23,
+     -4360747178,
+     -8970998624
+    ],
+    [
+     -4360747178,
+     0.0007513823915,
+     -0.0003153076738
+    ],
+    [
+     -8970998624,
+     -0.0003153076738,
+     0.001212407536
+    ]
+   ]
+  },
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Y",
+     "n": 12
+    }
+   ],
+   "how": "list",
+   "detail": "explained by “X1” and “X2”, on 12 complete rows",
+   "left": []
+  },
+  "summary": "Together, the predictors account for 99.84% of “Y”'s variation (R²): a significant model (P < 0.0001). Taking the other predictors into account, “X1” and “X2” have a significant effect of their own."
  },
  "linear-regression multiple {\"x\":\"Height\",\"y\":\"Weight\",\"forceOrigin\":false}": {
   "testType": "linear-regression",
