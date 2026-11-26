@@ -205,8 +205,27 @@ export async function checksOf(
       const [x, y] = pickXY(columns, params as LinearRegressionParams | undefined);
       if (!x || !y) return [];
       const origin = (params as LinearRegressionParams | undefined)?.forceOrigin;
+      // The fit the residuals come from is weighted when params.weights is
+      // set — the same schemes as linear-regression.ts, over these vectors.
+      // A weighted fit's raw residuals are still heteroscedastic, so the
+      // check reads its standardized residuals (resid * sqrt(w)): those are
+      // the quantities the weighted model assumes normal.
+      const weights = (params as LinearRegressionParams | undefined)?.weights ?? "none";
+      const wVec =
+        weights === "1/y"
+          ? `1/${rVec(y.values)}`
+          : weights === "1/y2"
+            ? `1/${rVec(y.values)}^2`
+            : weights === "1/x"
+              ? `1/${rVec(x.values)}`
+              : weights === "1/x2"
+                ? `1/${rVec(x.values)}^2`
+                : undefined;
+      const fit = wVec
+        ? `{w<-${wVec};resid(lm(${rVec(y.values)}~${rVec(x.values)}${origin ? "+0" : ""},weights=w))*sqrt(w)}`
+        : `resid(lm(${rVec(y.values)}~${rVec(x.values)}${origin ? "+0" : ""}))`;
       normality = {
-        parts: [{ name: "the residuals", r: `resid(lm(${rVec(y.values)}~${rVec(x.values)}${origin ? "+0" : ""}))` }],
+        parts: [{ name: wVec ? "the weighted residuals" : "the residuals", r: fit }],
         what: "of the residuals",
       };
       break;
@@ -217,9 +236,15 @@ export async function checksOf(
       const names = result.correlations
         ? [columns.find((c) => c.values.length)?.name, result.correlations[0].variable]
         : result.groups.map((g) => g.name);
-      const parts = names
-        .map((n) => columns.find((c) => c.name === n || c.set === n))
-        .filter((c): c is Column => c !== undefined);
+      // A variable that is a replicate set (an XY table's "A" holding
+      // "A:Y1", "A:Y2", …) is checked on every replicate subcolumn pooled,
+      // not only the first one `find` returns.
+      const parts = names.flatMap((n) => {
+        if (n === undefined) return [];
+        const cols = columns.filter((c) => c.set === n || c.name === n);
+        if (!cols.length) return [];
+        return [{ name: n, values: cols.flatMap((c) => c.values) }];
+      });
       normality = { parts: named(parts), what: "of each variable", instead: "Spearman's correlation" };
       break;
     }

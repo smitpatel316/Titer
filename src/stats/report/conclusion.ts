@@ -5,10 +5,14 @@
 import type { Dataset } from "../../lib/dataset";
 import { isSignificant, num, pText } from "../../lib/format";
 import type { AnalysisParams, AnalysisResult, AnalysisType, Analyzed } from "../types";
+import { MODEL_LABEL } from "../xy/nonlinear-fit";
 
 type Params = Record<string, unknown> | undefined;
 
 const q = (name: string) => `“${name}”`;
+/** A nonlinear model's plain name ("Sigmoidal, 4PL, …"), the key itself when unknown. */
+const modelLabel = (m: unknown) =>
+  typeof m === "string" ? ((MODEL_LABEL as Record<string, string>)[m] ?? m) : "the model";
 /** “A”, “B” and “C”. */
 const list = (names: string[]) =>
   names.length > 1 ? `${names.slice(0, -1).map(q).join(", ")} and ${q(names.at(-1)!)}` : names.map(q).join("");
@@ -186,7 +190,8 @@ export function conclusionOf(
 
     case "multiple-t-tests": {
       const rows = stat("Rows compared");
-      const k = stat("Significant rows (P < 0.05)");
+      // An FDR run reports "Significant rows (adjusted P < Q%)", not "(P < 0.05)".
+      const k = statStarting("Significant rows (")?.value;
       return k
         ? `${q(A ?? "")} and ${q(B ?? "")} differ significantly in ${k} of ${rows} rows (each row's P value corrected for testing every row).`
         : `The data don't show a difference between ${q(A ?? "")} and ${q(B ?? "")} in any of the ${rows} rows (each row's P value corrected for testing every row).`;
@@ -222,12 +227,13 @@ export function conclusionOf(
       };
       if (result.correlations) {
         const x = table.sets[0]?.name ?? "X";
-        return (
-          result.correlations
-            .filter((c) => c.r != null)
-            .map((c) => one(x, c.variable, c.r, c.p, c.low, c.high))
-            .join(" ") + SCALE
-        );
+        const said = result.correlations
+          .filter((c) => c.r != null)
+          .map((c) => one(x, c.variable, c.r, c.p, c.low, c.high));
+        // Every correlation null leaves nothing to say — never a bare scale.
+        if (!said.length)
+          return `No correlation could be calculated between ${q(x)} and ${list(result.correlations.map((c) => c.variable))} — too few complete pairs, or values all identical.`;
+        return `${said.join(" ")}${SCALE}`;
       }
       return A && B
         ? one(
@@ -276,6 +282,28 @@ export function conclusionOf(
     case "nonlinear-regression": {
       const fit = result.fit;
       if (!fit) return undefined;
+      // A compareModel run fits TWO MODELS to the same data set — fit.sets
+      // holds that one set, so the two-data-set sentence below would read
+      // "Y" and "undefined". Compare the models instead: the F test when
+      // the pair is nested, else the AICc both models always report.
+      if (p?.compareModel) {
+        const setName = fit.sets[0] ?? (p?.y as string | undefined) ?? "the data";
+        const [mA, mB] = [modelLabel(p?.model), modelLabel(p?.compareModel)];
+        const pv = stat("P value");
+        if (pv !== undefined) {
+          return sig(pv)
+            ? `On ${q(setName)}, the ${q(mA)} and ${q(mB)} models fit differently: the extra parameters of the more complex model are justified (extra sum-of-squares F test, ${P(pv)}).`
+            : `The data don't show that the ${q(mA)} and ${q(mB)} models fit ${q(setName)} differently (extra sum-of-squares F test, ${P(pv)}): the simpler model describes the data as well.`;
+        }
+        const d = stat("ΔAICc (primary − comparison)");
+        if (d == null)
+          return `On ${q(setName)}, the ${q(mA)} and ${q(mB)} models were compared, but AICc could not be computed (too few points for the correction).`;
+        if (d < 0)
+          return `On ${q(setName)}, the ${q(mA)} model is preferred over the ${q(mB)} model (ΔAICc = ${num(d)}; the lower AICc wins).`;
+        if (d > 0)
+          return `On ${q(setName)}, the ${q(mB)} model is preferred over the ${q(mA)} model (ΔAICc = ${num(d)}; the lower AICc wins).`;
+        return `On ${q(setName)}, the ${q(mA)} and ${q(mB)} models fit equally well (ΔAICc = 0).`;
+      }
       const pv = stat("P value");
       const midpoint = fit.rows.find((r) => /^(Log)?(EC50|IC50)$/.test(r.label))?.label.replace(/^Log/, "");
       if (pv !== undefined) {
@@ -343,10 +371,13 @@ export function conclusionOf(
       const pv = stat("P value");
       const trend = stat("Chi-square for trend") !== undefined;
       const first = analyzed?.sets[0]?.name ?? "";
-      if (trend)
-        return sig(pv)
-          ? `The share of ${q(first)} rises or falls steadily down the rows, in their order (${P(pv)}).`
-          : `The data don't show that the share of ${q(first)} rises or falls down the rows (${P(pv)}).`;
+      if (trend) {
+        // The trend's own P — not the overall Pearson P above.
+        const tpv = stat("P value (test for trend)");
+        return sig(tpv)
+          ? `The share of ${q(first)} rises or falls steadily down the rows, in their order (${P(tpv)}).`
+          : `The data don't show that the share of ${q(first)} rises or falls down the rows (${P(tpv)}).`;
+      }
       return sig(pv)
         ? `How the counts split across the columns differs from row to row (${P(pv)}; Cramér's V = ${num(stat("Cramér's V"))}, from 0, no link, to 1).`
         : `The data don't show that the counts split across the columns differently from row to row (${P(pv)}).`;
@@ -480,8 +511,14 @@ function curveSentence(set: string, i: number, model: string, result: AnalysisRe
       // An ECF reported too: where the curve has come F % of the way.
       const other = rows.find((r) => /^(EC|IC)\d+$/.test(r.label) && r.label !== mid)?.label;
       const [otherAt, otherRange] = other ? best(other) : ["", ""];
+      // A normalized curve's plateaus are 0 and 100 by construction — they
+      // are not fitted parameters, so param("Bottom")/param("Top") read "—".
+      const plateau = (term: string, fixed: string) => {
+        const [v] = param(term);
+        return v === "—" && model.includes("normalized") ? fixed : v;
+      };
       what =
-        `${Y} runs between two plateaus, ${param("Bottom")[0]} and ${param("Top")[0]}, and is halfway between them ` +
+        `${Y} runs between two plateaus, ${plateau("Bottom", "0")} and ${plateau("Top", "100")}, and is halfway between them ` +
         `${logX ? "at a concentration of" : `when ${X} is`} ${at} (the ${mid}; ${range}).` +
         (other
           ? ` It has ${other.startsWith("IC") ? "fallen" : "come"} ${other.slice(2)}% of the way at ${otherAt} (the ${other}; ${otherRange}).`
