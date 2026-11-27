@@ -12812,6 +12812,67 @@ check("three-way ANOVA: full post-hoc suite, simple effects and FDR (seq 192)", 
   }
   ok(fdr.notes.includes("FDR approach"), `notes must name the FDR approach, got: ${fdr.notes}`);
 });
+
+// BUG-REPORT #113 (seq 585) — three-way ANOVA post-hoc at 1e13 scale: commit
+// 989f7c0b centered the main aov/drop1 call, but runPosthoc still computed
+// the pair difference and Games-Howell's variances in TypeScript on the raw
+// uncentered cell values. At ~1e13 scale the uncentered diff loses
+// precision for every post-hoc method (mean's summation rounds at the 1e13
+// ULP, so the two means' rounding no longer cancels), and single-pass
+// variance() picks up n·δ²/(n−1) from mean(values)'s ULP error. The fix
+// shifts both cells by a common point (vi[0]) before differencing the means,
+// and double-centers inside variance() (shift by values[0] — exact by
+// Sterbenz — then subtract the shifted mean, so the mean's rounding is
+// relative to the spread, not the 1e13 offset).
+//
+// The repro cells are the bug report's exact pair: vi = [1e13+0.01,
+// 1e13+0.02, 1e13+0.03], vj = [1e13+0.05, 1e13+0.06, 1e13+0.07], as the
+// A (Day 1, WT) and B (Day 1, WT) cells of a 2×2×2×3 table; the other six
+// cells are filler at the same scale. Pre-fix the pair reads diff
+// -0.0390625 (exact value -0.041015625, 4.76% error) and variance(vi)
+// 1.0109e-4 (exact 9.5367e-5, 6.00% error); post-fix the diff is exact and
+// both variances are the exact 9.5367431640625e-5, so se =
+// sqrt(2·9.5367431640625e-5/3) = 0.007973599423122325 at Welch df 4 exactly.
+// The expected CI is diff ± qtukey(0.95, 8, 4)/√2 · se with q from scipy's
+// studentized_range (independent of R's ptukey); the P is the same
+// distribution's upper tail at t·√2. Pre-fix the CI reads
+// [-0.08111998946334928, 0.002994989463349286] and P 0.06387 — both pins
+// fail on the old code by ~1e-3 / ~24%.
+check("three-way ANOVA Games-Howell post-hoc at 1e13 scale is centered (BUG-REPORT #113, seq 585)", async () => {
+  const data: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3"],
+    rows: [
+      ["Day 1", "10000000000000.01", "10000000000000.02", "10000000000000.03", "10000000000000.05", "10000000000000.06", "10000000000000.07"],
+      ["Day 2", "10000000000000.11", "10000000000000.12", "10000000000000.13", "10000000000000.15", "10000000000000.16", "10000000000000.17"],
+      ["Day 1", "10000000000000.21", "10000000000000.22", "10000000000000.23", "10000000000000.25", "10000000000000.26", "10000000000000.27"],
+      ["Day 2", "10000000000000.31", "10000000000000.32", "10000000000000.33", "10000000000000.35", "10000000000000.36", "10000000000000.37"],
+    ],
+    rowGroups: [
+      { name: "WT", count: 2 },
+      { name: "KO", count: 2 },
+    ],
+  };
+  const out = await runAnalysis("three-way-anova", data, {
+    posthoc: "games-howell",
+    posthocTerm: "A:B:C",
+  } as AnalysisParams);
+  if ("error" in out) throw new Error(`three-way ANOVA failed: ${out.error}`);
+  strictEqual(out.comparisons!.length, 28);
+  const pair = out.comparisons!.find((c) => c.group1 === "A (Day 1, WT)" && c.group2 === "B (Day 1, WT)");
+  ok(pair, "the A (Day 1, WT) vs B (Day 1, WT) pair must be present");
+  // The centered difference is exact (pre-fix: -0.0390625).
+  strictEqual(pair.diff, -0.041015625, `diff: got ${pair.diff}, want -0.041015625`);
+  // The CI carries the double-centered variances (pre-fix low/high
+  // -0.08111998946334928 / 0.002994989463349286, se 1.5% too large).
+  // Tolerance 1e-7, not 1e-9: R's crit/ptukey and scipy's studentized_range
+  // differ by ~2e-9 on this critical value, while the pre-fix deviation is
+  // ~1.3e-3 — four orders above the tolerance, so the pin still fails
+  // decisively on the old code.
+  ok(pair.low != null && Math.abs(pair.low - -0.08243666750668865) < 1e-7, `low: got ${pair.low}, want -0.08243666750668865`);
+  ok(pair.high != null && Math.abs(pair.high - 0.0004054175066886545) < 1e-7, `high: got ${pair.high}, want 0.0004054175066886545`);
+  // The P carries the same se and the exact Welch df 4 (pre-fix: 0.06387).
+  ok(pair.p != null && Math.abs(pair.p - 0.05167700677582765) <= 0.05167700677582765 * 1e-6, `p: got ${pair.p}, want 0.05167700677582765`);
+});
 check("the multifactor ANOVA wizard asks for response, factors and a post-hoc term", () => {
   const table = readTable({
     columns: ["Title", "Response", "Treatment", "Time", "Genotype"],
