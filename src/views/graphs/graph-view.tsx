@@ -29,7 +29,7 @@ import { paletteOf } from "../../lib/palettes";
 import { computeGroupedDEG } from "../../lib/deg";
 import { useAnalysis, useAnalyses } from "../analyses/use-analysis";
 import { infoSheetsOf, resolveGraphOptions } from "../../lib/info-sheets";
-import { axisKind, choosableSets, GRAPHS, graphSeriesDataset, hasValueAxis, plotColumns, valueScale } from ".";
+import { axisKind, choosableSets, GRAPHS, graphSeriesDataset, hasValueAxis, plotColumns } from ".";
 import { addFittedCurve } from "./fitted-curve";
 import { addBindingCurve, addDoseResponseSpecialCurve, addEnzymeInhibitionCurve } from "./binding-curve";
 import { addGeneratedCurves } from "./generated-curves";
@@ -870,7 +870,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
             ).map((label) => labelOnAxes(label, scaled, options, !!horizontal));
       if (labels.length) fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...labels];
       if (hasValueAxis(family) && options.refLines?.length) {
-        const { shapes, annotations } = refLineParts(options, !!horizontal, valueScale(type, options, atValues));
+        const { shapes, annotations } = refLineParts(options, !!horizontal);
         fig.layout.shapes = [...((fig.layout.shapes as unknown[]) ?? []), ...shapes];
         fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...annotations];
       }

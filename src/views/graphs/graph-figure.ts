@@ -77,7 +77,6 @@ import {
   graphSeriesDataset,
   hasValueAxis,
   plotColumns,
-  valueScale,
   type GraphFigure,
 } from ".";
 import { addFittedCurve, addLogisticCurve as addAnalysisLogisticCurve } from "./fitted-curve";
@@ -859,7 +858,7 @@ export async function buildGraphFigure(
         }));
   if (labels.length) fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...labels];
   if (hasValueAxis(family) && options.refLines?.length) {
-    const { shapes, annotations } = refLineParts(buildOptions, type === "grouped-hbars", valueScale(type, buildOptions));
+    const { shapes, annotations } = refLineParts(buildOptions, type === "grouped-hbars");
     fig.layout.shapes = [...((fig.layout.shapes as unknown[]) ?? []), ...shapes];
     fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...annotations];
   }

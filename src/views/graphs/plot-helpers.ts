@@ -432,6 +432,33 @@ export function unlinkedAnalysisNote(graphType: GraphType): string | null {
   }
 }
 
+/** Which Axes-section range rows the Format panel offers for a graph: a
+ *  categorical axis takes no min/max (G-F8) — the scree plot's X is its
+ *  components, the forest plot's Y its covariates — so the row is not
+ *  offered at all instead of silently ignoring what the user types. Every
+ *  other graph offers both rows; whether a typed bound takes effect is the
+ *  builder's business (fixed-range graphs honour it, see roc-curve.ts). */
+export function axesRangeInputs(graphType: GraphType): { x: boolean; y: boolean } {
+  if (graphType === "scree-plot") return { x: false, y: true };
+  if (graphType === "dendrogram") return { x: false, y: true };
+  if (graphType === "forest-plot") return { x: true, y: false };
+  return { x: true, y: true };
+}
+
+/** Whether the Format panel offers a Linear/Log10/Log2 Scale row for each
+ *  axis of this graph. An ROC curve lives on [0, 1] on both axes, where a
+ *  log scale is meaningless (#151): on a log axis the forced [0, 1] range
+ *  reads as [1, 10] in data values, so the whole curve falls outside the
+ *  window — and the (0,0)/(1,1) anchors have no log at all. Every other
+ *  graph offers both rows (the Y row is further gated by family in the
+ *  panel: heatmap and volcano have no Y scale). */
+export function logScaleOffered(graphType: GraphType): { x: boolean; y: boolean } {
+  if (graphType === "roc-curve") return { x: false, y: false };
+  // A forest plot's Y is its covariate names, not values: no log scale there.
+  if (graphType === "forest-plot") return { x: true, y: false };
+  return { x: true, y: true };
+}
+
 /** A point's name (`key`, see `pointKeyOf`) at `offset` px from it, joined to it by a
  *  thin line once it's moved away from a point `size` px wide. */
 export const pointName = (
@@ -1165,17 +1192,12 @@ function labelAt(place: RefLabelPlace, at: number, vertical: boolean) {
 
 /** Reference lines across the plot at values of its value axis (Y; X when `horizontal`):
  *  Plotly shapes at their values, their texts at their end, at the log10 of the value on a
- *  log axis (`onAxis`); a value a log axis can't show (0 and under) isn't drawn.
- *  `scale` is the scale the value axis is actually drawn with — the caller's
- *  `valueScale(type, options)`, not the saved `options.yScale`: graphs whose builders
- *  force a linear value axis (a stacked bar, a residual plot) draw their lines on a
- *  linear axis even when a log scale is saved (seq 572, #100). */
+ *  log axis (`onAxis`); a value a log axis can't show (0 and under) isn't drawn. */
 export function refLineParts(
   options: GraphOptions,
   horizontal: boolean,
-  scale: GraphOptions["yScale"] = options.yScale,
 ): { shapes: unknown[]; annotations: unknown[] } {
-  const lines = (options.refLines ?? []).filter((l) => scale === "linear" || l.value > 0);
+  const lines = (options.refLines ?? []).filter((l) => options.yScale === "linear" || l.value > 0);
   const [value, across] = horizontal ? (["x", "y"] as const) : (["y", "x"] as const);
   return {
     shapes: lines.map((l) => ({
@@ -1197,7 +1219,7 @@ export function refLineParts(
         font: { family: FONT, size: options.fontSize, color: l.color ?? INK },
         [`${across}ref`]: "paper",
         [`${value}ref`]: value,
-        ...labelAt(l.labelPlace ?? "top-right", onAxis(l.value, scale), horizontal),
+        ...labelAt(l.labelPlace ?? "top-right", onAxis(l.value, options.yScale), horizontal),
       })),
   };
 }
