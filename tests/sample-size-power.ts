@@ -296,8 +296,8 @@ for (const [params, pattern] of bad) {
   ok(mcp.includes("pub struct SampleSizePowerArgs"), "Rust must take sample-size-power args");
   ok(mcp.includes('"sample-size-power"'), "Rust must enqueue the sample-size-power job");
   ok(mcp.includes('"titer_sample_size_power",'), "the analyses allowlist group must include the new tool");
-  ok(mcp.includes("assert_eq!(all.len(), 83,"), "the inventory pin must count 82 tools");
-  ok(mcp.includes("assert_eq!(tools.len(), 83,"), "the tool-count pin must count 82 tools");
+  ok(mcp.includes("assert_eq!(all.len(), 83,"), "the inventory pin must count 83 tools");
+  ok(mcp.includes("assert_eq!(tools.len(), 83,"), "the tool-count pin must count 83 tools");
   ok(mcp.includes("fourteen analysis tools (incl. three job tools)"), "the smoke-test breakdown must count fourteen analysis tools");
   const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
   ok(dispatch.includes('case "sample-size-power":'), "the dispatcher must route sample-size-power");

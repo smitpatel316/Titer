@@ -47898,12 +47898,12 @@ check("flow-f2a: spillover-matrix compensation per sample (seq 447) — inverse 
   ok(mainRs.includes("flow_store::flow_clear_compensation"), "main.rs must register flow_clear_compensation");
 
   // 8. The MCP slice: titer_apply_flow_compensation + the flow group,
-  //    the TS executor + dispatch branch + node update, 82 tools.
+  //    the TS executor + dispatch branch + node update, 83 tools.
   const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
   ok(mcp.includes("titer_apply_flow_compensation"), "mcp.rs must define the titer_apply_flow_compensation tool");
   ok(mcp.includes("ApplyFlowCompensationArgs"), "mcp.rs must define the ApplyFlowCompensationArgs schema");
   ok(mcp.includes("apply-flow-compensation"), "mcp.rs must dispatch the apply-flow-compensation job action");
-  ok(mcp.includes("82 tools"), "mcp.rs header must count 82 tools after F2a");
+  ok(mcp.includes("83 tools"), "mcp.rs header must count 83 tools after F2a+F2c");
   const mcpFlow = readFileSync("src/store/mcp-flow.ts", "utf8");
   ok(mcpFlow.includes("executeApplyFlowCompensation"), "src/store/mcp-flow.ts must execute the apply-flow-compensation job");
   const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
@@ -47914,8 +47914,8 @@ check("flow-f2a: spillover-matrix compensation per sample (seq 447) — inverse 
     "the store must provide an updateFlowSampleCompensation action",
   );
   ok(
-    readFileSync("tests/mcp-coverage-180.ts", "utf8").includes("EXPECTED_TOOL_COUNT = 82"),
-    "mcp-coverage-180.ts must expect 82 tools after F2a",
+    readFileSync("tests/mcp-coverage-180.ts", "utf8").includes("EXPECTED_TOOL_COUNT = 83"),
+    "mcp-coverage-180.ts must expect 83 tools after F2a+F2c",
   );
 });
 

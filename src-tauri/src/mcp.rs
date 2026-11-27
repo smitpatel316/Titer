@@ -15401,7 +15401,7 @@ mod tests {
         assert!(tools.contains(&"titer_send_feedback"), "feedback is in the entry: {tools:?}");
         assert_eq!(tools.len(), 12, "seven read + five read-more: {tools:?}");
         // All groups on: Antigravity gets everything the server offers —
-        // all 82 tools, including the destructive ones (seq 540: the
+        // all 83 tools, including the destructive ones (seq 540: the
         // allowlist is the only gate; the entry must not narrow it).
         let all_groups: Vec<&str> = ALLOWLIST_GROUPS.iter().map(|g| g.id).collect();
         let entry = expected_antigravity_entry(bridge, &allowed_for(&all_groups));
@@ -15411,7 +15411,7 @@ mod tests {
             .iter()
             .filter_map(|v| v.as_str())
             .collect();
-        assert_eq!(tools.len(), 82, "all tools on by default: {tools:?}");
+        assert_eq!(tools.len(), 83, "all tools on by default: {tools:?}");
         assert!(tools.contains(&"titer_delete_node"), "destructive tools included: {tools:?}");
         assert!(tools.contains(&"titer_run_script"), "destructive tools included: {tools:?}");
         assert!(tools.contains(&"titer_send_feedback"), "feedback included: {tools:?}");
