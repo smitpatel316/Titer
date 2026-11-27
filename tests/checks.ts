@@ -308,7 +308,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, applyDateAxis, applyNumberFormats, baseLayout, centers, curveXs, errorOf, errors, fitLabels, groupedBarLayout, groupedScatterLayout, hasTableXAxis, heatmapLayout, jitter, legendRightMargin, legendWidthPx, movedText, numberTickformat, paintOf, perRowStats, perRowSummaryStats, refLineParts, rowValues, scatterOffsets, summaryErrorAt, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, applyDateAxis, applyNumberFormats, axesRangeInputs, baseLayout, centers, curveXs, errorOf, errors, fitLabels, groupedBarLayout, groupedScatterLayout, hasTableXAxis, heatmapLayout, jitter, labelOnAxes, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowStats, perRowSummaryStats, refLineParts, rowValues, scatterOffsets, summaryErrorAt, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -9138,6 +9138,90 @@ check("BUG-REPORT #31: grouped-bars-scatter with default showPoints draws points
   ok((supTraces[2].x as number[]).every((x, k) => Math.abs(x - Math.floor(k / 2)) <= 0.36));
   ok((supTraces[3].x as number[]).every((x, k) => Math.abs(x - Math.floor(k / 2)) <= 0.36));
   ok((supTraces.slice(2).flatMap((t) => t.x as number[]) as number[]).every((x) => x >= -0.5 && x <= 1.5));
+});
+
+// BUG-REPORT #101 (seq 573): point labels on Horizontal Bars with a Log10
+// scale transformed the wrong axis — label.x (the value, on physical x) was
+// left untransformed (10^v, off-canvas) and row 0's label.y (the row index 0)
+// went through log10 to NaN. Labels carry physical Plotly coordinates, so
+// the log transform follows the physical axis: on a horizontal graph the
+// value axis lies across (option y → physical x) and the category axis down
+// (option x → physical y).
+check("BUG-REPORT #101: horizontal-bar point labels follow the physical axes on a log scale (seq 573)", () => {
+  const close = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+  // The repro's shape: values 10 and 100, Log10 value scale — `scaled` is
+  // option-keyed for grouped-hbars (x = labels, y = scale).
+  const log = { xScale: "linear", yScale: "log10" } as const;
+  const scaled = { x: false, y: true };
+  // Row 1's label sits at log10(100) = 2, row 0's at log10(10) = 1 — both
+  // finite, on the log axis, with the row itself untouched.
+  const row1 = labelOnAxes({ x: 100, y: 1 }, scaled, log, true);
+  ok(close(row1.x, 2), `row 1's label x is log10(100) = 2, got ${row1.x}`);
+  strictEqual(row1.y, 1);
+  const row0 = labelOnAxes({ x: 10, y: 0 }, scaled, log, true);
+  ok(close(row0.x, 1), `row 0's label x is log10(10) = 1, got ${row0.x}`);
+  strictEqual(row0.y, 0, "row 0's label stays at its row (finite, present — not NaN)");
+  ok(Number.isFinite(row0.x) && Number.isFinite(row0.y));
+  // The vertical case is unchanged: the value axis is y there.
+  const vertical = labelOnAxes({ x: 0, y: 100 }, scaled, log, false);
+  ok(close(vertical.y, 2), `vertical bars still log the y value, got ${vertical.y}`);
+  strictEqual(vertical.x, 0);
+  // Linear stays linear on both axes.
+  deepStrictEqual(
+    labelOnAxes({ x: 100, y: 0 }, scaled, { xScale: "linear", yScale: "linear" }, true),
+    { x: 100, y: 0 },
+  );
+});
+
+// BUG-REPORT #101 (seq 573), end to end: the shared figure builder — what
+// the GUI, the figure panels and the headless export all draw — must place
+// Horizontal Bars point labels at their log10 x with row 0 present.
+check("BUG-REPORT #101: headless Horizontal Bars with Log10 scale labels both rows on-canvas (seq 573)", async () => {
+  let t = newGroupedTable(1, 1); // A:Y1
+  t = writeBlock(t, 0, 0, [["r1", "10"], ["r2", "100"]], "grouped");
+  const table: ProjectNode = { id: "t1", type: "table", name: "G", parentId: null, tableType: "grouped", data: t };
+  const baseOptions = { ...newGraphOptions("grouped-hbars"), showPoints: true, yScale: "log10" as const };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "HBars",
+    parentId: "t1",
+    graphType: "grouped-hbars",
+    graphOptions: baseOptions,
+  };
+  const nodes: Record<string, ProjectNode> = { t1: table, g1: graph };
+  const noRun = async (): Promise<never> => {
+    throw new Error("no analysis should run for an unlinked graph");
+  };
+  // Discover the points' keys from the figure's own scatter trace.
+  const first = await buildGraphFigure(graph, nodes, { run: noRun });
+  ok(first.figure, "the figure builds");
+  const keys = (first.figure!.data as { customdata?: unknown }[]).flatMap((tr) =>
+    Array.isArray(tr.customdata) ? (tr.customdata as string[]) : [],
+  );
+  strictEqual(keys.length, 2, `two points drawn, got ${JSON.stringify(keys)}`);
+  // Label both rows and rebuild.
+  const labelled: ProjectNode = {
+    ...graph,
+    graphOptions: { ...baseOptions, points: Object.fromEntries(keys.map((k) => [k, { label: true }])) },
+  };
+  const { figure } = await buildGraphFigure(labelled, nodes, { run: noRun });
+  ok(figure, "the labelled figure builds");
+  const labels = ((figure!.layout.annotations as { name?: string; x?: number; y?: number }[] | undefined) ?? []).filter(
+    (l) => typeof l.name === "string",
+  );
+  strictEqual(labels.length, 2, `both rows labelled, got ${JSON.stringify(figure!.layout.annotations)}`);
+  const close = (a: number | undefined, b: number) => a !== undefined && Math.abs(a - b) < 1e-9;
+  const [low, high] = [...labels].sort((a, b) => (a.x ?? 0) - (b.x ?? 0));
+  // x at log10 of the value: 10 → 1, 100 → 2 — on the log axis, not 10^v off-canvas.
+  ok(close(low?.x, 1) && close(high?.x, 2), `label x: ${JSON.stringify(labels.map((l) => l.x))}`);
+  // y at the rows (0 and 1, jittered slightly): finite and on-canvas — row 0
+  // used to come out NaN through log10(0).
+  for (const [l, row] of [[low, 0], [high, 1]] as const) {
+    ok(Number.isFinite(l?.x) && Number.isFinite(l?.y), `row ${row} label is finite: ${JSON.stringify(l)}`);
+    ok(l!.y! >= row - 0.5 && l!.y! <= row + 0.5, `row ${row} label y near ${row}: ${l?.y}`);
+  }
+  ok((low?.y ?? 1) < (high?.y ?? 0), "row 0's label sits below row 1's");
 });
 
 check("seq 223: bars with individual points draws bars plus one points trace per group", () => {
