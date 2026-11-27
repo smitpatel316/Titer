@@ -22728,6 +22728,7 @@ check("updater-46: auto-updater resolves the artifact from the channel manifest 
   const updatesSrc = readFileSync("src/updates.ts", "utf8");
   ok(updatesSrc.includes("await downloadUpdate()"), "installUpdate downloads with no caller-supplied asset fields");
   ok(updatesSrc.includes("manifest.update"), "installUpdate still refuses when the manifest names no installable asset");
+});
 check("r2-65: UI/menu minor defects — single Grubbs' table, single Fill Down, no shortcut collision, fresh Change Parameters… state", () => {
   const results = readFileSync("src/views/analyses/analysis-results-view.tsx", "utf8");
   const menu = readFileSync("src/app-menu.ts", "utf8");
