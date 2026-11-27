@@ -12,6 +12,7 @@ import { ConverterDialog } from "./converter-dialog";
 import { ExportAllDialog } from "./export-all-dialog";
 import { AiConnectionsDialog } from "./ai-connections-dialog";
 import { MarketplaceDialog } from "./marketplace-dialog";
+import { PluginPanelDialog } from "../plugins/plugin-host-view";
 import { FeedbackConsentDialog } from "./feedback-consent-dialog";
 import { SendFeedbackDialog } from "./send-feedback-dialog";
 import { CrashReportDialog } from "./crash-report-dialog";
@@ -408,6 +409,8 @@ export function AppShell() {
       <AiConnectionsDialog />
 
       <MarketplaceDialog />
+
+      <PluginPanelDialog />
 
       <PreferencesDialog />
 

@@ -52,6 +52,10 @@ export interface ParsedPluginPackage {
   analyses: PluginAnalysisSpecJson[];
   /** Non-fatal notes (a missing README) — install proceeds. */
   warnings: string[];
+  /** The entry file's source text, when the manifest names one
+   *  (documented, loader.ts) — the store launches the Isolation frame
+   *  from it on enable (diff (5)). */
+  entrySource?: string;
 }
 
 /** One installed plugin (documented, loader.ts). */
