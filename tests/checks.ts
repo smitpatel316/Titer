@@ -50,7 +50,7 @@ import {
   parseGuideSeen,
   shouldShowGuide,
 } from "../src/lib/startup-guide";
-import { WHAT_S_NEW, WHATS_NEW_SEEN_KEY, filterWhatsNewEntries, markWhatsNewSeen, readWhatsNewSeen, seenVersion, visibleWhatsNewEntries } from "../src/lib/whats-new";
+import { WHAT_S_NEW, WHATS_NEW_SEEN_KEY, filterWhatsNewEntries, markWhatsNewSeen, readWhatsNewSeen, seenVersion, visibleWhatsNewEntries, whatsNewVersion } from "../src/lib/whats-new";
 import {
   extractMethod,
   formatMethodReport,
@@ -30619,31 +30619,32 @@ check("bugfix-br-108: closing the dialog never moves the seen marker down after 
     setItem: (k: string, v: string) => void (stored[k] = v),
   };
   Object.assign(globalThis, { localStorage: storage });
+  const current = whatsNewVersion();
   try {
-    // Running 2.0.1 (package.json) with 2.1.0 already seen: the marker stays.
+    // Running the package.json version with 2.1.0 already seen: the marker stays.
     stored[WHATS_NEW_SEEN_KEY] = "2.1.0";
     markWhatsNewSeen();
     strictEqual(readWhatsNewSeen(), "2.1.0", "a downgrade close leaves the newer marker alone");
     // Same version: already seen, no rewrite needed (value unchanged).
-    stored[WHATS_NEW_SEEN_KEY] = "2.0.1";
+    stored[WHATS_NEW_SEEN_KEY] = current;
     markWhatsNewSeen();
-    strictEqual(readWhatsNewSeen(), "2.0.1");
+    strictEqual(readWhatsNewSeen(), current);
     // Older version: the marker advances to the running version.
     stored[WHATS_NEW_SEEN_KEY] = "2.0.0";
     markWhatsNewSeen();
-    strictEqual(readWhatsNewSeen(), "2.0.1");
+    strictEqual(readWhatsNewSeen(), current);
     // No record: the marker is written.
     delete stored[WHATS_NEW_SEEN_KEY];
     markWhatsNewSeen();
-    strictEqual(readWhatsNewSeen(), "2.0.1");
+    strictEqual(readWhatsNewSeen(), current);
     // Garbled record: treated as no record, the marker is written.
     stored[WHATS_NEW_SEEN_KEY] = "banana";
     markWhatsNewSeen();
-    strictEqual(readWhatsNewSeen(), "2.0.1");
+    strictEqual(readWhatsNewSeen(), current);
     // A stored pre-release newer than the running version is left alone.
-    stored[WHATS_NEW_SEEN_KEY] = "2.0.2-rc.1";
+    stored[WHATS_NEW_SEEN_KEY] = "2.1.0-rc.1";
     markWhatsNewSeen();
-    strictEqual(readWhatsNewSeen(), "2.0.2-rc.1", "a newer pre-release marker is not overwritten");
+    strictEqual(readWhatsNewSeen(), "2.1.0-rc.1", "a newer pre-release marker is not overwritten");
   } finally {
     delete (globalThis as { localStorage?: unknown }).localStorage;
   }
@@ -47558,23 +47559,37 @@ check("feedback-loop-453: feedback reachable for every user, Discussions + suppo
   // shows only the current entry; already seen, or a downgrade, shows
   // nothing.
   const shownVersions = (entries: { version: string }[]) => entries.map((e) => e.version);
-  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.0")), ["2.0.1"], "prev 2.0.0 sees only 2.0.1");
+  deepStrictEqual(
+    shownVersions(visibleWhatsNewEntries("2.0.0")),
+    ["2.0.5", "2.0.3", "2.0.2"],
+    "prev 2.0.0 sees the three newest, capped at 3",
+  );
   deepStrictEqual(
     shownVersions(visibleWhatsNewEntries("1.9.0")),
-    ["2.0.1", "2.0.0"],
-    "prev 1.9.0 sees 2.0.1 + 2.0.0",
+    ["2.0.5", "2.0.3", "2.0.2"],
+    "prev 1.9.0 sees the three newest, capped at 3",
   );
   deepStrictEqual(
     shownVersions(visibleWhatsNewEntries("1.8.1")),
-    ["2.0.1", "2.0.0", "1.9.0"],
-    "prev 1.8.1 sees all three, capped at 3",
+    ["2.0.5", "2.0.3", "2.0.2"],
+    "prev 1.8.1 sees the three newest, capped at 3",
   );
-  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.1")), [], "prev 2.0.1 sees nothing");
-  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.2")), [], "downgrade sees nothing");
-  deepStrictEqual(shownVersions(visibleWhatsNewEntries(null)), ["2.0.1"], "no record sees only the current entry");
+  deepStrictEqual(
+    shownVersions(visibleWhatsNewEntries("2.0.1")),
+    ["2.0.5", "2.0.3", "2.0.2"],
+    "prev 2.0.1 sees the three newer entries",
+  );
+  deepStrictEqual(
+    shownVersions(visibleWhatsNewEntries("2.0.2")),
+    ["2.0.5", "2.0.3"],
+    "prev 2.0.2 sees the two newer entries",
+  );
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.5")), [], "prev 2.0.5 (current) sees nothing");
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.6")), [], "downgrade sees nothing");
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries(null)), ["2.0.5"], "no record sees only the current entry");
   deepStrictEqual(
     shownVersions(visibleWhatsNewEntries("banana")),
-    ["2.0.1"],
+    ["2.0.5"],
     "garbled record sees only the current entry",
   );
   const fiveEntries = ["2.0.3", "2.0.2", "2.0.1", "2.0.0", "1.9.0"].map((v) => ({
