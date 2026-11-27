@@ -1074,7 +1074,7 @@ function logAxis(
 }
 
 /** The value axis's scale and range: linear (from 0 when `zeroBase`, for bars), or log. */
-const yAxisRange = (options: GraphOptions, zeroBase?: boolean, grid: GraphOptions["gridX"] = "none") =>
+export const yAxisRange = (options: GraphOptions, zeroBase?: boolean, grid: GraphOptions["gridX"] = "none") =>
   options.yScale === "linear"
     ? axisRange(options.yMin, options.yMax, options.yStep, zeroBase)
     : logAxis(options.yScale, options.yMin, options.yMax, grid, options.tickDirection);
@@ -1083,7 +1083,7 @@ const y2AxisRange = (options: GraphOptions, zeroBase?: boolean) =>
   options.y2Scale === "linear"
     ? axisRange(options.y2Min, options.y2Max, options.y2Step, zeroBase)
     : logAxis(options.y2Scale, options.y2Min, options.y2Max);
-const xAxisRange = (options: GraphOptions, zeroBase?: boolean, grid: GraphOptions["gridX"] = "none") =>
+export const xAxisRange = (options: GraphOptions, zeroBase?: boolean, grid: GraphOptions["gridX"] = "none") =>
   options.xScale === "linear"
     ? axisRange(options.xMin, options.xMax, options.xStep, zeroBase)
     : logAxis(options.xScale, options.xMin, options.xMax, grid, options.tickDirection);

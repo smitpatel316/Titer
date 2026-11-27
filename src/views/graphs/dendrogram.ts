@@ -9,7 +9,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult, HclustDendrogram } from "../../stats/types";
 import type { Column } from "../../lib/dataset";
-import { GUIDE, type Paint, XY_AXES, xyLayout } from "./plot-helpers";
+import { GUIDE, type Paint, xyLayout } from "./plot-helpers";
 import type { GraphFigure, GraphModule } from ".";
 
 /** The one series this graph draws, as the Series section names it. */
@@ -131,7 +131,9 @@ function build(_columns: Column[], options: GraphOptions, _paint: Paint): GraphF
 export const dendrogram: GraphModule = {
   label: "Dendrogram",
   family: "multiple",
-  axes: XY_AXES,
+  // X is the leaves (labels on the ticks, cf. scree-plot); Y is the merge
+  // height/distance, a value axis whose scale/range/step the builder honours.
+  axes: () => ({ x: "labels", y: "scale" }),
   points: () => false,
   build,
 };

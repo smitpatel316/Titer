@@ -21,14 +21,41 @@ import {
   buildFlowPseudocolorPlot,
   type FlowFigure,
 } from "../../flow/viewer";
-import { XY_AXES } from "./plot-helpers";
+import { XY_AXES, xAxisRange, yAxisRange } from "./plot-helpers";
 
-const axesOnly = (xName: string, yName: string): GraphFigure => ({
-  data: [],
-  layout: { xaxis: { title: xName || "X" }, yaxis: { title: yName || "Y" } },
+/** A flow figure with the Format panel's axis scale/range/step applied to
+ *  its layout: the flow builders draw values on both axes (XY_AXES), so a
+ *  log scale or a typed bound must reach the layout — the viewer itself
+ *  knows nothing of GraphOptions (it never imports outside src/flow).
+ *  The axes-only figure gets it too, so the settings move the axes even
+ *  before a sample is named. Titles are untouched: the range helpers
+ *  return only type/ticks/range, never a title. */
+const withAxes = (fig: GraphFigure, options: GraphOptions): GraphFigure => ({
+  ...fig,
+  layout: {
+    ...fig.layout,
+    xaxis: {
+      ...((fig.layout.xaxis as Record<string, unknown> | undefined) ?? {}),
+      ...xAxisRange(options, undefined, options.gridX),
+    },
+    yaxis: {
+      ...((fig.layout.yaxis as Record<string, unknown> | undefined) ?? {}),
+      ...yAxisRange(options, undefined, options.gridY),
+    },
+  },
 });
 
-const asFigure = (fig: FlowFigure): GraphFigure => ({ data: fig.data, layout: fig.layout });
+const axesOnly = (xName: string, yName: string, options: GraphOptions): GraphFigure =>
+  withAxes(
+    {
+      data: [],
+      layout: { xaxis: { title: xName || "X" }, yaxis: { title: yName || "Y" } },
+    },
+    options,
+  );
+
+const asFigure = (fig: FlowFigure, options: GraphOptions): GraphFigure =>
+  withAxes({ data: fig.data, layout: fig.layout }, options);
 
 const dotPlot: GraphModule = {
   label: "Flow dot plot",
@@ -38,7 +65,7 @@ const dotPlot: GraphModule = {
   points: () => true,
   build: (_columns: Column[], options: GraphOptions) => {
     if (!options.flowSampleId || !options.flowXParam || !options.flowYParam) {
-      return axesOnly(options.flowXParam ?? "", options.flowYParam ?? "");
+      return axesOnly(options.flowXParam ?? "", options.flowYParam ?? "", options);
     }
     return asFigure(
       buildFlowDotPlot({
@@ -48,6 +75,7 @@ const dotPlot: GraphModule = {
         bins: options.flowBins,
         downsampleCap: options.flowDownsampleCap,
       }),
+      options,
     );
   },
 };
@@ -59,7 +87,7 @@ const densityPlot: GraphModule = {
   palette: "viridis",
   build: (_columns: Column[], options: GraphOptions) => {
     if (!options.flowSampleId || !options.flowXParam || !options.flowYParam) {
-      return axesOnly(options.flowXParam ?? "", options.flowYParam ?? "");
+      return axesOnly(options.flowXParam ?? "", options.flowYParam ?? "", options);
     }
     return asFigure(
       buildFlowDensityPlot({
@@ -68,6 +96,7 @@ const densityPlot: GraphModule = {
         yParam: options.flowYParam,
         bins: options.flowBins,
       }),
+      options,
     );
   },
 };
@@ -79,7 +108,7 @@ const contourPlot: GraphModule = {
   palette: "viridis",
   build: (_columns: Column[], options: GraphOptions) => {
     if (!options.flowSampleId || !options.flowXParam || !options.flowYParam) {
-      return axesOnly(options.flowXParam ?? "", options.flowYParam ?? "");
+      return axesOnly(options.flowXParam ?? "", options.flowYParam ?? "", options);
     }
     return asFigure(
       buildFlowContourPlot({
@@ -88,6 +117,7 @@ const contourPlot: GraphModule = {
         yParam: options.flowYParam,
         bins: options.flowBins,
       }),
+      options,
     );
   },
 };
@@ -100,7 +130,7 @@ const pseudocolorPlot: GraphModule = {
   points: () => true,
   build: (_columns: Column[], options: GraphOptions) => {
     if (!options.flowSampleId || !options.flowXParam || !options.flowYParam) {
-      return axesOnly(options.flowXParam ?? "", options.flowYParam ?? "");
+      return axesOnly(options.flowXParam ?? "", options.flowYParam ?? "", options);
     }
     return asFigure(
       buildFlowPseudocolorPlot({
@@ -110,6 +140,7 @@ const pseudocolorPlot: GraphModule = {
         bins: options.flowBins,
         downsampleCap: options.flowDownsampleCap,
       }),
+      options,
     );
   },
 };
@@ -122,7 +153,7 @@ const flowHistogram: GraphModule = {
   patterns: () => true,
   build: (_columns: Column[], options: GraphOptions) => {
     if (!options.flowSampleId || !options.flowXParam) {
-      return axesOnly(options.flowXParam ?? "", "Count");
+      return axesOnly(options.flowXParam ?? "", "Count", options);
     }
     return asFigure(
       buildFlowHistogram({
@@ -130,6 +161,7 @@ const flowHistogram: GraphModule = {
         param: options.flowXParam,
         bins: options.flowBins,
       }),
+      options,
     );
   },
 };

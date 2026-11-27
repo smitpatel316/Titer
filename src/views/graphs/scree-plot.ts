@@ -6,7 +6,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult } from "../../stats/types";
 import type { Column } from "../../lib/dataset";
-import { INK, type Paint, XY_AXES, xyLayout } from "./plot-helpers";
+import { INK, type Paint, xyLayout } from "./plot-helpers";
 import type { GraphFigure, GraphModule } from ".";
 
 /** The one series this graph draws, as the Series section names it. */
@@ -92,7 +92,9 @@ function build(_columns: Column[], options: GraphOptions, _paint: Paint): GraphF
 export const screePlot: GraphModule = {
   label: "Scree plot",
   family: "multiple",
-  axes: XY_AXES,
+  // X is the component labels (a category axis, cf. pow-stacked); Y is the
+  // percentages, a value axis whose scale/range/step the builder honours.
+  axes: () => ({ x: "labels", y: "scale" }),
   points: () => false,
   build,
 };
