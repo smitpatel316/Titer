@@ -552,10 +552,20 @@ fn escape_applescript_string(text: &str) -> String {
 
 /// An AppleScript number: integers bare, fractions to two decimals —
 /// never locale-formatted, never scientific. Mirrors
-/// `appleScriptNumber` in src/lib/office-export.ts.
+/// `appleScriptNumber` in src/lib/office-export.ts. Guarded (seq 539):
+/// a non-finite or astronomically large value must never reach the
+/// script as `inf`/`NaN` — `(value * 100.0).round()` overflows past
+/// ~1.8e306 — and a tiny positive must not round to `0`, which would
+/// divide by zero in the Keynote fit step. So the input is clamped
+/// into the range the formatter renders exactly, and a positive value
+/// that still rounds to zero renders as the smallest two-decimal size.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn applescript_number(value: f64) -> String {
-    let rounded = (value * 100.0).round() / 100.0;
+    let value = if value.is_nan() { 0.0 } else { value.clamp(0.0, 1e5) };
+    let mut rounded = (value * 100.0).round() / 100.0;
+    if value > 0.0 && rounded == 0.0 {
+        rounded = 0.01;
+    }
     if rounded.fract() == 0.0 {
         format!("{}", rounded as i64)
     } else {
@@ -563,12 +573,33 @@ fn applescript_number(value: f64) -> String {
     }
 }
 
+/// An image size Keynote can actually lay out, in points (seq 539):
+/// finite and within 1..=100000 pt. The old check — just `> 0.0` —
+/// let 1e307 through, which overflowed `applescript_number` into
+/// `set imgW to inf` (invalid AppleScript), and let 0.001 through,
+/// which rounded to `0` (and divided by zero in the fit step).
+/// `applescript_number` clamps as defence in depth, but the IPC gate
+/// is here: a bad size is refused before any script is built.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn check_keynote_image_size(width_pt: f64, height_pt: f64) -> Result<(), String> {
+    if !(width_pt.is_finite() && height_pt.is_finite()) {
+        return Err("Send to Keynote needs a finite image size.".into());
+    }
+    if !(1.0..=1e5).contains(&width_pt) || !(1.0..=1e5).contains(&height_pt) {
+        return Err("Send to Keynote needs an image size between 1 and 100000 points.".into());
+    }
+    Ok(())
+}
+
 /// A path the shell may hand to osascript or delete: it must be a file
 /// this app wrote to its own temp dir — canonicalized (symlinks
 /// resolved) and confined under `temp_dir()`, with one of the given
 /// extensions. Anything else is refused, so a compromised page can't
 /// point a clipboard or Keynote command at — or delete — an arbitrary
-/// file on disk.
+/// file on disk. The extension is checked twice: once on the given
+/// path, and again on the canonical path — a `*.png` symlink to a
+/// `.toml` (or extensionless) file in the shared temp dir must not
+/// pass on the link's name alone.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn canonicalize_in_temp_dir(path: &str, allowed: &[&str]) -> Result<PathBuf, String> {
     check_extension(path, allowed)?;
@@ -577,6 +608,9 @@ fn canonicalize_in_temp_dir(path: &str, allowed: &[&str]) -> Result<PathBuf, Str
     if !canonical.starts_with(&temp_dir) {
         return Err(format!("Titer can't access {path}"));
     }
+    // Re-check the extension on the canonical path: the check above saw
+    // the link's name, not its target.
+    check_extension(&canonical.to_string_lossy(), allowed)?;
     Ok(canonical)
 }
 
@@ -855,9 +889,7 @@ fn send_to_keynote_blocking(png_path: &str, path: &str, title: &str, width_pt: f
     // (`build_keynote_script`), never a string from the page.
     let png_path = canonicalize_in_temp_dir(png_path, &["png"])?;
     check_extension(path, &["key"])?;
-    if !(width_pt > 0.0 && height_pt > 0.0) {
-        return Err("Send to Keynote needs a positive image size.".into());
-    }
+    check_keynote_image_size(width_pt, height_pt)?;
     let applescript = build_keynote_script(&png_path.to_string_lossy(), path, title, width_pt, height_pt);
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2609,5 +2641,75 @@ mod tests {
         let err = canonicalize_in_temp_dir(&outside.to_string_lossy(), &["toml"]).expect_err("a file outside temp_dir must fail");
         assert!(err.contains("can't access"), "{err}");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn canonicalize_in_temp_dir_rechecks_the_extension_after_resolving_symlinks() {
+        // Bug-report #1 remainder: the pre-fix gate checked the extension
+        // on the link's name and never re-checked the canonical target,
+        // so a `*.png` symlink to a non-image file in the shared temp
+        // dir passed, was read, and was deleted.
+        let dir = move_scratch_dir("temp-gate-symlink");
+        let secret = dir.join("secret.toml");
+        fs::write(&secret, b"[x]").expect("fixture");
+        let link = dir.join("clipboard.png");
+        std::os::unix::fs::symlink(&secret, &link).expect("symlink fixture");
+        let err = canonicalize_in_temp_dir(&link.to_string_lossy(), &["png"])
+            .expect_err("a .png link to a .toml must fail");
+        assert!(err.contains("can't access"), "{err}");
+        // A `.png` symlink to a real `.png` still passes — the re-check
+        // looks at the target's extension, not the link's.
+        let real = dir.join("real.png");
+        fs::write(&real, b"fake png").expect("fixture");
+        let good_link = dir.join("alias.png");
+        std::os::unix::fs::symlink(&real, &good_link).expect("symlink fixture");
+        let got = canonicalize_in_temp_dir(&good_link.to_string_lossy(), &["png"])
+            .expect("a .png link to a .png should pass");
+        assert_eq!(got, fs::canonicalize(&real).unwrap(), "the gate returns the canonical path");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn applescript_number_never_emits_inf_nan_or_zero_for_a_positive_size() {
+        // Bug-report #81: pre-fix, (1e307 * 100.0).round() overflowed to
+        // infinity and the script got `set imgW to inf` — invalid
+        // AppleScript — and a tiny positive rounded to `0`.
+        for bad in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN, 1e307, -1e307] {
+            let got = applescript_number(bad);
+            assert!(
+                !got.contains("inf") && !got.contains("NaN"),
+                "applescript_number({bad}) must stay a finite number, got {got}"
+            );
+            assert!(got.parse::<f64>().map_or(false, |v| v.is_finite()), "got {got}");
+        }
+        assert_eq!(applescript_number(0.001), "0.01", "a tiny positive renders as the smallest two-decimal size");
+        // Ordinary values are unchanged.
+        assert_eq!(applescript_number(576.0), "576");
+        assert_eq!(applescript_number(288.5), "288.5");
+        assert_eq!(applescript_number(100.25), "100.25");
+        assert_eq!(applescript_number(0.0), "0");
+    }
+
+    #[test]
+    fn keynote_image_size_rejects_non_finite_tiny_and_huge_sizes() {
+        // Bug-report #81: pre-fix, only `> 0.0` was checked, so 1e307
+        // passed and overflowed `applescript_number` into `inf`, and
+        // 0.001 passed and rounded to `0`.
+        for (w, h) in [
+            (f64::INFINITY, 100.0),
+            (f64::NAN, 100.0),
+            (100.0, f64::INFINITY),
+            (1e307, 100.0),
+            (100.0, 1e6),
+            (0.001, 100.0),
+            (100.0, 0.0),
+            (-5.0, 100.0),
+        ] {
+            assert!(check_keynote_image_size(w, h).is_err(), "({w}, {h}) must be rejected");
+        }
+        // Ordinary slide-image sizes still pass, including the bounds.
+        for (w, h) in [(576.0, 288.0), (1.0, 1.0), (1e5, 1e5)] {
+            assert!(check_keynote_image_size(w, h).is_ok(), "({w}, {h}) must be accepted");
+        }
     }
 }
