@@ -39991,14 +39991,16 @@ check("export-164-dialog-opts: excluded values, decimal separator and column tit
     ["s1", "0123", "1.5"],
     ["a, b", 'x"y', "9.9*"],
   ]);
-  // The dialog's decimal separator beats the stored preference.
+  // The dialog's decimal separator beats the stored preference. The
+  // excluded cell stays blank here (the default) — only the 1.5 takes
+  // the comma; the 9.9 is excluded, so it is empty, not "9,9".
   strictEqual(
     await serializeTableData(data, "My: Table", "csv", "column", { decimalSeparator: "," }),
-    'Title,ID,Value\ns1,0123,"1,5"\n"a, b","x""y","9,9"',
+    'Title,ID,Value\ns1,0123,"1,5"\n"a, b","x""y",',
   );
   strictEqual(
     await serializeTableData(data, "My: Table", "txt", "column", { decimalSeparator: "," }),
-    'Title\tID\tValue\ns1\t0123\t1,5\na, b\t"x""y"\t9,9',
+    'Title\tID\tValue\ns1\t0123\t1,5\na, b\t"x""y"\t',
   );
   // No column titles: the header row is gone from every plain-text format.
   strictEqual(
