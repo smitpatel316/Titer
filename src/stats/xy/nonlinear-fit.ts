@@ -272,14 +272,15 @@ export function ecAnything(model: NonlinearModel, f: number, ligandConcentration
     );
   // A homologous competition curve is single-site in shape (fixed slope
   // −1 in log units): Y = Bmax·L/(L + 10^X + Kd) + Bottom, so the X at
-  // F% of span is log10(L + Kd) + log10((100 − F)/F) — its midpoint
-  // LogKd, not a LogEC50/EC50 + HillSlope. [L] is the fit's ligand
-  // concentration (a literal when the runner passed it, else the R
-  // variable L the homologous fit defines).
+  // F% displaced is log10(L + Kd) + log10(F/(100 − F)) — the cold
+  // concentration displacing F% is (L + Kd)·F/(100 − F), not
+  // (L + Kd)·(100 − F)/F, which is IC(100 − F) (Round 2 Issue 85). [L]
+  // is the fit's ligand concentration (a literal when the runner passed
+  // it, else the R variable L the homologous fit defines).
   if (model === "homologous-competition-logx") {
     const l =
       ligandConcentration != null && Number.isFinite(ligandConcentration) ? String(ligandConcentration) : "L";
-    const at = `log10(${l}+10^b[["LogKd"]])+log10((100-${f})/${f})`;
+    const at = `log10(${l}+10^b[["LogKd"]])+log10(${f}/(100-${f}))`;
     const d = `dl(function(b)${at})`;
     return {
       label: `IC${f}`,
@@ -415,8 +416,13 @@ const FOUR_LOG = "Bottom+(Top-Bottom)/(1+10^((LogEC50-x)*HillSlope))";
 // forcing Bottom unconditionally injects a full-span residual jump at
 // X = 0 on falling curves and biases the fit (Round 2 Issue 36). ifelse
 // evaluates both branches, but a NaN in the unselected branch is
-// discarded — the plateau-decay model already relies on this.
-const FOUR_X = "ifelse(x==0,ifelse(HillSlope<0,Top,Bottom),Bottom+(Top-Bottom)/(1+(EC50/x)^HillSlope))";
+// discarded — the plateau-decay model already relies on this. The guard
+// is arithmetic, not ifelse(HillSlope<0,Top,Bottom): ifelse returns the
+// length of its test, so a shared/fixed (length-1) HillSlope truncates
+// unshared Top[g]/Bottom[g] to length 1 in global fits and every group
+// past the first takes Series 1's plateau at X = 0 (Round 2 Issue 86);
+// Bottom+(Top-Bottom)*ifelse(HillSlope<0,1,0) keeps length(g).
+const FOUR_X = "ifelse(x==0,(Bottom+(Top-Bottom)*ifelse(HillSlope<0,1,0)),Bottom+(Top-Bottom)/(1+(EC50/x)^HillSlope))";
 const nls200 = (expr: string, start: string) => `nls(y~${expr},start=${start},control=nls.control(maxiter=200))`;
 /** The 4PL retry (Linux 4PL fix): the same nls call with a relaxed
  *  convergence tolerance. On near-perfect sigmoids the default tol=1e-5
@@ -1381,7 +1387,7 @@ export function modelSpec(
       // unguarded ratio is Inf/NaN there whenever a trial step takes
       // EC50 ≤ 0.
       const expr =
-        "ifelse(x==0,ifelse(HillSlope<0,Top,Bottom),Bottom+(Top-Bottom)/(1+(EC50*(2^(1/S)-1)^(1/HillSlope)/x)^HillSlope)^S)";
+        "ifelse(x==0,(Bottom+(Top-Bottom)*ifelse(HillSlope<0,1,0)),Bottom+(Top-Bottom)/(1+(EC50*(2^(1/S)-1)^(1/HillSlope)/x)^HillSlope)^S)";
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, `c(as.list(coef(${nls200(FOUR_X, `list(Bottom=min(y),Top=max(y),EC50=median(x[x>0]),HillSlope=${SIGN})`)})),S=1)`)}`,

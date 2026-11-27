@@ -13366,14 +13366,89 @@ check("R2-36: raw-X sigmoidal R guards are sign-aware at X = 0 (falling curves t
     { term: "Hill slope", estimate: 1 },
   ] as never;
   strictEqual(evaluateFittedCurve("sigmoidal-4pl-x", rising, 0), 1);
+  // And the TS guard when EC50 ≤ 0: at X = 0 the ratio is 0/0 = NaN (or a
+  // wrong-signed Inf under a fractional Hill slope in R), so evaluate()
+  // returns the limit explicitly — Top on a falling curve, Bottom on a
+  // rising one (100/0 for the normalized model). Without it every case
+  // below came back NaN.
+  const fallingZero = [
+    { term: "Bottom", estimate: 1 },
+    { term: "Top", estimate: 100 },
+    { term: "EC50", estimate: 0 },
+    { term: "Hill slope", estimate: -1 },
+  ] as never;
+  strictEqual(evaluateFittedCurve("sigmoidal-4pl-x", fallingZero, 0), 100);
+  const risingZero = [
+    { term: "Bottom", estimate: 1 },
+    { term: "Top", estimate: 100 },
+    { term: "EC50", estimate: 0 },
+    { term: "Hill slope", estimate: 1 },
+  ] as never;
+  strictEqual(evaluateFittedCurve("sigmoidal-4pl-x", risingZero, 0), 1);
+  const fallingNeg = [
+    { term: "Bottom", estimate: 1 },
+    { term: "Top", estimate: 100 },
+    { term: "EC50", estimate: -5 },
+    { term: "Hill slope", estimate: -1 },
+  ] as never;
+  strictEqual(evaluateFittedCurve("sigmoidal-4pl-x", fallingNeg, 0), 100);
+  strictEqual(
+    evaluateFittedCurve(
+      "agonist-4pl-normalized-x",
+      [
+        { term: "EC50", estimate: 0 },
+        { term: "Hill slope", estimate: -1 },
+      ] as never,
+      0,
+    ),
+    100,
+  );
+  strictEqual(
+    evaluateFittedCurve(
+      "agonist-4pl-normalized-x",
+      [
+        { term: "EC50", estimate: 0 },
+        { term: "Hill slope", estimate: 1 },
+      ] as never,
+      0,
+    ),
+    0,
+  );
+  strictEqual(evaluateFittedCurve("absolute-ic50-x", fallingZero, 0), 100);
+  strictEqual(
+    evaluateFittedCurve(
+      "asymmetric-5pl-x",
+      [...fallingZero, { term: "Asymmetry (S)", estimate: 1 }] as never,
+      0,
+    ),
+    100,
+  );
   // The R fit expressions and curve functions carry the same sign-aware guard.
-  ok(modelSpec("sigmoidal-4pl-x").fit.includes("ifelse(HillSlope<0,Top,Bottom)"), "FOUR_X guard must be sign-aware");
+  // The guard is arithmetic — Bottom+(Top−Bottom)·ifelse(HillSlope<0,1,0) —
+  // not ifelse(HillSlope<0,Top,Bottom): ifelse returns the length of its
+  // test, so a shared/fixed (length-1) HillSlope truncated unshared
+  // Top[g]/Bottom[g] to length 1 in global fits (Round 2 Issue 86).
+  ok(
+    modelSpec("sigmoidal-4pl-x").fit.includes("(Bottom+(Top-Bottom)*ifelse(HillSlope<0,1,0))"),
+    "FOUR_X guard must be sign-aware and length-safe",
+  );
+  ok(
+    !modelSpec("sigmoidal-4pl-x").fit.includes("ifelse(HillSlope<0,Top,Bottom)"),
+    "FOUR_X guard must not use the truncating ifelse form",
+  );
   ok(
     modelSpec("sigmoidal-4pl-x").curveFn?.includes('ifelse(p[["HillSlope"]]<0,p[["Top"]],p[["Bottom"]])'),
     "4PL-X curveFn guard must be sign-aware",
   );
   ok(modelSpec("agonist-4pl-normalized-x").fit.includes("ifelse(HillSlope<0,100,0)"), "normalized 4PL-X guard must be sign-aware");
-  ok(modelSpec("asymmetric-5pl-x").fit.includes("ifelse(HillSlope<0,Top,Bottom)"), "5PL-X guard must be sign-aware");
+  ok(
+    modelSpec("asymmetric-5pl-x").fit.includes("(Bottom+(Top-Bottom)*ifelse(HillSlope<0,1,0))"),
+    "5PL-X guard must be sign-aware and length-safe",
+  );
+  ok(
+    !modelSpec("asymmetric-5pl-x").fit.includes("ifelse(HillSlope<0,Top,Bottom)"),
+    "5PL-X guard must not use the truncating ifelse form",
+  );
   // Behaviour: a noiseless falling 4PL-X fit with an X = 0 (vehicle) point
   // recovers the curve — the unconditional Bottom guard left a ~99 residual
   // at X = 0 and dragged R² below 0.9.
@@ -13386,6 +13461,51 @@ check("R2-36: raw-X sigmoidal R guards are sign-aware at X = 0 (falling curves t
   ok(ec50 != null && Math.abs(ec50 - 10) < 1, `falling 4PL-X EC50 should be ~10, got ${ec50}`);
   const hill = fit.coefficients.find((c) => c.term === "HillSlope")?.estimate;
   ok(hill != null && hill < 0, `falling 4PL-X Hill slope should stay negative, got ${hill}`);
+});
+
+// BUG-REPORT.md Round 2 Issue 86 (High, cycle 44): the sign-aware X = 0
+// guard ifelse(HillSlope<0, Top, Bottom) truncated unshared Top[g]/
+// Bottom[g] to length 1 in global fits — R's ifelse returns the length of
+// its test, and a shared (length-1) HillSlope made every group past the
+// first take Series 1's plateau at X = 0. The guard is now arithmetic —
+// Bottom+(Top−Bottom)·ifelse(HillSlope<0,1,0) — which keeps length(g).
+check("R2-86: a global 4PL-X fit keeps each series' own Top/Bottom at X = 0 under a shared HillSlope", async () => {
+  const xs = [0, 1, 3, 10, 30, 100];
+  // Two falling curves (HillSlope −1) with different plateaus, sharing
+  // EC50 + HillSlope; Series 2's X = 0 point is its own Top (50), not
+  // Series 1's (100).
+  const y1 = xs.map((x) => (x === 0 ? 100 : 1 + 99 / (1 + x / 10)));
+  const y2 = xs.map((x) => (x === 0 ? 50 : 10 + 40 / (1 + x / 10)));
+  const table: TableData = {
+    columns: ["Title", "X", "Y1", "Y2"],
+    rows: xs.map((x, i) => ["", String(x), String(y1[i]), String(y2[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", table, {
+    y: "Y1",
+    model: "sigmoidal-4pl-x",
+    globalY: ["Y2"],
+    sharedParams: ["EC50", "HillSlope"],
+  });
+  if ("error" in out) throw new Error(out.error);
+  // Behaviour: both series fit ~exactly (noiseless data) — the truncating
+  // guard left a ~50 residual at Series 2's X = 0 and dragged its R²
+  // below 0.9 — and each series' own X = 0 value is its own Top.
+  const r2 = out.fit?.rows.find((r) => r.label === "R squared")?.values;
+  ok(r2?.length === 2 && r2.every((v) => v != null && v > 0.99), `global 4PL-X per-series R² should be > 0.99, got ${r2}`);
+  const sets = out.fit?.sets ?? ["Y1", "Y2"];
+  for (const [name, top] of [
+    ["Y1", 100],
+    ["Y2", 50],
+  ] as const) {
+    const at0 = evaluateFittedCurve(
+      "sigmoidal-4pl-x",
+      coefficientsForSet(out.coefficients ?? [], name, sets),
+      0,
+    );
+    ok(Number.isFinite(at0) && Math.abs(at0 - top) < 2, `${name} curve at X = 0 should be ~${top} (its own Top), got ${at0}`);
+    const topFit = coefficientsForSet(out.coefficients ?? [], name, sets).find((c) => c.term === "Top")?.estimate;
+    ok(topFit != null && Math.abs(topFit - top) < 2, `${name} fitted Top should be ~${top}, got ${topFit}`);
+  }
 });
 
 // BUG-REPORT.md Round 2 Issue 37 (High, cycle 44): applyFitOptions
@@ -13522,9 +13642,19 @@ check("R2-39: ecx refuses two-site curves, homologous ECx uses LogKd, global mid
   const refused = await runAnalysis("nonlinear-regression", refusedTable, { y: "Y1", model: "two-site-competition-logx", ecx: 80 });
   ok("error" in refused && refused.error.includes("two-site"), `two-site ecx should be refused plainly, got: ${"error" in refused ? refused.error : "ran"}`);
   // ... while a homologous EC80 comes back from LogKd + [L]: L = Kd = 1,
-  // so the log-X at 80% is log10(2) + log10(0.25) ≈ -0.301 and the IC80
+  // so the log-X at 80% is log10(2) + log10(4) ≈ 0.903 and the IC80
   // concentration (the derived row's units, like every other ECx/ICx) is
-  // (L + Kd)·(100 − 80)/80 = 0.5.
+  // (L + Kd)·80/(100 − 80) = 8 — the old (100 − F)/F form computed
+  // IC(100 − F) = 0.5 and labelled it IC80 (Round 2 Issue 85).
+  // The generated R text carries the corrected ratio, not the inverted one.
+  ok(
+    ecAnything("homologous-competition-logx", 80, 1).expr.includes("log10(80/(100-80))"),
+    `homologous ecAnything must use F/(100-F), got: ${ecAnything("homologous-competition-logx", 80, 1).expr}`,
+  );
+  ok(
+    !ecAnything("homologous-competition-logx", 80, 1).expr.includes("log10((100-80)/80)"),
+    "homologous ecAnything must not use the inverted (100-F)/F ratio",
+  );
   const homTable: TableData = {
     columns: ["Title", "X", "Y1"],
     rows: [-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2].map((x) => ["", String(x), String(100 / (2 + 10 ** x))]),
@@ -13537,7 +13667,8 @@ check("R2-39: ecx refuses two-site curves, homologous ECx uses LogKd, global mid
   });
   if ("error" in homOut) throw new Error(homOut.error);
   const ic80 = homOut.fit?.rows.find((r) => r.label === "IC80")?.values?.[0];
-  ok(ic80 != null && Math.abs(ic80 - 0.5) < 0.05, `homologous IC80 should be ~0.5, got ${ic80}`);
+  // (L + Kd)·F/(100 − F) = 2·80/20 = 8 — the old inverted form gave 0.5.
+  ok(ic80 != null && Math.abs(ic80 - 8) < 0.05, `homologous IC80 should be ~8, got ${ic80}`);
   // The global fit labels a shared midpoint by its own name: the mapping
   // lives in midpointLabel, wired at both row sites, and the blanket
   // "EC50" line is gone.

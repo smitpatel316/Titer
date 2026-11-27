@@ -49,6 +49,19 @@ export function evaluate(
   const c = (term: string) => coef(coefficients, termLabel(term));
   const [bottom, top, hill, s] = [c("Bottom"), c("Top"), c("HillSlope"), c("S")];
   const rise = top - bottom;
+  // Raw-X ratio models divide by X: at X = 0 the ratio is +Inf while
+  // EC50 > 0 (the formula then tends to the right plateau), but 0/0 = NaN
+  // once a trial step takes EC50 to 0 — and a negative EC50 over 0 is a
+  // wrong-signed Inf under a fractional Hill slope in R. Return the limit
+  // explicitly, exactly the R x == 0 guard (Round 2 Issue 36): Top on a
+  // falling curve, Bottom on a rising one (100/0 for the normalized model).
+  if (x === 0) {
+    if (model === "sigmoidal-4pl-x" || model === "absolute-ic50-x" || model === "asymmetric-5pl-x") {
+      if (c("EC50") <= 0) return hill < 0 ? top : bottom;
+    } else if (model === "agonist-4pl-normalized-x") {
+      if (c("EC50") <= 0) return hill < 0 ? 100 : 0;
+    }
+  }
   // A centered polynomial's terms are powers of (X − centeredX), not of X.
   const xc = x - (centeredX ?? 0);
   switch (model) {
