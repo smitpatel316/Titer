@@ -877,6 +877,185 @@ check("the gallery lists every graph in sidebar order, with its chart and table"
   deepStrictEqual(galleryItems(nodes, ["t1"], { t1: ["a1"] }), []);
 });
 
+const galleryBatchItems = [
+  { id: "g1", name: "Scatter", graphLabel: "Scatter or line", tableName: "Dose" },
+  { id: "g2", name: "Boxes", graphLabel: "Box and violin", tableName: "Growth" },
+  { id: "g3", name: "Heat", graphLabel: "Heatmap", tableName: "Dose" },
+];
+
+check("gallery batch selection toggles, selects all, and resolves in gallery order", () => {
+  deepStrictEqual(toggleGallerySelection([], "g1"), ["g1"]);
+  deepStrictEqual(toggleGallerySelection(["g1"], "g1"), []);
+  deepStrictEqual(toggleGallerySelection(["g1"], "g2"), ["g1", "g2"]);
+  deepStrictEqual(selectAllGallery(galleryBatchItems), ["g1", "g2", "g3"]);
+  deepStrictEqual(selectAllGallery([]), []);
+  // Gallery order, not selection order; unknown ids are dropped here.
+  deepStrictEqual(selectedGalleryItems(galleryBatchItems, ["g3", "g1", "nope"]), [galleryBatchItems[0], galleryBatchItems[2]]);
+  deepStrictEqual(selectedGalleryItems(galleryBatchItems, []), []);
+});
+
+check("a gallery thumbnail scales the longest side to the card and never upscales", () => {
+  deepStrictEqual(galleryThumbnail(600, 300), { widthPx: 220, heightPx: 110 });
+  deepStrictEqual(galleryThumbnail(300, 600), { widthPx: 110, heightPx: 220 });
+  deepStrictEqual(galleryThumbnail(100, 80), { widthPx: 100, heightPx: 80 });
+  deepStrictEqual(galleryThumbnail(600, 300, 100), { widthPx: 100, heightPx: 50 });
+  throws(() => galleryThumbnail(0, 100), /positive/);
+  throws(() => galleryThumbnail(100, -5), /positive/);
+  throws(() => galleryThumbnail(100, 100, 0), /positive/);
+});
+
+check("gallery batch rename renames the selected graphs and skips blanks and unknowns", () => {
+  const plan = galleryBatchRename(galleryBatchItems, ["g2", "g1", "nope"], { g1: "  Dose fit  ", g2: "" });
+  deepStrictEqual(plan.renamed, [{ id: "g1", name: "Dose fit" }]);
+  deepStrictEqual(plan.skipped, [
+    { id: "nope", reason: "“nope” is not in the gallery." },
+    { id: "g2", reason: "“Boxes” needs a non-empty new name." },
+  ]);
+  deepStrictEqual(galleryBatchRename(galleryBatchItems, [], { g1: "x" }), { renamed: [], skipped: [] });
+});
+
+check("gallery batch duplicate clones each selected graph, chained, and skips the rest", () => {
+  const s = reducer(makeInitialState(), { type: "load", ...payload, filePath: null });
+  const result = galleryBatchDuplicate(s, ["g1", "g1", "nope"], KEEP_ALL, cloneIds());
+  ok("plan" in result, "the batch should plan");
+  deepStrictEqual(result.duplicated, [
+    { id: "g1", newGraphId: "c3", newTableId: "c1" },
+    { id: "g1", newGraphId: "c6", newTableId: "c4" },
+  ]);
+  deepStrictEqual(result.skipped, [{ id: "nope", reason: "No graph “nope” to clone." }]);
+  // The second clone's table lands right after the original, ahead of the first's.
+  deepStrictEqual(result.plan.rootOrder, ["t1", "c4", "c1"]);
+  strictEqual(result.plan.activeNodeId, "c3");
+  strictEqual(Object.keys(result.plan.nodes).length, 9);
+  strictEqual(result.plan.nodes.c3.name, "Plot");
+  strictEqual(result.plan.nodes.c6.name, "Plot");
+  // Nothing to duplicate is an error, not an empty plan.
+  deepStrictEqual(galleryBatchDuplicate(s, [], KEEP_ALL, cloneIds()), {
+    error: "Select at least one graph to duplicate.",
+    skipped: [],
+  });
+  deepStrictEqual(galleryBatchDuplicate(s, ["nope", "t1"], KEEP_ALL, cloneIds()), {
+    error: "No selected graph could be duplicated.",
+    skipped: [
+      { id: "nope", reason: "No graph “nope” to clone." },
+      { id: "t1", reason: "“Doses” is a table, not a graph." },
+    ],
+  });
+});
+
+const galleryBatchNodes = {
+  g1: {
+    id: "g1",
+    type: "graph",
+    name: "A",
+    parentId: "t1",
+    graphType: "xy-scatter",
+    graphOptions: { ...DEFAULT_GRAPH_OPTIONS, width: 600, height: 400 },
+  },
+  g2: {
+    id: "g2",
+    type: "graph",
+    name: "B",
+    parentId: "t1",
+    graphType: "box-violin",
+    graphOptions: { ...DEFAULT_GRAPH_OPTIONS, width: 600, height: 400 },
+  },
+  t1: { id: "t1", type: "table", name: "Dose", parentId: null, tableType: "xy" },
+} as unknown as Record<string, ProjectNode>;
+
+check("gallery batch resize sets every selected graph to one size, clamped to the limits", () => {
+  const result = applyGalleryResize(galleryBatchNodes, ["g2", "g1", "t1", "nope"], 3000, 50);
+  deepStrictEqual(result.resized, ["g2", "g1"]);
+  strictEqual(result.nodes.g1.graphOptions!.width, GRAPH_LIMITS.width.max);
+  strictEqual(result.nodes.g1.graphOptions!.height, GRAPH_LIMITS.height.min);
+  strictEqual(result.nodes.g2.graphOptions!.width, GRAPH_LIMITS.width.max);
+  strictEqual(result.nodes.g2.graphOptions!.height, GRAPH_LIMITS.height.min);
+  // The untouched nodes keep their identity.
+  strictEqual(result.nodes.t1, galleryBatchNodes.t1);
+  deepStrictEqual(result.skipped, [
+    { id: "t1", reason: "“Dose” is a table, not a graph." },
+    { id: "nope", reason: "“nope” is not in the project." },
+  ]);
+  throws(() => applyGalleryResize(galleryBatchNodes, ["g1"], 0, 100), /positive/);
+  throws(() => applyGalleryResize(galleryBatchNodes, ["g1"], 100, Number.NaN), /positive/);
+});
+
+check("gallery batch palette recolors the selected graphs from the catalog, without aliasing it", () => {
+  const palette = PALETTES.find((p) => p.name === "okabe-ito")!;
+  const result = applyGalleryPalette(galleryBatchNodes, ["g1"], "okabe-ito");
+  deepStrictEqual(result.applied, ["g1"]);
+  deepStrictEqual(result.nodes.g1.graphOptions!.palette, { name: "okabe-ito", kind: palette.kind, colors: palette.colors });
+  ok(result.nodes.g1.graphOptions!.palette!.colors !== palette.colors, "the colors are a copy, not the catalog's array");
+  const reversed = applyGalleryPalette(galleryBatchNodes, ["g1"], "okabe-ito", { reversed: true });
+  strictEqual(reversed.nodes.g1.graphOptions!.palette!.reversed, true);
+  throws(() => applyGalleryPalette(galleryBatchNodes, ["g1"], "not-a-palette"), /No palette/);
+  const skipped = applyGalleryPalette(galleryBatchNodes, ["t1", "nope"], "okabe-ito");
+  deepStrictEqual(skipped.applied, []);
+  strictEqual(skipped.skipped.length, 2);
+});
+
+check("gallery batch highlight colors the selected graphs in the Navigator color, or clears it", () => {
+  const result = galleryBatchHighlight(galleryBatchNodes, ["g1", "g2"], "blue");
+  deepStrictEqual(result.highlighted, ["g1", "g2"]);
+  strictEqual(result.nodes.g1.highlight, "blue");
+  strictEqual(result.nodes.g2.highlight, "blue");
+  const cleared = galleryBatchHighlight(result.nodes, ["g1"], null);
+  strictEqual("highlight" in cleared.nodes.g1, false);
+  strictEqual(cleared.nodes.g2.highlight, "blue");
+  throws(() => galleryBatchHighlight(galleryBatchNodes, ["g1"], "pink" as never), /No highlight/);
+  const skipped = galleryBatchHighlight(galleryBatchNodes, ["t1"], "red");
+  deepStrictEqual(skipped.highlighted, []);
+  deepStrictEqual(skipped.skipped, [{ id: "t1", reason: "“Dose” is a table, not a graph." }]);
+});
+
+check("gallery batch print plans the selected graphs in gallery order under one page setup", () => {
+  const settings = { paperSize: "letter", orientation: "portrait", marginMm: 12, scale: 1 } as const;
+  const plan = galleryBatchPrint(galleryBatchItems, ["g3", "g1", "nope"], settings);
+  deepStrictEqual(plan.items, [galleryBatchItems[0], galleryBatchItems[2]]);
+  strictEqual(plan.settings, settings);
+  deepStrictEqual(plan.skipped, [{ id: "nope", reason: "“nope” is not in the gallery." }]);
+});
+
+check("gallery export plans one file per selected graph, de-duplicating same-named graphs", () => {
+  const items = [
+    { id: "g1", name: "Plot", graphLabel: "Scatter or line", tableName: "Dose" },
+    { id: "g2", name: "Plot", graphLabel: "Scatter or line", tableName: "Growth" },
+    { id: "g3", name: "Boxes", graphLabel: "Box and violin", tableName: "Growth" },
+  ];
+  const plan = galleryExportPlan(items, ["g3", "g1", "g2", "nope"], { format: "png" });
+  deepStrictEqual(plan.items, [
+    { id: "g1", name: "Plot", fileName: "Plot.png" },
+    { id: "g2", name: "Plot", fileName: "Plot (2).png" },
+    { id: "g3", name: "Boxes", fileName: "Boxes.png" },
+  ]);
+  strictEqual(plan.format, "png");
+  strictEqual(plan.dpi, "300");
+  deepStrictEqual(plan.skipped, [{ id: "nope", reason: "“nope” is not in the gallery." }]);
+  const jpeg = galleryExportPlan(items, ["g1"], { format: "jpeg", dpi: "600" });
+  deepStrictEqual(jpeg.items, [{ id: "g1", name: "Plot", fileName: "Plot.jpg" }]);
+  strictEqual(jpeg.dpi, "600");
+  throws(() => galleryExportPlan(items, ["g1"], { format: "gif" as never }), /Unknown export format/);
+  throws(() => galleryExportPlan(items, ["g1"], { format: "png", dpi: "72" as never }), /Unknown resolution/);
+});
+
+check("gallery batch send plans one Office document for the selected graphs", () => {
+  const word = galleryBatchSend(galleryBatchItems, ["g2", "g1", "nope"], "word");
+  deepStrictEqual(word, {
+    target: "word",
+    extension: "docx",
+    dialogTitle: "Send to Word",
+    items: [
+      { id: "g1", title: "Scatter" },
+      { id: "g2", title: "Boxes" },
+    ],
+    skipped: [{ id: "nope", reason: "“nope” is not in the gallery." }],
+  });
+  strictEqual(galleryBatchSend(galleryBatchItems, ["g1"], "powerpoint").extension, "pptx");
+  strictEqual(galleryBatchSend(galleryBatchItems, ["g1"], "powerpoint").dialogTitle, "Send to PowerPoint");
+  strictEqual(galleryBatchSend(galleryBatchItems, ["g1"], "keynote").extension, "key");
+  strictEqual(galleryBatchSend(galleryBatchItems, ["g1"], "keynote").dialogTitle, "Send to Keynote");
+});
+
 // ── Preferences (seq 225) + Print / Page Setup (seq 227) ─────────────────
 
 check("print settings default to Letter portrait, and the @page rule carries them", () => {
@@ -19139,6 +19318,76 @@ check("a Keynote export is not a file build — it is made in Keynote itself (Ke
       await buildOfficeDocument("keynote" as OfficeTarget, { png, title: "x", widthPx: 10, heightPx: 10, dpi: 150 });
     },
     /Keynote/,
+  );
+});
+
+check("a multi-graph Word export holds every graph under its own title (Office)", async () => {
+  const png = testPng(600, 300);
+  const bytes = await buildOfficeDocumentMulti("word", [
+    { png, title: "Dose response", widthPx: 600, heightPx: 300, dpi: 150 },
+    { png, title: "Growth", widthPx: 600, heightPx: 300, dpi: 150 },
+  ]);
+  const zip = await JSZip.loadAsync(bytes);
+  const names = Object.keys(zip.files);
+  for (const part of ["word/media/image1.png", "word/media/image2.png"])
+    ok(names.includes(part), `${part} missing from ${names.join(", ")}`);
+  const doc = await zip.file("word/document.xml")!.async("text");
+  ok(doc.includes("Dose response") && doc.includes("Growth"), doc);
+  ok(doc.indexOf("Dose response") < doc.indexOf("Growth"), doc);
+  ok(doc.includes('r:embed="rId1"') && doc.includes('r:embed="rId2"'), doc);
+  deepStrictEqual(new Uint8Array(await zip.file("word/media/image2.png")!.async("uint8array")), png);
+  // One image through the multi builder is the document the single builder wrote.
+  const single = await buildOfficeDocument("word", { png, title: "Dose response", widthPx: 600, heightPx: 300, dpi: 150 });
+  const singleZip = await JSZip.loadAsync(single);
+  strictEqual(doc, await singleZip.file("word/document.xml")!.async("text"));
+  strictEqual(
+    await zip.file("[Content_Types].xml")!.async("text"),
+    await singleZip.file("[Content_Types].xml")!.async("text"),
+  );
+});
+
+check("a multi-graph PowerPoint export gives every graph its own slide (Office)", async () => {
+  const png = testPng(600, 300);
+  const bytes = await buildOfficeDocumentMulti("powerpoint", [
+    { png, title: "Dose response", widthPx: 600, heightPx: 300, dpi: 150 },
+    { png, title: "Growth", widthPx: 600, heightPx: 300, dpi: 150 },
+  ]);
+  const zip = await JSZip.loadAsync(bytes);
+  const names = Object.keys(zip.files);
+  for (const part of [
+    "ppt/slides/slide1.xml",
+    "ppt/slides/slide2.xml",
+    "ppt/slides/_rels/slide1.xml.rels",
+    "ppt/slides/_rels/slide2.xml.rels",
+    "ppt/media/image1.png",
+    "ppt/media/image2.png",
+  ])
+    ok(names.includes(part), `${part} missing from ${names.join(", ")}`);
+  const slide1 = await zip.file("ppt/slides/slide1.xml")!.async("text");
+  const slide2 = await zip.file("ppt/slides/slide2.xml")!.async("text");
+  ok(slide1.includes("Dose response") && !slide1.includes("Growth"), slide1);
+  ok(slide2.includes("Growth") && !slide2.includes("Dose response"), slide2);
+  const presentation = await zip.file("ppt/presentation.xml")!.async("text");
+  ok(presentation.includes('r:id="rId2"') && presentation.includes('r:id="rId3"'), presentation);
+  // One image through the multi builder is the deck the single builder wrote.
+  const single = await buildOfficeDocument("powerpoint", { png, title: "Dose response", widthPx: 600, heightPx: 300, dpi: 150 });
+  const singleZip = await JSZip.loadAsync(single);
+  strictEqual(slide1, await singleZip.file("ppt/slides/slide1.xml")!.async("text"));
+});
+
+check("a multi-graph Office export refuses an empty list, Keynote, and a non-PNG (Office)", async () => {
+  const png = testPng(10, 10);
+  const image = { png, title: "x", widthPx: 10, heightPx: 10, dpi: 150 };
+  // Wrapped: the empty-list and Keynote guards throw synchronously.
+  await rejects(async () => {
+    await buildOfficeDocumentMulti("word", []);
+  }, /at least one image/);
+  await rejects(async () => {
+    await buildOfficeDocumentMulti("keynote" as OfficeTarget, [image]);
+  }, /Keynote/);
+  await rejects(
+    buildOfficeDocumentMulti("word", [{ ...image, png: new TextEncoder().encode("not a png") }]),
+    /PNG/,
   );
 });
 
