@@ -464,6 +464,14 @@ import {
   keynoteSizePoints,
   officeDialogTitle,
   officeExtension,
+  officeRenderColorMode,
+  officeSidecarName,
+  officeSidecarPath,
+  parseOfficeOptions,
+  serializeOfficeOptions,
+  type OfficeColor,
+  type OfficeExportOptions,
+  type OfficeImageMode,
   type OfficeTarget,
 } from "../src/lib/office-export";
 import {
@@ -517,8 +525,10 @@ import {
   VectorExportError,
   grayOf,
   grayscaleFigure,
+  monochromeFigure,
   parseColor,
   parseSvg,
+  recolorFigure,
   rgbToCmyk,
   svgToEps,
   svgToPdf,
@@ -19209,6 +19219,251 @@ check("Send to Keynote is offered in the graph and figure export menus on macOS 
     ok(src.includes("Send to Keynote…"), `${file} must offer Send to Keynote`);
     ok(src.includes('"keynote"'), `${file} must send the keynote target`);
     ok(src.includes("isMacOs()"), `${file} must gate Send to Keynote on macOS`);
+  }
+});
+
+// ── Send to Office options (seq 217 remainder, L15) ─────────────────────
+// Pre-fix these fail: Send to Office was one-click only — the PNG embedded
+// as a picture, in colour, with no choice. Prism's Send-to-Office
+// preferences (Prism 11 User Guide, "One-click to Microsoft PowerPoint or
+// Word") choose whether to embed, link, or send a picture, and — for Word
+// — whether to display full colors, black and white, or gray scale, where
+// the latter two "simply set a setting within Word to display and print
+// the graph in black and white or gray".
+//
+// The Mac / OOXML reading of those choices (there is no OLE on Mac, so no
+// Prism object can be embedded — the same honesty as the .key gap above):
+// "picture" is the embedded PNG as before; "embed" is the same embedded
+// PNG (Prism's embed is an OLE object, which cannot exist here — the file
+// for an embedded picture is the same, and the choice is recorded in the
+// result); "link" writes the PNG as a sidecar next to the document and
+// references it with TargetMode="External", so the document stays small
+// and Word/PowerPoint load the picture from the file. Colour for Word /
+// PowerPoint is Prism's display setting, not a re-render: the PNG bytes
+// are untouched and the picture carries a DrawingML recolor
+// (<a:grayscl/> / <a:biLevel>) — the original colours survive in the
+// file. Keynote has no script-level recolor in the verified dictionary,
+// so its colour is applied at render time instead (grayscale via the
+// existing render path, black & white via the monochrome figure walk).
+
+check("Office options parse with picture/color defaults and survive a round trip (Office options)", () => {
+  deepStrictEqual(parseOfficeOptions(undefined), { mode: "picture", color: "color" });
+  deepStrictEqual(parseOfficeOptions(null), { mode: "picture", color: "color" });
+  deepStrictEqual(parseOfficeOptions("nonsense"), { mode: "picture", color: "color" });
+  deepStrictEqual(parseOfficeOptions({}), { mode: "picture", color: "color" });
+  deepStrictEqual(parseOfficeOptions({ mode: "link", color: "grayscale" }), { mode: "link", color: "grayscale" });
+  deepStrictEqual(parseOfficeOptions({ mode: "embed", color: "blackwhite" }), { mode: "embed", color: "blackwhite" });
+  // Unknown values fall back per field, never through: a bad mode keeps a good colour.
+  deepStrictEqual(parseOfficeOptions({ mode: "ole-object", color: "grayscale" }), { mode: "picture", color: "grayscale" });
+  deepStrictEqual(parseOfficeOptions({ mode: "link", color: "sepia" }), { mode: "link", color: "color" });
+  const options: OfficeExportOptions = { mode: "link", color: "blackwhite" };
+  deepStrictEqual(parseOfficeOptions(JSON.parse(serializeOfficeOptions(options))), options);
+});
+
+check("a linked Word export has no embedded image — it references a sidecar PNG (Office options)", async () => {
+  const png = testPng(10, 10);
+  const bytes = await buildOfficeDocument(
+    "word",
+    { png, title: "Dose response", widthPx: 600, heightPx: 300, dpi: 150 },
+    { mode: "link", color: "color", linkFileName: "Dose response.png" },
+  );
+  const zip = await JSZip.loadAsync(bytes);
+  const names = Object.keys(zip.files);
+  ok(!names.includes("word/media/image1.png"), `a linked document must not embed the image: ${names.join(", ")}`);
+  const rels = await zip.file("word/_rels/document.xml.rels")!.async("text");
+  ok(rels.includes('TargetMode="External"'), rels);
+  ok(rels.includes('Target="Dose%20response.png"'), rels);
+  ok(rels.includes('Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"'), rels);
+  const doc = await zip.file("word/document.xml")!.async("text");
+  ok(doc.includes('<a:blip r:link="rId1"'), doc);
+  ok(!doc.includes("r:embed"), doc);
+});
+
+check("a linked PowerPoint export has no embedded image — it references a sidecar PNG (Office options)", async () => {
+  const png = testPng(10, 10);
+  const bytes = await buildOfficeDocument(
+    "powerpoint",
+    { png, title: "Dose response", widthPx: 600, heightPx: 300, dpi: 150 },
+    { mode: "link", color: "color", linkFileName: "Dose response.png" },
+  );
+  const zip = await JSZip.loadAsync(bytes);
+  const names = Object.keys(zip.files);
+  ok(!names.includes("ppt/media/image1.png"), `a linked deck must not embed the image: ${names.join(", ")}`);
+  const rels = await zip.file("ppt/slides/_rels/slide1.xml.rels")!.async("text");
+  ok(rels.includes('TargetMode="External"'), rels);
+  ok(rels.includes('Target="Dose%20response.png"'), rels);
+  const slide = await zip.file("ppt/slides/slide1.xml")!.async("text");
+  ok(slide.includes('<a:blip r:link="rId1"'), slide);
+  ok(!slide.includes("r:embed"), slide);
+});
+
+check("embed and picture write the same embedded-PNG file — Prism's embed is an OLE object, which has no Mac form (Office options)", async () => {
+  const png = testPng(10, 10);
+  const image = { png, title: "Dose response", widthPx: 600, heightPx: 300, dpi: 150 };
+  const embedded = await buildOfficeDocument("word", image, { mode: "embed", color: "color" });
+  const pictured = await buildOfficeDocument("word", image, { mode: "picture", color: "color" });
+  const defaulted = await buildOfficeDocument("word", image);
+  const zipE = await JSZip.loadAsync(embedded);
+  const zipP = await JSZip.loadAsync(pictured);
+  deepStrictEqual(Object.keys(zipE.files).sort(), Object.keys(zipP.files).sort());
+  ok(Object.keys(zipE.files).includes("word/media/image1.png"), "an embedded document must carry the image");
+  const rels = await zipE.file("word/_rels/document.xml.rels")!.async("text");
+  ok(!rels.includes("TargetMode"), rels);
+  const docE = await zipE.file("word/document.xml")!.async("text");
+  const docP = await zipP.file("word/document.xml")!.async("text");
+  strictEqual(docE, docP);
+  // No options means the old behaviour: an embedded picture, in colour.
+  const zipD = await JSZip.loadAsync(defaulted);
+  deepStrictEqual(Object.keys(zipD.files).sort(), Object.keys(zipP.files).sort());
+});
+
+check("Word/PowerPoint colour is a display setting on the picture — the PNG bytes are untouched (Office options)", async () => {
+  const png = testPng(10, 10);
+  const image = { png, title: "Dose response", widthPx: 600, heightPx: 300, dpi: 150 };
+  const gray = await buildOfficeDocument("word", image, { mode: "picture", color: "grayscale" });
+  const bw = await buildOfficeDocument("powerpoint", image, { mode: "picture", color: "blackwhite" });
+  const colour = await buildOfficeDocument("word", image, { mode: "picture", color: "color" });
+  const zipG = await JSZip.loadAsync(gray);
+  const docG = await zipG.file("word/document.xml")!.async("text");
+  ok(docG.includes('<a:blip r:embed="rId1"><a:grayscl/></a:blip>'), docG);
+  const zipB = await JSZip.loadAsync(bw);
+  const slideB = await zipB.file("ppt/slides/slide1.xml")!.async("text");
+  ok(slideB.includes('<a:blip r:embed="rId1"><a:biLevel thresh="50000"/></a:blip>'), slideB);
+  const zipC = await JSZip.loadAsync(colour);
+  const docC = await zipC.file("word/document.xml")!.async("text");
+  ok(docC.includes('<a:blip r:embed="rId1"></a:blip>'), docC);
+  ok(!docC.includes("grayscl") && !docC.includes("biLevel"), docC);
+  // Prism's point: the setting changes display/print, not the image — the
+  // embedded PNG is byte-identical in colour and in grayscale.
+  deepStrictEqual(
+    new Uint8Array(await zipG.file("word/media/image1.png")!.async("uint8array")),
+    new Uint8Array(await zipC.file("word/media/image1.png")!.async("uint8array")),
+  );
+});
+
+check("a linked Office export needs the linked file name, and unknown options are refused (Office options)", async () => {
+  const png = testPng(10, 10);
+  const image = { png, title: "x", widthPx: 10, heightPx: 10, dpi: 150 };
+  await rejects(buildOfficeDocument("word", image, { mode: "link", color: "color" }), /link.*file name/i);
+  await rejects(
+    buildOfficeDocument("word", image, { mode: "ole-object" as OfficeImageMode, color: "color" }),
+    /embed, link, picture/,
+  );
+  await rejects(
+    buildOfficeDocument("word", image, { mode: "picture", color: "sepia" as OfficeColor }),
+    /color, grayscale, blackwhite/,
+  );
+});
+
+check("the linked image sits beside the document, named after it (Office options)", () => {
+  strictEqual(officeSidecarName("Dose response.docx"), "Dose response.png");
+  strictEqual(officeSidecarName("Dose response.pptx"), "Dose response.png");
+  strictEqual(officeSidecarName("Dose response"), "Dose response.png");
+  strictEqual(officeSidecarPath("/Users/smit/Desktop/Dose response.docx"), "/Users/smit/Desktop/Dose response.png");
+  strictEqual(officeSidecarPath("Dose response.pptx"), "Dose response.png");
+});
+
+check("Word/PowerPoint always render the colour PNG — only Keynote recolours at render time (Office options)", () => {
+  strictEqual(officeRenderColorMode("word", "grayscale"), "color");
+  strictEqual(officeRenderColorMode("word", "blackwhite"), "color");
+  strictEqual(officeRenderColorMode("powerpoint", "grayscale"), "color");
+  strictEqual(officeRenderColorMode("keynote", "color"), "color");
+  strictEqual(officeRenderColorMode("keynote", "grayscale"), "grayscale");
+  strictEqual(officeRenderColorMode("keynote", "blackwhite"), "blackwhite");
+});
+
+check("the monochrome walk thresholds every colour to black or white, and leaves text alone (Office options)", () => {
+  const figure = {
+    data: [
+      {
+        name: "Red",
+        marker: { color: "#ff0000" },
+        line: { color: "rgb(255, 255, 0)" },
+        fillcolor: "rgba(0, 0, 255, 0.5)",
+        text: "Red",
+      },
+    ],
+    layout: { paper_bgcolor: "#808080", title: { text: "Red" } },
+  };
+  const out = monochromeFigure(figure);
+  const series = out.data[0] as { marker: { color: string }; line: { color: string }; fillcolor: string; name: string; text: string };
+  // Luminance: red ≈ 76 → black; yellow ≈ 226 → white; blue ≈ 29 → black (alpha kept).
+  strictEqual(series.marker.color, "#000000");
+  strictEqual(series.line.color, "#ffffff");
+  strictEqual(series.fillcolor, "rgba(0, 0, 0, 0.5)");
+  strictEqual(series.name, "Red");
+  strictEqual(series.text, "Red");
+  // Mid-gray (luminance exactly 128) goes white, like a 50% threshold.
+  strictEqual((out.layout as { paper_bgcolor: string }).paper_bgcolor, "#ffffff");
+  strictEqual((out.layout as { title: { text: string } }).title.text, "Red");
+});
+
+check("recolorFigure dispatches by colour mode — black & white is the monochrome walk (Office options)", () => {
+  const figure = { data: [{ marker: { color: "#ff0000" } }], layout: { paper_bgcolor: "#ffffff" } };
+  strictEqual(recolorFigure(figure, "color"), figure);
+  strictEqual(
+    (recolorFigure(figure, "grayscale").data[0] as { marker: { color: string } }).marker.color,
+    "#4c4c4c",
+  );
+  strictEqual(
+    (recolorFigure(figure, "blackwhite").data[0] as { marker: { color: string } }).marker.color,
+    "#000000",
+  );
+  strictEqual(
+    (recolorFigure(figure, "cmyk").data[0] as { marker: { color: string } }).marker.color,
+    "#ff0000",
+  );
+});
+
+check("black & white is a PNG-only colour mode — the vector formats have no such form (Office options)", () => {
+  validateExportColorMode("png", "blackwhite");
+  for (const format of ["jpeg", "svg", "pdf", "eps", "tiff", "bmp"]) {
+    throws(() => validateExportColorMode(format, "blackwhite"), /PNG only|blackwhite/i);
+  }
+  throws(() => validateExportColorMode("png", "sepia" as never), /color, grayscale, cmyk, blackwhite/);
+});
+
+// The MCP + shell legs can't run in this TS harness (they need a webview
+// and a Mac), so — same static-read shape as the Keynote pins above —
+// these read the sources they cover.
+check("titer_export_office accepts the mode and colour options through MCP (Office options)", () => {
+  const exporter = readFileSync("src/store/mcp-export.ts", "utf8");
+  ok(exporter.includes('"mode"'), "executeExportOffice must read the mode arg");
+  ok(exporter.includes('"color_mode"'), "executeExportOffice must read the color_mode arg");
+  ok(exporter.includes("officeRenderColorMode"), "executeExportOffice must recolour the render per target");
+  ok(exporter.includes("officeSidecarPath"), "executeExportOffice must write the linked sidecar beside the document");
+  ok(exporter.includes("linked_image_path"), "executeExportOffice must report where the linked image went");
+  ok(exporter.includes("has no office image mode"), "executeExportOffice must refuse an unknown mode naming the modes");
+  ok(exporter.includes("has no office colour"), "executeExportOffice must refuse an unknown colour naming the colours");
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes("pub mode: Option<String>"), "the Rust tool must take the mode arg");
+  ok(mcp.includes("pub color_mode: Option<String>"), "the Rust tool must take the color_mode arg");
+  ok(mcp.includes("Unknown office image mode"), "the Rust tool must validate the mode");
+  ok(mcp.includes("Unknown office colour"), "the Rust tool must validate the colour");
+  ok(mcp.includes('job_args["mode"]'), "the Rust tool must forward the mode to the job");
+  ok(mcp.includes('job_args["color_mode"]'), "the Rust tool must forward the colour to the job");
+});
+
+check("the graph and figure senders carry the chosen options into the render and the document (Office options)", () => {
+  const graph = readFileSync("src/views/graphs/graph-export.ts", "utf8");
+  ok(graph.includes("options: OfficeExportOptions"), "sendGraphToOffice must take the Office options");
+  ok(graph.includes("officeRenderColorMode(target, options.color)"), "sendGraphToOffice must recolour the render per target");
+  ok(graph.includes("officeSidecarPath(path)"), "sendGraphToOffice must place the linked sidecar beside the document");
+  const figure = readFileSync("src/views/figures/figure-export.ts", "utf8");
+  ok(figure.includes("options: OfficeExportOptions"), "sendFigureToOffice must take the Office options");
+  ok(figure.includes("officeRenderColorMode(target, options.color)"), "sendFigureToOffice must recolour the render per target");
+  ok(figure.includes("officeSidecarPath(path)"), "sendFigureToOffice must place the linked sidecar beside the document");
+});
+
+check("the Office choices are offered in both export panels and remembered for the next send (Office options)", () => {
+  for (const file of ["src/views/graphs/format-panel.tsx", "src/views/figures/figure-view.tsx"]) {
+    const src = readFileSync(file, "utf8");
+    ok(src.includes("Send as"), `${file} must offer the embed/link/picture choice`);
+    ok(src.includes("OFFICE_IMAGE_MODES"), `${file} must offer the embed/link/picture choice`);
+    ok(src.includes("OFFICE_COLORS"), `${file} must offer the colour choice`);
+    ok(src.includes("Black & White"), `${file} must offer black & white`);
+    ok(src.includes("readOfficeOptions"), `${file} must start from the remembered Office options`);
+    ok(src.includes("rememberOfficeOptions"), `${file} must remember the Office options for the next send`);
   }
 });
 
