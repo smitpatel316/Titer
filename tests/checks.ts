@@ -390,7 +390,7 @@ import {
   prettyBreaks,
   sturgesCount,
 } from "../src/stats/column/frequency-distribution";
-import { rankValues, seededGaussian, transformValue, zscoreValues } from "../src/stats/column/transform-data";
+import { parseUserFormula, rankValues, seededGaussian, transformValue, zscoreValues } from "../src/stats/column/transform-data";
 import {
   binomialPmf,
   chiSquarePdf,
@@ -31095,6 +31095,22 @@ check("transformValue applies the seq 341 pure functions (logit, probit, trig, A
   strictEqual(transformValue("rank" as never, 3), null);
   strictEqual(transformValue("zscore" as never, 3), null);
   strictEqual(transformValue("user-defined" as never, 3), null);
+});
+
+check("parseUserFormula refuses text in quotes and still accepts numeric formulas (seq 156 remainder)", () => {
+  const cols: Column[] = [
+    { name: "A", cells: ["1", "2"], byRow: [1, 2], values: [1, 2], rows: [0, 1] },
+  ];
+  // Quoted text cannot run in a numeric transform — it must be a clean
+  // error naming CONCATENATE, not a silently blanked column.
+  const withText = parseUserFormula('Y = CONCATENATE(A, "x")', cols);
+  ok("error" in withText);
+  if ("error" in withText) ok(withText.error.includes("CONCATENATE"));
+  const bareText = parseUserFormula('Y = "hi"', cols);
+  ok("error" in bareText);
+  // And a plain numeric formula still parses.
+  const numeric = parseUserFormula("Y = LOGIT(A)", cols);
+  ok(!("error" in numeric));
 });
 
 check("transformValue applies the seq 341 cross-column functions against the paired X value", () => {
