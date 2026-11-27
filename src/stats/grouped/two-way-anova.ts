@@ -517,7 +517,13 @@ async function runRepeatedMeasures(
         "the Geisser-Greenhouse correction from.",
     };
   }
-  const setup = `${R_EFFECT_CI};${R_PTUKEY};${R_CRIT};${R_ADJUST};v<-${rVec(values)};g<-${rFactor(group)};r<-${rFactor(row)};id<-${rFactor(subject)}`;
+  // Centered first (cf. commit 2db68ed1 for the one-way ANOVA): the split-plot
+  // sums of squares are differences of cell means, and on values alike in
+  // their first 13 digits (~1e13) the uncentered means lose them (F 1.4e-3–
+  // 2.5e-3 off the mpmath exact values). v-mean(v) is exact by Sterbenz
+  // (values within a factor of 2 of their mean), and the mean's own rounding
+  // is a common shift that cancels in every difference of means.
+  const setup = `${R_EFFECT_CI};${R_PTUKEY};${R_CRIT};${R_ADJUST};v<-${rVec(values)};v<-v-mean(v);g<-${rFactor(group)};r<-${rFactor(row)};id<-${rFactor(subject)}`;
   // Y: a subject per row (values come subject by subject, rows in order); gs its group.
   // Geisser-Greenhouse: epsilon of the rows' covariance pooled over the groups, double-centered.
   // A zero denominator means the differences have no variance at all (sphericity holds
@@ -765,7 +771,14 @@ export async function runTwoWayAnova(
   }
   if (identical(values)) return { error: NOTHING_VARIES };
   const nonparametric = params.design === "nonparametric";
-  const setup = `${R_EFFECT_CI};v<-${rVec(values)};g<-${rFactor(group)};r<-${rFactor(row)}`;
+  // Centered first (cf. commit 2db68ed1 for the one-way ANOVA): the Type III
+  // sums of squares are differences of cell means, and on values alike in
+  // their first 13 digits (~1e13) the uncentered means lose them (F 1.4e-3–
+  // 2.5e-3 off the mpmath exact values). v-mean(v) is exact by Sterbenz
+  // (values within a factor of 2 of their mean), and the mean's own rounding
+  // is a common shift that cancels in every difference of means. The ranks
+  // in the nonparametric path are unchanged by centering.
+  const setup = `${R_EFFECT_CI};v<-${rVec(values)};v<-v-mean(v);g<-${rFactor(group)};r<-${rFactor(row)}`;
   const rCode = nonparametric
     ? // Each effect's Type I sequential sum of squares on the ranks (the Scheirer-Ray-Hare
       // reference: Group first, then Row, then Interaction — NOT Type III, which gives a

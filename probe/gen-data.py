@@ -72,6 +72,32 @@ for gi in range(3):
 # Python's float sum matches it op-for-op, so these are the exact doubles R
 # receives (the pooled means, one per subgroup, in column order).
 nested_means = [[sum(sub) / 3 for sub in nested_raw[gi * 3:(gi + 1) * 3]] for gi in range(3)]
+# --- Two-way ANOVA big: 3 groups x 4 rows x 3 reps, values ~1e13 ---
+# group offsets (i-1)*0.9, row offsets (j-1.5)*0.6, interaction
+# (i-1)*(j-1.5)*0.15, within SD 0.35. Balanced, so Type III = Type I.
+twoway = []  # twoway[g][r][rep]
+for i in range(3):
+    grp = []
+    for j in range(4):
+        grp.append([BASE + (i - 1) * 0.9 + (j - 1.5) * 0.6 + (i - 1) * (j - 1.5) * 0.15
+                    + g(0, 0.35) for _ in range(3)])
+    twoway.append(grp)
+
+# --- Three-way ANOVA big: 2 groups x 2 rows/band x 2 bands x 3 reps ---
+# A (i-0.5)*1.8, B (j-0.5)*1.2, C (k-0.5)*1.0, two-way terms 0.4/0.3/0.5,
+# three-way 0.2, within SD 0.3. Balanced, so Type III = Type I.
+threeway = []  # threeway[a][b][c][rep]
+for i in range(2):
+    aa = []
+    for j in range(2):
+        bb = []
+        for k in range(2):
+            bb.append([BASE + (i - 0.5) * 1.8 + (j - 0.5) * 1.2 + (k - 0.5) * 1.0
+                       + (i - 0.5) * (j - 0.5) * 0.4 + (i - 0.5) * (k - 0.5) * 0.3
+                       + (j - 0.5) * (k - 0.5) * 0.5 + (i - 0.5) * (j - 0.5) * (k - 0.5) * 0.2
+                       + g(0, 0.3) for _ in range(3)])
+        aa.append(bb)
+    threeway.append(aa)
 
 
 # --- exact helpers (mpmath, 50 digits; inputs are the exact doubles) ---
@@ -419,6 +445,99 @@ def slopes_exact(x, ysets):
     if k == 2:
         out["intersection"] = float(
             (per[1]["intercept"] - per[0]["intercept"]) / (per[0]["slope"] - per[1]["slope"]))
+def twoway_exact(tw):
+    # tw[g][r][rep]; balanced 3x4x3, so the runner's Type III SS equal these
+    # cell-means (Type I) values.
+    G, R, n = 3, 4, 3
+    cells = [[mpf_list(tw[g][r]) for r in range(R)] for g in range(G)]
+    flat = [x for g in range(G) for r in range(R) for x in cells[g][r]]
+    N = len(flat)
+    gm = sum(flat) / N
+    cm = [[sum(cells[g][r]) / n for r in range(R)] for g in range(G)]
+    mA = [sum(cm[g]) / R for g in range(G)]
+    mB = [sum(cm[g][r] for g in range(G)) / G for r in range(R)]
+    ssA = R * n * sum((m - gm) ** 2 for m in mA)
+    ssB = G * n * sum((m - gm) ** 2 for m in mB)
+    ssAB = n * sum((cm[g][r] - mA[g] - mB[r] + gm) ** 2 for g in range(G) for r in range(R))
+    ssE = sum((x - cm[g][r]) ** 2 for g in range(G) for r in range(R) for x in cells[g][r])
+    dfA, dfB, dfAB, dfE = G - 1, R - 1, (G - 1) * (R - 1), N - G * R
+    msE = ssE / dfE
+    FA, FB, FAB = (ssA / dfA) / msE, (ssB / dfB) / msE, (ssAB / dfAB) / msE
+    return {
+        "FA": float(FA), "pA": float(f_p(FA, dfA, dfE)),
+        "FB": float(FB), "pB": float(f_p(FB, dfB, dfE)),
+        "FAB": float(FAB), "pAB": float(f_p(FAB, dfAB, dfE)),
+        "ssA": float(ssA), "ssB": float(ssB), "ssAB": float(ssAB), "ssE": float(ssE),
+        "dfE": dfE,
+    }
+
+
+def twoway_rm_exact(tw):
+    # Split-plot exact values, same definitions as the runner's sp(): Y rows
+    # are subjects, group-major (flattenRepeated order), columns are rows.
+    G, R, n = 3, 4, 3
+    Y = [[mp.mpf(tw[g][r][rep]) for r in range(R)] for g in range(G) for rep in range(n)]
+    N = len(Y)
+    s = [sum(row) / R for row in Y]
+    m = sum(sum(row) for row in Y) / (N * R)
+    mg = [sum(s[g * n:(g + 1) * n]) / n for g in range(G)]
+    mr = [sum(Y[i][r] for i in range(N)) / N for r in range(R)]
+    mgr = [[sum(Y[g * n + rep][r] for rep in range(n)) / n for r in range(R)] for g in range(G)]
+    ssG = R * sum(n * (mg[g] - m) ** 2 for g in range(G))
+    ssE1 = R * sum((s[i] - mg[i // n]) ** 2 for i in range(N))
+    ssR = N * sum((mr[r] - m) ** 2 for r in range(R))
+    ssI = sum(n * (mgr[g][r] - mg[g] - mr[r] + m) ** 2 for g in range(G) for r in range(R))
+    ssE2 = sum((Y[i][r] - s[i] - mgr[i // n][r] + mg[i // n]) ** 2
+               for i in range(N) for r in range(R))
+    dfG, dfE1 = G - 1, N - G
+    dfR, dfI, dfE2 = R - 1, (G - 1) * (R - 1), (N - G) * (R - 1)
+    FG = (ssG / dfG) / (ssE1 / dfE1)
+    FR = (ssR / dfR) / (ssE2 / dfE2)
+    FI = (ssI / dfI) / (ssE2 / dfE2)
+    return {
+        "FG": float(FG), "pG": float(f_p(FG, dfG, dfE1)),
+        "FR": float(FR), "pR": float(f_p(FR, dfR, dfE2)),
+        "FI": float(FI), "pI": float(f_p(FI, dfI, dfE2)),
+        "ssG": float(ssG), "ssE1": float(ssE1), "ssR": float(ssR),
+        "ssI": float(ssI), "ssE2": float(ssE2),
+    }
+
+
+def threeway_exact(tw3):
+    # tw3[a][b][c][rep]; balanced 2x2x2x3, so Type III = Type I cell-means values.
+    A, B, C, n = 2, 2, 2, 3
+    cells = [[[[mp.mpf(tw3[a][b][c][rep]) for rep in range(n)]
+               for c in range(C)] for b in range(B)] for a in range(A)]
+    flat = [x for a in range(A) for b in range(B) for c in range(C) for x in cells[a][b][c]]
+    N = len(flat)
+    gm = sum(flat) / N
+    cm = [[[sum(cells[a][b][c]) / n for c in range(C)] for b in range(B)] for a in range(A)]
+    mA = [sum(cm[a][b][c] for b in range(B) for c in range(C)) / (B * C) for a in range(A)]
+    mB = [sum(cm[a][b][c] for a in range(A) for c in range(C)) / (A * C) for b in range(B)]
+    mC = [sum(cm[a][b][c] for a in range(A) for b in range(B)) / (A * B) for c in range(C)]
+    mAB = [[sum(cm[a][b][c] for c in range(C)) / C for b in range(B)] for a in range(A)]
+    mAC = [[sum(cm[a][b][c] for b in range(B)) / B for c in range(C)] for a in range(A)]
+    mBC = [[sum(cm[a][b][c] for a in range(A)) / A for c in range(C)] for b in range(B)]
+    ssA = B * C * n * sum((m - gm) ** 2 for m in mA)
+    ssB = A * C * n * sum((m - gm) ** 2 for m in mB)
+    ssC = A * B * n * sum((m - gm) ** 2 for m in mC)
+    ssAB = C * n * sum((mAB[a][b] - mA[a] - mB[b] + gm) ** 2 for a in range(A) for b in range(B))
+    ssAC = B * n * sum((mAC[a][c] - mA[a] - mC[c] + gm) ** 2 for a in range(A) for c in range(C))
+    ssBC = A * n * sum((mBC[b][c] - mB[b] - mC[c] + gm) ** 2 for b in range(B) for c in range(C))
+    ssABC = n * sum((cm[a][b][c] - mAB[a][b] - mAC[a][c] - mBC[b][c]
+                     + mA[a] + mB[b] + mC[c] - gm) ** 2
+                    for a in range(A) for b in range(B) for c in range(C))
+    ssE = sum((x - cm[a][b][c]) ** 2 for a in range(A) for b in range(B)
+              for c in range(C) for x in cells[a][b][c])
+    dfE = N - A * B * C
+    msE = ssE / dfE
+    out = {"ssE": float(ssE), "dfE": dfE}
+    for k, ss in [("A", ssA), ("B", ssB), ("C", ssC), ("AB", ssAB),
+                  ("AC", ssAC), ("BC", ssBC), ("ABC", ssABC)]:
+        F = (ss / 1) / msE
+        out[f"F{k}"] = float(F)
+        out[f"p{k}"] = float(f_p(F, 1, dfE))
+        out[f"ss{k}"] = float(ss)
     return out
 
 
@@ -438,6 +557,9 @@ expected = {
     "slopesParallel": slopes_exact(xs, [ys, ys_o]),
     "slopesDiffer": slopes_exact(xs, [ys, ys_c]),
     "slopesThree": slopes_exact(xs, [ys, ys_o, ys_c]),
+    "twoWayBig": twoway_exact(twoway),
+    "twoWayBigRM": twoway_rm_exact(twoway),
+    "threeWayBig": threeway_exact(threeway),
 }
 
 # nested ANOVA exact: main table from the TS subgroup means, plus the
@@ -522,6 +644,20 @@ tables = {
                                            for s in (1, 2, 3) for r in (1, 2, 3)],
                   "rows": [[""] + [repr(v) for sub in nested_raw for v in sub]],
                   "groups": 3, "subgroups": 3, "replicates": 3},
+    # Grouped tables: columns are "Group:rep", rows are row positions.
+    # twoWayBig: 3 groups x 4 rows x 3 reps (36 values).
+    "twoWayBig": {"columns": ["Title"] + [f"{g}:Y{r}" for g in "ABC" for r in (1, 2, 3)],
+                  "rows": [[f"Day {j + 1}"] +
+                           [repr(twoway[i][j][rep]) for i in range(3) for rep in range(3)]
+                           for j in range(4)]},
+    # threeWayBig: 2 groups x 2 rows/band x 2 bands x 3 reps (24 values);
+    # rows 1-2 are band WT, rows 3-4 band KO.
+    "threeWayBig": {"columns": ["Title"] + [f"{g}:Y{r}" for g in "AB" for r in (1, 2, 3)],
+                    "rows": [[f"Day {j % 2 + 1}"] +
+                             [repr(threeway[i][j % 2][j // 2][rep])
+                              for i in range(2) for rep in range(3)]
+                             for j in range(4)],
+                    "rowGroups": [{"name": "WT", "count": 2}, {"name": "KO", "count": 2}]},
 }
 
 (WT / "tests" / "testdata").mkdir(parents=True, exist_ok=True)
