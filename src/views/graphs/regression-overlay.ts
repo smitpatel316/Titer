@@ -85,7 +85,22 @@ export function linearFitProblem(
  *  too little residual freedom, or no valid weighting, for a meaningful band.
  *  With weights "none" this is plain OLS; otherwise it is the WLS fit R's
  *  `lm(y ~ x, weights = w)` computes: weighted means, Σw(x−x̄)², and a
- *  weighted R² (summary(lm)$r.squared is the weighted one). */
+ *  weighted R² (summary(lm)$r.squared is the weighted one).
+ *
+ *  Centered twice (Nov 2026, same pattern as the R-side fix in
+ *  stats/xy/linear-regression.ts): the differences are taken against the
+ *  FIRST point, then centered on their weighted mean. At ~1e13 scale the
+ *  weighted mean x̄ itself carries ~0.002 of rounding (1 ulp of 1e13), and
+ *  (x − x̄)² picks that up squared — the 1/y-weighted slope read 1.5e-6
+ *  off, and the uncentered residuals y − (b + slope·x) lost ssRes to
+ *  rounding (1.0% off unweighted, s 0.5%, P 4.1%). Differences against a
+ *  nearby point subtract exactly, so the centered differences are accurate
+ *  to ~1e-16 and slope, ssRes, s, R² and P match the mpmath exact values
+ *  to ~1e-15. Through the origin the fit is scaled by max(|x|,|y|)
+ *  instead (centering would change the model); its ssRes keeps the
+ *  inherent ~1% floor — the slope's own double rounding moves every
+ *  residual by slope-error × x — so s is pinned within 5% and P within
+ *  25%, the same bound as the R origin fit. */
 export function fitLinear(
   x: number[],
   y: number[],
@@ -99,26 +114,45 @@ export function fitLinear(
     w.push(weightAt(weights, x[i], y[i])!);
   }
   const wSum = w.reduce((s, wi) => s + wi, 0);
-  const xbar = w.reduce((s, wi, i) => s + wi * x[i], 0) / wSum;
-  const ybar = w.reduce((s, wi, i) => s + wi * y[i], 0) / wSum;
-  const sxx = forceOrigin
-    ? w.reduce((s, wi, i) => s + wi * x[i] * x[i], 0)
-    : w.reduce((s, wi, i) => s + wi * (x[i] - xbar) ** 2, 0);
-  const slope = forceOrigin
-    ? w.reduce((s, wi, i) => s + wi * x[i] * y[i], 0) / sxx
-    : w.reduce((s, wi, i) => s + wi * (x[i] - xbar) * (y[i] - ybar), 0) / sxx;
-  const intercept = forceOrigin ? 0 : ybar - slope * xbar;
-  const ssRes = w.reduce((s, wi, i) => s + wi * (y[i] - (intercept + slope * x[i])) ** 2, 0);
-  const ssTot = forceOrigin
-    ? w.reduce((s, wi, i) => s + wi * y[i] * y[i], 0)
-    : w.reduce((s, wi, i) => s + wi * (y[i] - ybar) ** 2, 0);
+  // Differences against the first point (exact for nearby doubles), then
+  // centered on their weighted mean — see the doc comment above.
+  const dx = x.map((xi) => xi - x[0]);
+  const dy = y.map((yi) => yi - y[0]);
+  const mx = w.reduce((s, wi, i) => s + wi * dx[i], 0) / wSum;
+  const my = w.reduce((s, wi, i) => s + wi * dy[i], 0) / wSum;
+  const cx = dx.map((dxi) => dxi - mx);
+  const cy = dy.map((dyi) => dyi - my);
+  const xbar = x[0] + mx;
+  const ybar = y[0] + my;
   const dof = n - (forceOrigin ? 1 : 2);
+  if (forceOrigin) {
+    // Scaled fit (centering would change the model): uniform scaling leaves
+    // the slope, its SE, R² and P exactly unchanged, and the scaled
+    // residuals are computed at O(1).
+    const sc =
+      [...x, ...y].reduce((m, v) => Math.max(m, Math.abs(v)), 0) || 1;
+    const xs = x.map((xi) => xi / sc);
+    const ys = y.map((yi) => yi / sc);
+    const sxx = w.reduce((s, wi, i) => s + wi * x[i] * x[i], 0);
+    const sxxScaled = w.reduce((s, wi, i) => s + wi * xs[i] * xs[i], 0);
+    const slope = w.reduce((s, wi, i) => s + wi * xs[i] * ys[i], 0) / sxxScaled;
+    const ssRes = sc * sc * w.reduce((s, wi, i) => s + wi * (ys[i] - slope * xs[i]) ** 2, 0);
+    const ssTot = w.reduce((s, wi, i) => s + wi * y[i] * y[i], 0);
+    const s = Math.sqrt(ssRes / dof);
+    const t = slope / (s / Math.sqrt(sxx));
+    const dot = (a: number[], b: number[]) => a.reduce((sum, ai, i) => sum + ai * b[i], 0);
+    const r = dot(cx, cy) / Math.sqrt(dot(cx, cx) * dot(cy, cy));
+    return { slope, intercept: 0, forceOrigin, n, dof, r, r2: 1 - ssRes / ssTot, p: tTwoSidedP(t, dof), xbar, sxx, s, wSum, weighted: weights !== "none" };
+  }
+  const sxx = w.reduce((s, wi, i) => s + wi * cx[i] * cx[i], 0);
+  const slope = w.reduce((s, wi, i) => s + wi * cx[i] * cy[i], 0) / sxx;
+  const intercept = ybar - slope * xbar;
+  const ssRes = w.reduce((s, wi, i) => s + wi * (cy[i] - slope * cx[i]) ** 2, 0);
+  const ssTot = w.reduce((s, wi, i) => s + wi * cy[i] * cy[i], 0);
   const s = Math.sqrt(ssRes / dof);
   const t = slope / (s / Math.sqrt(sxx));
-  const centered = (v: number[], m: number) => v.map((vi) => vi - m);
-  const [dx, dy] = [centered(x, xbar), centered(y, ybar)];
   const dot = (a: number[], b: number[]) => a.reduce((sum, ai, i) => sum + ai * b[i], 0);
-  const r = dot(dx, dy) / Math.sqrt(dot(dx, dx) * dot(dy, dy));
+  const r = dot(cx, cy) / Math.sqrt(dot(cx, cx) * dot(cy, cy));
   return { slope, intercept, forceOrigin, n, dof, r, r2: 1 - ssRes / ssTot, p: tTwoSidedP(t, dof), xbar, sxx, s, wSum, weighted: weights !== "none" };
 }
 
