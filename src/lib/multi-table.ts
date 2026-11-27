@@ -187,9 +187,27 @@ export function mergeGraphTables(primary: MergeInput, extras: MergeInput[]): Mer
   const primaryDs = readTable(primary.data);
   const extraDs = extras.map((e) => readTable(e.data));
 
+  // A summary table can't share a graph with a replicates one — on ANY
+  // table type, XY included: XY tables carry summary formats too
+  // (`applySummaryFormatXY`), and a mean-sd-n XY table's Y columns are
+  // Mean/SD/N triples, not replicate series, so merging it with a
+  // replicates table plots the SD/N columns as data. (Checked before the
+  // row-title mismatch below: different sub-column semantics is the more
+  // fundamental incompatibility.)
+  for (let i = 0; i < extras.length; i++) {
+    if (summaryFormatOf(primary.data) !== summaryFormatOf(extras[i].data)) {
+      return {
+        dataset: primaryDs,
+        tableType: primary.tableType,
+        problem:
+          `Tables “${primary.name}” and “${extras[i].name}” use different sub-column formats (${summaryFormatOf(primary.data)} vs ${summaryFormatOf(extras[i].data)}) — a graph can't mix summary and replicate sub-columns.`,
+        tables,
+      };
+    }
+  }
+
   // Grouped-family tables share their rows as categories: the row titles
-  // must line up, and a summary table can't share a graph with a
-  // replicates one (their sub-columns mean different things).
+  // must line up, or the rows can't line up on one graph.
   if (!hasXColumn(primary.tableType)) {
     for (let i = 0; i < extras.length; i++) {
       const other = extraDs[i];
@@ -202,15 +220,6 @@ export function mergeGraphTables(primary: MergeInput, extras: MergeInput[]): Mer
             tableType: primary.tableType,
             problem:
               `Tables “${primary.name}” and “${extras[i].name}” don't share row ${row + 1} (“${a}” vs “${b}”), so their rows can't line up on one graph — give both tables the same row titles, in the same order.`,
-            tables,
-          };
-        }
-        if (summaryFormatOf(primary.data) !== summaryFormatOf(extras[i].data)) {
-          return {
-            dataset: primaryDs,
-            tableType: primary.tableType,
-            problem:
-              `Tables “${primary.name}” and “${extras[i].name}” use different sub-column formats (${summaryFormatOf(primary.data)} vs ${summaryFormatOf(extras[i].data)}) — a graph can't mix summary and replicate sub-columns.`,
             tables,
           };
         }

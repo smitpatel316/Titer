@@ -293,18 +293,25 @@ function byGroup(columns: Column[]): DataSet[] {
 }
 
 /** A nested table's groups ("A" for "A:S1:R1"…), each with its subgroups
- *  ("S1" for "A:S1:R1"…), in table order. A column whose name doesn't split
- *  into exactly three parts belongs to no subgroup and is left out — a nested
- *  table's columns are all "group:subgroup:replicate" by construction, so this
- *  only bites on a hand-edited name. Subgroups without a single number are
- *  kept here (the nested runners must see them to name the ones they drop);
- *  callers that only want data pass the numeric columns. */
+ *  ("S1" for "A:S1:R1"…), in table order. The split is from the right:
+ *  the last two segments are subgroup:replicate and everything before
+ *  them is the group — a merged multi-table dataset qualifies an extra
+ *  table's columns as "<table> — <group>:<subgroup>:<replicate>", so a
+ *  table name holding ":" ("Dose:Response — G1:S1:R1") still parses, with
+ *  the qualified group name kept whole, instead of the whole extra table
+ *  being silently dropped. A column with fewer than three ":"-separated
+ *  segments belongs to no subgroup and is left out — a nested table's
+ *  columns are all "group:subgroup:replicate" by construction, so this
+ *  only bites on a hand-edited name. Subgroups without a single number
+ *  are kept here (the nested runners must see them to name the ones
+ *  they drop); callers that only want data pass the numeric columns. */
 export function nestedGroupsOf(columns: Column[]): NestedGroup[] {
   const groups = new Map<string, Map<string, Column[]>>();
   for (const c of columns) {
     const parts = c.name.split(":");
-    if (parts.length !== 3) continue;
-    const [group, subgroup] = parts;
+    if (parts.length < 3) continue;
+    const group = parts.slice(0, parts.length - 2).join(":");
+    const subgroup = parts[parts.length - 2];
     let subs = groups.get(group);
     if (!subs) groups.set(group, (subs = new Map()));
     subs.set(subgroup, [...(subs.get(subgroup) ?? []), c]);

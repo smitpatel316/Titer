@@ -472,6 +472,60 @@ check(
   JSON.stringify(nullCount),
 );
 
+// R2-58: a grouped sidecar graph honours the resolved summary format —
+// it used to ignore it and always draw tableDefault ("sem") error bars,
+// so a y_sd_n grouped table got SEM bars and y_cv_n / y_single /
+// y_plus_minus lost their mapping entirely.
+const groupedMapping = (format: string, subcolumnCount: number, tableErrorIsSd = false) =>
+  mapSidecarGraph({
+    tableFormat: "grouped",
+    tableDataFormat: format,
+    datasetFormat: format,
+    subcolumnCount,
+    isAutoCreated: true,
+    hasInputDatasets: true,
+    sourceResolvable: true,
+    tableErrorIsSd,
+  });
+{
+  const sdN = groupedMapping("y_sd_n", 3);
+  check(
+    "R2-58 grouped y_sd_n draws SD bars, not SEM",
+    sdN.reconstructible && sdN.graphType === "grouped-bars" && sdN.error === "sd",
+    JSON.stringify(sdN),
+  );
+  const cvN = groupedMapping("y_cv_n", 3);
+  check(
+    "R2-58 grouped y_cv_n draws derived SD bars",
+    cvN.reconstructible && cvN.error === "sd" && (cvN.derivedError ?? "").includes("mean × CV% / 100"),
+    JSON.stringify(cvN),
+  );
+  const single = groupedMapping("y_single", 1);
+  check(
+    "R2-58 grouped y_single draws no error bars",
+    single.reconstructible && single.error === "none",
+    JSON.stringify(single),
+  );
+  const pm = groupedMapping("y_plus_minus", 3);
+  check(
+    "R2-58 grouped y_plus_minus draws no bars and notes the asymmetric limit",
+    pm.reconstructible && pm.error === "none" && (pm.limitNote ?? "").includes("asymmetric"),
+    JSON.stringify(pm),
+  );
+  const reps = groupedMapping("y_replicates", 2);
+  check(
+    "R2-58 grouped y_replicates still defaults to SEM",
+    reps.reconstructible && reps.error === "sem",
+    JSON.stringify(reps),
+  );
+  const repsSd = groupedMapping("y_replicates", 2, true);
+  check(
+    "R2-58 grouped y_replicates on an SD table still defaults to SD",
+    repsSd.reconstructible && repsSd.error === "sd",
+    JSON.stringify(repsSd),
+  );
+}
+
 // ── R2: the .pzfx heuristics H1–H6 ───────────────────────────────────────
 
 const pzfxNode = (
@@ -706,6 +760,25 @@ expectThrow(
     "R3 clearing the link builds without it",
     report.created.length === 2 && (s.created[1].options as { regAnalysisId?: string }).regAnalysisId === undefined,
     JSON.stringify(s.created[1].options),
+  );
+}
+{
+  // R2-58: validate-then-create — an invalid decision must not leave the
+  // earlier graphs behind, or a retry duplicates them. p1 confirms
+  // cleanly and p2 carries a bad error override: the throw must happen
+  // with NOTHING created.
+  const s = stubDeps();
+  let message = "";
+  try {
+    applyRegenDecisions(applyPlans, allDecisions({ p2: { error: "bogus" } }), s.deps);
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  check("R2-58 invalid second decision still refused", message.includes("must be one of"), message || "did not throw");
+  check(
+    "R2-58 invalid second decision creates nothing (validate-then-create)",
+    s.created.length === 0,
+    `${s.created.length} graph(s) created before the throw`,
   );
 }
 expectThrow("R3 empty plans refused", () => applyRegenDecisions([], [], stubDeps().deps), "no import-time graph plans");

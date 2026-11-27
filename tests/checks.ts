@@ -248,7 +248,7 @@ import {
 } from "../src/lib/palettes";
 import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-palettes";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, graphSeriesDataset, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
-import { datasetColumns, isGrouped, isNested, levelsOf, readTable, seriesOf, setColumns, splitXY, xyPoints, type Column, type Dataset } from "../src/lib/dataset";
+import { datasetColumns, isGrouped, isNested, levelsOf, nestedGroupsOf, readTable, seriesOf, setColumns, splitXY, xyPoints, type Column, type Dataset } from "../src/lib/dataset";
 import {
   convertXCell,
   displayXCell,
@@ -269,6 +269,7 @@ import {
   mergeGraphTables,
   mergedGraphData,
   overlayAnalysisData,
+  qualifyName,
   remapQualifiedOptions,
   validateGraphSources,
   type MergeInput,
@@ -10307,6 +10308,23 @@ check("nestedGroupsOf splits columns into groups and subgroups, and sets scope b
     "B:S2:R1",
     "B:S2:R2",
   ]);
+});
+
+check("nestedGroupsOf parses qualified columns from an extra table whose name contains ':' (R2-59)", () => {
+  const col = (name: string): Column => ({ name, cells: [1], byRow: [1] }) as unknown as Column;
+  // The merge qualifies an extra table's columns as "Dose:Response — G1:S1:R1":
+  // split from the right, the group stays whole instead of the column being dropped.
+  const groups = nestedGroupsOf(["G1:S1:R1", "G1:S1:R2"].map((n) => col(qualifyName("Dose:Response", n))));
+  deepStrictEqual(
+    groups.map((g) => [g.name, g.subgroups.map((s) => s.name)]),
+    [["Dose:Response — G1", ["S1"]]],
+  );
+  // Ordinary nested names still parse exactly as before.
+  const plain = nestedGroupsOf([col("G1:S1:R1"), col("G1:S2:R1")]);
+  deepStrictEqual(
+    plain.map((g) => [g.name, g.subgroups.map((s) => s.name)]),
+    [["G1", ["S1", "S2"]]],
+  );
 });
 
 // v1.5.0 m16 (plan 14): the subgroup mean is PINNED to pooled — the mean
@@ -41478,6 +41496,56 @@ check("48: grouped tables must share row titles, and a mismatch is a problem, no
   const off = mk("Assay 2", ["Day 1", "Day 3"]);
   const { problem } = mergeGraphTables(a, [off]);
   ok(problem?.includes("Day 2") && problem?.includes("Day 3"), `mismatch says which rows differ: ${problem}`);
+});
+
+check("48: XY tables with different sub-column formats can't share a graph (R2-59)", () => {
+  const mk = (name: string, format: "replicates" | "mean-sd-n"): MergeInput => {
+    const base = xyTable(name, [0, 1, 2], { Y1: [10, 20, 30] });
+    return format === "replicates" ? base : { ...base, data: { ...base.data, summaryFormat: format } };
+  };
+  // A mean-sd-n table's Y columns are Mean/SD/N triples, not replicate
+  // series — merging it with a replicates table would plot the SD/N
+  // columns as data.
+  const summary = mk("Assay 1", "mean-sd-n");
+  const replicates = mk("Assay 2", "replicates");
+  const mixed = mergeGraphTables(summary, [replicates]);
+  ok(
+    mixed.problem?.includes("different sub-column formats") && mixed.problem?.includes("mean-sd-n"),
+    `mixed formats must be a problem: ${mixed.problem ?? "merged clean"}`,
+  );
+  const reversed = mergeGraphTables(replicates, [mk("Assay 2", "mean-sd-n")]);
+  ok(reversed.problem?.includes("different sub-column formats"), `reversed mix must be a problem: ${reversed.problem ?? "merged clean"}`);
+  // Same format on both sides still merges.
+  strictEqual(mergeGraphTables(summary, [mk("Assay 2", "mean-sd-n")]).problem, undefined);
+});
+
+check("48: an extra Nested table whose name contains ':' survives the merge (R2-59)", () => {
+  const mk = (name: string): MergeInput => ({
+    id: name === "Assay 1" ? "t1" : "t2",
+    name,
+    tableType: "nested",
+    data: {
+      columns: ["Title", "G1:S1:R1", "G1:S1:R2", "G1:S2:R1"],
+      rows: [
+        ["r1", "1", "2", "3"],
+        ["r2", "4", "5", "6"],
+      ],
+      groups: 1,
+      subgroups: 2,
+      replicates: 2,
+    },
+  });
+  const { dataset, problem } = mergeGraphTables(mk("Assay 1"), [mk("Dose:Response")]);
+  strictEqual(problem, undefined);
+  // The extra table's columns are qualified "Dose:Response — G1:…", so
+  // its group is the qualified name — and none of its data is dropped.
+  deepStrictEqual(
+    dataset.nested.map((g) => [g.name, g.subgroups.map((s) => [s.name, s.columns.length])]),
+    [
+      ["G1", [["S1", 2], ["S2", 1]]],
+      ["Dose:Response — G1", [["S1", 2], ["S2", 1]]],
+    ],
+  );
 });
 
 check("48: a source of a different table type is refused, and a missing one is named", () => {
