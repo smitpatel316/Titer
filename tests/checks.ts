@@ -1120,6 +1120,164 @@ check("replacing the copy's data leaves the original family untouched", () => {
   strictEqual(s.nodes.a1.parentId, t1);
 });
 
+// BUG-REPORT #18: duplicating a family must re-point the cloned graph's
+// analysis links at the cloned analyses. Before the fix the copy kept the
+// original ids verbatim, so the copied graph plotted the new table's points
+// under the ORIGINAL table's regression line, significance stars and
+// overlays — and deleting the original left dangling links behind.
+check("duplicating a family re-points a cloned graph at the cloned analyses", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  // A second table with its own analysis: a link to it is outside the
+  // duplicated family, so the copy must keep pointing at the original.
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "t2",
+      type: "table",
+      name: "Table 2",
+      parentId: null,
+      tableType: "column",
+      data: JSON.parse(JSON.stringify(s.nodes[t1].data)),
+    },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "ax",
+      type: "analysis",
+      name: "Descriptive statistics",
+      parentId: "t2",
+      analysisType: "descriptive-statistics",
+      analysisParams: { columns: ["Y1"] } as AnalysisParams,
+    },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "a1",
+      type: "analysis",
+      name: "Linear regression",
+      parentId: t1,
+      analysisType: "descriptive-statistics",
+      analysisParams: { columns: ["Y1"] } as AnalysisParams,
+    },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "a2",
+      type: "analysis",
+      name: "t test",
+      parentId: t1,
+      analysisType: "descriptive-statistics",
+      analysisParams: { columns: ["Y1"] } as AnalysisParams,
+    },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "g1",
+      type: "graph",
+      name: "XY scatter",
+      parentId: t1,
+      graphType: "individual",
+      graphOptions: {
+        ...newGraphOptions("individual"),
+        regAnalysisId: "a1",
+        sigAnalysisId: "a2",
+        sigAnalysisIds: ["a1", "a2"],
+        demingAnalysisId: "a1",
+        coxAnalysisId: "ax",
+        ttestAnalysisId: "a2",
+        poissonAnalysisId: "a1",
+        pcaAnalysisId: "a1",
+        smoothAnalysisId: "a2",
+        kmeansAnalysisId: "a1",
+        hclustAnalysisId: "a2",
+        monteCarloAnalysisId: "a1",
+      },
+    },
+  });
+  s = reducer(s, { type: "duplicateFamily", id: t1 });
+  const copyId = s.rootOrder[1];
+  const [copyA1, copyA2, copyG] = s.childOrder[copyId].map((id) => s.nodes[id]);
+  ok(copyA1.id !== "a1" && copyA2.id !== "a2" && copyG.id !== "g1", "the children get fresh ids");
+  const opts = copyG.graphOptions!;
+  // Every sibling link re-points at the cloned analysis, never the original.
+  strictEqual(opts.regAnalysisId, copyA1.id);
+  strictEqual(opts.sigAnalysisId, copyA2.id);
+  deepStrictEqual(opts.sigAnalysisIds, [copyA1.id, copyA2.id]);
+  strictEqual(opts.demingAnalysisId, copyA1.id);
+  strictEqual(opts.ttestAnalysisId, copyA2.id);
+  strictEqual(opts.poissonAnalysisId, copyA1.id);
+  strictEqual(opts.pcaAnalysisId, copyA1.id);
+  strictEqual(opts.smoothAnalysisId, copyA2.id);
+  strictEqual(opts.kmeansAnalysisId, copyA1.id);
+  strictEqual(opts.hclustAnalysisId, copyA2.id);
+  strictEqual(opts.monteCarloAnalysisId, copyA1.id);
+  // A link outside the family was not cloned: it keeps pointing at the
+  // original analysis, which still exists — exactly as Clone Graph does.
+  strictEqual(opts.coxAnalysisId, "ax");
+  // The source family is untouched, links included.
+  strictEqual(s.nodes.g1.graphOptions?.regAnalysisId, "a1");
+  strictEqual(s.nodes.g1.graphOptions?.coxAnalysisId, "ax");
+  deepStrictEqual(s.nodes.g1.graphOptions?.sigAnalysisIds, ["a1", "a2"]);
+});
+
+// BUG-REPORT #19: `latest.current` only updates when React commits, so
+// code that reads the store straight after a dispatch sees the project
+// from before the dispatch — dropping run-on-close script changes on
+// close, and skipping the crash-recovery backup refresh in Revert to
+// Saved. The hook itself can't run in this suite (no window), so this
+// pins the shape of the fix in source: the script runner returns the
+// scripted project and waits for its commit, the loaders report whether
+// the project landed, and Revert trusts that — never the stale store.
+check("run-on-close scripts and Revert to Saved must not read the pre-dispatch store", () => {
+  const doc = readFileSync("src/store/use-document.ts", "utf8");
+  // runSavedScripts returns the scripted project instead of leaving the
+  // caller to read `latest.current`, and waits for each dispatch to
+  // commit before the caller reads the store.
+  ok(
+    doc.includes("Promise<{ ok: boolean; changed: boolean; doc: ScriptDoc }>"),
+    "runSavedScripts must return { ok, changed, doc }",
+  );
+  ok(
+    doc.includes("await waitForScriptCommit(result.doc, beforeRevision)"),
+    "runSavedScripts must wait for the applyScript dispatch to commit",
+  );
+  // The close path treats a script change as dirty even if the commit is
+  // still in flight after the bounded wait.
+  ok(
+    doc.includes("(run.changed || latest.current.isDirty)"),
+    "confirmDiscardWithAutosave must count a script change as dirty",
+  );
+  // load / loadRemote report whether the project landed, and Revert to
+  // Saved trusts that instead of the stale dirty flag.
+  ok(
+    doc.includes("const load = async (path: string, untitled: boolean): Promise<boolean>"),
+    "load must return Promise<boolean>",
+  );
+  ok(
+    doc.includes("const loadRemote = async (handle: RemoteHandle): Promise<boolean>"),
+    "loadRemote must return Promise<boolean>",
+  );
+  ok(
+    doc.includes("const loaded = path ? await load(path, false) : handle ? await loadRemote(handle) : false;"),
+    "revertToSaved must use the load's boolean result",
+  );
+  ok(
+    !doc.includes("const after = latest.current;"),
+    "revertToSaved must not read the stale store after a load",
+  );
+  // The backup after a revert is written from the disk text just loaded,
+  // not from the store's pre-revert project.
+  ok(
+    doc.includes("await writeBackupSnapshot(undefined, savedText);"),
+    "revertToSaved must refresh the backup from the loaded disk text",
+  );
+});
+
 // ── File ▸ Merge (seq 180) ───────────────────────────────────────────────
 // Prism 10 User Guide, "Merging and splitting projects": File ▸ Merge
 // appends all sheets from another project file to the current one, and
