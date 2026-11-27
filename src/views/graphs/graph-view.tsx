@@ -1102,8 +1102,8 @@ export function GraphView({ node }: { node: ProjectNode }) {
             const draw = widthIn === undefined ? size : drawSizeAtWidth(size, widthIn);
             plottedRef.current && copyGraphImage(plottedRef.current, draw, dpi, colorMode);
           }}
-          onSendToOffice={(target, dpi) =>
-            plottedRef.current && sendGraphToOffice(plottedRef.current, size, target, dpi, node.name)
+          onSendToOffice={(target, dpi, options) =>
+            plottedRef.current && sendGraphToOffice(plottedRef.current, size, target, dpi, node.name, options)
           }
         />
       }

@@ -9,7 +9,7 @@ import { withoutSelection } from "../graphs/selection";
 import { vectorTraces } from "../graphs/plot-helpers";
 import { PX_PER_INCH, withDpi } from "../../lib/image-dpi";
 import { bmpEncode, decodePng, pdfEncode, tiffEncode } from "../../lib/raster-export";
-import { grayscaleFigure, svgToEps, svgToPdf, VectorExportError, type ColorMode } from "../../lib/vector-export";
+import { recolorFigure, svgToEps, svgToPdf, VectorExportError, type ColorMode } from "../../lib/vector-export";
 import {
   composeFigureSvg,
   figureExportSize,
@@ -23,7 +23,17 @@ import {
 import { buildGraphFigure, type GraphOverlayStatus } from "../graphs/graph-figure";
 import type { ExportFormat, Resolution } from "../graphs/graph-export";
 import { clipboardSupportsPdf, vectorClipboardItem, writeVectorToClipboard } from "../graphs/graph-export";
-import { buildOfficeDocument, officeDialogTitle, officeExtension, type OfficeTarget } from "../../lib/office-export";
+import {
+  buildOfficeDocument,
+  DEFAULT_OFFICE_OPTIONS,
+  officeDialogTitle,
+  officeExtension,
+  officeRenderColorMode,
+  officeSidecarName,
+  officeSidecarPath,
+  type OfficeExportOptions,
+  type OfficeTarget,
+} from "../../lib/office-export";
 import type { FigurePanel, ProjectNode } from "../../store/types";
 
 const EXTENSION: Record<ExportFormat, string> = { png: "png", jpeg: "jpg", svg: "svg", pdf: "pdf", tiff: "tiff", eps: "eps", bmp: "bmp" };
@@ -65,7 +75,7 @@ async function panelImage(
 ): Promise<{ image: Blob | null; overlays: GraphOverlayStatus[] }> {
   const { figure: rawFig, overlays } = await buildGraphFigure(graph, nodes, { hideLegend });
   if (!rawFig) return { image: null, overlays };
-  const fig = colorMode === "grayscale" ? grayscaleFigure(rawFig) : rawFig;
+  const fig = recolorFigure(rawFig, colorMode);
   const el = document.createElement("div");
   el.style.cssText = "position:fixed;left:-10000px;top:0;visibility:hidden;";
   document.body.appendChild(el);
@@ -443,13 +453,20 @@ export async function copyFigureImage(
  *  user opens the file in Word/PowerPoint). Keynote takes Prism's own
  *  route instead: the PNG is handed to Keynote on macOS, which makes the
  *  presentation and saves the real .key (see office-export.ts — no
- *  file-side .key exists). */
+ *  file-side .key exists).
+ *
+ *  `options` (seq 217 remainder, L15) is the send's embed/link/picture
+ *  + colour choice, remembered for the next send: Word / PowerPoint take
+ *  the colour PNG and carry the colour as a display setting on the
+ *  picture, Keynote takes the recoloured render, and "link" writes the
+ *  PNG as a sidecar beside the document. */
 export async function sendFigureToOffice(
   figure: ProjectNode,
   nodes: Record<string, ProjectNode>,
   target: OfficeTarget,
   dpi: Resolution,
   name: string,
+  options: OfficeExportOptions = DEFAULT_OFFICE_OPTIONS,
 ) {
   const title = officeDialogTitle(target);
   if (!figure.panels?.length) return alert(title, "Add a panel first.", "error");
@@ -457,7 +474,7 @@ export async function sendFigureToOffice(
   if (hasEmptyCell(g.panels, g.grid))
     await alert("Empty Cell", "The figure has an empty cell — it exports blank.", "warning");
   try {
-    const out = await renderFigureRaster(figure, nodes, "png", dpi);
+    const out = await renderFigureRaster(figure, nodes, "png", dpi, officeRenderColorMode(target, options.color));
     if (out.capped && out.reason) await alert("Figure Too Large", `${out.reason} Exporting at the largest fitting size.`, "warning");
     const png = new Uint8Array(await out.blob.arrayBuffer());
     if (target === "keynote") {
@@ -471,13 +488,6 @@ export async function sendFigureToOffice(
       lastFolder = path.slice(0, path.lastIndexOf("/"));
       await handoffPngToKeynote(png, name, path, out.width, out.height, Number(dpi));
     } else {
-      const doc = await buildOfficeDocument(target, {
-        png,
-        title: name,
-        widthPx: out.width,
-        heightPx: out.height,
-        dpi: Number(dpi),
-      });
       const ext = officeExtension(target);
       const fileName = `${name}.${ext}`;
       const path = await pickSavePath(
@@ -488,7 +498,20 @@ export async function sendFigureToOffice(
       );
       if (!path) return;
       lastFolder = path.slice(0, path.lastIndexOf("/"));
+      const linked = options.mode === "link";
+      const doc = await buildOfficeDocument(
+        target,
+        {
+          png,
+          title: name,
+          widthPx: out.width,
+          heightPx: out.height,
+          dpi: Number(dpi),
+        },
+        { ...options, linkFileName: linked ? officeSidecarName(path) : undefined },
+      );
       await writeFile(path, doc);
+      if (linked) await writeFile(officeSidecarPath(path), png);
     }
     if (out.missing)
       await alert(

@@ -19344,13 +19344,24 @@ check("Word/PowerPoint colour is a display setting on the picture — the PNG by
 check("a linked Office export needs the linked file name, and unknown options are refused (Office options)", async () => {
   const png = testPng(10, 10);
   const image = { png, title: "x", widthPx: 10, heightPx: 10, dpi: 150 };
-  await rejects(buildOfficeDocument("word", image, { mode: "link", color: "color" }), /link.*file name/i);
+  // Wrapped, as in the Keynote guard check above: the option validation
+  // throws synchronously, before any promise exists.
   await rejects(
-    buildOfficeDocument("word", image, { mode: "ole-object" as OfficeImageMode, color: "color" }),
+    async () => {
+      await buildOfficeDocument("word", image, { mode: "link", color: "color" });
+    },
+    /link.*file name/i,
+  );
+  await rejects(
+    async () => {
+      await buildOfficeDocument("word", image, { mode: "ole-object" as OfficeImageMode, color: "color" });
+    },
     /embed, link, picture/,
   );
   await rejects(
-    buildOfficeDocument("word", image, { mode: "picture", color: "sepia" as OfficeColor }),
+    async () => {
+      await buildOfficeDocument("word", image, { mode: "picture", color: "sepia" as OfficeColor });
+    },
     /color, grayscale, blackwhite/,
   );
 });
@@ -19440,8 +19451,8 @@ check("titer_export_office accepts the mode and colour options through MCP (Offi
   ok(mcp.includes("pub color_mode: Option<String>"), "the Rust tool must take the color_mode arg");
   ok(mcp.includes("Unknown office image mode"), "the Rust tool must validate the mode");
   ok(mcp.includes("Unknown office colour"), "the Rust tool must validate the colour");
-  ok(mcp.includes('job_args["mode"]'), "the Rust tool must forward the mode to the job");
-  ok(mcp.includes('job_args["color_mode"]'), "the Rust tool must forward the colour to the job");
+  ok(mcp.includes('"mode": mode'), "the Rust tool must forward the mode to the job");
+  ok(mcp.includes('"color_mode": color_mode'), "the Rust tool must forward the colour to the job");
 });
 
 check("the graph and figure senders carry the chosen options into the render and the document (Office options)", () => {
@@ -19460,11 +19471,18 @@ check("the Office choices are offered in both export panels and remembered for t
     const src = readFileSync(file, "utf8");
     ok(src.includes("Send as"), `${file} must offer the embed/link/picture choice`);
     ok(src.includes("OFFICE_IMAGE_MODES"), `${file} must offer the embed/link/picture choice`);
+    ok(src.includes("Send colour"), `${file} must offer the colour choice`);
     ok(src.includes("OFFICE_COLORS"), `${file} must offer the colour choice`);
-    ok(src.includes("Black & White"), `${file} must offer black & white`);
-    ok(src.includes("readOfficeOptions"), `${file} must start from the remembered Office options`);
-    ok(src.includes("rememberOfficeOptions"), `${file} must remember the Office options for the next send`);
   }
+  // The figure panel keeps the options in their own remembered key; the
+  // graph panel keeps them inside its remembered export choice — either
+  // way, one send's choice is the next send's.
+  const figure = readFileSync("src/views/figures/figure-view.tsx", "utf8");
+  ok(figure.includes("readOfficeOptions"), "figure-view must start from the remembered Office options");
+  ok(figure.includes("rememberOfficeOptions"), "figure-view must remember the Office options for the next send");
+  const panel = readFileSync("src/views/graphs/format-panel.tsx", "utf8");
+  ok(panel.includes("parseOfficeOptions(saved.office)"), "format-panel must read the remembered Office options");
+  ok(panel.includes("office: OfficeExportOptions"), "format-panel must carry the Office options in its export choice");
 });
 
 // The Tauri write_file allowlist, read through either source shape: the

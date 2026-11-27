@@ -18,8 +18,127 @@
 // execution); `buildKeynoteScript` below remains as the suite-pinned
 // shape reference for the exact script the shell builds.
 import JSZip from "jszip";
+import type { ColorMode } from "./vector-export";
 
 export type OfficeTarget = "word" | "powerpoint" | "keynote";
+
+/** How the graph's image travels into the document (seq 217 remainder,
+ *  L15 — Prism's Send-to-Office preference: "whether to embed, link, or
+ *  send a picture", Prism 11 User Guide, "One-click to Microsoft
+ *  PowerPoint or Word"). There is no OLE on Mac, so no Prism-style
+ *  embedded object can exist here: "picture" and "embed" both write the
+ *  PNG embedded in the file (the file for an embedded picture is the
+ *  same either way, and the choice is recorded in the result), while
+ *  "link" writes the PNG as a sidecar next to the document and references
+ *  it with TargetMode="External". Keynote always embeds the placed image
+ *  in the .key when it saves, so all three modes hand it the same PNG —
+ *  the choice is recorded, not pretended. */
+export type OfficeImageMode = "embed" | "link" | "picture";
+
+export const OFFICE_IMAGE_MODES: { value: OfficeImageMode; label: string }[] = [
+  { value: "picture", label: "Picture" },
+  { value: "embed", label: "Embed" },
+  { value: "link", label: "Link" },
+];
+
+/** How the graph's colours travel (seq 217 remainder, L15): Prism's
+ *  Word choice is full colors, black and white, or gray scale — "the
+ *  latter two options simply set a setting within Word to display and
+ *  print the graph in black and white or gray", so the embedded image
+ *  keeps its original colours. Word / PowerPoint get exactly that (a
+ *  DrawingML recolor on the picture); Keynote has no script-level
+ *  recolor, so its PNG is recoloured at render time instead. */
+export type OfficeColor = "color" | "grayscale" | "blackwhite";
+
+export const OFFICE_COLORS: { value: OfficeColor; label: string }[] = [
+  { value: "color", label: "Color" },
+  { value: "grayscale", label: "Grayscale" },
+  { value: "blackwhite", label: "Black & White" },
+];
+
+/** One Send to Office's options: how the image travels, and in what colours. */
+export interface OfficeExportOptions {
+  mode: OfficeImageMode;
+  color: OfficeColor;
+}
+
+/** The default send — the old one-click behaviour: the PNG embedded as a picture, in colour. */
+export const DEFAULT_OFFICE_OPTIONS: OfficeExportOptions = { mode: "picture", color: "color" };
+
+const OFFICE_MODES: readonly string[] = ["embed", "link", "picture"];
+const OFFICE_COLOR_VALUES: readonly string[] = ["color", "grayscale", "blackwhite"];
+
+/** Strict validation for builders and tool args: an unknown option is a
+ *  caller bug, and it says so naming the allowed values. */
+export function validateOfficeOptions(options: OfficeExportOptions): void {
+  if (!OFFICE_MODES.includes(options.mode))
+    throw new Error(`Unknown office image mode “${options.mode}” — the modes are embed, link, picture.`);
+  if (!OFFICE_COLOR_VALUES.includes(options.color))
+    throw new Error(`Unknown office colour “${options.color}” — the colours are color, grayscale, blackwhite.`);
+}
+
+/** Loose parsing for stored / pasted-in options: unknown or missing
+ *  fields fall back per field, never through — a bad mode keeps a good colour. */
+export function parseOfficeOptions(raw: unknown): OfficeExportOptions {
+  const obj = (raw ?? {}) as Partial<OfficeExportOptions>;
+  return {
+    mode: OFFICE_MODES.includes(obj.mode as string) ? (obj.mode as OfficeImageMode) : "picture",
+    color: OFFICE_COLOR_VALUES.includes(obj.color as string) ? (obj.color as OfficeColor) : "color",
+  };
+}
+
+export function serializeOfficeOptions(options: OfficeExportOptions): string {
+  return JSON.stringify(parseOfficeOptions(options));
+}
+
+// This Mac's preferences, never the project's: the last Send to Office
+// options — a choice made on one send is the next send's choice too.
+// The localStorage access mirrors src/lib/autosave.ts: never throws (no
+// localStorage in tests, private mode, or a quota error).
+export const OFFICE_OPTIONS_KEY = "titer.office.export";
+
+export function readOfficeOptions(): OfficeExportOptions {
+  try {
+    if (typeof localStorage === "undefined") return DEFAULT_OFFICE_OPTIONS;
+    return parseOfficeOptions(JSON.parse(localStorage.getItem(OFFICE_OPTIONS_KEY) ?? "{}"));
+  } catch {
+    return DEFAULT_OFFICE_OPTIONS;
+  }
+}
+
+export function rememberOfficeOptions(options: OfficeExportOptions): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(OFFICE_OPTIONS_KEY, serializeOfficeOptions(options));
+  } catch {
+    // not remembered; still works
+  }
+}
+
+/** The colour mode the PNG for `target` is rendered in. Word / PowerPoint
+ *  always take the colour PNG — their colour is the DrawingML recolor on
+ *  the picture, so the file keeps the original colours (double-clicking
+ *  back into the source sees them, as in Prism). Keynote takes the
+ *  recoloured render: its script has no recolor to set. */
+export function officeRenderColorMode(target: OfficeTarget, color: OfficeColor): ColorMode {
+  if (target === "keynote") return color;
+  return "color";
+}
+
+/** The sidecar PNG's file name for a document file name ("Dose
+ *  response.docx" → "Dose response.png") — the name the linked document
+ *  references, and the file the sender writes beside the document. */
+export function officeSidecarName(docFileName: string): string {
+  const base = docFileName.slice(Math.max(docFileName.lastIndexOf("/"), docFileName.lastIndexOf("\\")) + 1);
+  const dot = base.lastIndexOf(".");
+  return (dot > 0 ? base.slice(0, dot) : base) + ".png";
+}
+
+/** The sidecar PNG's full path for a document path. */
+export function officeSidecarPath(docPath: string): string {
+  const slash = Math.max(docPath.lastIndexOf("/"), docPath.lastIndexOf("\\"));
+  return (slash >= 0 ? docPath.slice(0, slash + 1) : "") + officeSidecarName(docPath);
+}
 
 /** The file extension for a target ("docx" / "pptx" / "key"). */
 export const officeExtension = (target: OfficeTarget) =>
@@ -71,18 +190,42 @@ export function pngSize(png: Uint8Array): { widthPx: number; heightPx: number } 
 
 const emu = (inches: number) => Math.round(inches * EMU_PER_INCH);
 
+/** The picture's `<a:blip>`: an embedded picture (`r:embed`) or a linked
+ *  one (`r:link`), carrying the colour as a DrawingML recolor — Prism's
+ *  Word display setting, not a re-render: `<a:grayscl/>` for grayscale,
+ *  `<a:biLevel thresh="50000"/>` (a 50% threshold) for black & white,
+ *  no effect child for colour. The embedded PNG bytes are untouched. */
+function blipXml(linked: boolean, color: OfficeColor): string {
+  const effect =
+    color === "grayscale" ? "<a:grayscl/>" : color === "blackwhite" ? '<a:biLevel thresh="50000"/>' : "";
+  return `<a:blip r:${linked ? "link" : "embed"}="rId1">${effect}</a:blip>`;
+}
+
+/** The image relationship: an internal part for an embedded picture, an
+ *  external reference (resolved against the document's folder) for a
+ *  linked one — the sidecar the sender writes beside the document. The
+ *  internal target is relative to the part that owns the relationship
+ *  ("media/image1.png" from word/, "../media/image1.png" from
+ *  ppt/slides/). */
+function imageRelXml(internalTarget: string, linkFileName: string | undefined): string {
+  if (linkFileName !== undefined)
+    return `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${encodeURI(linkFileName)}" TargetMode="External"/>`;
+  return `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${internalTarget}"/>`;
+}
+
 /** A .docx: the title as a heading paragraph, then the image centred in the
  *  6.5×9 in text area of a letter page. */
-async function buildWord(image: OfficeImage): Promise<Uint8Array> {
+async function buildWord(image: OfficeImage, options: OfficeExportOptions & { linkFileName?: string }): Promise<Uint8Array> {
   checkPng(image.png);
   const { widthIn, heightIn } = fittedInches(image, 6.5, 9);
   const cx = emu(widthIn);
   const cy = emu(heightIn);
   const title = escapeXml(image.title);
+  const linked = options.mode === "link";
   const zip = new JSZip();
   zip.file(
     "[Content_Types].xml",
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/media/image1.png" ContentType="image/png"/></Types>`,
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>${linked ? "" : '<Override PartName="/word/media/image1.png" ContentType="image/png"/>'}</Types>`,
   );
   zip.file(
     "_rels/.rels",
@@ -90,13 +233,14 @@ async function buildWord(image: OfficeImage): Promise<Uint8Array> {
   );
   zip.file(
     "word/document.xml",
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t xml:space="preserve">${title}</w:t></w:r></w:p><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="1" name="Graph"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="Graph"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p><w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`,
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t xml:space="preserve">${title}</w:t></w:r></w:p><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="1" name="Graph"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="Graph"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill>${blipXml(linked, options.color)}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p><w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`,
   );
   zip.file(
     "word/_rels/document.xml.rels",
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/></Relationships>`,
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${imageRelXml("media/image1.png", linked ? options.linkFileName : undefined)}</Relationships>`,
   );
-  zip.file("word/media/image1.png", image.png);
+  // A linked picture lives outside the file: no media part in the package.
+  if (!linked) zip.file("word/media/image1.png", image.png);
   return zip.generateAsync({ type: "uint8array" });
 }
 
@@ -104,7 +248,7 @@ async function buildWord(image: OfficeImage): Promise<Uint8Array> {
  *  the image centred in the 12.333×6 in area below it. PowerPoint insists
  *  on a slide master, a layout and a theme, so the deck carries minimal
  *  versions of all three — a slide alone is not a deck it will open. */
-async function buildPowerPoint(image: OfficeImage): Promise<Uint8Array> {
+async function buildPowerPoint(image: OfficeImage, options: OfficeExportOptions & { linkFileName?: string }): Promise<Uint8Array> {
   checkPng(image.png);
   const { widthIn, heightIn } = fittedInches(image, 12.333, 6);
   const cx = emu(widthIn);
@@ -113,10 +257,11 @@ async function buildPowerPoint(image: OfficeImage): Promise<Uint8Array> {
   const x = emu((13.333 - widthIn) / 2);
   const y = emu(1 + (6 - heightIn) / 2);
   const title = escapeXml(image.title);
+  const linked = options.mode === "link";
   const zip = new JSZip();
   zip.file(
     "[Content_Types].xml",
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/media/image1.png" ContentType="image/png"/></Types>`,
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>${linked ? "" : '<Override PartName="/ppt/media/image1.png" ContentType="image/png"/>'}</Types>`,
   );
   zip.file(
     "_rels/.rels",
@@ -152,24 +297,36 @@ async function buildPowerPoint(image: OfficeImage): Promise<Uint8Array> {
   );
   zip.file(
     "ppt/slides/slide1.xml",
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="12192000" cy="6858000"/><a:chOff x="0" y="0"/><a:chExt cx="12192000" cy="6858000"/></a:xfrm></p:grpSpPr><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="228600"/><a:ext cx="11277600" cy="457200"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="2400" b="1"/><a:t>${title}</a:t></a:r></a:p></p:txBody></p:sp><p:pic><p:nvPicPr><p:cNvPr id="3" name="Graph"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"/></p:spPr></p:pic></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`,
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="12192000" cy="6858000"/><a:chOff x="0" y="0"/><a:chExt cx="12192000" cy="6858000"/></a:xfrm></p:grpSpPr><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="228600"/><a:ext cx="11277600" cy="457200"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="2400" b="1"/><a:t>${title}</a:t></a:r></a:p></p:txBody></p:sp><p:pic><p:nvPicPr><p:cNvPr id="3" name="Graph"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill>${blipXml(linked, options.color)}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"/></p:spPr></p:pic></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`,
   );
   zip.file(
     "ppt/slides/_rels/slide1.xml.rels",
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/></Relationships>`,
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${imageRelXml("../media/image1.png", linked ? options.linkFileName : undefined)}<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/></Relationships>`,
   );
-  zip.file("ppt/media/image1.png", image.png);
+  // A linked picture lives outside the file: no media part in the package.
+  if (!linked) zip.file("ppt/media/image1.png", image.png);
   return zip.generateAsync({ type: "uint8array" });
 }
 
-/** The graph/layout as a real Word document or PowerPoint deck. Keynote
- *  has no file builder — a .key is written by Keynote itself, from the
- *  script the shell builds (see above); calling this with "keynote" is a
- *  caller bug, and it says so. */
-export function buildOfficeDocument(target: OfficeTarget, image: OfficeImage): Promise<Uint8Array> {
+/** The graph/layout as a real Word document or PowerPoint deck, with the
+ *  send's options (seq 217 remainder, L15). Keynote has no file builder
+ *  — a .key is written by Keynote itself, from the script the shell
+ *  builds (see above); calling this with "keynote" is a caller bug, and
+ *  it says so. `options` defaults to the old one-click send (an embedded
+ *  picture, in colour); "link" needs `linkFileName` — the sidecar PNG's
+ *  file name as the document should reference it — because the builder
+ *  cannot guess the file name the user picked in the save dialog. */
+export function buildOfficeDocument(
+  target: OfficeTarget,
+  image: OfficeImage,
+  options: OfficeExportOptions & { linkFileName?: string } = DEFAULT_OFFICE_OPTIONS,
+): Promise<Uint8Array> {
   if (target === "keynote")
     throw new Error("Send to Keynote builds the presentation in Keynote itself (macOS), not as a file — use handoffPngToKeynote.");
-  return target === "word" ? buildWord(image) : buildPowerPoint(image);
+  validateOfficeOptions(options);
+  if (options.mode === "link" && !options.linkFileName)
+    throw new Error("Send to Word / PowerPoint as a link needs the linked image file name — the document references the PNG beside it.");
+  return target === "word" ? buildWord(image, options) : buildPowerPoint(image, options);
 }
 
 // ── Send to Keynote (seq 217) ───────────────────────────────────────────

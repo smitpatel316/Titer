@@ -45,7 +45,7 @@ import {
 import { largestAt, PX_PER_INCH, withDpi } from "../lib/image-dpi";
 import { bmpEncode, decodePng, pdfEncode, tiffEncode } from "../lib/raster-export";
 import {
-  grayscaleFigure,
+  recolorFigure,
   svgToEps,
   svgToPdf,
   validateExportColorMode,
@@ -56,7 +56,11 @@ import { DEFAULT_FIGURE_SIZE, validateFigureSize } from "../lib/figure";
 import {
   buildOfficeDocument,
   officeExtension,
+  officeRenderColorMode,
+  officeSidecarName,
+  officeSidecarPath,
   pngSize,
+  type OfficeExportOptions,
   type OfficeTarget,
 } from "../lib/office-export";
 import { isMacOs } from "../lib/channel";
@@ -375,10 +379,7 @@ export async function renderGraphImage(
       drawnFormat === "jpeg" || format === "pdf" || format === "tiff" || format === "eps" || format === "bmp"
         ? { ...drawn.layout, ...WHITE }
         : drawn.layout;
-    const figure =
-      colorMode === "grayscale"
-        ? grayscaleFigure({ data: vectorTraces(withoutSelection(drawn.data)), layout })
-        : { data: vectorTraces(withoutSelection(drawn.data)), layout };
+    const figure = recolorFigure({ data: vectorTraces(withoutSelection(drawn.data)), layout }, colorMode);
     const vector = format === "svg" || format === "eps" || format === "pdf";
     const scale = vector ? 1 : Number(dpi) / PX_PER_INCH;
     const url = await Plotly.toImage(figure, { format: drawnFormat, ...draw96, scale });
@@ -495,8 +496,8 @@ export function exportFormatDpi(
     throw jobErr(job, `has no resolution “${dpiRaw}” — the resolutions are ${RESOLUTIONS.join(", ")} DPI.`);
   }
   const colorModeRaw = optStr(job, args, "color_mode") ?? "color";
-  if (colorModeRaw !== "color" && colorModeRaw !== "grayscale" && colorModeRaw !== "cmyk") {
-    throw jobErr(job, `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk.`);
+  if (colorModeRaw !== "color" && colorModeRaw !== "grayscale" && colorModeRaw !== "cmyk" && colorModeRaw !== "blackwhite") {
+    throw jobErr(job, `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk, blackwhite (PNG only).`);
   }
   try {
     validateExportColorMode(formatRaw, colorModeRaw as ColorMode);
@@ -808,7 +809,20 @@ export async function executeExportAllGraphs(job: McpJob, deps: ExportJobDeps): 
  *  handed to Keynote on macOS for a real .key (seq 217: no file-side
  *  .key exists — Keynote itself makes the presentation, so the target
  *  refuses on any machine that cannot drive Keynote). Exactly one
- *  of `graph_id` / `figure_id`. */
+ *  of `graph_id` / `figure_id`.
+ *
+ *  Options (seq 217 remainder, L15 — Prism's Send-to-Office
+ *  preferences): `mode` is "picture" (the embedded PNG, the default),
+ *  "embed" (the same embedded PNG — Prism's embed is an OLE object,
+ *  which has no Mac form) or "link" (the PNG written as a sidecar beside
+ *  the document, referenced externally — reported as
+ *  `linked_image_path`); `color_mode` is "color", "grayscale" or
+ *  "blackwhite". Word / PowerPoint take the colour PNG and carry the
+ *  colour as a display setting on the picture, so the file keeps the
+ *  original colours; Keynote takes the recoloured render, since its
+ *  script has no recolor to set — and Keynote embeds the placed image
+ *  when it saves, so a linked Keynote send is recorded as "link" but
+ *  the .key is self-contained either way. */
 export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Promise<ExportJobOutcome> {
   const args = argsOf(job);
   const graphId = optStr(job, args, "graph_id");
@@ -821,12 +835,22 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
     throw jobErr(job, `has no office target “${targetRaw}” — the targets are word, powerpoint and keynote.`);
   }
   const target = targetRaw as OfficeTarget;
+  const modeRaw = optStr(job, args, "mode") ?? "picture";
+  if (modeRaw !== "embed" && modeRaw !== "link" && modeRaw !== "picture") {
+    throw jobErr(job, `has no office image mode “${modeRaw}” — the modes are embed, link, picture.`);
+  }
+  const colorRaw = optStr(job, args, "color_mode") ?? "color";
+  if (colorRaw !== "color" && colorRaw !== "grayscale" && colorRaw !== "blackwhite") {
+    throw jobErr(job, `has no office colour “${colorRaw}” — the colours are color, grayscale, blackwhite.`);
+  }
+  const options: OfficeExportOptions = { mode: modeRaw, color: colorRaw };
   const dpiRaw = optStr(job, args, "dpi") ?? "300";
   if (!(RESOLUTIONS as readonly string[]).includes(dpiRaw)) {
     throw jobErr(job, `has no resolution “${dpiRaw}” — the resolutions are ${RESOLUTIONS.join(", ")} DPI.`);
   }
   const dpi = dpiRaw as Resolution;
   const path = reqStr(job, args, "path");
+  const renderColor = officeRenderColorMode(target, options.color);
   const state = deps.getState();
   let png: Uint8Array;
   let title: string;
@@ -839,7 +863,7 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
   if (graphId !== undefined) {
     const graph = graphNode(job, state, graphId);
     const size96 = graphDrawSize(graph);
-    const out = await renderGraphImage(graph, state.nodes, "png", dpi, size96, deps.run);
+    const out = await renderGraphImage(graph, state.nodes, "png", dpi, size96, deps.run, renderColor);
     png = out.bytes;
     title = graph.name;
     widthPx = out.widthPx;
@@ -852,7 +876,7 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
     if (!figure.panels?.length) {
       throw jobErr(job, `cannot export figure “${figure.name}” — add a panel first.`);
     }
-    const out = await renderFigureRaster(figure, state.nodes, "png", dpi);
+    const out = await renderFigureRaster(figure, state.nodes, "png", dpi, renderColor);
     png = new Uint8Array(await out.blob.arrayBuffer());
     title = figure.name;
     widthPx = out.width;
@@ -869,26 +893,42 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
   // Keynote saved, not the raw request — the shell ensures the extension
   // before dispatching, so in practice they are the same.
   let savedPath = path;
+  let linkedImagePath: string | undefined;
+  const io = deps.io ?? defaultExportIo;
   if (target === "keynote") {
     if (!isMacOs())
       throw jobErr(job, "needs macOS with Keynote installed — this machine cannot drive Keynote.");
     const outPath = ensureSaveExtension(path, "key");
     savedPath = await handoffPngToKeynote(png, title, outPath, dims.widthPx, dims.heightPx, Number(dpi));
   } else {
-    const doc = await buildOfficeDocument(target, {
-      png,
-      title,
-      widthPx: dims.widthPx,
-      heightPx: dims.heightPx,
-      dpi: Number(dpi),
-    });
-    const io = deps.io ?? defaultExportIo;
-    await io.writeFile(ensureSaveExtension(path, officeExtension(target)), doc);
+    const docPath = ensureSaveExtension(path, officeExtension(target));
+    const linked = options.mode === "link";
+    const doc = await buildOfficeDocument(
+      target,
+      {
+        png,
+        title,
+        widthPx: dims.widthPx,
+        heightPx: dims.heightPx,
+        dpi: Number(dpi),
+      },
+      { ...options, linkFileName: linked ? officeSidecarName(docPath) : undefined },
+    );
+    await io.writeFile(docPath, doc);
+    savedPath = docPath;
+    if (linked) {
+      // The picture lives beside the document: Word / PowerPoint load it
+      // from there, so the sidecar is written first-class, not temp.
+      linkedImagePath = officeSidecarPath(docPath);
+      await io.writeFile(linkedImagePath, png);
+    }
   }
   const ext = officeExtension(target);
   const result: Record<string, unknown> = {
     project_id: job.project_id,
     target,
+    mode: options.mode,
+    color_mode: options.color,
     path: savedPath,
     extension: ext,
     width_px: widthPx,
@@ -900,6 +940,9 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
   else result.figure_id = figureId;
   if (missing) result.missing = missing;
   if (reason) result.reason = reason;
+  if (linkedImagePath) result.linked_image_path = linkedImagePath;
+  if (target === "keynote" && options.mode === "link")
+    result.note = "Keynote embeds the placed image in the .key when it saves — there is no linked-image form in Keynote.";
   return { result };
 }
 

@@ -4706,6 +4706,17 @@ pub struct ExportOfficeArgs {
     pub figure_id: Option<String>,
     /// "word" | "powerpoint" | "keynote" (macOS only).
     pub target: String,
+    /// How the image travels: "picture" (the PNG embedded, the default),
+    /// "embed" (the same embedded PNG — Prism's embed is an OLE object,
+    /// which has no Mac form) or "link" (the PNG written as a sidecar
+    /// beside the document, referenced externally). Omit for "picture".
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// "color" | "grayscale" | "blackwhite". Word / PowerPoint take the
+    /// colour PNG and carry the colour as a display setting on the
+    /// picture; Keynote takes the recoloured render. Omit for "color".
+    #[serde(default)]
+    pub color_mode: Option<String>,
     /// "150" | "300" | "600" | "900" | "1200". Omit for "300".
     #[serde(default)]
     pub dpi: Option<String>,
@@ -9640,7 +9651,7 @@ impl TiterMcpServer {
     /// `graph_id` / `figure_id`.
     #[tool(
         name = "titer_export_office",
-        description = "Export one graph or figure to Word (.docx), PowerPoint (.pptx) or Keynote (.key, macOS only — the presentation is created in Keynote itself): the same PNG render at dpi 150/300/600/900/1200 (default 300), embedded at its physical size — the GUI's one-click Send to Office, driven headlessly. Exactly one of graph_id / figure_id. path omitted = beside the project file, else <Documents>/Titer Exports.",
+        description = "Export one graph or figure to Word (.docx), PowerPoint (.pptx) or Keynote (.key, macOS only — the presentation is created in Keynote itself): the same PNG render at dpi 150/300/600/900/1200 (default 300), embedded at its physical size — the GUI's one-click Send to Office, driven headlessly. Exactly one of graph_id / figure_id. mode: picture (embedded PNG, default), embed (the same embedded PNG — Prism's embed is an OLE object, which has no Mac form) or link (the PNG written as a sidecar beside the document, reported as linked_image_path). color_mode: color (default), grayscale or blackwhite — Word/PowerPoint carry the colour as a display setting on the picture, Keynote takes the recoloured render. path omitted = beside the project file, else <Documents>/Titer Exports.",
         annotations(
             title = "Export to Office",
             read_only_hint = false,
@@ -9653,12 +9664,24 @@ impl TiterMcpServer {
         &self,
         Parameters(args): Parameters<ExportOfficeArgs>,
     ) -> Result<Json<serde_json::Value>, String> {
-        let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id, "figure_id": args.figure_id, "target": args.target, "dpi": args.dpi, "path": args.path });
+        let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id, "figure_id": args.figure_id, "target": args.target, "mode": args.mode, "color_mode": args.color_mode, "dpi": args.dpi, "path": args.path });
         let result: Result<serde_json::Value, String> = async {
             let target = args.target.as_str();
             if target != "word" && target != "powerpoint" && target != "keynote" {
                 return Err(format!(
                     "Unknown office target “{target}” — the targets are word, powerpoint and keynote."
+                ));
+            }
+            let mode = args.mode.as_deref().unwrap_or("picture");
+            if mode != "embed" && mode != "link" && mode != "picture" {
+                return Err(format!(
+                    "Unknown office image mode “{mode}” — the modes are embed, link, picture."
+                ));
+            }
+            let color_mode = args.color_mode.as_deref().unwrap_or("color");
+            if color_mode != "color" && color_mode != "grayscale" && color_mode != "blackwhite" {
+                return Err(format!(
+                    "Unknown office colour “{color_mode}” — the colours are color, grayscale, blackwhite."
                 ));
             }
             let (node_id, fallback) = match (&args.graph_id, &args.figure_id) {
@@ -9692,7 +9715,7 @@ impl TiterMcpServer {
                     .to_string_lossy()
                     .into_owned(),
             };
-            let mut job_args = serde_json::json!({ "target": target, "dpi": dpi, "path": path });
+            let mut job_args = serde_json::json!({ "target": target, "mode": mode, "color_mode": color_mode, "dpi": dpi, "path": path });
             if let Some(g) = &args.graph_id {
                 job_args["graph_id"] = serde_json::Value::String(g.clone());
             }

@@ -1,14 +1,25 @@
 // Saving a graph as an image file, or copying it to the clipboard.
 import { alert, copyPdfToClipboard, handoffPngToKeynote, isNative, pickSavePath, writeFile } from "../../native";
 import { isMacOs } from "../../lib/channel";
-import { buildOfficeDocument, officeDialogTitle, officeExtension, pngSize, type OfficeTarget } from "../../lib/office-export";
+import {
+  buildOfficeDocument,
+  DEFAULT_OFFICE_OPTIONS,
+  officeDialogTitle,
+  officeExtension,
+  officeRenderColorMode,
+  officeSidecarName,
+  officeSidecarPath,
+  pngSize,
+  type OfficeExportOptions,
+  type OfficeTarget,
+} from "../../lib/office-export";
 import { loadPlotly } from "./plotly";
 import { withoutSelection } from "./selection";
 import { vectorTraces } from "./plot-helpers";
 import { largestAt, PX_PER_INCH, withDpi } from "../../lib/image-dpi";
 import { bmpEncode, decodePng, pdfEncode, tiffEncode } from "../../lib/raster-export";
 import {
-  grayscaleFigure,
+  recolorFigure,
   svgToEps,
   svgToPdf,
   validateExportColorMode,
@@ -130,10 +141,7 @@ async function toImage(el: HTMLElement, size: Size, format: ExportFormat, dpi: R
     drawnFormat === "jpeg" || format === "pdf" || format === "tiff" || format === "eps" || format === "bmp"
       ? { ...drawn.layout, ...WHITE }
       : drawn.layout;
-  const figure =
-    colorMode === "grayscale"
-      ? grayscaleFigure({ data: vectorTraces(withoutSelection(drawn.data)), layout })
-      : { data: vectorTraces(withoutSelection(drawn.data)), layout };
+  const figure = recolorFigure({ data: vectorTraces(withoutSelection(drawn.data)), layout }, colorMode);
   const vector = format === "svg" || format === "eps" || format === "pdf";
   const scale = vector ? 1 : Number(dpi) / PX_PER_INCH;
   const Plotly = await loadPlotly();
@@ -293,13 +301,26 @@ export async function writeVectorToClipboard(pdf: Promise<Blob>, png: Promise<Bl
  *  one-click export; the user opens it in Word/PowerPoint. Keynote is
  *  the exception: no file-side .key exists (see office-export.ts), so
  *  Keynote takes Prism's own route — the PNG is handed to Keynote on
- *  macOS, which makes the presentation and saves the real .key. */
-export async function sendGraphToOffice(el: HTMLElement, size: Size, target: OfficeTarget, dpi: Resolution, name: string) {
+ *  macOS, which makes the presentation and saves the real .key.
+ *
+ *  `options` (seq 217 remainder, L15) is the send's embed/link/picture
+ *  + colour choice, remembered for the next send: Word / PowerPoint take
+ *  the colour PNG and carry the colour as a display setting on the
+ *  picture, Keynote takes the recoloured render, and "link" writes the
+ *  PNG as a sidecar beside the document. */
+export async function sendGraphToOffice(
+  el: HTMLElement,
+  size: Size,
+  target: OfficeTarget,
+  dpi: Resolution,
+  name: string,
+  options: OfficeExportOptions = DEFAULT_OFFICE_OPTIONS,
+) {
   const title = officeDialogTitle(target);
   const why = tooLarge(size, dpi);
   if (why) return alert(title, why, "error");
   try {
-    const { blob: image } = await toImage(el, size, "png", dpi);
+    const { blob: image } = await toImage(el, size, "png", dpi, officeRenderColorMode(target, options.color));
     const bytes = new Uint8Array(await image.arrayBuffer());
     const dims = pngSize(bytes);
     if (!dims) throw new Error("Couldn't draw the graph as a PNG image.");
@@ -315,13 +336,6 @@ export async function sendGraphToOffice(el: HTMLElement, size: Size, target: Off
       await handoffPngToKeynote(bytes, name, path, dims.widthPx, dims.heightPx, Number(dpi));
       return;
     }
-    const doc = await buildOfficeDocument(target, {
-      png: bytes,
-      title: name,
-      widthPx: dims.widthPx,
-      heightPx: dims.heightPx,
-      dpi: Number(dpi),
-    });
     const ext = officeExtension(target);
     const fileName = `${name}.${ext}`;
     const path = await pickSavePath(
@@ -332,7 +346,20 @@ export async function sendGraphToOffice(el: HTMLElement, size: Size, target: Off
     );
     if (!path) return;
     lastFolder = path.slice(0, path.lastIndexOf("/"));
+    const linked = options.mode === "link";
+    const doc = await buildOfficeDocument(
+      target,
+      {
+        png: bytes,
+        title: name,
+        widthPx: dims.widthPx,
+        heightPx: dims.heightPx,
+        dpi: Number(dpi),
+      },
+      { ...options, linkFileName: linked ? officeSidecarName(path) : undefined },
+    );
     await writeFile(path, doc);
+    if (linked) await writeFile(officeSidecarPath(path), bytes);
   } catch (err) {
     alert(title, reason(err), "error");
   }

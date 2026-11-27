@@ -41,7 +41,7 @@
 
 import { deflate } from "pako";
 
-export type ColorMode = "color" | "grayscale" | "cmyk";
+export type ColorMode = "color" | "grayscale" | "cmyk" | "blackwhite";
 
 export const COLOR_MODES: { value: ColorMode; label: string }[] = [
   { value: "color", label: "Color" },
@@ -140,18 +140,56 @@ export function grayString(c: Rgb): string {
 }
 
 export function validateExportColorMode(format: string, colorMode: ColorMode): void {
-  if (colorMode !== "color" && colorMode !== "grayscale" && colorMode !== "cmyk")
-    throw new Error(`Unknown colour mode “${colorMode}” — the colour modes are color, grayscale, cmyk.`);
+  if (colorMode !== "color" && colorMode !== "grayscale" && colorMode !== "cmyk" && colorMode !== "blackwhite")
+    throw new Error(`Unknown colour mode “${colorMode}” — the colour modes are color, grayscale, cmyk, blackwhite.`);
   if (colorMode === "cmyk" && format !== "eps" && format !== "pdf" && format !== "tiff")
     throw new Error(`CMYK is supported for EPS, PDF and TIFF only — ${format} has no CMYK form. Choose color or grayscale.`);
+  // Black & white is the Office send's display/render mode (seq 217
+  // remainder): a 50% threshold has no form in the vector or CMYK
+  // encoders, so only the PNG render — the format Office sends — takes it.
+  if (colorMode === "blackwhite" && format !== "png")
+    throw new Error(`Black & white is supported for PNG only — ${format} has no black & white form. Choose color or grayscale.`);
 }
 
 export function grayscaleFigure<T extends { data: unknown[]; layout: object }>(figure: T): T {
-  // Only colour-valued strings are grayscaled: a string under a key that
-  // names a colour ("color", "fillcolor", "paper_bgcolor", "colorscale"…)
-  // or an element of such an array. Series/category names and titles are
-  // text, even when they happen to spell a CSS colour name ("Red") —
-  // rewriting those corrupts the legend and the title.
+  return mapFigureColors(figure, grayString);
+}
+
+/** A colour's black-or-white (`#000000` / `#ffffff`) at a 50% luminance
+ *  threshold — Prism's black & white send, as a render; an alpha colour
+ *  keeps its alpha as rgba. */
+export function monochromeString(c: Rgb): string {
+  const bw = grayOf(c) >= 128 ? 255 : 0;
+  if (c.a < 1) return `rgba(${bw}, ${bw}, ${bw}, ${c.a})`;
+  return bw === 255 ? "#ffffff" : "#000000";
+}
+
+/** The figure with every colour thresholded to black or white (seq 217
+ *  remainder): the render-time form of black & white, for targets with no
+ *  display setting — Keynote. Same walk as `grayscaleFigure`. */
+export function monochromeFigure<T extends { data: unknown[]; layout: object }>(figure: T): T {
+  return mapFigureColors(figure, monochromeString);
+}
+
+/** A figure with a colour mode applied at render time: grayscale walks
+ *  the colours to gray, black & white thresholds them, colour and CMYK
+ *  pass through (CMYK is applied at emit time by the encoders). */
+export function recolorFigure<T extends { data: unknown[]; layout: object }>(figure: T, colorMode: ColorMode): T {
+  if (colorMode === "grayscale") return grayscaleFigure(figure);
+  if (colorMode === "blackwhite") return monochromeFigure(figure);
+  return figure;
+}
+
+/** The colour-string walk `grayscaleFigure` / `monochromeFigure` share:
+ *  only colour-valued strings are rewritten — a string under a key that
+ *  names a colour ("color", "fillcolor", "paper_bgcolor", "colorscale"…)
+ *  or an element of such an array. Series/category names and titles are
+ *  text, even when they happen to spell a CSS colour name ("Red") —
+ *  rewriting those corrupts the legend and the title. */
+function mapFigureColors<T extends { data: unknown[]; layout: object }>(
+  figure: T,
+  toColor: (c: Rgb) => string,
+): T {
   const isColorKey = (key: string): boolean => {
     const k = key.toLowerCase();
     return k.includes("color") || k === "fill" || k === "stroke";
@@ -162,7 +200,7 @@ export function grayscaleFigure<T extends { data: unknown[]; layout: object }>(f
       const t = v.trim().toLowerCase();
       if (t === "none" || t === "transparent") return v;
       const c = parseColor(v);
-      return c ? grayString(c) : v;
+      return c ? toColor(c) : v;
     }
     if (Array.isArray(v)) return v.map((el) => map(el, colorContext));
     if (v && typeof v === "object") {

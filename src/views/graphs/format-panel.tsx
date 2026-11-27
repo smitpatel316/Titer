@@ -47,7 +47,14 @@ import {
   type Resolution,
 } from "./graph-export";
 import { COLOR_MODES, type ColorMode } from "../../lib/vector-export";
-import type { OfficeTarget } from "../../lib/office-export";
+import {
+  DEFAULT_OFFICE_OPTIONS,
+  OFFICE_COLORS,
+  OFFICE_IMAGE_MODES,
+  parseOfficeOptions,
+  type OfficeExportOptions,
+  type OfficeTarget,
+} from "../../lib/office-export";
 import { isMacOs } from "../../lib/channel";
 import {
   Choice,
@@ -103,7 +110,7 @@ interface Props extends SectionContext {
   /** Where a new reference line goes: the middle of the value axis as drawn. */
   newLineAt: number;
   /** One-click Send to Word / PowerPoint (v2 item 19). */
-  onSendToOffice?: (target: OfficeTarget, dpi: Resolution) => void;
+  onSendToOffice?: (target: OfficeTarget, dpi: Resolution, options: OfficeExportOptions) => void;
 }
 
 // What the Style section sets, put back by its Reset.
@@ -155,6 +162,10 @@ type ExportChoice = {
   size: ExportSizePreset;
   customWidth?: number;
   customUnit: ExportSizeUnit;
+  /** Send to Office's embed/link/picture + colour (seq 217 remainder,
+   *  L15): remembered with the rest of the export choice, so one send's
+   *  choice is the next send's. */
+  office: OfficeExportOptions;
 };
 function readExport(): ExportChoice {
   try {
@@ -168,9 +179,10 @@ function readExport(): ExportChoice {
       customWidth:
         typeof saved.customWidth === "number" && saved.customWidth > 0 ? saved.customWidth : undefined,
       customUnit: saved.customUnit === "cm" ? "cm" : "in",
+      office: parseOfficeOptions(saved.office),
     };
   } catch {
-    return { format: "png", dpi: "300", colorMode: "color", preset: "custom", size: "graph", customUnit: "in" };
+    return { format: "png", dpi: "300", colorMode: "color", preset: "custom", size: "graph", customUnit: "in", office: DEFAULT_OFFICE_OPTIONS };
   }
 }
 
@@ -767,35 +779,49 @@ export function FormatPanel(props: Props) {
           </Button>
         </div>
         {props.onSendToOffice && (
-          <div className="flex gap-2">
-            <Button
-              className="flex-1"
-              disabled={!props.canExport}
-              onClick={() => props.onSendToOffice!("word", exported.dpi)}
-            >
-              Send to Word…
-            </Button>
-            <Button
-              className="flex-1"
-              disabled={!props.canExport}
-              onClick={() => props.onSendToOffice!("powerpoint", exported.dpi)}
-            >
-              Send to PowerPoint…
-            </Button>
-            {isMacOs() && (
+          <>
+            <Choice
+              label="Send as"
+              value={exported.office.mode}
+              onChange={(mode) => chooseExport({ office: { ...exported.office, mode } })}
+              items={OFFICE_IMAGE_MODES}
+            />
+            <Choice
+              label="Send colour"
+              value={exported.office.color}
+              onChange={(color) => chooseExport({ office: { ...exported.office, color } })}
+              items={OFFICE_COLORS}
+            />
+            <div className="flex gap-2">
               <Button
                 className="flex-1"
                 disabled={!props.canExport}
-                onClick={() => props.onSendToOffice!("keynote", exported.dpi)}
+                onClick={() => props.onSendToOffice!("word", exported.dpi, exported.office)}
               >
-                Send to Keynote…
+                Send to Word…
               </Button>
-            )}
-          </div>
+              <Button
+                className="flex-1"
+                disabled={!props.canExport}
+                onClick={() => props.onSendToOffice!("powerpoint", exported.dpi, exported.office)}
+              >
+                Send to PowerPoint…
+              </Button>
+              {isMacOs() && (
+                <Button
+                  className="flex-1"
+                  disabled={!props.canExport}
+                  onClick={() => props.onSendToOffice!("keynote", exported.dpi, exported.office)}
+                >
+                  Send to Keynote…
+                </Button>
+              )}
+            </div>
+          </>
         )}
         <p className="text-small text-secondary">
           Send to Word / PowerPoint saves a Word or PowerPoint file with the graph in it — open it in Word or
-          PowerPoint.
+          PowerPoint. Link sends the picture as a separate PNG beside the document instead of embedding it.
           {isMacOs() &&
             " Send to Keynote creates the presentation in Keynote instead (macOS only) — Keynote saves the .key file."}
         </p>

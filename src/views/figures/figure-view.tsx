@@ -56,6 +56,13 @@ import { frozenFigureNodes } from "./panel-figure";
 import { DrawingObjectsLayer } from "../../components/drawing-objects";
 import { copyFigureImage, saveFigureImage, sendFigureToOffice } from "./figure-export";
 import type { OfficeTarget } from "../../lib/office-export";
+import {
+  OFFICE_COLORS,
+  OFFICE_IMAGE_MODES,
+  readOfficeOptions,
+  rememberOfficeOptions,
+  type OfficeExportOptions,
+} from "../../lib/office-export";
 import { isMacOs } from "../../lib/channel";
 import { EXPORT_FORMATS, EXPORT_PRESETS, exportPreset, saveGraphImage, type ExportFormat, type ExportPreset } from "../graphs/graph-export";
 import { COLOR_MODES, type ColorMode } from "../../lib/vector-export";
@@ -400,10 +407,17 @@ export function FigureView({ node }: { node: ProjectNode }) {
   };
 
   // One-click Send to Word / PowerPoint for the whole layout (v2 item 19).
+  // The send's embed/link/picture + colour (seq 217 remainder, L15) —
+  // remembered, so one send's choice is the next send's.
+  const [officeOptions, setOfficeOptions] = React.useState<OfficeExportOptions>(readOfficeOptions);
+  const chooseOfficeOptions = (next: OfficeExportOptions) => {
+    setOfficeOptions(next);
+    rememberOfficeOptions(next);
+  };
   const onSendToOffice = async (target: OfficeTarget) => {
     setExporting(true);
     try {
-      await sendFigureToOffice(node, nodes, target, dpi, node.name);
+      await sendFigureToOffice(node, nodes, target, dpi, node.name, officeOptions);
     } finally {
       setExporting(false);
     }
@@ -718,6 +732,20 @@ export function FigureView({ node }: { node: ProjectNode }) {
           >
             Copy Figure (PNG)
           </Button>
+          <Field label="Send as">
+            <Segmented
+              value={officeOptions.mode}
+              onChange={(mode) => chooseOfficeOptions({ ...officeOptions, mode })}
+              options={OFFICE_IMAGE_MODES.map((m) => ({ value: m.value, label: m.label }))}
+            />
+          </Field>
+          <Field label="Send colour">
+            <Segmented
+              value={officeOptions.color}
+              onChange={(color) => chooseOfficeOptions({ ...officeOptions, color })}
+              options={OFFICE_COLORS.map((m) => ({ value: m.value, label: m.label }))}
+            />
+          </Field>
           <div className="flex gap-2">
             <Button
               variant="ghost"
@@ -747,7 +775,8 @@ export function FigureView({ node }: { node: ProjectNode }) {
             )}
           </div>
           <p className="text-small text-secondary">
-            Send to Word / PowerPoint saves a Word or PowerPoint file with the whole figure in it.
+            Send to Word / PowerPoint saves a Word or PowerPoint file with the whole figure in it. Link sends the
+            picture as a separate PNG beside the document instead of embedding it.
             {isMacOs() &&
               " Send to Keynote creates the presentation in Keynote instead (macOS only) — Keynote saves the .key file."}
           </p>
