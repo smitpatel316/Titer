@@ -123,14 +123,30 @@ export async function pickSavePath(title: string, defaultPath: string, name: str
   return path === null ? null : ensureSaveExtension(path, ext);
 }
 
+/** The extensions `write_file` accepts — mirror of `WRITE_FILE_EXTENSIONS`
+ *  in src-tauri/src/main.rs; keep in step. A trailing dot-segment outside
+ *  this list is not an extension the shell will write. */
+const WRITABLE_EXTENSIONS = new Set([
+  "hlx", "prism", "pzt", "pzm", "pzfx", "png", "jpg", "jpeg", "svg", "pdf",
+  "tif", "tiff", "bmp", "eps", "csv", "txt", "xlsx", "xml", "docx", "pptx",
+]);
+
 /** The path a save dialog returned, with the format extension ensured: an
  *  extensionless name gets `.${ext}` (a trailing dot is stripped first, so
  *  "figure." becomes "figure.png", not "figure..png"). A name that already
- *  has any extension is left alone — a user who typed "figure.jpg" for a PNG
- *  export keeps what they typed. Dots in a folder name are not an extension. */
+ *  ends in a recognized extension is left alone — the target extension
+ *  itself, or any extension `write_file` accepts, so a user who typed
+ *  "figure.jpg" for a PNG export keeps what they typed and a Keynote
+ *  ".key" path is not doubled. A trailing dot-segment that is neither
+ *  ("Fig 1.2", whose "2" is no extension) gains `.${ext}`. Dots in a
+ *  folder name are not an extension, and the basename is split on both
+ *  "/" and "\\", so a dot in a Windows parent directory is not mistaken
+ *  for the file's extension. */
 export function ensureSaveExtension(path: string, ext: string): string {
-  const base = path.slice(path.lastIndexOf("/") + 1);
-  if (/\.([^/.]+)$/.test(base)) return path;
+  const base = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
+  const dot = base.lastIndexOf(".");
+  const suffix = dot > 0 && dot < base.length - 1 ? base.slice(dot + 1).toLowerCase() : "";
+  if (suffix !== "" && (suffix === ext.toLowerCase() || WRITABLE_EXTENSIONS.has(suffix))) return path;
   return `${path.replace(/\.+$/, "")}.${ext}`;
 }
 

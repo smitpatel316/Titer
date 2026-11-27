@@ -10169,13 +10169,26 @@ fn sanitize_export_stem(name: &str, fallback: &str) -> String {
 }
 
 /// The path with the format extension ensured: an extensionless name
-/// gets `.${ext}`; a name that already has any extension is left alone
-/// (the GUI's `ensureSaveExtension` rule).
+/// gets `.${ext}`; a name that already ends in a recognized extension
+/// is left alone — either the target extension itself, or any extension
+/// `write_file` accepts (so a user who typed "figure.jpg" for a PNG
+/// export keeps what they typed, and a Keynote ".key" path is not
+/// doubled). A trailing dot-segment that is neither ("Fig 1.2", whose
+/// "2" is no extension) gains `.${ext}` instead of being mistaken for
+/// one. The basename is split on both '/' and '\\', so a dot in a
+/// Windows parent directory ("C:\Users\alice.smith\Desktop\plot") is
+/// not mistaken for the file's extension.
 fn ensure_export_extension(path: &str, ext: &str) -> String {
-    let base = path.rsplit('/').next().unwrap_or(path);
+    let base = path.rsplit(|c| c == '/' || c == '\\').next().unwrap_or(path);
     let has_ext = base
         .rfind('.')
-        .is_some_and(|dot| dot > 0 && dot < base.len() - 1);
+        .filter(|&dot| dot > 0 && dot < base.len() - 1)
+        .is_some_and(|dot| {
+            let suffix = &base[dot + 1..];
+            let lower = suffix.to_ascii_lowercase();
+            suffix.eq_ignore_ascii_case(ext)
+                || crate::WRITE_FILE_EXTENSIONS.contains(&lower.as_str())
+        });
     if has_ext {
         path.to_string()
     } else {
@@ -14775,5 +14788,23 @@ mod tests {
         assert_eq!(back["mcpServers"]["titer"], entry);
         assert!(!dir.join("mcp_config.json.titer-bak").exists(), "no backup when there was no file");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_extension_is_appended_when_the_dot_is_not_a_real_extension() {
+        // Issue 48: "Fig 1.2" has no real extension — its "2" is not one.
+        assert_eq!(ensure_export_extension("/tmp/Fig 1.2", "png"), "/tmp/Fig 1.2.png");
+        assert_eq!(ensure_export_extension("/tmp/Fig 1.2", "pdf"), "/tmp/Fig 1.2.pdf");
+        // A dot in a Windows parent directory is not the file's extension.
+        assert_eq!(
+            ensure_export_extension("C:\\Users\\alice.smith\\Desktop\\plot", "png"),
+            "C:\\Users\\alice.smith\\Desktop\\plot.png"
+        );
+        // Controls: the target extension, and any writable extension, stay.
+        assert_eq!(ensure_export_extension("/tmp/fig.png", "png"), "/tmp/fig.png");
+        assert_eq!(ensure_export_extension("/tmp/figure.jpg", "png"), "/tmp/figure.jpg");
+        assert_eq!(ensure_export_extension("/tmp/Talk.key", "key"), "/tmp/Talk.key");
+        assert_eq!(ensure_export_extension("/tmp/fig", "png"), "/tmp/fig.png");
+        assert_eq!(ensure_export_extension("/tmp/figure.", "png"), "/tmp/figure.png");
     }
 }
