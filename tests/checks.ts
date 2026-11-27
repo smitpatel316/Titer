@@ -33309,8 +33309,10 @@ check("calcvars: CONCATENATE joins cell text, and text lives only inside it (seq
   deepStrictEqual(add(base, "Full", "CONCATENATE(First, Last)"), ["JohnSmith", "Ada", "Doe", "X"]);
   deepStrictEqual(add(base, "Spaced", "CONCATENATE(First, \" \", Last)"), ["John Smith", "Ada ", " Doe", " X"]);
   // Numbers join as the text typed for them; an expression joins as its
-  // computed value, blank when it has none.
-  deepStrictEqual(add(base, "WithN", "CONCATENATE(N, First)"), ["42John", "7Ada", "Doe", "1X"]);
+  // computed value, blank when it has none. (Row 3 holds no N and no
+  // First, so it joins to nothing; row 4's First is spaces-only, blank
+  // by the COUNTA rule.)
+  deepStrictEqual(add(base, "WithN", "CONCATENATE(N, First)"), ["42John", "7Ada", null, "1"]);
   deepStrictEqual(add(base, "WithExpr", "CONCATENATE(First, N + 1)"), ["John43", "Ada8", null, "2"]);
   // A text column reads as text to the rest of the engine: COUNTA counts
   // its cells, and another CONCATENATE can build on it.
