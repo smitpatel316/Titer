@@ -388,7 +388,15 @@ import {
   sturgesCount,
 } from "../src/stats/column/frequency-distribution";
 import { rankValues, seededGaussian, transformValue, zscoreValues } from "../src/stats/column/transform-data";
-import { binomialPmf, chiSquarePdf, fPdf, normalPdf, poissonPmf, tPdf } from "../src/stats/distributions";
+import {
+  binomialPmf,
+  chiSquarePdf,
+  fPdf,
+  noncentralTCdf,
+  normalPdf,
+  poissonPmf,
+  tPdf,
+} from "../src/stats/distributions";
 import {
   concentrationFactor,
   convertConcentration,
@@ -27082,6 +27090,27 @@ check("the distribution densities and masses match reference values (seq 203)", 
   strictEqual(binomialPmf(1, 10, 1), NaN);
   strictEqual(poissonPmf(-1, 5), NaN);
   strictEqual(poissonPmf(1, 0), NaN);
+});
+
+// Bug 63 (remainder) + bug 80: the noncentral t CDF silently returned 1.0
+// when (1−x)^(df/2) underflowed at large df (|t| ≥ 50 at df ≥ 1500) and
+// cliffed to 0 past |δ| > 447 (the twin series started at j = 0 with an
+// en ≤ 100000 cap, so it never reached the Poisson mode). References are
+// SciPy scipy.stats.nct.cdf values. NOTE: the report's "~0.500" for
+// nct(500; 1, 500) is wrong — for df = 1 the median is ~740, not δ;
+// SciPy gives 0.31731.
+check("noncentral t CDF stays smooth at large df and large delta (bugs 63 + 80)", () => {
+  const close = (got: number, want: number, label: string) => {
+    ok(Math.abs(got - want) < 1e-9, `${label} = ${got} (want ${want})`);
+  };
+  // Was 1.0 (bogus): (1−x)^(df/2) underflowed, freezing I_x at 1.
+  close(noncentralTCdf(50, 2000, 50), 0.49779329789003834, "nct(50; 2000, 50)");
+  // Was 1.0 (bogus): the true value is ~0 (below 1e-300).
+  ok(noncentralTCdf(50, 2000, 100) < 1e-12, `nct(50; 2000, 100) = ${noncentralTCdf(50, 2000, 100)} (want ~0)`);
+  // Was 0.0 (cliff past |δ| > 447): the twin series never reached the mode.
+  close(noncentralTCdf(500, 1, 500), 0.31731147574388785, "nct(500; 1, 500)");
+  close(noncentralTCdf(200, 5000, 200), 0.4977401000091556, "nct(200; 5000, 200)");
+  close(noncentralTCdf(448, 1, 448), 0.3173117134697949, "nct(448; 1, 448)");
 });
 
 check("plot a function plots Prism's statistical distributions (seq 203)", async () => {

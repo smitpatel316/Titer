@@ -308,11 +308,14 @@ export function centralChiSquareQuantile(p: number, df: number): number {
  *  series over the incomplete beta, plus Φ(−δ). The twin series needs
  *  ~δ²/2 terms, so the iteration cap is 100,000 rather than R's 100: power
  *  analysis routinely carries δ past 10. The first Poisson weight
- *  ½·exp(−δ²/2) underflows to 0 past |δ| ≈ 38, so there the series
- *  weights are carried in log space and exponentiated per term (the terms
- *  that matter sit near the Poisson mode, far above the underflow floor)
- *  — the CDF continues smoothly instead of cliffing to 0. NaN outside
- *  its domain; δ = 0 is the central t. */
+ *  ½·exp(−δ²/2) underflows to 0 past |δ| ≈ 38, so there (μ = δ²/2 > 700)
+ *  the series is summed outward from the Poisson mode floor(μ) instead
+ *  of upward from j = 0 — the anchored weights are O(1/√μ), the beta
+ *  factors come from direct `regularizedIncompleteBeta` calls and the
+ *  increments from their log forms, so neither the weights nor the
+ *  (1−x)^(df/2) factor can underflow (bugs 63 + 80: the old log-space
+ *  path still returned a bogus 1.0 at large df and cliffed to 0 past
+ *  |δ| > 447). NaN outside its domain; δ = 0 is the central t. */
 export function noncentralTCdf(t: number, df: number, delta: number): number {
   if (!Number.isFinite(t) || !Number.isFinite(df) || !Number.isFinite(delta) || df <= 0) return NaN;
   if (delta === 0) return centralTCdf(t, df);
@@ -329,64 +332,161 @@ export function noncentralTCdf(t: number, df: number, delta: number): number {
   if (x > 0) {
     const lambda = del * del;
     const mu = 0.5 * lambda;
-    // The twin-series weights are Poisson weights p_j = ½·e^(−μ)·μ^j/j!
-    // (and q_j ∝ p_j): the first weight underflows to 0 once μ ≳ 710
-    // (|δ| ≳ 37.7), which zeroes the whole series and cliffs the CDF to
-    // exactly 0 (bug 63, cycle 42). Past that point carry the weights in
-    // log space and exponentiate per term — the same log-space trick
-    // `poissonMixtureWeights` uses for the noncentral F / chi-square
-    // CDFs: the terms that matter sit near the Poisson mode j ≈ μ, where
-    // p_j is O(1/√μ), far above the underflow floor, while the underflowed
-    // far-tail terms contribute < 1e-300 and exponentiate to 0 harmlessly.
-    // Below the threshold the original linear recurrence runs unchanged
-    // (bit-identical results in the region that already worked).
-    const logWeights = mu > 700;
-    let logP = 0;
-    let logQ = 0;
-    let p = 0.5 * Math.exp(-mu);
-    let q = (Math.SQRT2 / Math.sqrt(Math.PI)) * p * del;
-    if (logWeights) {
-      logP = Math.log(0.5) - mu;
-      logQ = Math.log(Math.SQRT2 / Math.sqrt(Math.PI)) + logP + Math.log(Math.abs(del));
-      p = logP > -745 ? Math.exp(logP) : 0;
-      q = logQ > -745 ? Math.sign(del) * Math.exp(logQ) : 0;
-    }
-    let s = 0.5 - p;
-    let a = 0.5;
-    const b = 0.5 * df;
-    const rxb = Math.pow(1 - x, b);
-    const albeta = 0.5 * Math.log(Math.PI) + lgamma(b) - lgamma(a + b);
-    let xodd = regularizedIncompleteBeta(x, a, b);
-    let godd = 2 * rxb * Math.exp(a * Math.log(x) - albeta);
-    let xeven = 1 - rxb;
-    let geven = b * x * rxb;
-    tnc = p * xodd + q * xeven;
-    let en = 1;
-    let errbd = Infinity;
-    while (errbd > 1e-12 && en <= 100000) {
-      a += 1;
-      xodd -= godd;
-      xeven -= geven;
-      godd = (godd * x * (a + b - 1)) / a;
-      geven = (geven * x * (a + b - 0.5)) / (a + 0.5);
-      if (logWeights) {
-        logP += Math.log(mu) - Math.log(en);
-        logQ += Math.log(mu) - Math.log(en + 0.5);
-        p = logP > -745 ? Math.exp(logP) : 0;
-        q = logQ > -745 ? Math.sign(del) * Math.exp(logQ) : 0;
-      } else {
+    if (mu > 700) {
+      // Bugs 63 (remainder) + 80: past μ ≈ 710 the twin series must be
+      // summed outward from the Poisson mode — see
+      // `noncentralTTwinSeriesModeCentered` below. Summing upward from
+      // j = 0 underflows twice (the first weight at |δ| ≳ 38, the beta
+      // increment godd₀ = 2·(1−x)^(df/2)·… at large df, freezing I_x at 1
+      // and returning a bogus 1.0) and the en ≤ 100000 cap cliffs to 0
+      // past |δ| > 447. Past μ ~ 1e300 lgamma overflows, but there the
+      // CDF is 0 or 1 to within 1e-300 and the Φ(−δ) term below already
+      // gives exactly that.
+      tnc = mu > 1e300 ? 0 : noncentralTTwinSeriesModeCentered(x, df, del, mu);
+    } else {
+      // The original linear recurrence, unchanged: below the threshold
+      // nothing underflows, so results stay bit-identical to the region
+      // that already worked.
+      let p = 0.5 * Math.exp(-mu);
+      let q = (Math.SQRT2 / Math.sqrt(Math.PI)) * p * del;
+      let s = 0.5 - p;
+      let a = 0.5;
+      const b = 0.5 * df;
+      const rxb = Math.pow(1 - x, b);
+      const albeta = 0.5 * Math.log(Math.PI) + lgamma(b) - lgamma(a + b);
+      let xodd = regularizedIncompleteBeta(x, a, b);
+      let godd = 2 * rxb * Math.exp(a * Math.log(x) - albeta);
+      let xeven = 1 - rxb;
+      let geven = b * x * rxb;
+      tnc = p * xodd + q * xeven;
+      let en = 1;
+      let errbd = Infinity;
+      while (errbd > 1e-12 && en <= 100000) {
+        a += 1;
+        xodd -= godd;
+        xeven -= geven;
+        godd = (godd * x * (a + b - 1)) / a;
+        geven = (geven * x * (a + b - 0.5)) / (a + 0.5);
         p = (p * lambda) / (2 * en);
         q = (q * lambda) / (2 * en + 1);
+        s -= p;
+        en += 1;
+        tnc += p * xodd + q * xeven;
+        errbd = 2 * s * (xodd - godd);
       }
-      s -= p;
-      en += 1;
-      tnc += p * xodd + q * xeven;
-      errbd = 2 * s * (xodd - godd);
     }
   }
   tnc += normalCdf(-del);
   if (negdel) tnc = 1 - tnc;
   return Math.min(1, Math.max(0, tnc));
+}
+
+/** The AS 243 twin series for the noncentral t CDF in the large-μ regime
+ *  (μ = δ²/2 > 700), summed outward from the Poisson mode m = floor(μ)
+ *  instead of upward from j = 0. The twin series is
+ *  Σ_j p_j·I_x(j+½, b) + Σ_j q_j·I_x(j+1, b), with p_j the halved Poisson
+ *  weights ½·e^(−μ)·μ^j/j! and q_j = q_0·λ^j/(3·5·…·(2j+1)), λ = 2μ.
+ *  Anchoring at the mode keeps every quantity representable: p_m and q_m
+ *  are O(1/√μ) (computed from their log forms), the beta factors
+ *  I_x(m+½, b) and I_x(m+1, b) come from direct
+ *  `regularizedIncompleteBeta` calls — no (1−x)^(df/2) factor anywhere,
+ *  so the large-df underflow that froze I_x at 1 and returned a bogus
+ *  1.0 cannot happen — and the increments godd_m, geven_m come from
+ *  their log forms (godd_j = x^(j+½)(1−x)^b/((j+½)·B(j+½, b)) and
+ *  geven_j = x^(j+1)(1−x)^b/((j+1)·B(j+1, b))), exponentiated only when
+ *  above the underflow floor. From the mode the recurrences run both
+ *  ways with the same per-step factors as the j = 0 loop in
+ *  `noncentralTCdf` (upward: godd × x(a+b)/(a+1), geven ×
+ *  x(a+b+½)/(a+3/2), p × μ/j, q × 2μ/(2j+1); downward: the inverses).
+ *  Both weights fall monotonically away from the mode on each side, so
+ *  the sum stops once both are 1e-16 of their mode values — the omitted
+ *  Poisson tail is then < ~1e-17, since every beta factor is in [0, 1] —
+ *  with a 5,000,000-step safety cap per direction (reached only for
+ *  |δ| ≳ 8·10⁵, far past any power-analysis input). */
+function noncentralTTwinSeriesModeCentered(x: number, df: number, del: number, mu: number): number {
+  const b = 0.5 * df;
+  const m = Math.floor(mu);
+  const logMu = Math.log(mu);
+  const logX = Math.log(x);
+  const log1mx = Math.log(1 - x);
+  // log p_j = log(½) − μ + j·log μ − log j!.
+  const logP = (j: number) => Math.log(0.5) - mu + j * logMu - lgamma(j + 1);
+  // log |q_j| = log(√2/√π) + log|δ| + log p_j + 2j·ln 2 + 2·log j! − log(2j+1)!.
+  const logQ = (j: number) =>
+    Math.log(Math.SQRT2 / Math.sqrt(Math.PI)) +
+    Math.log(Math.abs(del)) +
+    logP(j) +
+    2 * j * Math.LN2 +
+    2 * lgamma(j + 1) -
+    lgamma(2 * j + 2);
+  // log godd_j / log geven_j, from the increment forms above.
+  const logGodd = (j: number) =>
+    (j + 0.5) * logX + b * log1mx - Math.log(j + 0.5) - lgamma(j + 0.5) - lgamma(b) + lgamma(j + 0.5 + b);
+  const logGeven = (j: number) =>
+    (j + 1) * logX + b * log1mx - Math.log(j + 1) - lgamma(j + 1) - lgamma(b) + lgamma(j + 1 + b);
+  const pMode = Math.exp(logP(m));
+  const qMode = Math.sign(del) * Math.exp(logQ(m));
+  const xoddMode = regularizedIncompleteBeta(x, m + 0.5, b);
+  const xevenMode = regularizedIncompleteBeta(x, m + 1, b);
+  const logGoddMode = logGodd(m);
+  const logGevenMode = logGeven(m);
+  const goddMode = logGoddMode > -745 ? Math.exp(logGoddMode) : 0;
+  const gevenMode = logGevenMode > -745 ? Math.exp(logGevenMode) : 0;
+
+  let tnc = pMode * xoddMode + qMode * xevenMode;
+  const pStop = 1e-16 * pMode;
+  const qStop = 1e-16 * Math.max(Math.abs(qMode), pMode);
+  const MAX_STEPS = 5000000;
+
+  // Upward from the mode: a = j + ½ rises, xodd/xeven fall by godd/geven.
+  let p = pMode;
+  let q = qMode;
+  let xodd = xoddMode;
+  let xeven = xevenMode;
+  let godd = goddMode;
+  let geven = gevenMode;
+  let a = m + 0.5;
+  let steps = 0;
+  while ((p > pStop || Math.abs(q) > qStop) && steps < MAX_STEPS) {
+    xodd -= godd;
+    xeven -= geven;
+    godd = (godd * x * (a + b)) / (a + 1);
+    geven = (geven * x * (a + b + 0.5)) / (a + 1.5);
+    a += 1;
+    const j = a - 0.5;
+    p = (p * mu) / j;
+    q = (q * 2 * mu) / (2 * j + 1);
+    tnc += p * xodd + q * xeven;
+    steps += 1;
+  }
+
+  // Downward from the mode: a falls, xodd/xeven rise by godd/geven.
+  p = pMode;
+  q = qMode;
+  xodd = xoddMode;
+  xeven = xevenMode;
+  godd = goddMode;
+  geven = gevenMode;
+  a = m + 0.5;
+  let j = m;
+  steps = 0;
+  while ((p > pStop || Math.abs(q) > qStop) && steps < MAX_STEPS && j > 0) {
+    const multGodd = a / (x * (a + b - 1));
+    const multGeven = (j + 1) / (x * (j + b));
+    // A non-finite multiplier means x·(…) underflowed, which only
+    // happens where the true increment is already 0 in double precision.
+    godd = Number.isFinite(multGodd) ? godd * multGodd : 0;
+    geven = Number.isFinite(multGeven) ? geven * multGeven : 0;
+    xodd += godd;
+    xeven += geven;
+    p = (p * j) / mu;
+    q = (q * (2 * j + 1)) / (2 * mu);
+    j -= 1;
+    a -= 1;
+    tnc += p * xodd + q * xeven;
+    steps += 1;
+  }
+  return tnc;
 }
 
 /** Poisson weights for a Poisson-mixture series, in log space around the
