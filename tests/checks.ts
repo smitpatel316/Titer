@@ -33138,6 +33138,212 @@ check("calcvars: COUNTA counts text values, not just numbers (seq 377)", () => {
   deepStrictEqual(add(excluded, "CountX", "COUNT(A)"), [null, null, null, "1", null, null]);
 });
 
+check("calcvars: function library remainder — logit/probit, atan2, integer math, random, IS_DEFINED, percentile (seq 156 remainder)", () => {
+  // Prism 11's function reference has a longer library than the 11.0 core
+  // shipped: LOGIT / PROBIT (the transform pair), ATAN2 (Prism also spells
+  // it ARCTAN2), FACT / INT / MOD / TRUNC / POWER / CEILING / AVERAGE,
+  // AND / OR as functions, RAND / RANDBETWEEN, IS_DEFINED, PERCENTILE
+  // (PERC), and the text function CONCATENATE. Expected values below are
+  // pinned against independent computations (Python's statistics /
+  // NormalDist for PROBIT and the type-7 percentile; JS Math for the rest),
+  // formatted the way a cell holds them (10 significant digits).
+  const base = mvTable(["Title", "P", "A", "B"], [
+    [null, "0.5", "10", "3"],
+    [null, "0.75", "20", "-7"],
+    [null, "0.25", "30", "2"],
+    [null, "0.9", "40", "0"],
+    [null, "0", null, "5"],
+    [null, "1", "7", null],
+  ]);
+  const add = (t: TableData, name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(t, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  const all = (v: string | null): (string | null)[] => Array(6).fill(v);
+  // LOGIT is ln(p / (1 - p)); PROBIT is the standard-normal quantile
+  // (R's qnorm). Both blank at p <= 0 or p >= 1, never the variable.
+  deepStrictEqual(add(base, "Logit", "LOGIT(P)"), ["0", "1.098612289", "-1.098612289", "2.197224577", null, null]);
+  deepStrictEqual(add(base, "Probit", "PROBIT(P)"), ["0", "0.6744897502", "-0.6744897502", "1.281551566", null, null]);
+  deepStrictEqual(add(base, "Probit975", "PROBIT(0.975)"), all("1.959963985"));
+  // ATAN2 follows the Excel / Prism convention — ATAN2(x, y) is the angle
+  // whose tangent is y / x, i.e. atan2(y, x): ATAN2(0, 1) is +pi/2 and
+  // ATAN2(1, 0) is 0. ARCTAN2 is the same function under Prism's other
+  // spelling. Row-wise, ATAN2(A, B) is atan2(B, A) per row.
+  deepStrictEqual(add(base, "Atan2a", "ATAN2(0, 1)"), all("1.570796327"));
+  deepStrictEqual(add(base, "Atan2b", "ATAN2(1, 0)"), all("0"));
+  deepStrictEqual(add(base, "Atan2c", "ATAN2(1, 1)"), all("0.7853981634"));
+  deepStrictEqual(add(base, "Atan2d", "ARCTAN2(0, 1)"), all("1.570796327"));
+  deepStrictEqual(add(base, "Atan2Row", "ATAN2(A, B)"), ["0.2914567945", "-0.3366748194", "0.06656816378", "0", null, null]);
+  // AVERAGE is MEAN under Prism's other name.
+  deepStrictEqual(add(base, "Avg", "AVERAGE(A)"), all("21.4"));
+
+  const ints = mvTable(["Title", "X", "Y"], [
+    [null, "5", "3"],
+    [null, "0", "-7"],
+    [null, "-2.7", "2"],
+    [null, "3.75", "0"],
+    [null, "-3.75", "-3"],
+  ]);
+  const addI = (name: string, formula: string): (string | null)[] => add(ints, name, formula);
+  // FACT is the whole-number factorial only (negative / fractional blanks);
+  // INT truncates toward zero (not FLOOR); MOD takes the divisor's sign
+  // (Excel's rule — MOD(-3, 2) is 1, where JS % gives -1); TRUNC drops
+  // digits without rounding, either side of the point; POWER is `^` as a
+  // function; CEILING is CEIL under its other name.
+  deepStrictEqual(addI("Fact", "FACT(X)"), ["120", "1", null, null, null]);
+  deepStrictEqual(addI("Int", "INT(X)"), ["5", "0", "-2", "3", "-3"]);
+  deepStrictEqual(addI("Mod", "MOD(X, Y)"), ["2", "0", "1.3", null, "-0.75"]);
+  deepStrictEqual(addI("Trunc", "TRUNC(X)"), ["5", "0", "-2", "3", "-3"]);
+  deepStrictEqual(addI("Power", "POWER(X, Y)"), ["125", null, "7.29", "1", "-0.01896296296"]);
+  deepStrictEqual(addI("Ceil", "CEILING(X)"), ["5", "0", "-2", "4", "-3"]);
+  const truncBase = mvTable(["Title", "V"], [
+    [null, "123.456"],
+    [null, "-123.456"],
+  ]);
+  deepStrictEqual(add(truncBase, "T1", "TRUNC(V, 1)"), ["123.4", "-123.4"]);
+  deepStrictEqual(add(truncBase, "T2", "TRUNC(V, 2)"), ["123.45", "-123.45"]);
+  deepStrictEqual(add(truncBase, "Tm1", "TRUNC(V, -1)"), ["120", "-120"]);
+  // AND / OR as functions: three-valued, like the operators — a false
+  // decides AND (a true decides OR) whatever the other side holds, and a
+  // blank only blanks the result when nothing decides it.
+  deepStrictEqual(addI("And", "AND(X > 0, Y > 0)"), ["1", "0", "0", "0", "0"]);
+  deepStrictEqual(addI("Or", "OR(X > 0, Y > 0)"), ["1", "0", "1", "1", "0"]);
+  const blankLogic = mvTable(["Title", "X", "Y"], [
+    [null, null, "1"],
+    [null, "2", null],
+  ]);
+  deepStrictEqual(add(blankLogic, "AndB", "AND(X > 0, Y > 0)"), [null, null]);
+  deepStrictEqual(add(blankLogic, "OrB", "OR(X > 0, Y > 0)"), ["1", "1"]);
+
+  // RAND is uniform on [0, 1) and RANDBETWEEN is an integer in its range.
+  // Both are seeded per variable, so a column does not reshuffle on every
+  // edit (a materialized column must survive a recompute unchanged) and
+  // two RAND columns still differ.
+  const randRes = addCalculatedVariable(base, "Rand", "RAND()");
+  if ("error" in randRes) throw new Error(randRes.error);
+  const rand = calcValues(randRes.data, "Rand");
+  ok(rand.every((v) => v != null && Number(v) >= 0 && Number(v) < 1), JSON.stringify(rand));
+  strictEqual(new Set(rand).size, 6);
+  deepStrictEqual(calcValues(recomputeCalculated(randRes.data), "Rand"), rand);
+  const rand2Res = addCalculatedVariable(randRes.data, "Rand2", "RAND()");
+  if ("error" in rand2Res) throw new Error(rand2Res.error);
+  ok(calcValues(rand2Res.data, "Rand2").some((v, i) => v !== rand[i]), "two RAND columns must differ");
+  const rbRes = addCalculatedVariable(base, "Rb", "RANDBETWEEN(2, 5)");
+  if ("error" in rbRes) throw new Error(rbRes.error);
+  const rb = calcValues(rbRes.data, "Rb");
+  ok(rb.every((v) => v != null && Number.isInteger(Number(v)) && Number(v) >= 2 && Number(v) <= 5), JSON.stringify(rb));
+  deepStrictEqual(calcValues(recomputeCalculated(rbRes.data), "Rb"), rb);
+  // A reversed range and a fractional bound blank the rows, not the variable.
+  deepStrictEqual(add(base, "RbBad", "RANDBETWEEN(5, 2)"), all(null));
+  deepStrictEqual(add(base, "RbFrac", "RANDBETWEEN(1.5, 5)"), all(null));
+
+  // IS_DEFINED is 1 where the value exists and 0 where it is blank — a
+  // text cell counts as defined, so it reads the cell's text, not just
+  // its number. An expression is defined when its value is.
+  const definedBase = mvTable(["Title", "A", "T"], [
+    [null, "10", "x"],
+    [null, null, "y"],
+    [null, "30", null],
+    [null, "abc", null],
+  ]);
+  const addD = (name: string, formula: string): (string | null)[] => add(definedBase, name, formula);
+  deepStrictEqual(addD("DefA", "IS_DEFINED(A)"), ["1", "0", "1", "1"]);
+  deepStrictEqual(addD("DefT", "IS_DEFINED(T)"), ["1", "1", "0", "0"]);
+  deepStrictEqual(addD("DefExpr", "IS_DEFINED(A + 1)"), ["1", "0", "1", "0"]);
+  deepStrictEqual(addD("DefMean", "IS_DEFINED(MEAN(A))"), ["1", "1", "1", "1"]);
+
+  // PERCENTILE (PERC) is the type-7 percentile — linear interpolation
+  // between the closest ranks, R's default — over the whole variable,
+  // with the WHERE form filtering first. k outside [0, 100], and no
+  // matching rows, blank the column.
+  const percBase = mvTable(["Title", "A", "B"], [
+    [null, "10", "3"],
+    [null, "20", "-7"],
+    [null, "30", "2"],
+    [null, "40", "0"],
+  ]);
+  const addP = (name: string, formula: string): (string | null)[] => add(percBase, name, formula);
+  const all4 = (v: string | null): (string | null)[] => Array(4).fill(v);
+  deepStrictEqual(addP("P50", "PERCENTILE(A, 50)"), all4("25"));
+  deepStrictEqual(addP("P90", "PERCENTILE(A, 90)"), all4("37"));
+  deepStrictEqual(addP("P25", "PERCENTILE(A, 25)"), all4("17.5"));
+  deepStrictEqual(addP("P0", "PERCENTILE(A, 0)"), all4("10"));
+  deepStrictEqual(addP("P100", "PERCENTILE(A, 100)"), all4("40"));
+  deepStrictEqual(addP("Perc", "PERC(A, 50)"), all4("25"));
+  deepStrictEqual(addP("Pk", "PERCENTILE(A, 25 + 25)"), all4("25"));
+  deepStrictEqual(addP("Phi", "PERCENTILE(A, 101)"), all4(null));
+  deepStrictEqual(addP("Plo", "PERCENTILE(A, -1)"), all4(null));
+  deepStrictEqual(addP("Pw", "PERCENTILE(A, 50) WHERE B > 0"), all4("20"));
+  deepStrictEqual(addP("Pwn", "PERCENTILE(A, 50) WHERE B > 100"), all4(null));
+  const unsorted = mvTable(["Title", "A"], [
+    [null, "3"],
+    [null, "1"],
+    [null, "4"],
+    [null, "1"],
+    [null, "5"],
+    [null, "9"],
+    [null, "2"],
+    [null, "6"],
+  ]);
+  deepStrictEqual(add(unsorted, "Pu50", "PERCENTILE(A, 50)"), Array(8).fill("3.5"));
+  deepStrictEqual(add(unsorted, "Pu90", "PERCENTILE(A, 90)"), Array(8).fill("6.9"));
+});
+
+check("calcvars: CONCATENATE joins cell text, and text lives only inside it (seq 156 remainder)", () => {
+  const base = mvTable(["Title", "First", "Last", "N"], [
+    [null, "John", "Smith", "42"],
+    [null, "Ada", null, "7"],
+    [null, null, "Doe", null],
+    [null, "   ", "X", "1"],
+  ]);
+  const add = (t: TableData, name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(t, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  // Blank cells contribute nothing (a spaces-only cell counts as blank,
+  // the COUNTA rule); a column that joins to nothing stays blank.
+  deepStrictEqual(add(base, "Full", "CONCATENATE(First, Last)"), ["JohnSmith", "Ada", "Doe", "X"]);
+  deepStrictEqual(add(base, "Spaced", "CONCATENATE(First, \" \", Last)"), ["John Smith", "Ada ", " Doe", " X"]);
+  // Numbers join as the text typed for them; an expression joins as its
+  // computed value, blank when it has none.
+  deepStrictEqual(add(base, "WithN", "CONCATENATE(N, First)"), ["42John", "7Ada", "Doe", "1X"]);
+  deepStrictEqual(add(base, "WithExpr", "CONCATENATE(First, N + 1)"), ["John43", "Ada8", null, "2"]);
+  // A text column reads as text to the rest of the engine: COUNTA counts
+  // its cells, and another CONCATENATE can build on it.
+  const withFull = addCalculatedVariable(base, "Full", "CONCATENATE(First, Last)");
+  if ("error" in withFull) throw new Error(withFull.error);
+  deepStrictEqual(add(withFull.data, "CountFull", "COUNTA(Full)"), ["4", "4", "4", "4"]);
+  deepStrictEqual(add(withFull.data, "Bang", "CONCATENATE(Full, \"!\")"), ["JohnSmith!", "Ada!", "Doe!", "X!"]);
+  // A formula that is only a string literal, and CONCATENATE anywhere but
+  // the whole formula, error the variable with a reason — text cannot
+  // flow through arithmetic, which only holds numbers.
+  const nested = addCalculatedVariable(base, "Bad", "CONCATENATE(First, Last) + 1");
+  ok("error" in nested && nested.error.includes("CONCATENATE"), JSON.stringify(nested));
+  const quoted = addCalculatedVariable(base, "Bad2", "\"hi\" + 1");
+  ok("error" in quoted && quoted.error.includes("text"), JSON.stringify(quoted));
+  const bareText = addCalculatedVariable(base, "Bad3", "\"hi\"");
+  ok("error" in bareText && bareText.error.includes("text"), JSON.stringify(bareText));
+  const unterminated = addCalculatedVariable(base, "Bad4", "CONCATENATE(First, \" )");
+  ok("error" in unterminated, JSON.stringify(unterminated));
+  // A rename rewrites the variable but never the text inside quotes.
+  strictEqual(renameVariableInFormula("CONCATENATE(First, \"First\")", "First", "Given"), "CONCATENATE(Given, \"First\")");
+  // Text formulas and values round-trip through .hlx.
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: { id: "t1", type: "table", name: "MV", parentId: null, tableType: "multiple", data: withFull.data },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const parsed = read(serializeProjectFile(payload));
+  strictEqual(parsed.updated, false);
+  const loaded = parsed.project.nodes.t1 as ProjectNode;
+  deepStrictEqual(calcValues(loaded.data!, "Full"), ["JohnSmith", "Ada", "Doe", "X"]);
+});
+
 // ── Simulate data + Monte Carlo (plan 22) ───────────────────────────────
 
 check("simulationRCode draws each distribution from the right R call", () => {
