@@ -213,8 +213,17 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
     const logs = lognormal(p) ? `;${g.map((x) => `${x}<-log(${x})`).join(";")};v<-log(v)` : "";
     const setup =
       `${R_EFFECT_CI};${groupsSetup(groups)}${logs};G<-list(${g.join(",")});` +
-      // Centered first: aov's QR on values alike in their first digits (1000000000000.4…) loses
-      // the differences between groups (NIST's SmLs09: F 687 instead of 2001).
+      // Centered first: the group means and variances are taken on the values
+      // shifted by the grand mean, so the differences between groups — which
+      // Welch's F, Brown-Forsythe's F*, and every post-hoc comparison are
+      // built from — are computed on O(1) numbers, not on values alike in
+      // their first digits (1000000000000.4…: the raw means differ from each
+      // other only past the 13th digit, so m[i]−m[j] loses the differences
+      // and the post-hoc P values read up to 48% off, some Games-Howell P
+      // values exactly 0). The shift cancels in every contrast (and in var),
+      // so the statistics are unchanged — only precise. The lognormal
+      // geometric means below add the shift back (m + mean(v)).
+      `gm<-mean(v);G<-lapply(G,function(x)x-gm);` +
       `n<-lengths(G);m<-sapply(G,mean);s2<-sapply(G,var);a<-summary(aov(I(v-mean(v))~gr))[[1]]`;
     // Brown-Forsythe's F* (Brown and Forsythe, 1974): the between-group sum of squares
     // over Σ(1 − n_i/N)·s_i², its denominator df from the weights c_i =
@@ -227,7 +236,7 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
         `bfc<-bfw/sum(bfw);bfDf2<-1/sum(bfc^2/(n-1));bfP<-pf(bfF,${k - 1},bfDf2,lower.tail=FALSE)`
       : "";
     const main = welch(p)
-      ? `w<-oneway.test(v~gr,var.equal=FALSE);r<-c(F=unname(w$statistic),dfn=unname(w$parameter[1]),dfd=unname(w$parameter[2]),p=w$p.value,bfF=bfF,bfDfn=${k - 1},bfDfd=bfDf2,bfP=bfP)`
+      ? `w<-oneway.test(I(v-mean(v))~gr,var.equal=FALSE);r<-c(F=unname(w$statistic),dfn=unname(w$parameter[1]),dfd=unname(w$parameter[2]),p=w$p.value,bfF=bfF,bfDfn=${k - 1},bfDfd=bfDf2,bfP=bfP)`
       : // Partial eta squared (seq 161) equals eta squared here — one factor, so
         // R² = η² = partial η² (Prism's ANOVA guide) — with its 95% CI from
         // the F statistic's noncentrality (`etaCI`, N = total observations).
@@ -250,7 +259,9 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
         `trPlin=pf(ssl/mse,1,a$Df[2],lower.tail=FALSE),` +
         `trPnonlin=${k >= 4 ? `pf((max(0,ssb-ssl)/${k - 2})/mse,${k - 2},a$Df[2],lower.tail=FALSE)` : "NA"})`
       : "";
-    const geometric = lognormal(p) ? `;r<-c(r,setNames(exp(m),paste0("gm",0:${groups.length - 1})))` : "";
+    // The group means above are centered (m + mean(v) is the raw mean, so
+    // the geometric means add the shift back).
+    const geometric = lognormal(p) ? `;r<-c(r,setNames(exp(m+mean(v)),paste0("gm",0:${groups.length - 1})))` : "";
     if (p.posthoc === "none") return `${setup}${bf};${main}${tr}${geometric};${trend(p) ? "c(r,tr)" : "r"}`;
     const ph = comparisons(groups, p);
     if (!lognormal(p)) return `${setup}${bf};${main}${tr}\n${ph.setup}\nc(r,${ph.values}${trend(p) ? ",tr" : ""})`;

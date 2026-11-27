@@ -2871,6 +2871,28 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   // (exact 5801.207149667295); the pins are the centered-aov values.
   ["anovaBig", anovaBig, "anova", { posthoc: "none" }],
   ["anovaSmall", anovaSmall, "anova", { posthoc: "none" }],
+  // 1e13-scale precision, Welch's / Brown-Forsythe / post-hoc (Nov 2026):
+  // the same fixtures under unequal SDs — pre-fix the big Welch F was
+  // 6057.18 (exact 6056.17303873), BF F* 5802.35 (exact 5801.20714967), the
+  // Games-Howell P values read exactly 0 where the exact ones are ~1e-14,
+  // the FDR P values up to 48% off, and the pair diffs up to 0.22% off
+  // (the diffs come from describe(), the centered means in base.ts, not
+  // from the ANOVA's own R code). The pins are the centered values,
+  // cross-checked against the mpmath exact values in
+  // probe/expected-precision.json (welchBig/welchSmall) — see
+  // disagreements() below. Three values are NOT exact-anchored there:
+  // anovaBig's T3 P values sit on R's smm() integration floor (~2e-12,
+  // ~0.5% quadrature noise), three Games-Howell P values underflow R's
+  // ptukey to 0 (exact ~1e-14), and one FDR P value is a denormal at the
+  // double range edge — all three are R limits, unchanged by centering.
+  ["anovaBig", anovaBig, "anova", { posthoc: "none", equalSd: false }],
+  ["anovaBig", anovaBig, "anova", { posthoc: "games-howell", equalSd: false }],
+  ["anovaBig", anovaBig, "anova", { posthoc: "t3", equalSd: false }],
+  ["anovaBig", anovaBig, "anova", { posthoc: "fdr", equalSd: false }],
+  ["anovaSmall", anovaSmall, "anova", { posthoc: "none", equalSd: false }],
+  ["anovaSmall", anovaSmall, "anova", { posthoc: "games-howell", equalSd: false }],
+  ["anovaSmall", anovaSmall, "anova", { posthoc: "t3", equalSd: false }],
+  ["anovaSmall", anovaSmall, "anova", { posthoc: "fdr", equalSd: false }],
   // One-way ANOVA completion (seq 191): the Brown-Forsythe ANOVA beside
   // Welch's (its F*/df/P ride in the `equalSd: false` case above), the False
   // Discovery Rate after the ordinary ANOVA (pooled-SD t tests) and after
