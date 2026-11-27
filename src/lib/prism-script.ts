@@ -1306,7 +1306,12 @@ export function runScript(input: ScriptDoc, text: string, files: Record<string, 
     log: [],
     effects: [],
     path: "",
-    current: active ? { kind: active.type, id: active.id } : { kind: "table", id: doc.rootOrder[0] ?? null },
+    // Scripts address sheets, and a flow sample is not a script-addressable
+    // sheet (seq 441): an active sample falls back to the first root item.
+    current:
+      active && active.type !== "sample"
+        ? { kind: active.type, id: active.id }
+        : { kind: "table", id: doc.rootOrder[0] ?? null },
     output: null,
     outputPath: null,
     outputDelimiter: "\t",

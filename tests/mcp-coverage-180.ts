@@ -43,7 +43,9 @@
 // titer_set_result_cell_background; 78 since seq 436, marketplace M4,
 // which adds titer_list_plugin_analyses + titer_run_plugin_analysis; 79
 // since seq 450, which adds titer_convert_to_nested; 80 since seq 452,
-// 2.0, which adds titer_read_error_log),
+// 2.0, which adds titer_read_error_log; 81 since seq 443, FlowJo F1c,
+// which adds titer_import_fcs; 82 since seq 447, FlowJo F2a, which adds
+// titer_apply_flow_compensation),
 // 61 AnalysisType variants / schema keys / runner keys (was 54; 60 since
 // seq 177 select-transform; 61 since #46 compare-slopes).
 // ONE correction vs the audit stands: row 178 said GAP, but Compact
@@ -260,7 +262,7 @@ const scopeText = (scope: string): string => {
   }
 };
 
-const EXPECTED_TOOL_COUNT = 80;
+const EXPECTED_TOOL_COUNT = 82;
 const EXPECTED_ANALYSIS_TYPES = 61;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
@@ -303,7 +305,7 @@ const invariants = new Map<string, { ok: boolean; detail: string }>();
   const groupedSet = new Set(grouped);
   invariants.set("allowlist", {
     ok:
-      allowlist.size === 10 &&
+      allowlist.size === 11 &&
       grouped.length === toolNames.size &&
       groupedSet.size === grouped.length &&
       [...toolNames].every((t) => groupedSet.has(t)) &&
@@ -779,8 +781,24 @@ const ROWS: Row[] = [
     item: "1.7.4 allowlist",
     title: "1.7.4 allowlist groups",
     status: "covered",
-    note: "10 groups covering all 80 tools exactly once; default = read group only.",
+    note: "11 groups covering all 82 tools exactly once; default = read group only.",
     checks: [{ kind: "invariant", name: "allowlist" }],
+  },
+  {
+    item: "FlowJo F2a",
+    title: "FlowJo F2a compensation (seq 447): titer_apply_flow_compensation",
+    status: "covered",
+    note: "Applies a spillover matrix to a sample's stored events (file / CSV / explicit matrix); lives in the flow allowlist group, off by default with the flow toggle.",
+    checks: [
+      {
+        kind: "tools",
+        tools: ["titer_apply_flow_compensation"],
+      },
+      { kind: "toolGroup", group: "flow", tool: "titer_apply_flow_compensation" },
+      { kind: "sourceContains", file: "mcp.rs", text: "apply-flow-compensation" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "apply-flow-compensation" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "executeApplyFlowCompensation" },
+    ],
   },
   {
     item: "1.7.4 P0 tools",

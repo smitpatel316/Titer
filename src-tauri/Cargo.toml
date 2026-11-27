@@ -34,6 +34,12 @@ axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util"] }
 tokio-util = "0.7"
 
+# FlowJo track, seq 440 (F0): FCS reader. flow-fcs 0.6.0 pinned exact —
+# young crate (1.6k downloads), re-evaluate on upgrade; see
+# docs/flow-fcs-evaluation.md. `compensation` for apply_file_compensation.
+# specta/typescript NOT enabled (Titer uses neither tauri-specta nor ts-rs).
+flow-fcs = { version = "=0.6.0", features = ["compensation"] }
+
 # macOS-only: the private-API feature and the Objective-C bridge. The Linux
 # build (dev/test) compiles without them; the Mac DMG build is unchanged.
 [target.'cfg(target_os = "macos")'.dependencies]

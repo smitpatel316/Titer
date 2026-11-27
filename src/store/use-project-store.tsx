@@ -36,6 +36,7 @@ import { dependentAnalyses } from "../lib/dataset-manager";
 import { applyWand as planWand, type WandReport } from "../lib/wand";
 import type { CellBackgroundColor } from "../lib/cell-colors";
 import { cloneGraphPlan, type CloneOptions, type ClonePlan } from "../lib/clone-graph";
+import { createSampleNode, type FlowCompensationRef, type FlowSampleRef } from "../flow/sample";
 import { DEFAULT_FIGURE_DPI, DEFAULT_FIGURE_SIZE, DEFAULT_LABEL_STYLE, newFigurePanels } from "../lib/figure";
 import { clearRegenPlans } from "../lib/prism-graph-regen";
 import type { FigureGrid, FigureLabelStyle, FigurePanel, FigureSize, Resolution, SharedLegend } from "./types";
@@ -246,6 +247,9 @@ type Action =
    *  `"section|row|col"` address, `color` one of Prism's 8 names or null
    *  to clear it. Presentation only — the values never change. */
   | { type: "setResultCellBackground"; id: string; key: string; color: CellBackgroundColor | null }
+  /** Compensation applied to a flow sample (seq 447): the matrix +
+   *  applied flag recorded on the sample node. */
+  | { type: "updateFlowSampleCompensation"; id: string; compensation: FlowCompensationRef; at: number }
   | {
       type: "updateFigure";
       id: string;
@@ -1257,6 +1261,34 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         isDirty: true,
       };
     }
+    case "updateFlowSampleCompensation": {
+      // Seq 447: record the applied matrix on the sample node. A no-op
+      // when the record already says the same thing (re-applying an
+      // identical matrix must not mint an undo step).
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "sample" || !node.flowSample) return state;
+      const current = node.flowSample.compensation;
+      if (
+        current &&
+        current.applied === action.compensation.applied &&
+        current.source === action.compensation.source &&
+        JSON.stringify(current.fluorochromes) === JSON.stringify(action.compensation.fluorochromes) &&
+        JSON.stringify(current.spillover) === JSON.stringify(action.compensation.spillover)
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        nodes: {
+          ...state.nodes,
+          [action.id]: {
+            ...node,
+            flowSample: { ...node.flowSample, compensation: action.compensation },
+          },
+        },
+        isDirty: true,
+      };
+    }
     case "updateFigure": {
       const node = state.nodes[action.id];
       if (!node || node.type !== "figure") return state;
@@ -1405,6 +1437,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "setScripts",
   "setHighlight",
   "setResultCellBackground",
+  "updateFlowSampleCompensation",
   "updateFigure",
   "applyScript",
   "reorderRoot",
@@ -1498,6 +1531,8 @@ function changeName(action: Action): string {
       return "Highlight Sheet";
     case "setResultCellBackground":
       return "Cell Background Color";
+    case "updateFlowSampleCompensation":
+      return "Apply Compensation";
     case "updateFigure":
       return "Figure Change";
     case "applyScript":
@@ -1570,6 +1605,14 @@ interface ProjectActions {
   /** A table computed from `from`'s values (Transform or Normalize). */
   createTransformed: (from: string, transform: Omit<Transform, "from">) => void;
   createAnalysis: (parentId: string, analysisType: AnalysisType, analysisParams?: AnalysisParams) => string;
+  /** Create a flow sample node from an imported FCS file (seq 443):
+   *  the node id and the sample id are the same by convention, so the
+   *  reference's `sampleId` is the node's id. Returns the node id. */
+  createFlowSample: (ref: FlowSampleRef) => string;
+  /** Record a compensation matrix on a flow sample node (seq 447): the
+   *  matrix applied to its stored events + whether it is applied. The
+   *  events themselves live in the store, never on this node. */
+  updateFlowSampleCompensation: (sampleId: string, compensation: FlowCompensationRef) => void;
   /** A plugin analysis node on a table: named for the plugin analysis, and
    *  carrying its namespaced id + params instead of an `AnalysisType`. */
   createPluginAnalysis: (parentId: string, pluginId: string, pluginParams?: PluginParamValues) => string;
@@ -1861,6 +1904,23 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           },
         });
         return id;
+      },
+      // A flow sample node from an imported FCS file (seq 443): the node
+      // id and the sample id are the same by convention (seq 441), so the
+      // reference's sampleId is the node's id. The events live in the
+      // Rust store, never on this node.
+      createFlowSample: (ref) => {
+        const id = ref.sampleId;
+        dispatch({
+          type: "create",
+          node: createSampleNode(id, ref.name, ref),
+        });
+        return id;
+      },
+      // Compensation applied to a sample (seq 447): record the matrix +
+      // applied flag on the sample node.
+      updateFlowSampleCompensation: (sampleId, compensation) => {
+        dispatch({ type: "updateFlowSampleCompensation", id: sampleId, compensation, at: Date.now() });
       },
       // Named for the plugin analysis it runs (an unregistered plugin
       // keeps its id as the name until it is re-enabled).

@@ -19,6 +19,9 @@ import {
   type RQueueSnapshot,
 } from "../src/stats/r-queue";
 import { PARAM_KEYS_BY_ANALYSIS, parseProjectFile, parseProjectText, readPalette, serializeProjectFile, validateAnalysisParams, type ProjectFilePayload } from "../src/lib/project-file";
+import { createSampleNode, isSampleNode, readFlowSample, type FlowSampleRef } from "../src/flow/sample";
+import { InMemoryFlowStore, createFlowStore, isFlowEnabled } from "../src/flow/store";
+import { buildExperimentSummaryTable, buildSampleSummaryTable, createSummaryTableNode } from "../src/flow/summary";
 import {
   canRevertToSaved,
   diskChangedExternally,
@@ -326,6 +329,11 @@ import { XY_SCATTER_MAX_POINTS } from "../src/views/graphs/xy-scatter";
 import { addForestPlot } from "../src/views/graphs/forest-plot";
 import { addScreePlot } from "../src/views/graphs/scree-plot";
 import { addEstimationPlot, estimationDiffLabel } from "../src/views/graphs/estimation-plot";
+import { FLOW_FIXTURE_PARAMS, FLOW_FIXTURE_SAMPLE_ID, generateFixtureSample, loadFixtureSample } from "../src/flow/fixture";
+import { bin2D, downsampleIndices, FLOW_SCATTER_CAP, histogram1D, pointDensities, smoothGrid } from "../src/flow/density";
+import { getColumn, listSamples, sampleStats, unloadSample } from "../src/flow/store";
+import { buildFlowContourPlot, buildFlowDensityPlot, buildFlowDotPlot, buildFlowHistogram, buildFlowPseudocolorPlot } from "../src/flow/viewer";
+import { isFlowEnabled as isFlowPickerEnabled } from "../src/flow/feature-flag";
 import { evaluate as evaluateFittedCurve, addLogisticCurve } from "../src/views/graphs/fitted-curve";
 import { addSchildPlot, schildPlotPoints } from "../src/views/graphs/schild-plot";
 import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay";
@@ -47244,6 +47252,671 @@ check("plugin-m5 seam: the interceptor never calls executeJob or Tauri invoke di
   );
   ok(!/\bexecuteJob\s*\(/.test(src), "isolation.ts must never call executeJob itself");
   ok(!/\binvoke\s*\(/.test(src), "isolation.ts must never call Tauri invoke itself");
+});
+
+// flow-f1b (seq 442): the density-plot viewer on synthetic fixture data,
+// through the store API contract only. Binning/KDE counts correct on the
+// fixture, downsample/cap behavior correct, graph modules registered, and
+// the viewer reads data ONLY through src/flow/store.ts — never raw arrays
+// from elsewhere. Opt-in, off by default: no picker surface lists a flow
+// graph while the flow toggle is off.
+check("flow-f1b: density-plot viewer (dot / density / contour / pseudocolor / histogram) on the synthetic fixture", () => {
+  // The fixture is deterministic: the same seed regenerates the same events.
+  const a = generateFixtureSample(20000, 42);
+  const b = generateFixtureSample(20000, 42);
+  strictEqual(a.paramNames.join(","), FLOW_FIXTURE_PARAMS.join(","));
+  deepStrictEqual(Array.from(a.columns[2].slice(0, 100)), Array.from(b.columns[2].slice(0, 100)));
+  ok(a.columns.every((c) => c.length === 20000), "every fixture parameter holds 20000 events");
+
+  // Load through the store contract; stats come back from the store, not the arrays.
+  loadFixtureSample(20000, 42);
+  ok(listSamples().includes(FLOW_FIXTURE_SAMPLE_ID), "the fixture sample is listed");
+  const stats = sampleStats(FLOW_FIXTURE_SAMPLE_ID);
+  strictEqual(stats.eventCount, 20000);
+  strictEqual(stats.params.length, FLOW_FIXTURE_PARAMS.length);
+  for (const p of stats.params) ok(p.min < p.max, `${p.name} has a range`);
+  const cd4 = getColumn(FLOW_FIXTURE_SAMPLE_ID, "CD4");
+  strictEqual(cd4.length, 20000);
+  throws(() => getColumn(FLOW_FIXTURE_SAMPLE_ID, "NoSuchParam"), /unknown parameter/);
+
+  // 2-D binning: every valid event lands in exactly one bin.
+  const cd8 = getColumn(FLOW_FIXTURE_SAMPLE_ID, "CD8");
+  const grid = bin2D(cd4, cd8, 64, 64);
+  strictEqual(grid.counts.length, 64);
+  ok(grid.counts.every((row) => row.length === 64), "the grid is 64 x 64");
+  strictEqual(grid.counts.flat().reduce((s, v) => s + v, 0), grid.total);
+  strictEqual(grid.total, 20000, "all 20000 events are binned, none dropped");
+  strictEqual(grid.skipped, 0);
+
+  // Smoothing keeps the mass (within edge effects) and stays finite.
+  const smooth = smoothGrid(grid.counts, 1.5);
+  ok(smooth.flat().every((v) => Number.isFinite(v) && v >= 0), "smoothed densities are finite and non-negative");
+  const smoothTotal = smooth.flat().reduce((s, v) => s + v, 0);
+  ok(Math.abs(smoothTotal - grid.total) / grid.total < 0.1, `smoothing preserves mass (${smoothTotal} vs ${grid.total})`);
+  ok(smooth.flat().reduce((m, v) => Math.max(m, v), 0) > 0, "the smoothed grid has a peak");
+
+  // Per-point densities: one per event, normalised to [0, 1], peaking at 1.
+  const densities = pointDensities(cd4, cd8, smooth, grid.xEdges, grid.yEdges);
+  strictEqual(densities.length, 20000);
+  ok(densities.every((v) => Number.isFinite(v) && v >= 0 && v <= 1), "per-point densities lie in [0, 1]");
+  strictEqual(densities.reduce((m, v) => Math.max(m, v), 0), 1, "densities are normalised to a peak of 1");
+  // 1-D histogram: counts sum to the events, one bin per edge pair.
+  const hist = histogram1D(cd4, 32);
+  strictEqual(hist.counts.length, 32);
+  strictEqual(hist.counts.reduce((s, v) => s + v, 0), 20000);
+
+  // Downsampling: capped, deterministic, in range, strictly increasing.
+  strictEqual(FLOW_SCATTER_CAP, XY_SCATTER_MAX_POINTS, "the flow scatter cap matches the SVG scatter cap");
+  const idx = downsampleIndices(20000, FLOW_SCATTER_CAP, 7);
+  strictEqual(idx.length, FLOW_SCATTER_CAP);
+  ok(idx.every((v, i) => v < 20000 && (i === 0 || v > idx[i - 1])), "downsampled indices are in range and increasing");
+  deepStrictEqual(Array.from(downsampleIndices(20000, FLOW_SCATTER_CAP, 7)), Array.from(idx), "downsampling is deterministic");
+  strictEqual(downsampleIndices(100, FLOW_SCATTER_CAP, 7).length, 100, "a small sample is not padded up");
+
+  // Dot plot: WebGL scatter, density-aware — capped, never 1:1 at 100k scale.
+  const dot = buildFlowDotPlot({ sampleId: FLOW_FIXTURE_SAMPLE_ID, xParam: "CD4", yParam: "CD8" });
+  strictEqual(dot.data.length, 1);
+  strictEqual((dot.data[0] as { type: string }).type, "scattergl");
+  strictEqual(((dot.data[0] as { x: unknown[] }).x).length, FLOW_SCATTER_CAP, "the dot plot draws the cap, not all 20000 events");
+  // The export pipeline converts WebGL traces to plain scatter (graph-export reuse).
+  strictEqual((vectorTraces(dot.data)[0] as { type: string }).type, "scatter");
+
+  // Density plot: a heatmap over the smoothed binned grid.
+  const density = buildFlowDensityPlot({ sampleId: FLOW_FIXTURE_SAMPLE_ID, xParam: "CD4", yParam: "CD8", bins: 64 });
+  strictEqual((density.data[0] as { type: string }).type, "heatmap");
+  const z = (density.data[0] as { z: number[][] }).z;
+  strictEqual(z.length, 64);
+  ok(z.every((row) => row.length === 64), "density z is 64 x 64");
+  ok(z.flat().reduce((s, v) => s + v, 0) > 0, "the density grid holds events");
+
+  // Contour plot: contour lines over the same smoothed grid.
+  const contour = buildFlowContourPlot({ sampleId: FLOW_FIXTURE_SAMPLE_ID, xParam: "CD4", yParam: "CD8", bins: 64 });
+  strictEqual((contour.data[0] as { type: string }).type, "contour");
+  const cz = (contour.data[0] as { z: number[][] }).z;
+  strictEqual(cz.length, 64);
+  ok(cz.every((row) => row.length === 64), "contour z is 64 x 64");
+
+  // Pseudocolor plot: capped scattergl dots, each coloured by its local density.
+  const pseudo = buildFlowPseudocolorPlot({ sampleId: FLOW_FIXTURE_SAMPLE_ID, xParam: "CD4", yParam: "CD8" });
+  strictEqual((pseudo.data[0] as { type: string }).type, "scattergl");
+  const marker = (pseudo.data[0] as { marker: { color: number[]; colorscale: unknown } }).marker;
+  strictEqual(marker.color.length, FLOW_SCATTER_CAP, "one density colour per plotted dot");
+  ok(marker.color.every((v) => v >= 0 && v <= 1), "pseudocolor values lie in [0, 1]");
+  ok(marker.colorscale !== undefined, "pseudocolor carries a colorscale");
+
+  // Histogram: one bar trace per population, counts summing to each population.
+  const histFig = buildFlowHistogram({
+    sampleId: FLOW_FIXTURE_SAMPLE_ID,
+    param: "CD4",
+    bins: 32,
+    populations: [
+      { name: "CD4+", gate: { xParam: "CD4", yParam: "CD8", xMin: 1000, xMax: Infinity, yMin: -Infinity, yMax: Infinity } },
+      { name: "CD4-", gate: { xParam: "CD4", yParam: "CD8", xMin: -Infinity, xMax: 1000, yMin: -Infinity, yMax: Infinity } },
+    ],
+  });
+  strictEqual(histFig.data.length, 2, "one bar trace per population");
+  const counts = histFig.data.map((t) => ((t as { y: number[] }).y).reduce((s, v) => s + v, 0));
+  ok(counts[0] > 5000 && counts[0] < 7000, `the CD4+ population is ~6000 events (got ${counts[0]})`);
+  ok(counts[1] > 13000 && counts[1] < 15000, `the CD4- population is ~14000 events (got ${counts[1]})`);
+  strictEqual(counts[0] + counts[1], 20000, "the populations partition the sample");
+  const whole = buildFlowHistogram({ sampleId: FLOW_FIXTURE_SAMPLE_ID, param: "CD4", bins: 32 });
+  strictEqual(whole.data.length, 1);
+  strictEqual(((whole.data[0] as { y: number[] }).y).reduce((s, v) => s + v, 0), 20000);
+
+  // Registry: all five flow modules are registered — and none is offered in
+  // any graph picker while the flow toggle is off (opt-in, off by default).
+  for (const t of ["flow-dot-plot", "flow-density-plot", "flow-contour-plot", "flow-pseudocolor-plot", "flow-histogram"] as const) {
+    ok(t in GRAPHS, `${t} is registered`);
+  }
+  ok(!isFlowPickerEnabled(), "flow is off by default");
+  for (const list of Object.values(GRAPH_OPTIONS_BY_TABLE)) {
+    ok(!list.some((o) => o.value.startsWith("flow-")), "no picker offers a flow graph while flow is off");
+  }
+  // The registry modules build from graph options (the export pipeline's path).
+  const regDot = GRAPHS["flow-dot-plot"].build([], { ...DEFAULT_GRAPH_OPTIONS, flowSampleId: FLOW_FIXTURE_SAMPLE_ID, flowXParam: "CD4", flowYParam: "CD8" } as never, paintOf(DEFAULT_GRAPH_OPTIONS, 1));
+  strictEqual((regDot.data[0] as { type: string }).type, "scattergl");
+
+  // The viewer reads ONLY through the store: unload the sample and every
+  // builder fails — there is no second copy of the data to fall back on.
+  unloadSample(FLOW_FIXTURE_SAMPLE_ID);
+  throws(() => buildFlowDotPlot({ sampleId: FLOW_FIXTURE_SAMPLE_ID, xParam: "CD4", yParam: "CD8" }), /not loaded/);
+  throws(() => buildFlowDensityPlot({ sampleId: FLOW_FIXTURE_SAMPLE_ID, xParam: "CD4", yParam: "CD8" }), /not loaded/);
+  ok(!listSamples().includes(FLOW_FIXTURE_SAMPLE_ID), "the sample is gone after unload");
+  const viewerSrc = readFileSync("src/flow/viewer.ts", "utf8");
+  ok(!/from "\.\.\//.test(viewerSrc), "viewer.ts imports nothing outside src/flow");
+  ok(!/\b(TableData|readTable)\b/.test(viewerSrc), "viewer.ts never touches the table grid");
+  loadFixtureSample(20000, 42);
+});
+
+
+check("flow-f1a: columnar event store loads synthetic FCS-like data, stats + summary bridge round-trip, and events never reach the .hlx JSON", async () => {
+  // Synthetic FCS-like dataset: 3 parameters, 5 events. One column carries
+  // a sentinel value (987654.321) that must never appear in a saved file.
+  const store = new InMemoryFlowStore({ budgetBytes: 1024 * 1024 });
+  const info = await store.loadSample(
+    "s1",
+    [
+      Float32Array.from([100, 200, 300, 400, 987654.321]),
+      Float32Array.from([10, 20, 30, 40, 50]),
+      Float32Array.from([0.5, 1.5, 2.5, 3.5, 4.5]),
+    ],
+    ["FSC-A", "SSC-A", "CD4"],
+    { name: "Sample 1", sourcePath: "sample1.fcs" },
+  );
+  strictEqual(info.eventCount, 5);
+  strictEqual(info.parameterCount, 3);
+  strictEqual(info.sampleId, "s1");
+  // Columns read back verbatim; unknown sample / parameter reads as null.
+  deepStrictEqual(Array.from((await store.getColumn("s1", "CD4"))!), [0.5, 1.5, 2.5, 3.5, 4.5]);
+  strictEqual(await store.getColumn("s1", "Nope"), null);
+  strictEqual(await store.getColumn("missing", "CD4"), null);
+  // Stats: event count + per-parameter min/max/mean over the finite values.
+  const stats = (await store.sampleStats("s1"))!;
+  strictEqual(stats.eventCount, 5);
+  strictEqual(stats.params[0].name, "FSC-A");
+  strictEqual(stats.params[0].min, 100);
+  ok(Math.abs((stats.params[0].max ?? 0) - 987654.3125) < 0.01, "f32 sentinel reads back as f32");
+  strictEqual(stats.params[1].min, 10);
+  strictEqual(stats.params[1].max, 50);
+  strictEqual(stats.params[1].mean, 30);
+  strictEqual(stats.params[2].min, 0.5);
+  strictEqual(stats.params[2].max, 4.5);
+  strictEqual(stats.params[2].mean, 2.5);
+  // Mismatched column lengths and duplicate parameter names are refused.
+  await rejects(store.loadSample("bad", [Float32Array.from([1, 2]), Float32Array.from([1])], ["A", "B"]));
+  await rejects(store.loadSample("bad", [Float32Array.from([1]), Float32Array.from([1])], ["A", "A"]));
+  // LRU: a tiny budget evicts the least-recently-used sample, never the one just loaded.
+  const tiny = new InMemoryFlowStore({ budgetBytes: 80 });
+  await tiny.loadSample("a", [Float32Array.from([1, 2, 3, 4, 5])], ["FSC-A"]); // 20 B
+  await tiny.loadSample("b", [Float32Array.from([1, 2, 3, 4, 5])], ["FSC-A"]); // 20 B
+  await tiny.loadSample("c", [Float32Array.from([1, 2, 3, 4, 5])], ["FSC-A"]); // 20 B
+  await tiny.loadSample("d", [Float32Array.from([1, 2, 3, 4, 5])], ["FSC-A"]); // 20 B → 80 B, fits
+  await tiny.loadSample("e", [Float32Array.from([1, 2, 3, 4, 5])], ["FSC-A"]); // 100 B → evicts "a"
+  deepStrictEqual(
+    (await tiny.listSamples()).map((s) => s.sampleId),
+    ["b", "c", "d", "e"],
+  );
+  strictEqual(await tiny.sampleStats("a"), null);
+  strictEqual(await tiny.unloadSample("b"), true);
+  strictEqual(await tiny.unloadSample("b"), false);
+  strictEqual((await tiny.listSamples()).length, 3);
+  // The summary bridge turns store stats into an ordinary table shape.
+  const ref: FlowSampleRef = {
+    sampleId: "s1",
+    sourcePath: "sample1.fcs",
+    sourceKind: "fcs",
+    name: "Sample 1",
+    eventCount: 5,
+    parameters: [{ name: "FSC-A" }, { name: "SSC-A" }, { name: "CD4" }],
+  };
+  const table = buildSampleSummaryTable(ref, stats);
+  deepStrictEqual(table.columns, [
+    "Sample",
+    "Events",
+    "FSC-A min",
+    "FSC-A max",
+    "FSC-A mean",
+    "SSC-A min",
+    "SSC-A max",
+    "SSC-A mean",
+    "CD4 min",
+    "CD4 max",
+    "CD4 mean",
+  ]);
+  strictEqual(table.rows.length, 1);
+  strictEqual(table.rows[0][0], "Sample 1");
+  strictEqual(table.rows[0][1], "5");
+  strictEqual(table.rows[0][2], "100");
+  strictEqual(table.rows[0][5], "10");
+  strictEqual(table.rows[0][8], "0.5");
+  // A multi-sample table unions the parameters; a sample without one reads null there.
+  const ref2: FlowSampleRef = {
+    sampleId: "s2",
+    sourcePath: "sample2.fcs",
+    sourceKind: "fcs",
+    name: "Sample 2",
+    eventCount: 2,
+    parameters: [{ name: "FSC-A" }, { name: "CD8" }],
+  };
+  const stats2 = { sampleId: "s2", eventCount: 2, params: [
+    { name: "FSC-A", count: 2, min: 1, max: 3, mean: 2 },
+    { name: "CD8", count: 2, min: 7, max: 9, mean: 8 },
+  ] };
+  const experiment = buildExperimentSummaryTable([
+    { ref, stats },
+    { ref: ref2, stats: stats2 },
+  ]);
+  strictEqual(experiment.rows.length, 2);
+  ok(experiment.columns.includes("CD8 min"), "union keeps a parameter only one sample has");
+  strictEqual(experiment.rows[0][experiment.columns.indexOf("CD8 min")], null);
+  strictEqual(experiment.rows[1][experiment.columns.indexOf("CD8 min")], "7");
+  const summaryNode = createSummaryTableNode("t1", "Flow summary", table, ["s1"]);
+  strictEqual(summaryNode.type, "table");
+  strictEqual(summaryNode.tableType, "column");
+  deepStrictEqual(summaryNode.flowSourceSampleIds, ["s1"]);
+  deepStrictEqual(summaryNode.data, table);
+  // The .hlx round-trip: the sample node serializes with its metadata, the
+  // events never reach the file, and the node reads back as a sample. The
+  // node id and the sample id are the same by convention (seq 441), so the
+  // node takes the sample's id.
+  const node = createSampleNode("s1", "Sample 1", ref);
+  ok(isSampleNode(node));
+  strictEqual(node.parentId, null);
+  const payload: ProjectFilePayload = {
+    nodes: { s1: node },
+    rootOrder: ["s1"],
+    childOrder: {},
+    activeNodeId: "s1",
+  };
+  const text = serializeProjectFile(payload);
+  ok(text.includes("flowSample"), "metadata is in the file");
+  ok(text.includes("FSC-A"), "parameter names are in the file");
+  ok(!text.includes("987654"), "no event value reaches the .hlx JSON");
+  const back = parseProjectFile(JSON.parse(text));
+  if ("error" in back) throw new Error(back.error);
+  const backNode = back.project.nodes.s1;
+  ok(isSampleNode(backNode), "a sample node reads back as a sample");
+  deepStrictEqual(backNode.flowSample, ref);
+  strictEqual("data" in backNode, false, "a sample node carries no table data");
+  // Forgiving reads: wrong types fall back, bad parameters are dropped, and
+  // fields this version doesn't know survive the round-trip.
+  const forgiving = readFlowSample({
+    sampleId: "x",
+    sourcePath: 42,
+    sourceKind: "weird",
+    eventCount: "many",
+    parameters: [{ name: "FSC-A", bits: "16" }, { name: 7 }, "junk"],
+    extraFutureField: "keep me",
+  });
+  ok(forgiving);
+  strictEqual(forgiving!.sourcePath, "");
+  strictEqual(forgiving!.sourceKind, "fcs");
+  strictEqual(forgiving!.eventCount, 0);
+  deepStrictEqual(forgiving!.parameters, [{ name: "FSC-A" }]);
+  strictEqual((forgiving as unknown as Record<string, unknown>).extraFutureField, "keep me");
+  strictEqual(readFlowSample({ parameters: [] }), null, "a sample with no parameters is dropped");
+  strictEqual(readFlowSample("junk"), null);
+  // The committed sidecar fixture parses as the documented TFCS format.
+  const fixture = readFileSync("tests/testdata/flow-sample-1.tfcs");
+  strictEqual(fixture.subarray(0, 4).toString("ascii"), "TFCS");
+  strictEqual(fixture.readUInt32LE(4), 3, "3 parameters");
+  strictEqual(fixture.readUInt32LE(8), 8, "8 events");
+  strictEqual(fixture.length, 12 + 3 * 8 * 4);
+  // The flow module is off by default, and the factory falls back to the
+  // in-memory store outside the Tauri shell (tests, web dev).
+  strictEqual(isFlowEnabled(), false);
+  const fallback = createFlowStore();
+  ok(fallback instanceof InMemoryFlowStore, "no Tauri shell → in-memory store");
+  await fallback.loadSample("w", [Float32Array.from([1, 2])], ["FSC-A"]);
+  strictEqual((await fallback.sampleStats("w"))!.eventCount, 2);
+});
+
+// ── FlowJo track, seq 440 (F0) ────────────────────────────────────────────
+
+check("flow-f0: flow-fcs 0.6.0 evaluation verdict recorded + smoke parse of a real FCS file", () => {
+  // Seq 440: ADOPT-or-BUILD verdict for the `flow-fcs` crate as Titer's FCS
+  // reader, evaluated against a real-world public corpus (see
+  // docs/flow-fcs-evaluation.md). Pre-fix this fails: no verdict file, no
+  // fixtures, no wired dependency, no smoke test.
+  const evalPath = "docs/flow-fcs-evaluation.md";
+  ok(existsSync(evalPath), "docs/flow-fcs-evaluation.md must record the ADOPT-or-BUILD verdict");
+  const md = readFileSync(evalPath, "utf8");
+  ok(/^## Verdict: ADOPT$/m.test(md), "the verdict must be recorded as ADOPT (one line)");
+  ok(md.includes("flow-fcs 0.6.0"), "the verdict must name the evaluated version (0.6.0)");
+  ok(md.includes("logicle"), "the verdict must record the logicle/biexactness finding");
+
+  // The smoke fixture is a real FCS file (Gating-ML compliance corpus,
+  // FCS 3.0, big-endian int16). Re-derive $PAR/$TOT/params from its own
+  // bytes here, and require the verdict doc to record the same numbers —
+  // so the pin is self-validating, not a copy of a copied claim.
+  const fixture = "tests/testdata/fcs/int-10_events_6_parameters.fcs";
+  ok(existsSync(fixture), "the smoke fixture must be committed under tests/testdata/fcs/");
+  const buf = readFileSync(fixture);
+  strictEqual(buf.subarray(0, 6).toString("ascii"), "FCS3.0", "fixture must be an FCS 3.0 file");
+  const textStart = parseInt(buf.subarray(10, 18).toString("ascii").trim(), 10);
+  const textEnd = parseInt(buf.subarray(18, 26).toString("ascii").trim(), 10);
+  const delim = String.fromCharCode(buf[textStart]);
+  const parts = buf.subarray(textStart, textEnd + 1).toString("ascii").split(delim);
+  const kw: Record<string, string> = {};
+  for (let i = 1; i + 1 < parts.length; i += 2) kw[parts[i]] = parts[i + 1];
+  strictEqual(kw["$PAR"], "6", "fixture $PAR must be 6");
+  strictEqual(kw["$TOT"], "10", "fixture $TOT must be 10");
+  const params = [1, 2, 3, 4, 5, 6].map((n) => kw[`$P${n}N`]);
+  deepStrictEqual(params, ["AS", "BS", "CS", "DS", "ES", "FS"], "fixture params must be AS..FS");
+  ok(
+    md.includes("int-10_events_6_parameters.fcs: FCS3.0, $PAR 6, $TOT 10, params AS/BS/CS/DS/ES/FS"),
+    "the verdict doc must record the smoke-parse expectation for the primary fixture",
+  );
+
+  // A $SPILLOVER fixture must be committed too (the compensation path is
+  // part of the ADOPT case), with its matrix recorded in the verdict doc.
+  ok(existsSync("tests/testdata/fcs/synth-spill.fcs"), "the $SPILLOVER fixture must be committed");
+  ok(md.includes("synth-spill.fcs"), "the verdict doc must record the $SPILLOVER fixture");
+
+  // ADOPT means wired in: the crate must be a declared dependency and a
+  // headless Rust smoke test must open the fixture and assert $PAR/$TOT.
+  const cargo = readFileSync("src-tauri/Cargo.toml", "utf8");
+  ok(cargo.includes('flow-fcs'), "src-tauri/Cargo.toml must declare the flow-fcs dependency");
+  const smoke = readFileSync("src-tauri/src/flow.rs", "utf8");
+  ok(smoke.includes("int-10_events_6_parameters.fcs"), "the Rust smoke test must open the fixture");
+  ok(
+    smoke.includes("get_number_of_parameters") && smoke.includes("get_number_of_events"),
+    "the Rust smoke test must assert $PAR and $TOT",
+  );
+});
+
+// ── FlowJo track, seq 443 (F1c) ────────────────────────────────────────────
+
+check("flow-f1c: FCS 2.0–3.2 reader (flow-fcs 0.6.0) into the event store + titer_import_fcs, with the offset guard", () => {
+  // Seq 443: the reader wiring the ADOPTED flow-fcs 0.6.0 crate into the
+  // F1a event store, implementing all six ADOPT conditions from
+  // docs/flow-fcs-evaluation.md. Pre-fix this fails: no reader, no
+  // fixtures, no tool, no dispatch branch. The runtime behaviour is
+  // covered by the Rust unit tests in src-tauri/src/flow.rs (real file
+  // loads, guard refusals, normalisations); this pin re-derives the
+  // fixtures' own ground truth from their bytes (like flow-f0) and pins
+  // the wiring surface on both sides of the bridge.
+  const fcsDir = "tests/testdata/fcs";
+  const readText = (name: string) => readFileSync(`${fcsDir}/${name}`);
+  // HEADER offsets (bytes 10..18 TEXT start, 18..26 TEXT end, 26..34 DATA
+  // start, 34..42 DATA end) + a TEXT keyword map, re-derived per file.
+  const headerOf = (buf: Buffer) => ({
+    textStart: parseInt(buf.subarray(10, 18).toString("ascii").trim(), 10),
+    textEnd: parseInt(buf.subarray(18, 26).toString("ascii").trim(), 10),
+    dataStart: parseInt(buf.subarray(26, 34).toString("ascii").trim(), 10),
+    dataEnd: parseInt(buf.subarray(34, 42).toString("ascii").trim(), 10),
+  });
+  const keywordsOf = (buf: Buffer): Record<string, string> => {
+    const { textStart, textEnd } = headerOf(buf);
+    const delim = String.fromCharCode(buf[textStart]);
+    const parts = buf.subarray(textStart, textEnd + 1).toString("ascii").split(delim);
+    const kw: Record<string, string> = {};
+    for (let i = 1; i + 1 < parts.length; i += 2) kw[parts[i]] = parts[i + 1];
+    return kw;
+  };
+
+  // 1. The committed fixtures all exist (a few KB each).
+  for (const name of [
+    "f1c-short-byteord.fcs",
+    "f1c-blank-analysis.fcs",
+    "f1c-bare-spill.fcs",
+    "f1c-offset-discrepancy.fcs",
+    "f1c-i24.fcs",
+    "f1c-ascii.fcs",
+    "f1c-f32-3.2.fcs",
+    "f1c-comp.fcs",
+    "f1c-multi-dataset.fcs",
+  ]) {
+    ok(existsSync(`${fcsDir}/${name}`), `the F1c fixture ${name} must be committed under ${fcsDir}/`);
+  }
+
+  // 2. The synthetic FCS 3.2 fixture is a real, decodable file — re-derive
+  // its ground truth from its own bytes (F32 LE, 2 params, 4 events), the
+  // numbers the Rust reader test asserts after loading it into the store.
+  const f32 = readText("f1c-f32-3.2.fcs");
+  strictEqual(f32.subarray(0, 6).toString("ascii"), "FCS3.2", "the 3.2 fixture must be an FCS 3.2 file");
+  const f32kw = keywordsOf(f32);
+  strictEqual(f32kw["$PAR"], "2", "3.2 fixture $PAR must be 2");
+  strictEqual(f32kw["$TOT"], "4", "3.2 fixture $TOT must be 4");
+  strictEqual(f32kw["$P1N"], "FSC-A", "3.2 fixture $P1N must be FSC-A");
+  strictEqual(f32kw["$P2N"], "FL1-A", "3.2 fixture $P2N must be FL1-A");
+  strictEqual(f32kw["$DATATYPE"], "F", "3.2 fixture must be float data");
+  const f32DataStart = parseInt(f32kw["$BEGINDATA"], 10);
+  const firstEvent = [f32.readFloatLE(f32DataStart), f32.readFloatLE(f32DataStart + 4)];
+  deepStrictEqual(firstEvent, [10, 20], "3.2 fixture first event must be [10, 20]");
+  const lastEvent = [f32.readFloatLE(f32DataStart + 24), f32.readFloatLE(f32DataStart + 28)];
+  deepStrictEqual(lastEvent, [40, 80], "3.2 fixture last event must be [40, 80]");
+
+  // 3. The offset-discrepancy fixture really does disagree (HEADER DATA
+  // 5555 vs TEXT $BEGINDATA 6081) — so the guard has something to refuse —
+  // and the reader implements the guard (condition 6).
+  const disc = readText("f1c-offset-discrepancy.fcs");
+  const discHeader = headerOf(disc);
+  const discKw = keywordsOf(disc);
+  strictEqual(discHeader.dataStart, 5555, "discrepancy fixture HEADER DATA start must be 5555");
+  strictEqual(parseInt(discKw["$BEGINDATA"], 10), 6081, "discrepancy fixture TEXT $BEGINDATA must be 6081");
+  ok(discHeader.dataStart !== parseInt(discKw["$BEGINDATA"], 10), "the fixture's offsets must disagree");
+
+  // 4. The normalisation fixtures carry the forms they exercise.
+  strictEqual(keywordsOf(readText("f1c-short-byteord.fcs"))["$BYTEORD"], "2,1", "short-$BYTEORD fixture must use \"2,1\"");
+  const blank = readText("f1c-blank-analysis.fcs");
+  ok(blank.subarray(42, 50).toString("ascii").trim() === "", "blank-ANALYSIS fixture HEADER ANALYSIS start must be spaces");
+  ok(keywordsOf(readText("f1c-bare-spill.fcs"))["SPILL"] !== undefined, "bare-SPILL fixture must carry a bare SPILL keyword");
+  ok(keywordsOf(readText("f1c-comp.fcs"))["$COMP"] !== undefined, "$COMP fixture must carry $COMP");
+  ok(parseInt(keywordsOf(readText("f1c-multi-dataset.fcs"))["$NEXTDATA"], 10) > 0, "multi-dataset fixture must carry a non-zero $NEXTDATA");
+  strictEqual(keywordsOf(readText("f1c-i24.fcs"))["$P1B"], "24", "i24 fixture must be 24-bit int data");
+  strictEqual(keywordsOf(readText("f1c-ascii.fcs"))["$DATATYPE"], "A", "ascii fixture must be ASCII data");
+
+  // 5. The reader implements every ADOPT condition in Rust.
+  const reader = readFileSync("src-tauri/src/flow.rs", "utf8");
+  ok(reader.includes("fn read_fcs_sample"), "flow.rs must expose read_fcs_sample (store-free, for tests)");
+  ok(reader.includes("fn import_fcs_file"), "flow.rs must expose import_fcs_file (reader → store)");
+  ok(reader.includes("flow_import_fcs"), "flow.rs must expose the flow_import_fcs Tauri command");
+  ok(reader.includes("disagrees"), "condition 6: the offset guard must refuse on HEADER-vs-TEXT disagreement");
+  ok(reader.includes('"1,2"') && reader.includes('"1,2,3,4"'), "condition 5: short $BYTEORD forms must be normalised");
+  ok(reader.includes("SPILL") && reader.includes("$SPILL"), "bare SPILL must be normalised to $SPILL");
+  ok(reader.includes("unsupported"), "condition 3: unsupported data types must be refused with a clear error");
+  ok(!reader.includes("logicle") || !/logicle\(/.test(reader), "condition 1: the reader must not call the crate's logicle transform");
+  ok(reader.includes("open_all") || reader.includes("$NEXTDATA"), "multi-dataset files must be walked via $NEXTDATA");
+  ok(reader.includes(".fcs"), "condition 2: the extension gate must be worked around by staging to a .fcs name");
+  ok(reader.includes("f1c-offset-discrepancy.fcs"), "the Rust tests must refuse the offset-discrepancy fixture");
+  ok(reader.includes("f1c-f32-3.2.fcs"), "the Rust tests must load the FCS 3.2 fixture");
+  ok(reader.includes("coulter"), "the Rust tests must spot-check the real coulter.lmd corpus file");
+  ok(readFileSync("src-tauri/src/main.rs", "utf8").includes("flow::flow_import_fcs"), "main.rs must register flow_import_fcs");
+
+  // 6. The MCP slice: titer_import_fcs + the flow allowlist group, off by
+  // default (not in the default read set).
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes("titer_import_fcs"), "mcp.rs must define the titer_import_fcs tool");
+  ok(mcp.includes("ImportFcsArgs"), "mcp.rs must define the ImportFcsArgs schema");
+  ok(mcp.includes("import-fcs"), "mcp.rs must dispatch the import-fcs job action");
+  ok(mcp.includes('id: "flow"'), "mcp.rs must define the flow allowlist group");
+  ok(!/ALLOWLIST_DEFAULT_GROUPS: &\[&str\] = &\["read", "flow"\]/.test(mcp), "the flow group must not be in the default allowlist");
+
+  // 7. The TS side: import client + executor + dispatch branch + store action.
+  const fcs = readFileSync("src/flow/fcs.ts", "utf8");
+  ok(fcs.includes("importFcs") && fcs.includes("flow_import_fcs"), "src/flow/fcs.ts must invoke the flow_import_fcs command");
+  ok(fcs.includes("buildFlowSampleRef"), "src/flow/fcs.ts must build the sample node reference from the summary");
+  ok(readFileSync("src/store/mcp-flow.ts", "utf8").includes("executeImportFcs"), "src/store/mcp-flow.ts must execute the import-fcs job");
+  const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
+  ok(dispatch.includes('case "import-fcs"'), "mcp-dispatch.ts must have the import-fcs branch");
+  ok(dispatch.includes("createFlowSample"), "mcp-dispatch.ts must pass createFlowSample to the job");
+  ok(readFileSync("src/store/use-project-store.tsx", "utf8").includes("createFlowSample"), "the store must provide a createFlowSample action");
+
+  // 8. Opt-in, off by default: the module stays off until the toggle.
+  strictEqual(isFlowEnabled(), false);
+});
+
+check("flow-f2a: spillover-matrix compensation per sample (seq 447) — inverse applied over all events, sparse across measurement types", async () => {
+  // Seq 447: compensation is the inverse of the $SPILLOVER/$SPILL/$COMP
+  // matrix, multiplied per event (compensated = S^-1 x observed, column
+  // vector) — the same convention the F0 harness verified numerically
+  // (synth-spill first compensated value 87.60202 vs Python inv(spill)
+  // @ raw = 87.602). Channels outside the fluorochrome list pass through
+  // unchanged (FCS 3.1 sparse-matrix guidance: height vs area). Pre-fix
+  // this fails: no compensation module, no store operations, no tool.
+  // The module is loaded dynamically so the failure is this check's, not
+  // the whole file's (a static import would fail checks.ts to load).
+  const fcsDir = "tests/testdata/fcs";
+  const readBytes = (name: string) => readFileSync(`${fcsDir}/${name}`);
+  const headerOf = (buf: Buffer) => ({
+    textStart: parseInt(buf.subarray(10, 18).toString("ascii").trim(), 10),
+    textEnd: parseInt(buf.subarray(18, 26).toString("ascii").trim(), 10),
+    dataStart: parseInt(buf.subarray(26, 34).toString("ascii").trim(), 10),
+    dataEnd: parseInt(buf.subarray(34, 42).toString("ascii").trim(), 10),
+  });
+  const keywordsOf = (buf: Buffer): Record<string, string> => {
+    const { textStart, textEnd } = headerOf(buf);
+    const delim = String.fromCharCode(buf[textStart]);
+    const parts = buf.subarray(textStart, textEnd + 1).toString("ascii").split(delim);
+    const kw: Record<string, string> = {};
+    for (let i = 1; i + 1 < parts.length; i += 2) kw[parts[i]] = parts[i + 1];
+    return kw;
+  };
+  // Event-major F32 LE columns, re-derived from the file's own bytes.
+  const columnsOf = (buf: Buffer): { names: string[]; columns: Float32Array[] } => {
+    const kw = keywordsOf(buf);
+    const par = parseInt(kw["$PAR"], 10);
+    const tot = parseInt(kw["$TOT"], 10);
+    const names = Array.from({ length: par }, (_, i) => kw[`$P${i + 1}N`]);
+    const dataStart = parseInt(kw["$BEGINDATA"], 10);
+    const columns = names.map(() => new Float32Array(tot));
+    for (let e = 0; e < tot; e++) {
+      for (let p = 0; p < par; p++) {
+        columns[p][e] = buf.readFloatLE(dataStart + (e * par + p) * 4);
+      }
+    }
+    return { names, columns };
+  };
+  const closeTo = (actual: number, expected: number, tol: number, what: string) => {
+    ok(Math.abs(actual - expected) <= tol, `${what} must be ~${expected} (got ${actual})`);
+  };
+
+  // 1. The multi-measurement-type fixture exists and carries the sparse
+  //    3x3 matrix over the -A fluorochromes only (8 params, 4 events).
+  ok(existsSync(`${fcsDir}/f2a-multi-type.fcs`), "the F2a fixture f2a-multi-type.fcs must be committed under tests/testdata/fcs/");
+  const multi = readBytes("f2a-multi-type.fcs");
+  strictEqual(multi.subarray(0, 6).toString("ascii"), "FCS3.1", "multi-type fixture must be an FCS 3.1 file");
+  const multiKw = keywordsOf(multi);
+  strictEqual(multiKw["$PAR"], "8", "multi-type fixture $PAR must be 8");
+  strictEqual(multiKw["$TOT"], "4", "multi-type fixture $TOT must be 4");
+  strictEqual(
+    multiKw["$SPILLOVER"],
+    "3,FL1-A,FL2-A,FL3-A,1.0,0.05,0.01,0.02,1.0,0.03,0.0,0.04,1.0",
+    "multi-type fixture $SPILLOVER must be the 3x3 over FL1-A/FL2-A/FL3-A",
+  );
+  const multiData = columnsOf(multi);
+  deepStrictEqual(multiData.names, ["FSC-A", "FSC-H", "FL1-A", "FL1-H", "FL2-A", "FL2-H", "FL3-A", "FL3-H"]);
+  deepStrictEqual(Array.from(multiData.columns[2]), [100, 200, 300, 400], "multi-type fixture FL1-A raw must be [100, 200, 300, 400]");
+  deepStrictEqual(Array.from(multiData.columns[3]), [10, 20, 30, 40], "multi-type fixture FL1-H raw must be [10, 20, 30, 40]");
+
+  // 2. The synth-spill ground truth, re-derived from its own bytes: the
+  //    F0 oracle (first compensated value 87.60202).
+  const spillBuf = readBytes("synth-spill.fcs");
+  const spillKw = keywordsOf(spillBuf);
+  strictEqual(
+    spillKw["$SPILLOVER"],
+    "3,FL1-A,FL2-A,FL3-A,1.0,0.05,0.01,0.02,1.0,0.03,0.0,0.04,1.0",
+    "synth-spill $SPILLOVER must be the 3x3 over FL1-A/FL2-A/FL3-A",
+  );
+  const spillData = columnsOf(spillBuf);
+  deepStrictEqual(spillData.names, ["FL1-A", "FL2-A", "FL3-A"]);
+  deepStrictEqual(Array.from(spillData.columns[0]), [100, 200, 300, 400], "synth-spill FL1-A raw must be [100, 200, 300, 400]");
+
+  // 3. The math: f64 inverse matches the numpy reference, and applying it
+  //    to the raw columns gives the F0 oracle values.
+  const comp = await import("../src/flow/compensation");
+  const fluor = ["FL1-A", "FL2-A", "FL3-A"];
+  const matrix = [
+    [1.0, 0.05, 0.01],
+    [0.02, 1.0, 0.03],
+    [0.0, 0.04, 1.0],
+  ];
+  const inv = comp.invertMatrix(matrix);
+  closeTo(inv[0][0], 1.00099418, 1e-6, "inverse[0][0]");
+  closeTo(inv[0][1], -0.04970896, 1e-6, "inverse[0][1]");
+  closeTo(inv[1][2], -0.02986547, 1e-6, "inverse[1][2]");
+  closeTo(inv[2][0], 0.00080176, 1e-6, "inverse[2][0]");
+  const compensated = comp.compensateColumns(spillData.columns, spillData.names, fluor, matrix);
+  closeTo(compensated[0][0], 87.60202, 1e-3, "compensated FL1-A event 0");
+  closeTo(compensated[1][0], 189.47533, 1e-3, "compensated FL2-A event 0");
+  closeTo(compensated[2][0], 292.42099, 1e-3, "compensated FL3-A event 0");
+  closeTo(compensated[0][1], 175.20405, 1e-3, "compensated FL1-A event 1");
+  // The raw columns are untouched: compensation materialises a new copy.
+  deepStrictEqual(Array.from(spillData.columns[0]), [100, 200, 300, 400], "compensateColumns must not mutate the raw columns");
+
+  // 4. The store: apply the file's matrix, read compensated columns back,
+  //    re-applying with an edited matrix recomputes from RAW (never double
+  //    compensation), and clearing reverts to raw.
+  const store = new InMemoryFlowStore({ budgetBytes: 1024 * 1024 });
+  await store.loadSample("spill", spillData.columns, spillData.names, { name: "synth-spill", sourcePath: "synth-spill.fcs" });
+  const state = await store.applyCompensation("spill", { fluorochromes: fluor, matrix, source: "file" });
+  strictEqual(state.applied, true, "compensation state must report applied after apply");
+  strictEqual(state.source, "file", "compensation state must record the file source");
+  deepStrictEqual(state.fluorochromes, fluor);
+  const colAfter = await store.getColumn("spill", "FL1-A");
+  closeTo(colAfter![0], 87.60202, 1e-3, "stored FL1-A event 0 after apply");
+  closeTo(colAfter![3], 350.40809, 1e-3, "stored FL1-A event 3 after apply");
+  const got = await store.getCompensation("spill");
+  strictEqual(got?.applied, true, "getCompensation must report the applied state");
+  // Re-apply with an edited matrix (identity): values return to raw —
+  // the apply recomputes from the raw copy, it does not stack.
+  await store.applyCompensation("spill", {
+    fluorochromes: fluor,
+    matrix: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    source: "manual",
+  });
+  deepStrictEqual(Array.from((await store.getColumn("spill", "FL1-A"))!), [100, 200, 300, 400], "re-applying identity must restore raw values");
+  strictEqual((await store.getCompensation("spill"))?.source, "manual", "re-apply must record the new source");
+  // Clear reverts to raw and reports unapplied.
+  strictEqual(await store.clearCompensation("spill"), true, "clearCompensation must report true for a loaded sample");
+  deepStrictEqual(Array.from((await store.getColumn("spill", "FL2-A"))!), [200, 400, 600, 800], "clear must restore raw FL2-A");
+  strictEqual((await store.getCompensation("spill"))?.applied, false, "getCompensation must report unapplied after clear");
+  strictEqual(await store.clearCompensation("missing"), false, "clearCompensation must report false for an unknown sample");
+  await rejects(store.applyCompensation("missing", { fluorochromes: fluor, matrix, source: "file" }), "apply on an unknown sample must be refused");
+
+  // 5. Sparse across measurement types: the multi-type fixture's -H
+  //    params and FSC-A/FSC-H pass through bit-identical; only the -A
+  //    fluorochromes are compensated, to the numpy values.
+  const store2 = new InMemoryFlowStore({ budgetBytes: 1024 * 1024 });
+  await store2.loadSample("multi", multiData.columns, multiData.names, { name: "f2a-multi-type", sourcePath: "f2a-multi-type.fcs" });
+  await store2.applyCompensation("multi", { fluorochromes: fluor, matrix, source: "file" });
+  deepStrictEqual(Array.from((await store2.getColumn("multi", "FL1-H"))!), [10, 20, 30, 40], "FL1-H must pass through compensation unchanged");
+  deepStrictEqual(Array.from((await store2.getColumn("multi", "FSC-A"))!), [1000, 2000, 3000, 4000], "FSC-A must pass through compensation unchanged");
+  deepStrictEqual(Array.from((await store2.getColumn("multi", "FSC-H"))!), [100, 200, 300, 400], "FSC-H must pass through compensation unchanged");
+  closeTo((await store2.getColumn("multi", "FL1-A"))![0], 87.60202, 1e-3, "multi-type FL1-A event 0");
+  closeTo((await store2.getColumn("multi", "FL3-A"))![3], 1169.68395, 1e-3, "multi-type FL3-A event 3");
+
+  // 6. Matrix text: the $SPILLOVER flat form and the FlowJo-style CSV
+  //    form both parse, and refusals are explicit.
+  const fromKeyword = comp.parseSpilloverKeyword(multiKw["$SPILLOVER"]);
+  deepStrictEqual(fromKeyword.fluorochromes, fluor);
+  deepStrictEqual(fromKeyword.matrix, matrix);
+  const csv = " ,FL1-A,FL2-A,FL3-A\nFL1-A,1.0,0.05,0.01\nFL2-A,0.02,1.0,0.03\nFL3-A,0.0,0.04,1.0\n";
+  const fromCsv = comp.parseSpilloverCsv(csv);
+  deepStrictEqual(fromCsv.fluorochromes, fluor);
+  deepStrictEqual(fromCsv.matrix, matrix);
+  throws(() => comp.invertMatrix([[1, 1], [1, 1]]), /singular/, "a singular matrix must be refused");
+  throws(() => comp.invertMatrix([[1, 0], [0, 1, 0]]), /square/, "a non-square matrix must be refused");
+  throws(() => comp.invertMatrix([[1, Number.NaN], [0, 1]]), /finite/, "a non-finite matrix must be refused");
+  await rejects(
+    store.applyCompensation("spill", { fluorochromes: ["FL1-A", "NOPE"], matrix: [[1, 0], [0, 1]], source: "manual" }),
+    "an unknown fluorochrome must be refused",
+  );
+  throws(() => comp.parseSpilloverCsv(" ,FL1-A\nFL2-A,1.0\n"), /match/, "CSV row labels must match the header");
+
+  // 7. The Rust mirror: apply/clear/get + Tauri commands + tests.
+  const flowStore = readFileSync("src-tauri/src/flow_store.rs", "utf8");
+  ok(flowStore.includes("fn apply_compensation"), "flow_store.rs must expose apply_compensation");
+  ok(flowStore.includes("flow_apply_compensation"), "flow_store.rs must expose the flow_apply_compensation command");
+  ok(flowStore.includes("flow_get_compensation"), "flow_store.rs must expose the flow_get_compensation command");
+  ok(flowStore.includes("flow_clear_compensation"), "flow_store.rs must expose the flow_clear_compensation command");
+  ok(flowStore.includes("f2a-multi-type.fcs"), "the Rust tests must load the multi-type fixture");
+  ok(flowStore.includes("87.602"), "the Rust tests must assert the 87.60202 oracle value");
+  const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(mainRs.includes("flow_store::flow_apply_compensation"), "main.rs must register flow_apply_compensation");
+  ok(mainRs.includes("flow_store::flow_clear_compensation"), "main.rs must register flow_clear_compensation");
+
+  // 8. The MCP slice: titer_apply_flow_compensation + the flow group,
+  //    the TS executor + dispatch branch + node update, 82 tools.
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes("titer_apply_flow_compensation"), "mcp.rs must define the titer_apply_flow_compensation tool");
+  ok(mcp.includes("ApplyFlowCompensationArgs"), "mcp.rs must define the ApplyFlowCompensationArgs schema");
+  ok(mcp.includes("apply-flow-compensation"), "mcp.rs must dispatch the apply-flow-compensation job action");
+  ok(mcp.includes("82 tools"), "mcp.rs header must count 82 tools after F2a");
+  const mcpFlow = readFileSync("src/store/mcp-flow.ts", "utf8");
+  ok(mcpFlow.includes("executeApplyFlowCompensation"), "src/store/mcp-flow.ts must execute the apply-flow-compensation job");
+  const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
+  ok(dispatch.includes('case "apply-flow-compensation"'), "mcp-dispatch.ts must have the apply-flow-compensation branch");
+  ok(dispatch.includes("updateFlowSampleCompensation"), "mcp-dispatch.ts must pass updateFlowSampleCompensation to the job");
+  ok(
+    readFileSync("src/store/use-project-store.tsx", "utf8").includes("updateFlowSampleCompensation"),
+    "the store must provide an updateFlowSampleCompensation action",
+  );
+  ok(
+    readFileSync("tests/mcp-coverage-180.ts", "utf8").includes("EXPECTED_TOOL_COUNT = 82"),
+    "mcp-coverage-180.ts must expect 82 tools after F2a",
+  );
 });
 
 

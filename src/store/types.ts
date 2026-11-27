@@ -7,8 +7,9 @@ import type { SummaryFormat } from "../lib/summary-format";
 import type { CellBackgroundColor } from "../lib/cell-colors";
 import type { PluginParamValues } from "../plugins/parameters";
 import type { PluginAnalysisResult } from "../plugins/registry";
+import type { FlowSampleRef } from "../flow/sample";
 
-export type NodeType = "table" | "analysis" | "graph" | "figure" | "info";
+export type NodeType = "table" | "analysis" | "graph" | "figure" | "info" | "sample";
 /** What an item is, as menus name it ("Delete Graph…"). */
 export const NODE_NAMES: Record<NodeType, string> = {
   table: "Table",
@@ -16,6 +17,7 @@ export const NODE_NAMES: Record<NodeType, string> = {
   graph: "Graph",
   figure: "Figure",
   info: "Info Sheet",
+  sample: "Sample",
 };
 export type TableType = "column" | "xy" | "grouped" | "nested" | "multiple" | "contingency" | "survival" | "parts-of-whole";
 /** Tables whose first data column is X (a Survival table's is the time). */
@@ -80,7 +82,15 @@ export type GraphType =
   | "mv-before-after-strip"
   | "mv-box-whisker"
   | "mv-violin"
-  | "mv-bar-chart";
+  | "mv-bar-chart"
+  // FlowJo graphs (seq 442): registered in the GraphModule registry but
+  // offered in NO picker (see GRAPH_OPTIONS_BY_TABLE) while the flow
+  // toggle is off — opt-in, off by default.
+  | "flow-dot-plot"
+  | "flow-density-plot"
+  | "flow-contour-plot"
+  | "flow-pseudocolor-plot"
+  | "flow-histogram";
 
 /** The choices of a graph's options, one list each: the types come from them, and a
  *  file's value outside them is read as the option's default. */
@@ -184,6 +194,10 @@ export const GRAPH_LIMITS = {
    *  clamped to the components the linked PCA actually reported. */
   pcaX: { min: 1, max: 20 },
   pcaY: { min: 1, max: 20 },
+  /** A flow plot's density-grid / histogram bins per axis (seq 442). */
+  flowBins: { min: 8, max: 256 },
+  /** A flow scatter overlay's dot cap — never above the scatter cap. */
+  flowDownsampleCap: { min: 100, max: 5000 },
 } as const;
 
 /** An axis's number format (Prism's Format Axes "Number format"): automatic
@@ -293,6 +307,16 @@ export interface GraphOptions {
   xMaxConstant?: string;
   // A histogram's bin width, in the values' units; omitted (or 0 and under), R's own bins.
   binWidth?: number;
+  // FlowJo (flow) graphs (seq 442): a flow graph reads its events from the
+  // event store (src/flow/store.ts), not from a table — these options name
+  // the sample and the parameters it plots. Omitted: the graph draws its
+  // axes only. `flowBins` is the density-grid / histogram bin count;
+  // `flowDownsampleCap` caps the plotted dots (never 1:1 at 100k events).
+  flowSampleId?: string;
+  flowXParam?: string;
+  flowYParam?: string;
+  flowBins?: number;
+  flowDownsampleCap?: number;
   // Significance annotations (Column and grouped graphs): read sibling analyses'
   // pairwise comparisons and draw brackets. `sigAnalysisId` is the (legacy) single
   // source analysis node; `sigAnalysisIds` names several — a grouped-scatter's
@@ -1086,6 +1110,17 @@ export interface ProjectNode {
   dpi?: Resolution;
   /** Info sheet nodes only: its constants, notes, and linked table. */
   info?: InfoSheetData;
+  /** Flow sample nodes only (seq 441): the sample's reference — the FCS
+   *  file path, parameter metadata, and placeholders for compensation,
+   *  transforms and gating. Event data NEVER lives here (see
+   *  `src/flow/sample.ts`); the events live in the columnar store.
+   *  Omitted on every other kind. */
+  flowSample?: FlowSampleRef;
+  /** Flow-derived nodes only (seq 441): the sample ids a summary table or
+   *  population-stats analysis was derived from, so the link back to the
+   *  event store stays explicit. Omitted when the node derives from no
+   *  sample. */
+  flowSourceSampleIds?: string[];
 }
 
 /** One panel of a multi-panel figure: a reference to an existing graph node,

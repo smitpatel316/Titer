@@ -50,6 +50,7 @@ import {
   Z_WITHIN,
 } from "../store/types";
 import { isCellBackgroundColor, parseResultCellBackgroundKey, type CellBackgroundColor } from "./cell-colors";
+import { readFlowSample } from "../flow/sample";
 import {
   type AnalysisParams,
   type AnalysisResult,
@@ -266,7 +267,7 @@ const NODE_KEYS = Object.keys({
   sourceTableIds: 1,
   frozenData: 1, frozenDataByGraph: 1, frozenDataByTable: 1, drawingObjects: 1,
   panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, figureBackground: 1, dpi: 1,
-  info: 1,
+  info: 1, flowSample: 1, flowSourceSampleIds: 1,
 } satisfies Record<keyof ProjectNode, 1>);
 // prettier-ignore
 const DATA_KEYS = Object.keys({
@@ -284,6 +285,7 @@ const OPTIONAL_OPTIONS = {
   yMinConstant: "text", yMaxConstant: "text", xMinConstant: "text", xMaxConstant: "text",
   sigAnalysisId: "text", sigAnalysisIds: "texts", sigPairs: "texts", regAnalysisId: "text", demingAnalysisId: "text", coxAnalysisId: "text", ttestAnalysisId: "text", poissonAnalysisId: "text", smoothAnalysisId: "text", pcaAnalysisId: "text", kmeansAnalysisId: "text", hclustAnalysisId: "text", monteCarloAnalysisId: "text", xVariable: "text", yVariable: "text", bubbleSizeVariable: "text", bubbleColorVariable: "text",
   volcanoX: "text", volcanoY: "text", volcanoLabel: "text", volcanoGroupA: "text", volcanoGroupB: "text", rightYDataset: "text", y2Label: "text",
+  flowSampleId: "text", flowXParam: "text", flowYParam: "text", flowBins: "number", flowDownsampleCap: "number",
   palette: "palette", series: "styles", points: "pointStyles", outlineColor: "color", pointOutlineColor: "color", errorColor: "color",
   legend: "place", note: "place", refLines: "refLines", sets: "texts",
   xNumberFormat: "numberFormat", yNumberFormat: "numberFormat", y2NumberFormat: "numberFormat",
@@ -1934,7 +1936,7 @@ function readDrawingObjects(raw: unknown, label: string, issues: ProjectIssue[])
   return objects.length ? objects : undefined;
 }
 
-const NODE_TYPES: NodeType[] = ["table", "analysis", "graph", "figure", "info"];
+const NODE_TYPES: NodeType[] = ["table", "analysis", "graph", "figure", "info", "sample"];
 
 /** An info sheet as a file holds it, forgivingly: constants read as names +
  *  string values, notes as text, and the linked table as an id (checked
@@ -2201,6 +2203,16 @@ function readNode(
     const figureObjects = readDrawingObjects(n.drawingObjects, node.name, issues);
     if (figureObjects) node.drawingObjects = figureObjects;
     else delete node.drawingObjects;
+  } else if (type === "sample") {
+    // A sample lives at the project root, never under a table — and it is
+    // only a sample when its reference reads: a reference without an id or
+    // without parameters is not a sample, and the node is dropped (seq 441).
+    // The events themselves are never in the file; the reference is the
+    // file path + metadata, and the store reloads from it on demand.
+    node.parentId = null;
+    const flowSample = readFlowSample(n.flowSample);
+    if (!flowSample) return null;
+    node.flowSample = flowSample;
   } else {
     node.graphType = lower(n.graphType) as ProjectNode["graphType"];
     node.graphOptions = readOptions(n.graphOptions, node.name, issues);
@@ -2244,6 +2256,17 @@ function readNode(
     if (graphObjects) node.drawingObjects = graphObjects;
     else delete node.drawingObjects;
   }
+  // A flow-derived node names the samples it came from: ids only,
+  // de-duplicated — anything else is a hand edit, dropped rather than
+  // trusted. The sample reference itself belongs to sample nodes alone.
+  if (Array.isArray(n.flowSourceSampleIds)) {
+    const ids = [...new Set(n.flowSourceSampleIds.filter((id): id is string => typeof id === "string" && id !== ""))];
+    if (ids.length) node.flowSourceSampleIds = ids;
+    else delete node.flowSourceSampleIds;
+  } else {
+    delete node.flowSourceSampleIds;
+  }
+  if (type !== "sample") delete node.flowSample;
   if (type !== "table") delete node.transform; // a table's alone
   if (type !== "analysis") {
     // Orphaned results belong to analyses only: a hand-edited file can't
@@ -2504,13 +2527,13 @@ export function parseProjectFile(
   /** The item with this id: one of the file's own, never a name every object has ("constructor"). */
   const nodeOf = (id: unknown) => (isIn(nodes, id) ? nodes[id as string] : undefined);
   // Analyses and graphs belong to a table: drop those whose table didn't survive.
-  // Figures and info sheets live at the project root (a figure may span tables),
+  // Figures, info sheets and samples live at the project root (a figure may span tables),
   // so they stay.
   // Orphaned analyses stay too (v2 item 5): their table is gone, and the saved
   // result is what they show. A flag that contradicts a surviving table is
   // cleared instead — the analysis still has its table, so it isn't orphaned.
   for (const node of Object.values(nodes)) {
-    if (node.type === "figure" || node.type === "info") continue;
+    if (node.type === "figure" || node.type === "info" || node.type === "sample") continue;
     if (node.type === "analysis" && node.orphaned) {
       if (nodeOf(node.parentId)?.type === "table") {
         delete node.orphaned;
@@ -2565,15 +2588,17 @@ export function parseProjectFile(
   const ids = (v: unknown) => (Array.isArray(v) ? v.filter((id): id is string => typeof id === "string") : []);
   const tables = Object.values(nodes).filter((n) => n.type === "table");
   const orphans = Object.values(nodes).filter((n) => n.type === "analysis" && n.orphaned);
+  const samples = Object.values(nodes).filter((n) => n.type === "sample");
   // A file with no tables at all still opens when its orphaned results survive
-  // (a project whose tables were all deleted keeps its results, as in Prism);
-  // with neither, there is nothing to show.
-  if (tables.length === 0 && orphans.length === 0)
+  // (a project whose tables were all deleted keeps its results, as in Prism),
+  // or when it holds flow samples (a sample-only project is a real project:
+  // the samples are the work); with none of those, there is nothing to show.
+  if (tables.length === 0 && orphans.length === 0 && samples.length === 0)
     return { error: "This project file has no readable data tables." };
   // Saved order first, then anything the order missed: tables, then info
   // sheets, then figures (figures live at the project root, after the
-  // tables, in creation order), then orphaned analyses (they live at the
-  // project root too).
+  // tables, in creation order), then samples (also root-level, in creation
+  // order), then orphaned analyses (they live at the project root too).
   const figures = Object.values(nodes).filter((n) => n.type === "figure");
   const infos = Object.values(nodes).filter((n) => n.type === "info");
   const rootOrder = [
@@ -2584,6 +2609,8 @@ export function parseProjectFile(
       ...infos.map((f) => f.id),
       ...ids(project.rootOrder).filter((id) => nodeOf(id)?.type === "figure"),
       ...figures.map((f) => f.id),
+      ...ids(project.rootOrder).filter((id) => nodeOf(id)?.type === "sample"),
+      ...samples.map((s) => s.id),
       ...ids(project.rootOrder).filter((id) => nodeOf(id)?.type === "analysis" && nodeOf(id)?.orphaned),
       ...orphans.map((o) => o.id),
     ]),
