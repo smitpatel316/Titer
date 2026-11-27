@@ -1,15 +1,17 @@
-# Titer (Helix) Bug Report — Round 2 (Recheck 3 at `d4b45130`)
+# Titer (Helix) Bug Report — Round 2 (Recheck 4 at `c54f5954`)
 
-Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findings), rechecked at `b8a2528` (+14 findings `#68`–`#81`), at `8c877d8` (+16 findings `#82`–`#97`), and at `HEAD` `d4b45130` across the 69 commits in `60f3da5..d4b45130` (+14 findings `#98`–`#111`).
+Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findings), rechecked at `b8a2528` (`#68`–`#81`), at `8c877d8` (`#82`–`#97`), at `d4b45130` (`#98`–`#111`), and at `HEAD` `c54f5954` across the 90 commits in `fbc68961..c54f5954` (+4 findings `#112`–`#115`).
 
-## Recheck Status at `d4b45130`
+## Recheck Status at `c54f5954`
 
 - **Round 1 (`85f6c91`, 28 issues)**: **28 of 28** fixed.
-- **Round 2 (`d44c1da`, #1–#67)**: **28 Fixed** (`#2`, `#3`, `#5`, `#8`, `#12`, `#13`, `#14`, `#15`, `#21`, `#27`, `#30`, `#31`, `#34`, `#36`, `#38`, `#39`, `#42`, `#43`, `#48`, `#49`, `#54`, `#55`, `#56`, `#61`, `#62`, `#64`, `#66`, `#67` — +10 newly fixed at `d4b45130`), **10 Partially Fixed** (`#1`, `#6`, `#7`, `#17`, `#23`, `#24`, `#28`, `#29`, `#37`, `#63`), **29 Open**.
-- **Recheck 1 (`b8a2528`, #68–#81)**: **11 Fixed** (`#68`, `#69`, `#70`, `#71`, `#74`, `#75`, `#76`, `#77`, `#78`, `#79`, `#81`), **3 Partially Fixed** (`#72`, `#73`, `#80`), **0 Open**.
-- **Recheck 2 (`8c877d8`, #82–#97)**: **12 Fixed** (`#83`, `#84`, `#85`, `#86`, `#87`, `#88`, `#91`, `#92`, `#93`, `#94`, `#96`, `#97`), **4 Partially Fixed** (`#82`, `#89`, `#90`, `#95`), **0 Open**.
-- **New in `60f3da5..d4b45130` (#98–#111)**: **14 New** (**5 High**, **5 Medium**, **4 Low**).
-- **Active Total**: **60 Active** (**34 High**, **21 Medium**, **5 Low**; **51 Fixed** out of 111 total).
+- **Round 2 (`d44c1da`, #1–#67)**: **42 Fixed** (`#2`, `#3`, `#5`, `#8`, `#12`, `#13`, `#14`, `#15`, `#16`, `#18`, `#21`, `#22`, `#26`, `#27`, `#30`, `#31`, `#32`, `#34`, `#35`, `#36`, `#38`, `#39`, `#40`, `#41`, `#42`, `#43`, `#44`, `#48`, `#49`, `#51`, `#53`, `#54`, `#55`, `#56`, `#58`, `#59`, `#61`, `#62`, `#64`, `#65`, `#66`, `#67` — +14 newly fixed at `c54f5954`), **24 Partially Fixed** (`#1`, `#6`, `#7`, `#9`, `#10`, `#11`, `#17`, `#19`, `#20`, `#23`, `#24`, `#25`, `#28`, `#29`, `#33`, `#37`, `#45`, `#46`, `#47`, `#50`, `#52`, `#57`, `#60`, `#63`), **1 Open** (`#4`).
+- **Recheck 1 (`b8a2528`, #68–#81)**: **11 Fixed**, **3 Partially Fixed** (`#72`, `#73`, `#80`), **0 Open**.
+- **Recheck 2 (`8c877d8`, #82–#97)**: **12 Fixed**, **4 Partially Fixed** (`#82`, `#89`, `#90`, `#95`), **0 Open**.
+- **Recheck 3 (`d4b45130`, #98–#111)**: **5 Fixed** (`#102`, `#104`, `#106`, `#109`, `#111`), **8 Partially Fixed** (`#98`, `#99`, `#101`, `#103`, `#105`, `#107`, `#108`, `#110`), **1 Open** (`#100` — merged in `1f5af2e9`, reverted in `34f50c12`).
+- **New in `fbc68961..c54f5954` (#112–#115)**: **4 New** (**2 High**, **2 Medium**).
+- **Active Total**: **45 Active** (**27 High**, **16 Medium**, **2 Low**; **70 Fixed** out of 115 total).
+  - *Note*: Several Partial entries below carry high-priority regressions introduced in the 2.0.4 batch (`#45` macOS OAuth `O_NONBLOCK`, `#98` Linux `xdg-open --`, `#47` `abandon_window` closing already-open windows, `#33` `convertTableToNested` wiping `cachedResult`, `#107` `noncentralTChiSquareLimit` 0.17 CDF error, `#103` `fitLinear` all-`NaN` on identical X, `#25` ragged grouped excluded-cell cursor drift, and `#11` release CSP / same-`pluginId` remount).
 
 ---
 
@@ -25,63 +27,63 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 | 6 | **High** | Partial | Plugins / Security | Plugin static-gate bypasses (`__TAURI_INTERNALS__` regex typo, `Function()`, R backtick/dynamic dispatch) and `.GlobalEnv` escape in shared WebR |
 | 7 | **High** | Partial | Plugins / Security | Path traversal in `manifest.entry` / zip-slip entries in `loadPluginFromZip`, plus unverified manifest ID/version on marketplace install & update |
 | 8 | **High** | Fixed | Server / Security | Feedback server global rate limit can be exhausted by a single per-IP blocked attacker, plus unbounded rate-limiter maps and dedupe TOCTOU race |
-| 9 | **High** | Open | Cloud Sync | Cloud conflict "Overwrite" always fails (`expectedVersion ?? handle.version`), while offline-opened remote files silently overwrite remote edits |
-| 10 | **High** | Open | Cloud Auth | Concurrent Box token refresh deletes fresh single-use tokens and signs user out; deleted tokens leave permanent zombie accounts |
-| 11 | **High** | Open | Plugins / Isolation | `PluginIsolationWebview` is non-functional in both dev (`<StrictMode>` teardown) and release builds (Tauri CSP blocks `srcDoc` inline `<script>`s) |
+| 9 | **High** | Partial | Cloud Sync | Cloud conflict "Overwrite" always fails (`expectedVersion ?? handle.version`), while offline-opened remote files silently overwrite remote edits |
+| 10 | **High** | Partial | Cloud Auth | Concurrent Box token refresh deletes fresh single-use tokens and signs user out; deleted tokens leave permanent zombie accounts |
+| 11 | **High** | Partial | Plugins / Isolation | `PluginIsolationWebview` is non-functional in both dev (`<StrictMode>` teardown) and release builds (Tauri CSP blocks `srcDoc` inline `<script>`s) |
 | 12 | **High** | Fixed | Marketplace / Plugins | Enabled marketplace plugins are never re-registered into the live plugin registry on app restart |
 | 13 | **High** | Fixed | UI / Scripts | `ScriptDialog` crashes React on opening File ▸ Run Script… (conditional `useState` after early `return null`) |
 | 14 | **High** | Fixed | UI / Wizard | `AnalysisWizard` crashes with uncaught `TypeError` on Change Parameters… (`⌘T`) whenever a wizard has 0 questions for the current table |
 | 15 | **High** | Fixed | UI / Analyses | `AnalysisView` Cancel button and elapsed-time/queue display are unreachable dead code while an analysis is running |
-| 16 | **High** | Open | UI / Import | `ImportDialog` overwrites the parent table when "Create a new table" is shown selected (`insertionPoint === null`), drops all edits on `Enter` (stale closure), and strips the whole file as Info/Notes on `fromRow` |
+| 16 | **High** | Fixed | UI / Import | `ImportDialog` overwrites the parent table when "Create a new table" is shown selected (`insertionPoint === null`), drops all edits on `Enter` (stale closure), and strips the whole file as Info/Notes on `fromRow` |
 | 17 | **High** | Partial | Graphs / Store | Freezing a graph does not freeze it — `mergedGraphData` always reads live `parent.data` and overrides `frozenData` |
-| 18 | **High** | Open | Store / Duplicate | `duplicateFamily` fails to remap analysis links in cloned graphs, binding duplicated graphs to the original table's analyses |
-| 19 | **High** | Open | Store / Document | `use-document.ts` reads stale `latest.current` immediately after `dispatch`, dropping `runOnClose` script changes on close and skipping crash-recovery backup refresh in `revertToSaved` |
-| 20 | **High** | Open | Project File | Save/load round-trip regressions in `project-file.ts`: frozen graphs/figures always reopen `updated: true`, blank/image figure panels trigger false "missing graph" warnings, and `rootOrder`/`orphanedDataSet` mismatches |
+| 18 | **High** | Fixed | Store / Duplicate | `duplicateFamily` fails to remap analysis links in cloned graphs, binding duplicated graphs to the original table's analyses |
+| 19 | **High** | Partial | Store / Document | `use-document.ts` reads stale `latest.current` immediately after `dispatch`, dropping `runOnClose` script changes on close and skipping crash-recovery backup refresh in `revertToSaved` |
+| 20 | **High** | Partial | Project File | Save/load round-trip regressions in `project-file.ts`: frozen graphs/figures always reopen `updated: true`, blank/image figure panels trigger false "missing graph" warnings, and `rootOrder`/`orphanedDataSet` mismatches |
 | 21 | **High** | Fixed | Calculated Variables | `calcvars.ts`: `NOT` binds tighter than comparisons/arithmetic (inverting `WHERE NOT …` and `IF(NOT …)`), and `renameVariableInFormula` writes unbracketed names (breaking formulas or silently substituting `Math.E`/`Math.PI`) and corrupts scientific notation |
-| 22 | **High** | Open | Calculated Variables | `calcvars.ts`: stale `rawTextAt` for chained calculated variables (`COUNTA`, `OVER`), silent wrong/blank results for expression aggregates (`MIN(A+B)`, `MEAN(A+B)`), and `RANK` returning `0.5` on excluded rows |
+| 22 | **High** | Fixed | Calculated Variables | `calcvars.ts`: stale `rawTextAt` for chained calculated variables (`COUNTA`, `OVER`), silent wrong/blank results for expression aggregates (`MIN(A+B)`, `MEAN(A+B)`), and `RANK` returning `0.5` on excluded rows |
 | 23 | **High** | Partial | Tabular Import | `.xlsx` import misclassifies custom number formats containing `[Red]`, currency codes, or unit suffixes (`"nM"`, `"mg/mL"`) as dates — silently corrupting numeric data into 1900-era date strings |
 | 24 | **High** | Partial | Tabular Import | `.xlsx` / CSV importer corrupts rows on self-closing `<row .../>` and `<t/>` tags, crashes on malformed attributes/entities, and overflows the call stack before `MAX_IMPORT_ROWS` truncation |
-| 25 | **High** | Open | Prism `.prism` Import | `.prism` import drops `summaryFormat` on grouped summary tables (treating Mean/SD/N as raw replicates) and fails to sanitize `:` or pad ragged subcolumns |
-| 26 | **High** | Open | Prism `.prism`/`.pzfx` Export | Native Titer XY replicate (`A:Y1`, `A:Y2`) and XY summary (`A:Mean`, `A:SD`, `A:N`) tables lose their grouping, `summaryFormat`, and nonlinear-regression dataset links in both `.prism` and `.pzfx` exports |
+| 25 | **High** | Partial | Prism `.prism` Import | `.prism` import drops `summaryFormat` on grouped summary tables (treating Mean/SD/N as raw replicates) and fails to sanitize `:` or pad ragged subcolumns |
+| 26 | **High** | Fixed | Prism `.prism`/`.pzfx` Export | Native Titer XY replicate (`A:Y1`, `A:Y2`) and XY summary (`A:Mean`, `A:SD`, `A:N`) tables lose their grouping, `summaryFormat`, and nonlinear-regression dataset links in both `.prism` and `.pzfx` exports |
 | 27 | **High** | Fixed | Vector Export (EPS) | EPS vector export produces invalid/corrupted PostScript (`nocurrentpoint` crash on text + leaked `clip` path) |
 | 28 | **High** | Partial | Vector Export (PDF) | PDF vector export corrupts all non-ASCII text (`−`, `R²`, `±`, `µM`, `°C`, `×`) by writing UTF-16BE bytes into single-byte Type1 `Tj` streams |
 | 29 | **High** | Partial | Vector Export (PDF/EPS) | Vector PDF/EPS export silently ignores Plotly CSS `px` units (`font-size`, `stroke-width`, `stroke-dasharray`), erases parent `<g>` opacity, and `grayscaleFigure` rewrites series labels matching CSS color names |
 | 30 | **High** | Fixed | Vector Export (Figures) | Multi-panel Figure vector PDF and EPS exports are shrunk to 75% (`0.75×`) of configured physical dimensions |
 | 31 | **High** | Fixed | Graphs (Grouped) | `grouped-bars-scatter` ("Bars with individual points") plots numeric scatter X coordinates on a categorical X axis and duplicates points/legend entries |
-| 32 | **High** | Open | Graphs (Summary) | Summary tables draw no SEM error bars on `"mean-sem"` tables and drop asymmetric lower error bars (`errorMinus`) on XY summary graphs |
-| 33 | **High** | Open | MCP Server | `titer_read_results` returns stale cached results after table mutations and returns `not_computed` for frozen/orphaned/cloned analyses with saved `cachedResult` |
+| 32 | **High** | Fixed | Graphs (Summary) | Summary tables draw no SEM error bars on `"mean-sem"` tables and drop asymmetric lower error bars (`errorMinus`) on XY summary graphs |
+| 33 | **High** | Partial | MCP Server | `titer_read_results` returns stale cached results after table mutations and returns `not_computed` for frozen/orphaned/cloned analyses with saved `cachedResult` |
 | 34 | **High** | Fixed | MCP / Param Validation | `validateAnalysisParams` omits 11 per-analysis enum narrowings from `analysis-params-schema.json`, allowing cross-family params that silently run the wrong statistical test or crash R |
-| 35 | **High** | Open | XY Graphs / Overlays | `addFittedCurve` draws all-`NaN` curves (no line rendered) for every multi-Y (`params.ys`) and curve-comparison (`params.compareWith`) nonlinear regression |
+| 35 | **High** | Fixed | XY Graphs / Overlays | `addFittedCurve` draws all-`NaN` curves (no line rendered) for every multi-Y (`params.ys`) and curve-comparison (`params.compareWith`) nonlinear regression |
 | 36 | **High** | Fixed | XY Stats (Nonlinear) | Raw-X sigmoidal models (`sigmoidal-4pl-x`, `absolute-ic50-x`, `asymmetric-5pl-x`, `agonist-4pl-normalized-x`) force `Y = Bottom` (or `0`) at `X = 0` in R even when `HillSlope < 0`, corrupting falling-curve fits and disagreeing with TS `evaluate()` |
 | 37 | **High** | Partial | XY Stats (Nonlinear) | `applyFitOptions` (`transformNlsCall`) silently strips built-in `lower=`/`upper=` bounds on 17+ models whenever weights, fixed params, bounds, or robust/Poisson IRLS are used — and crashes on `logistic-growth` / `gompertz-growth` |
 | 38 | **High** | Fixed | XY Stats (Nonlinear) | Weighted, robust, and Poisson fits on log-Y models (`semilog-y-log`, `log-log-line`, `exponential-growth-log`) compute `R²` by dividing `log(Y)`-scale SS by raw `Y`-scale SST, and Poisson IRLS uses `1/log(Y)` weights |
 | 39 | **High** | Fixed | XY Stats (Nonlinear) | `ecAnything` crashes R (`subscript out of bounds`) when `params.ecx` is requested on competition models, and `runGlobalNonlinear` mislabels shared `IC50`/`IC50Hi`/`LogKd` midpoints as `"EC50"` |
-| 40 | **High** | Open | XY Stats (User-Defined) | `user-defined.ts` accepts R reserved keywords (`NA`, `Inf`, `NULL`, `TRUE`, `for`, `in`, …) causing R syntax errors, and naming a parameter `HillSlope` causes the fitted curve overlay to render nothing (all `NaN`) |
-| 41 | **High** | Open | Multiple Stats | Multiple Linear Regression (`multiple-regression.ts`) miscomputes VIFs, crashes with R syntax error when only categorical predictors are present, and passes raw unaligned columns to `describe()` |
+| 40 | **High** | Fixed | XY Stats (User-Defined) | `user-defined.ts` accepts R reserved keywords (`NA`, `Inf`, `NULL`, `TRUE`, `for`, `in`, …) causing R syntax errors, and naming a parameter `HillSlope` causes the fitted curve overlay to render nothing (all `NaN`) |
+| 41 | **High** | Fixed | Multiple Stats | Multiple Linear Regression (`multiple-regression.ts`) miscomputes VIFs, crashes with R syntax error when only categorical predictors are present, and passes raw unaligned columns to `describe()` |
 | 42 | **High** | Fixed | Grouped Stats | Three-way ANOVA Games–Howell post-hoc crashes R (`object 'Infinity' not found`) when compared cells have zero variance (identical replicates) |
 | 43 | **High** | Fixed | Sample Size & Power | Sample Size & Power `solveEffect` fails for all valid effects in the upper doubling band (e.g. Pearson `r ∈ (0.8, 1)`, one-proportion `h ∈ (1.6, π]`, t/ANOVA/χ² `∈ (6.4, 10]`), and `power <= alpha` returns bogus `effect ≈ 0` |
-| 44 | **Medium** | Open | Tauri Capabilities | Missing `core:window:allow-hide` and `core:window:allow-set-focus` capabilities silently break BUG-12 close-quiesce mitigation and non-macOS Window menu switcher |
-| 45 | **Medium** | Open | Cloud Auth (Box) | Box OAuth loopback flow has bind-after-open race, aborts on single non-callback socket, blocks Tokio worker, and leaks thread/port on timeout |
-| 46 | **Medium** | Open | Auto-Updater | Auto-updater `download_update` and `apply_update` block the macOS main thread and accept arbitrary HTTPS URLs / unverified bundles |
-| 47 | **Medium** | Open | MCP Server | Failed `titer_open_project`, `titer_import_prism`, `titer_create_project`, and `titer_cloud_download` leak a blank window and hijack `last_published` |
+| 44 | **Medium** | Fixed | Tauri Capabilities | Missing `core:window:allow-hide` and `core:window:allow-set-focus` capabilities silently break BUG-12 close-quiesce mitigation and non-macOS Window menu switcher |
+| 45 | **Medium** | Partial | Cloud Auth (Box) | Box OAuth loopback flow has bind-after-open race, aborts on single non-callback socket, blocks Tokio worker, and leaks thread/port on timeout |
+| 46 | **Medium** | Partial | Auto-Updater | Auto-updater `download_update` and `apply_update` block the macOS main thread and accept arbitrary HTTPS URLs / unverified bundles |
+| 47 | **Medium** | Partial | MCP Server | Failed `titer_open_project`, `titer_import_prism`, `titer_create_project`, and `titer_cloud_download` leak a blank window and hijack `last_published` |
 | 48 | **Medium** | Fixed | Export / Paths | Export tools fail with `"Titer can't access <path>"` whenever the output filename contains a dot (e.g. `Fig 1.2`) or on Windows paths with a dot in a parent directory |
 | 49 | **Medium** | Fixed | MCP Schema | `analysis-params-schema.json` omits `"none"` from `posthoc` enum for `nested-anova`/`multifactor-anova`, marks defaulted params required for `two-way-anova`/`rm-anova`, and duplicates `"xy"` in `nonlinear-regression.offered_on` |
-| 50 | **Medium** | Open | Graphs / Figures Export | `titer_export_all_graphs` and Figure exports omit `deps.run` / `rootOrder`; `buildGraphFigure` diverges from `GraphView` (drops `sourceTableIds`, `frozenData`, `sigAnalysisIds`, number/date formatting) |
-| 51 | **Medium** | Open | XY Graphs / Overlays | Replicate XY tables break `deming-overlay.ts` & `binding-curve.ts` overlays; `addLogisticCurve` queries three nonexistent stat labels (always displaying `—`) |
-| 52 | **Medium** | Open | Store / Transforms | Renaming a column/group blanks dependent `% of control` transformed tables, edits overwrite frozen transformed tables, and `followTable` misses newly added column-name fields |
-| 53 | **Medium** | Open | Tables / CalcVars | `permuteColumns`, `dropColumns`, and `removeCalculatedVariable` corrupt or leak `cellBackgrounds`, `linkedPaste`, `calculated`, `decimals`, `variableTypes`, `labelVariable`, and `levelOrder` |
+| 50 | **Medium** | Partial | Graphs / Figures Export | `titer_export_all_graphs` and Figure exports omit `deps.run` / `rootOrder`; `buildGraphFigure` diverges from `GraphView` (drops `sourceTableIds`, `frozenData`, `sigAnalysisIds`, number/date formatting) |
+| 51 | **Medium** | Fixed | XY Graphs / Overlays | Replicate XY tables break `deming-overlay.ts` & `binding-curve.ts` overlays; `addLogisticCurve` queries three nonexistent stat labels (always displaying `—`) |
+| 52 | **Medium** | Partial | Store / Transforms | Renaming a column/group blanks dependent `% of control` transformed tables, edits overwrite frozen transformed tables, and `followTable` misses newly added column-name fields |
+| 53 | **Medium** | Fixed | Tables / CalcVars | `permuteColumns`, `dropColumns`, and `removeCalculatedVariable` corrupt or leak `cellBackgrounds`, `linkedPaste`, `calculated`, `decimals`, `variableTypes`, `labelVariable`, and `levelOrder` |
 | 54 | **Medium** | Fixed | Data Grid / Clipboard | Copying cells in Titer and pasting via Paste Special (default options) inserts a spurious column-header row |
 | 55 | **Medium** | Fixed | Prism `.pzfx` Import | `.pzfx` XML parser scrambles mixed-content `<Title>`/`<d>` tags (`H<Sub>2</Sub>O` → `"HO2"`), drops `<Font>`-wrapped `<Info>` text, double-decodes CDATA, and matches closing-tag prefixes |
 | 56 | **Medium** | Fixed | Prism Import | Scientific-notation comma-decimal numbers (e.g. `"4,096e+007"`, `"1,5e-3"`) are not normalized in `.pzfx` or `.prism` import and are silently dropped as non-numeric text |
-| 57 | **Medium** | Open | Prism Scripts | `prism-script.ts`: `DuplicateDataTable Clear` leaks phantom exclusions, `Import` at `row = 0` drops first CSV row, Survival tables mis-index Y columns by 1, `ExportTable All` without `SetPath` targets `/`, and script table mutations leave calculated variables & transformed tables stale |
-| 58 | **Medium** | Open | Prism Graph Regen | `applyRegenDecisions` mutates the project before validating later decisions (creating duplicate graphs on retry), and `mapSidecarGraph` ignores summary formats on grouped `.prism` tables |
-| 59 | **Medium** | Open | Multi-Table Graphs | `mergeGraphTables` skips the `summaryFormat` mismatch check for XY tables and silently drops extra Nested tables whose name contains `:` |
-| 60 | **Medium** | Open | Prism `.prism` Import | `.prism` import destroys line breaks in Info Sheet `notes` via `plainTitle()` and lacks bounds/type guards on malformed `document.json` / `content.json` and large row/column spreads |
+| 57 | **Medium** | Partial | Prism Scripts | `prism-script.ts`: `DuplicateDataTable Clear` leaks phantom exclusions, `Import` at `row = 0` drops first CSV row, Survival tables mis-index Y columns by 1, `ExportTable All` without `SetPath` targets `/`, and script table mutations leave calculated variables & transformed tables stale |
+| 58 | **Medium** | Fixed | Prism Graph Regen | `applyRegenDecisions` mutates the project before validating later decisions (creating duplicate graphs on retry), and `mapSidecarGraph` ignores summary formats on grouped `.prism` tables |
+| 59 | **Medium** | Fixed | Multi-Table Graphs | `mergeGraphTables` skips the `summaryFormat` mismatch check for XY tables and silently drops extra Nested tables whose name contains `:` |
+| 60 | **Medium** | Partial | Prism `.prism` Import | `.prism` import destroys line breaks in Info Sheet `notes` via `plainTitle()` and lacks bounds/type guards on malformed `document.json` / `content.json` and large row/column spreads |
 | 61 | **Medium** | Fixed | Stats Report | `report/conclusion.ts`, `report/checks.ts`, and `report/analyzed.ts` produce inverted/misleading conclusions and assumption checks (FDR `multiple-t-tests` always concludes "no difference", `compareModel` prints `"Y" and "undefined"`, `chi-square` trend uses omnibus Pearson P, `checks.ts` ignores weights & replicates, `analyzed.ts` ignores `chi-square` `sets` and misreports MV `linear-regression` X) |
 | 62 | **Medium** | Fixed | XY Stats (Nonlinear) | `AICc` in `enzyme-inhibition.ts` (and `nonlinear-regression.ts`) omits the residual-variance parameter (`+ 1`) from `k`; `interpolationCode` silently drops 95% CIs on tight positive-X ranges; multi-Y centered polynomials share only the first set's `centeredX` |
 | 63 | **Medium** | Partial | Sample Size & Power | `noncentralTCdf` underflows to `0` at `|δ| ≥ 38.57`, causing t-test power to jump discontinuously to `100%` and `solveN` to underestimate `n` at small `df` / strict `α` |
 | 64 | **Medium** | Fixed | Plugins / Marketplace | Plugin wizard `kind: "text"` questions reject all non-numeric text, and `MarketplaceDialog` pre-checks `"network"` (and all permissions) by default |
-| 65 | **Low** | Open | UI / Menus | UI/menu minor defects: duplicate Grubbs' `"Outliers by column"` table, duplicate `Edit ▸ Fill Down` menu item (first lacks `!activeTableFrozen`), `CmdOrCtrl+Alt+I` shortcut collision (`New Info Sheet…` vs `Inspector`), and stale `Change Parameters…` enabled state |
+| 65 | **Low** | Fixed | UI / Menus | UI/menu minor defects: duplicate Grubbs' `"Outliers by column"` table, duplicate `Edit ▸ Fill Down` menu item (first lacks `!activeTableFrozen`), `CmdOrCtrl+Alt+I` shortcut collision (`New Info Sheet…` vs `Inspector`), and stale `Change Parameters…` enabled state |
 | 66 | **Low** | Fixed | WebR / Survival | WebR / survival edge cases: `ensurePackages` doubles caller `timeoutMs` on claim timeout; `survival-analysis.ts` computes 2-group HR on `k ≥ 3` and returns `—` without explanation on disjoint risk sets |
 | 67 | **Low** | Fixed | Nested Tables (R1 #28) | [Carryover from Round 1 #28] Pasting wide data into a Nested table silently drops overflow columns without showing the `"Some Values Weren't Pasted"` notice (`columnsBeyond` omits `isNested(data)`) |
 | 68 | **High** | Fixed | Native Clipboard | `copy_pdf_to_clipboard` puts two separate `NSPasteboardItem`s on the macOS clipboard instead of one multi-flavour item |
@@ -114,20 +116,24 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 | 95 | **Medium** | Partial | Tabular Import | `parseXlsx` skips self-closing `<si/>` (and `<si ...>` with attributes) in `sharedStrings.xml`, shifting all subsequent cell strings off by 1, and concatenates `<rPh>` phonetic runs |
 | 96 | **Medium** | Fixed | WebR / Concurrency | `webr.ts` `resolveInEngine` fires an unconditional `releaseClaimCode(pending)` on claim timeout (`codes === null`), risking wiping another window's live claim |
 | 97 | **Low** | Fixed | Graphs / Tables Labels | `labelRuns` splits Unicode minus (`10^−6` → `10<sup>−</sup>6`) and collapses consecutive `_` runs (`ctrl_1_a` → `ctrl<sub>1a</sub>`) |
-| 98 | **High** | New | Native IPC / Security | `open_file` IPC permits arbitrary executable launch (no extension allowlist), Windows `cmd /C start` shell injection, and macOS `open` flag injection |
-| 99 | **High** | New | Data Grid / Tables | `pasteNames` (upstream 1.1.1) corrupts Nested tables (`isNested` omitted), drops column metadata/calculated formulas, and cross-renames lead/group collisions |
-| 100 | **High** | New | Graphs / Format Panel | Upstream 1.1.1 `axisKind` is not wired into `FormatPanel`: `rowsAt: "values"` and `histogram`/`qq-plot` lose X controls, `grouped-stacked`/`residuals` offer dead Log controls, `grouped-hbars` mislabels value axis as `"Y"`, and `scree-plot`/`dendrogram` misdeclare `XY_AXES` |
-| 101 | **High** | New | Graphs (Horizontal Bars) | Point labels on Horizontal Bars (`grouped-hbars`) with Log scale transform `y` instead of `x`, placing labels at `10^v` off-canvas and `NaN` on row 0 |
-| 102 | **High** | New | Column Stats (ANOVA) | `2db68ed1` ANOVA 13-digit centering missed `TukeyHSD` (making Tukey P values contradict centered Tukey CIs), plus Welch, Brown-Forsythe, linear trend, and post-hoc diffs |
-| 103 | **Medium** | New | XY Stats (Linear) | `2db68ed1` linear-regression centering missed `compare-slopes.ts`, `report/checks.ts`, and `regression-overlay.ts` (crashes or inflates graph CI bands on 13-digit data) |
-| 104 | **Medium** | New | Graphs (Grouped) | `valueXAxis` drops `options.gridX`, silently disabling X gridlines on Connected Lines with `rowsAt: "values"` |
-| 105 | **Medium** | New | UI / What's New | `isNewer` and `seenVersion` invert semver pre-release ordering (`2.0.2-rc.1 > 2.0.2`) and reject pre-release / uppercase-`V` seen strings |
-| 106 | **Medium** | New | Native Clipboard | `clipboard_text` (macOS) passes unchecked nullable `UTF8String` pointer to `CStr::from_ptr` in `unsafe` |
-| 107 | **Medium** | New | Math / Distributions | `noncentralTCdf` overflows `tt * tt` for `|t| ≥ 1.34e154` (returning `normalCdf(-delta)` instead of `1`/`0`) and `noncentralTTwinSeriesModeCentered` breaks at `|δ| ≥ 1e6` / large `df + δ` |
-| 108 | **Low** | New | UI / What's New | `WhatsNewDialog` `close()` unconditionally overwrites `titer.whats-new-seen` with the running version, regressing the seen marker after a downgrade |
-| 109 | **Low** | New | UI / Import | `openSourceFile` discards the specific Rust error string returned by `open_file` (`err instanceof Error` is `false` for Tauri string rejections) |
-| 110 | **Low** | New | Graphs / Ticks | `fitLabels` produces `dtick: NaN` on coincident adjacent ticks (`at[1] === at[0]`), and `graph-view.tsx` checks `!current` after `Plotly.relayout` instead of immediately after `Plotly.react` |
-| 111 | **Low** | New | XY Graphs / Overlays | `fitted-curve.ts` `x === 0` guard misses 4 other R-guarded raw-X ratio models (`agonist-3pl-x`, `agonist-3pl-normalized-x`, `biphasic-x`, `bell-shaped-x`) and `asymmetric-5pl-x` underflow at tiny `HillSlope` |
+| 98 | **High** | Partial | Native IPC / Security | `open_file` IPC permits arbitrary executable launch (no extension allowlist), Windows `cmd /C start` shell injection, and macOS `open` flag injection |
+| 99 | **High** | Partial | Data Grid / Tables | `pasteNames` (upstream 1.1.1) corrupts Nested tables (`isNested` omitted), drops column metadata/calculated formulas, and cross-renames lead/group collisions |
+| 100 | **High** | Open | Graphs / Format Panel | Upstream 1.1.1 `axisKind` is not wired into `FormatPanel`: `rowsAt: "values"` and `histogram`/`qq-plot` lose X controls, `grouped-stacked`/`residuals` offer dead Log controls, `grouped-hbars` mislabels value axis as `"Y"`, and `scree-plot`/`dendrogram` misdeclare `XY_AXES` |
+| 101 | **High** | Partial | Graphs (Horizontal Bars) | Point labels on Horizontal Bars (`grouped-hbars`) with Log scale transform `y` instead of `x`, placing labels at `10^v` off-canvas and `NaN` on row 0 |
+| 102 | **High** | Fixed | Column Stats (ANOVA) | `2db68ed1` ANOVA 13-digit centering missed `TukeyHSD` (making Tukey P values contradict centered Tukey CIs), plus Welch, Brown-Forsythe, linear trend, and post-hoc diffs |
+| 103 | **Medium** | Partial | XY Stats (Linear) | `2db68ed1` linear-regression centering missed `compare-slopes.ts`, `report/checks.ts`, and `regression-overlay.ts` (crashes or inflates graph CI bands on 13-digit data) |
+| 104 | **Medium** | Fixed | Graphs (Grouped) | `valueXAxis` drops `options.gridX`, silently disabling X gridlines on Connected Lines with `rowsAt: "values"` |
+| 105 | **Medium** | Partial | UI / What's New | `isNewer` and `seenVersion` invert semver pre-release ordering (`2.0.2-rc.1 > 2.0.2`) and reject pre-release / uppercase-`V` seen strings |
+| 106 | **Medium** | Fixed | Native Clipboard | `clipboard_text` (macOS) passes unchecked nullable `UTF8String` pointer to `CStr::from_ptr` in `unsafe` |
+| 107 | **Medium** | Partial | Math / Distributions | `noncentralTCdf` overflows `tt * tt` for `|t| ≥ 1.34e154` (returning `normalCdf(-delta)` instead of `1`/`0`) and `noncentralTTwinSeriesModeCentered` breaks at `|δ| ≥ 1e6` / large `df + δ` |
+| 108 | **Low** | Partial | UI / What's New | `WhatsNewDialog` `close()` unconditionally overwrites `titer.whats-new-seen` with the running version, regressing the seen marker after a downgrade |
+| 109 | **Low** | Fixed | UI / Import | `openSourceFile` discards the specific Rust error string returned by `open_file` (`err instanceof Error` is `false` for Tauri string rejections) |
+| 110 | **Low** | Partial | Graphs / Ticks | `fitLabels` produces `dtick: NaN` on coincident adjacent ticks (`at[1] === at[0]`), and `graph-view.tsx` checks `!current` after `Plotly.relayout` instead of immediately after `Plotly.react` |
+| 111 | **Low** | Fixed | XY Graphs / Overlays | `fitted-curve.ts` `x === 0` guard misses 4 other R-guarded raw-X ratio models (`agonist-3pl-x`, `agonist-3pl-normalized-x`, `biphasic-x`, `bell-shaped-x`) and `asymmetric-5pl-x` underflow at tiny `HillSlope` |
+| 112 | **High** | New | Grouped Stats (2-Way ANOVA) | Two-way ANOVA `runPosthoc` still computes uncentered `mean(a) - mean(b)` at `1e13` scale (4.76% error on all ordinary and RM sphericity-assumed post-hocs) |
+| 113 | **High** | New | Grouped Stats (3-Way ANOVA) | Three-way ANOVA `runPosthoc` computes uncentered `diff` and single-pass TS Games–Howell `variance()` at `1e13` scale (4.76% diff / 6.0% variance error) |
+| 114 | **Medium** | New | Nested Stats | Nested ANOVA post-hoc `diff` still subtracts raw uncentered `described[i].mean - described[j].mean` instead of `describe()`'s centered `diff(i, j)` |
+| 115 | **Medium** | New | XY Stats (Deming) | Deming regression TS `olsFit` (for `notes()`) and `demingProblem` still use single-pass uncentered sums (disagreeing with R OLS rows at `1e13` and letting constant `[0.1, 0.1, 0.1]` flow to all-`NaN` R output) |
 
 ---
 
@@ -302,8 +308,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 9: Cloud conflict "Overwrite" always fails (`expectedVersion ?? handle.version`), while offline-opened remote files silently overwrite remote edits
+### Issue 9 [PARTIALLY FIXED]: Cloud conflict "Overwrite" always fails (`expectedVersion ?? handle.version`), while offline-opened remote files silently overwrite remote edits
 - **Severity**: High
+- **Status**: Partially Fixed at `c54f5954` (core Overwrite `force=true`, cache `.meta.json` sidecar, unknown-version conflict, and MCP `force=false` fixed)
+- **Remaining at `c54f5954`**: `openOfflineCopy` (`src/store/use-document.ts:552-557`) falls back to `cachedVersion ?? handle.version` when loading a legacy cache with no `.meta.json` sidecar — when triggered via `RemotePickerDialog` (`src/components/remote-picker.tsx:100-112`, which populates `handle.version` from the online folder listing before disconnect), saving after reconnect stamps the remote's latest version onto older cached bytes and silently overwrites newer remote edits.
 - **Files**:
   - `src/lib/cloud.ts:225-242` (`writeFile`)
   - `src/store/use-document.ts:431, 500-527, 653-661, 705` (`saveRemote`, `openOfflineCopy`, `resolveConflict`, `openRemoteEntry`)
@@ -324,8 +332,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 10: Concurrent Box token refresh deletes fresh single-use tokens and signs user out; deleted tokens leave permanent zombie accounts
+### Issue 10 [PARTIALLY FIXED]: Concurrent Box token refresh deletes fresh single-use tokens and signs user out; deleted tokens leave permanent zombie accounts
 - **Severity**: High
+- **Status**: Partially Fixed at `c54f5954` (per-account cached `BoxClient`, `tokio::sync::Mutex` refresh serialization lock, and safe `cloud_disconnect` registry cleanup fixed in `src-tauri/src/cloud_box.rs` and `src-tauri/src/main.rs`)
+- **Remaining at `c54f5954`**: Concurrent `401` retries in `BoxClient::send_authed` (`src-tauri/src/cloud_box.rs:742-759`) unconditionally zero `tokens.expires_at_unix = 0` without checking whether `self.tokens` still holds the failing `token` (clobbering a freshly refreshed token's expiry); in `BoxClient::revoke` (`src-tauri/src/cloud_box.rs:1003, 1025`), early `?` on `load_byo_credentials` can skip `delete_tokens`.
 - **Files**:
   - `src-tauri/src/cloud_box.rs:543-601` (`BoxClient::from_account`, `BoxClient::access_token`)
   - `src-tauri/src/main.rs:1110-1128` (`cloud_provider`)
@@ -341,8 +351,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 11: `PluginIsolationWebview` is non-functional in both dev (`<StrictMode>` teardown) and release builds (Tauri CSP blocks `srcDoc` inline `<script>`s)
+### Issue 11 [PARTIALLY FIXED]: `PluginIsolationWebview` is non-functional in both dev (`<StrictMode>` teardown) and release builds (Tauri CSP blocks `srcDoc` inline `<script>`s)
 - **Severity**: High
+- **Status**: Partially Fixed at `c54f5954` (StrictMode mount/cleanup teardown fixed in `src/plugins/isolation-view.tsx:129-135` and `srcDoc` replaced by `public/plugin-isolation.html` + `public/plugin-isolation.js`)
+- **Remaining at `c54f5954`**: (1) In release builds, `<iframe sandbox="allow-scripts" src="/plugin-isolation.html">` (`src/plugins/isolation-view.tsx:144-145`) runs with an opaque `null` origin (no `allow-same-origin`), so Tauri's `script-src 'self'` CSP (`src-tauri/tauri.conf.json:39`) still refuses to load `./plugin-isolation.js` (`public/plugin-isolation.html:22`); (2) `key={session.pluginId}` (`isolation-view.tsx:135, 142`) never remounts the iframe or executes new `session.source` when `session` is replaced for the same `pluginId` (`public/plugin-isolation.js:40-41` ignores re-init).
 - **Files**:
   - `src/plugins/isolation-view.tsx:64-99`
   - `src/plugins/isolation.ts:193-199, 331-373`
@@ -428,8 +440,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 16: `ImportDialog` overwrites the parent table when "Create a new table" is shown selected (`insertionPoint === null`), drops all edits on `Enter` (stale closure), and strips the whole file as Info/Notes on `fromRow`
+### Issue 16 [FIXED]: `ImportDialog` overwrites the parent table when "Create a new table" is shown selected (`insertionPoint === null`), drops all edits on `Enter` (stale closure), and strips the whole file as Info/Notes on `fromRow`
 - **Severity**: High
+- **Status**: Fixed at `c54f5954` (`src/views/tables/import-dialog.tsx:197-204, 253-254, 277-296, 850, 888` handles `insertionPoint === null`, keeps latest `confirm`/`onCancel` via refs, and initializes `fromRow` end-row state)
 - **Files**:
   - `src/views/tables/import-dialog.tsx:210-255, 582-600, 788-793, 826-831`
   - `src/components/app-shell.tsx:337-350`
@@ -453,7 +466,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 ### Issue 17 [PARTIALLY FIXED]: Freezing a graph does not freeze it — `mergedGraphData` always reads live `parent.data` and overrides `frozenData`
 - **Severity**: High
 - **Status**: Partially Fixed at `d4b45130` (`setGraphFrozen` snapshots extra `sourceTableIds` into `frozenDataByTable` at `src/store/use-project-store.tsx:757-763`, `mergedGraphData` reads `graph.frozenDataByTable` at `src/lib/multi-table.ts:106`, and `GraphView` uses `overlayAnalysisData` at `src/views/graphs/graph-view.tsx:452`)
-- **Remaining at `d4b45130`**: (1) `buildGraphFigure` (`src/views/graphs/graph-figure.ts:194-200, 367, 424`) still reads `parent.data`/`graph.frozenData` directly rather than `mergedGraphData` and `overlayAnalysisData` (already open under `#50`); (2) `#20` still causes saved frozen graphs (including `frozenDataByTable`) to reopen `updated: true`; (3) removing an extra source table does not prune stale table IDs from `frozenDataByTable`.
+- **Remaining at `c54f5954`**: `buildGraphFigure` (`src/views/graphs/graph-figure.ts:511-516`) still bypasses `overlayAnalysisData` for frozen significance analyses (running them against live `nodes[a.parentId]?.data` — shared with `#50`), and `frozenDataByTable` is never pruned when an extra source table is removed (shared with `#20`).
 - **Files**:
   - `src/lib/multi-table.ts:76-101` (`mergedGraphData`)
   - `src/views/graphs/graph-view.tsx:89-90, 140, 160-166`
@@ -468,8 +481,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 18: `duplicateFamily` fails to remap analysis links in cloned graphs, binding duplicated graphs to the original table's analyses
+### Issue 18 [FIXED]: `duplicateFamily` fails to remap analysis links in cloned graphs, binding duplicated graphs to the original table's analyses
 - **Severity**: High
+- **Status**: Fixed at `c54f5954` (`src/store/use-project-store.tsx:646-675` builds a two-pass `idMap` and remaps all 11 `GRAPH_ANALYSIS_ID_KEYS` plus `sigAnalysisIds`)
 - **Files**:
   - `src/store/use-project-store.tsx:608-664` (`duplicateFamily`)
   - `src/lib/project-file.ts:274-286` (`GRAPH_ANALYSIS_LINKS`)
@@ -482,8 +496,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 19: `use-document.ts` reads stale `latest.current` immediately after `dispatch`, dropping `runOnClose` script changes on close and skipping crash-recovery backup refresh in `revertToSaved`
+### Issue 19 [PARTIALLY FIXED]: `use-document.ts` reads stale `latest.current` immediately after `dispatch`, dropping `runOnClose` script changes on close and skipping crash-recovery backup refresh in `revertToSaved`
 - **Severity**: High
+- **Status**: Partially Fixed at `c54f5954` (`waitForScriptCommit` and `revertToSaved` backup refresh fixed in `src/store/use-document.ts`)
+- **Remaining at `c54f5954`**: Regression in `quitSaveAllowed` (`src/store/use-document.ts:1649-1670`) keeps `run.changed` OR'd (`:1656`) on the post-settle re-check (`:1666`), unconditionally triggering a redundant second disk write / Box upload on close after any `runOnClose` script edit.
 - **Files**:
   - `src/store/use-document.ts:107-111, 1511-1525, 1546-1572, 1633-1676, 1789-1806`
   - `src/store/use-project-store.tsx:1703-1706` (`latest.current` updated only in `useLayoutEffect`)
@@ -499,8 +515,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 20: Save/load round-trip regressions in `project-file.ts`: frozen graphs/figures always reopen `updated: true`, blank/image figure panels trigger false "missing graph" warnings, and `rootOrder`/`orphanedDataSet` mismatches
+### Issue 20 [PARTIALLY FIXED]: Save/load round-trip regressions in `project-file.ts`: frozen graphs/figures always reopen `updated: true`, blank/image figure panels trigger false "missing graph" warnings, and `rootOrder`/`orphanedDataSet` mismatches
 - **Severity**: High
+- **Status**: Partially Fixed at `c54f5954` (frozen graph/figure `updated: true`, all 22 `DATA_KEYS` in `readFrozenData`, blank/image figure panel false warning, and `repointAnalysis` `orphanedDataSet` cleanup fixed in `src/lib/project-file.ts:187-194, 1817-1851, 2625-2627` and `src/store/use-project-store.tsx:582`)
+- **Remaining at `c54f5954`**: (1) `rootOrder` insertion (`src/store/use-project-store.tsx:390-412, 734-740`) ignores orphaned analyses, appending newly created tables/infos/figures after orphans and reopening `updated: true`; (2) `frozenDataByTable` is never pruned when an extra source table is deleted or removed via `setGraphSources` (`use-project-store.tsx:501-510, 1160-1174`, `project-file.ts:2687-2700`).
 - **Files**:
   - `src/lib/project-file.ts:168-177, 1677-1728, 1840-1855, 2067-2074, 2103-2110, 2486-2496, 2601-2611`
   - `src/store/use-project-store.tsx:389-401, 569-573, 691-695`
@@ -538,8 +556,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 22: `calcvars.ts`: stale `rawTextAt` for chained calculated variables (`COUNTA`, `OVER`), silent wrong/blank results for expression aggregates (`MIN(A+B)`, `MEAN(A+B)`), and `RANK` returning `0.5` on excluded rows
+### Issue 22 [FIXED]: `calcvars.ts`: stale `rawTextAt` for chained calculated variables (`COUNTA`, `OVER`), silent wrong/blank results for expression aggregates (`MIN(A+B)`, `MEAN(A+B)`), and `RANK` returning `0.5` on excluded rows
 - **Severity**: High
+- **Status**: Fixed at `c54f5954` (`src/lib/calcvars.ts` reads computed text in `rawTextAt`, rejects non-`var` expression aggregates, and returns `null` from `RANK` on `WHERE`-excluded rows; minor edge case: a `ROWS` frame excluding `CURRENT ROW` with tying values at `src/lib/calcvars.ts:756` can still match `equal >= 1`)
 - **Files**:
   - `src/lib/calcvars.ts:354-356, 733-742, 853-879, 922-923, 1028-1059`
 - **Explanation**:
@@ -589,9 +608,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 25: `.prism` import drops `summaryFormat` on grouped summary tables (treating Mean/SD/N as raw replicates) and fails to sanitize `:` or pad ragged subcolumns
+### Issue 25 [PARTIALLY FIXED]: `.prism` import drops `summaryFormat` on grouped summary tables (treating Mean/SD/N as raw replicates) and fails to sanitize `:` or pad ragged subcolumns
 - **Severity**: High
-- **Status**: Open (merged in `67b89f0`, reverted in `294da63`)
+- **Status**: Partially Fixed at `c54f5954` (re-applied grouped summary format, `:` sanitization, and ragged padding in `4860fc4d` at `src/lib/prism.ts:1163-1215`)
+- **Remaining at `c54f5954`**: (1) **Regression**: Ragged grouped `.prism` import advances `colCursor += entry.count` instead of `replicates` (`src/lib/prism.ts:1337-1342`), shifting every subsequent group's `EXCLUDED` cells onto wrong columns (and `replicates` ignores `entry.count > replicatesCount`); (2) **Regression**: `groupFormat` (`src/lib/prism.ts:1171-1178`) checks `setFormat` before `table.dataFormat`, reversing BUG-9 precedence and misreading grouped `y_cv_n` tables whose datasets say `y_sd_n` as Mean/SD/N.
 - **Files**:
   - `src/lib/prism.ts:1054-1067, 1103, 1128-1142, 1165-1169`
   - `src/lib/prism-write.ts:477-520`
@@ -610,9 +630,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 26: Native Titer XY replicate (`A:Y1`, `A:Y2`) and XY summary (`A:Mean`, `A:SD`, `A:N`) tables lose their grouping, `summaryFormat`, and nonlinear-regression dataset links in both `.prism` and `.pzfx` exports
+### Issue 26 [FIXED]: Native Titer XY replicate (`A:Y1`, `A:Y2`) and XY summary (`A:Mean`, `A:SD`, `A:N`) tables lose their grouping, `summaryFormat`, and nonlinear-regression dataset links in both `.prism` and `.pzfx` exports
 - **Severity**: High
-- **Status**: Open (merged in `67b89f0`, reverted in `294da63`)
+- **Status**: Fixed at `c54f5954` (re-applied in `4860fc4d` with positional dataset lettering fix in `a4d1425d` across `src/lib/prism-write.ts` and `src/lib/pzfx-write.ts`)
 - **Files**:
   - `src/lib/prism-write.ts:289-331, 521-538, 785-794`
   - `src/lib/pzfx-write.ts:134-177, 428-431`
@@ -710,8 +730,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 32: Summary tables draw no SEM error bars on `"mean-sem"` tables and drop asymmetric lower error bars (`errorMinus`) on XY summary graphs
+### Issue 32 [FIXED]: Summary tables draw no SEM error bars on `"mean-sem"` tables and drop asymmetric lower error bars (`errorMinus`) on XY summary graphs
 - **Severity**: High
+- **Status**: Fixed at `c54f5954` (`src/views/graphs/plot-helpers.ts` computes `asSem` without `asSd` on `"mean-sem"`, uses `Math.abs(m)` for CV, and preserves `errorMinus` in `xyDrawn`)
 - **Files**:
   - `src/views/graphs/plot-helpers.ts:573-590` (`xyDrawn`)
   - `src/views/graphs/plot-helpers.ts:1353-1368` (`summaryErrorAt`)
@@ -727,8 +748,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 33: `titer_read_results` returns stale cached results after table mutations and returns `not_computed` for frozen/orphaned/cloned analyses with saved `cachedResult`
+### Issue 33 [PARTIALLY FIXED]: `titer_read_results` returns stale cached results after table mutations and returns `not_computed` for frozen/orphaned/cloned analyses with saved `cachedResult`
 - **Severity**: High
+- **Status**: Partially Fixed at `c54f5954` (`read_results` falls back to `node.cachedResult`, `removeDataSet` preserves orphaned `cachedResult`, and `updateTable` / MCP mutations invalidate non-frozen child results)
+- **Remaining at `c54f5954`**: (1) **High regression**: `convertTableToNested` (`src/store/use-project-store.tsx:1079-1120`) calls `updateTable` without snapshotting/restoring `cachedResult` (unlike `removeDataSet` in `34c71e84`), permanently wiping saved results of every column analysis it orphans; (2) Metadata-only table edits (`set-x-format`, `set-variable-type`, `set-level-order` at `use-project-store.tsx:966-980`) and `titer_run_script` (`src/lib/prism-script.ts:448-463`) never clear `cachedResult`, so `titer_read_results` still returns stale pre-edit numbers; (3) UI table edits after an analysis error leave stale `{ error }` in `McpInner.results` (`src-tauri/src/mcp.rs:2906-2912`).
 - **Files**:
   - `src-tauri/src/mcp.rs:1725-1764` (`mcp_publish_snapshot`, `mcp_publish_result`)
   - `src-tauri/src/mcp.rs:2023-2031` (`McpState.results`)
@@ -769,8 +792,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 35: `addFittedCurve` draws all-`NaN` curves (no line rendered) for every multi-Y (`params.ys`) and curve-comparison (`params.compareWith`) nonlinear regression
+### Issue 35 [FIXED]: `addFittedCurve` draws all-`NaN` curves (no line rendered) for every multi-Y (`params.ys`) and curve-comparison (`params.compareWith`) nonlinear regression
 - **Severity**: High
+- **Status**: Fixed at `c54f5954` (`coefficientsForSet` in `src/stats/xy/nonlinear-regression.ts` handles both `${setName} — ` prefixes and ` (${setName})` suffixes)
 - **Files**:
   - `src/views/graphs/fitted-curve.ts:446-483` (`addFittedCurve`)
   - `src/stats/xy/nonlinear-regression.ts:602-618, 2390, 2661` (`coefficientsForSet`)
@@ -853,8 +877,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 40: `user-defined.ts` accepts R reserved keywords (`NA`, `Inf`, `NULL`, `TRUE`, `for`, `in`, …) causing R syntax errors, and naming a parameter `HillSlope` causes the fitted curve overlay to render nothing (all `NaN`)
+### Issue 40 [FIXED]: `user-defined.ts` accepts R reserved keywords (`NA`, `Inf`, `NULL`, `TRUE`, `for`, `in`, …) causing R syntax errors, and naming a parameter `HillSlope` causes the fitted curve overlay to render nothing (all `NaN`)
 - **Severity**: High
+- **Status**: Fixed at `c54f5954` (`src/stats/xy/user-defined.ts` rejects R `?Reserved` identifiers; `src/stats/xy/nonlinear-regression.ts` `labelFor` preserves raw parameter names for `user-defined`)
 - **Files**:
   - `src/stats/xy/user-defined.ts:61-70, 378-398`
   - `src/stats/xy/nonlinear-regression.ts:97-98`
@@ -870,8 +895,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 41: Multiple Linear Regression (`multiple-regression.ts`) miscomputes VIFs, crashes with R syntax error when only categorical predictors are present, and passes raw unaligned columns to `describe()`
+### Issue 41 [FIXED]: Multiple Linear Regression (`multiple-regression.ts`) miscomputes VIFs, crashes with R syntax error when only categorical predictors are present, and passes raw unaligned columns to `describe()`
 - **Severity**: High
+- **Status**: Fixed at `c54f5954` (`src/stats/multiple/multiple-regression.ts` computes `vifAssigns`/`vif` over `design` and calls `describe(alignedGroups(...))`)
 - **Files**:
   - `src/stats/multiple/multiple-regression.ts:83-88, 135, 152`
   - `src/stats/multiple/predictors.ts:242-264`
@@ -918,8 +944,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ## Medium-Severity Issues
 
-### Issue 44: Missing `core:window:allow-hide` and `core:window:allow-set-focus` capabilities silently break BUG-12 close-quiesce mitigation and non-macOS Window menu switcher
+### Issue 44 [FIXED]: Missing `core:window:allow-hide` and `core:window:allow-set-focus` capabilities silently break BUG-12 close-quiesce mitigation and non-macOS Window menu switcher
 - **Severity**: Medium
+- **Status**: Fixed at `c54f5954` (`src-tauri/capabilities/default.json:11-12` grants `core:window:allow-hide` and `core:window:allow-set-focus`)
 - **Files**:
   - `src-tauri/capabilities/default.json:5-12`
   - `src/native.ts:615-620, 1090-1096`
@@ -930,8 +957,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 45: Box OAuth loopback flow has bind-after-open race, aborts on single non-callback socket, blocks Tokio worker, and leaks thread/port on timeout
+### Issue 45 [PARTIALLY FIXED]: Box OAuth loopback flow has bind-after-open race, aborts on single non-callback socket, blocks Tokio worker, and leaks thread/port on timeout
 - **Severity**: Medium
+- **Status**: Partially Fixed at `c54f5954` (bind-before-open, multi-accept loop, `spawn_blocking`, and stop-flag thread join fixed in `src-tauri/src/cloud.rs` and `src-tauri/src/cloud_box.rs`)
+- **Remaining at `c54f5954`**: **High macOS regression**: `wait_for_code` (`src-tauri/src/cloud.rs:549`) calls `listener.set_nonblocking(true)` and `handle_loopback_connection` (`:461-472`) never calls `stream.set_nonblocking(false)`. On macOS/BSD, `accept()` inherits `O_NONBLOCK`, so `read_line` hits `WouldBlock` whenever callback bytes aren't already buffered and silently drops the OAuth callback connection until the 5-minute timeout.
 - **Files**:
   - `src-tauri/src/cloud.rs:446-526` (`wait_for_code`, `ephemeral_loopback_port`)
   - `src-tauri/src/cloud_box.rs:471-483` (`connect_box`)
@@ -942,8 +971,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 46: Auto-updater `download_update` and `apply_update` block the macOS main thread and accept arbitrary HTTPS URLs / unverified bundles
+### Issue 46 [PARTIALLY FIXED]: Auto-updater `download_update` and `apply_update` block the macOS main thread and accept arbitrary HTTPS URLs / unverified bundles
 - **Severity**: Medium
+- **Status**: Partially Fixed at `c54f5954` (all updater commands run via `spawn_blocking`, `download_update` pins `CHANNEL_MANIFEST_URL` + SHA-256 + path confinement in `src-tauri/src/updater.rs`)
+- **Remaining at `c54f5954`**: `fetch_channel_manifest_sync` (`src-tauri/src/updater.rs:100-105`) omits `--proto =https --proto-redir =https`; releases remain unsigned (no `codesign` or Ed25519 signature check); Linux uses a predictable `/tmp` staging dir.
 - **Files**:
   - `src-tauri/src/updater.rs:100-127, 150-219`
   - `src-tauri/src/main.rs:1885-1887`
@@ -954,8 +985,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 47: Failed `titer_open_project`, `titer_import_prism`, `titer_create_project`, and `titer_cloud_download` leak a blank window and hijack `last_published`
+### Issue 47 [PARTIALLY FIXED]: Failed `titer_open_project`, `titer_import_prism`, `titer_create_project`, and `titer_cloud_download` leak a blank window and hijack `last_published`
 - **Severity**: Medium
+- **Status**: Partially Fixed at `c54f5954` (`abandon_window` and `prev_last_published` cover new blank windows in `src-tauri/src/mcp.rs`)
+- **Remaining at `c54f5954`**: (1) **High regression**: `titer_open_project` and `titer_cloud_download` (`src-tauri/src/mcp.rs:6709-6740, 9105-9130`) call `abandon_window` even when `open_bounded` returned an **already-open** window label — if that window carries a stale `openError`, `abandon_window` force-closes the user's active project window with `save: "discard"` (`src-tauri/src/main.rs:179-189`); (2) an unclosed window (e.g. blocked by `native.alert`) can re-publish and re-hijack `last_published` (`mcp.rs:3239-3250`).
 - **Files**:
   - `src-tauri/src/mcp.rs:2343, 5632, 5697` (`import_prism_in_new_window`, `create_project`, `open_project`)
   - `src-tauri/src/mcp.rs:1725-1736`
@@ -993,8 +1026,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 50: `titer_export_all_graphs` and Figure exports omit `deps.run` / `rootOrder`; `buildGraphFigure` diverges from `GraphView` (drops `sourceTableIds`, `frozenData`, `sigAnalysisIds`, number/date formatting)
+### Issue 50 [PARTIALLY FIXED]: `titer_export_all_graphs` and Figure exports omit `deps.run` / `rootOrder`; `buildGraphFigure` diverges from `GraphView` (drops `sourceTableIds`, `frozenData`, `sigAnalysisIds`, number/date formatting)
 - **Severity**: Medium
+- **Status**: Partially Fixed at `c54f5954` (`deps.run`/`rootOrder` forwarded through `mcp-export.ts` and `figure-export.ts`; `buildGraphFigure` now uses `mergedGraphData`, `sigAnalysisIds`, `applyNumberFormats`, and `applyDateAxis`)
+- **Remaining at `c54f5954`**: `buildGraphFigure` (`src/views/graphs/graph-figure.ts:511-516`) still bypasses `overlayAnalysisData` for frozen significance analyses, and `figure-export.ts` (`src/views/figures/figure-export.ts:157-322`) never calls `frozenFigureNodes` so frozen Figures still export live/re-frozen data (shared with `#17` & `#73`).
 - **Files**:
   - `src/store/mcp-export.ts:421, 518, 651`
   - `src/views/figures/figure-export.ts:56-65`
@@ -1006,8 +1041,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 51: Replicate XY tables break `deming-overlay.ts` & `binding-curve.ts` overlays; `addLogisticCurve` queries three nonexistent stat labels (always displaying `—`)
+### Issue 51 [FIXED]: Replicate XY tables break `deming-overlay.ts` & `binding-curve.ts` overlays; `addLogisticCurve` queries three nonexistent stat labels (always displaying `—`)
 - **Severity**: Medium
+- **Status**: Fixed at `c54f5954` (`src/views/graphs/deming-overlay.ts` and `src/views/graphs/binding-curve.ts` pool replicate datasets via `splitXY`; `src/views/graphs/fitted-curve.ts` `addLogisticCurve` matches `logistic-regression.ts` stat labels)
 - **Files**:
   - `src/views/graphs/deming-overlay.ts:68-71`
   - `src/views/graphs/binding-curve.ts:139-144, 169-171, 228-235, 314-323`
@@ -1021,8 +1057,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 52: Renaming a column/group blanks dependent `% of control` transformed tables, edits overwrite frozen transformed tables, and `followTable` misses newly added column-name fields
+### Issue 52 [PARTIALLY FIXED]: Renaming a column/group blanks dependent `% of control` transformed tables, edits overwrite frozen transformed tables, and `followTable` misses newly added column-name fields
 - **Severity**: Medium
+- **Status**: Partially Fixed at `c54f5954` (`% of control` rename, frozen transform skip, and top-level `PARAM_NAMES`/`OPTION_NAMES` updated in `src/store/use-project-store.tsx` and `src/store/references.ts`)
+- **Remaining at `c54f5954`**: `followTable` (`src/store/references.ts:82-100`) still misses `TransformDataParams.constants` and nested `SelectTransformParams` fields (`transforms[].variable`, `rowFilter.variable`, `columnFilter.variable`, `columnFilter.otherVariable`); `use-project-store.tsx:984` skips remapping `t.transform.control` while a transformed table is frozen (`if (t.frozen) continue;`).
 - **Files**:
   - `src/store/use-project-store.tsx:873-919` (`updateTable`)
   - `src/lib/transform.ts:36, 55-60`
@@ -1037,8 +1075,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 53: `permuteColumns`, `dropColumns`, and `removeCalculatedVariable` corrupt or leak `cellBackgrounds`, `linkedPaste`, `calculated`, `decimals`, `variableTypes`, `labelVariable`, and `levelOrder`
+### Issue 53 [FIXED]: `permuteColumns`, `dropColumns`, and `removeCalculatedVariable` corrupt or leak `cellBackgrounds`, `linkedPaste`, `calculated`, `decimals`, `variableTypes`, `labelVariable`, and `levelOrder`
 - **Severity**: Medium
+- **Status**: Fixed at `c54f5954` (`src/views/tables/table-data.ts:418-475` and `src/lib/calcvars.ts:1219-1249` remap `cellBackgrounds`/`linkedPaste`, prune column metadata, and keep the last data column)
 - **Files**:
   - `src/views/tables/table-data.ts:417-464` (`permuteColumns`, `dropColumns`)
   - `src/lib/calcvars.ts:1188-1201` (`removeCalculatedVariable`)
@@ -1088,8 +1127,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 57: `prism-script.ts`: `DuplicateDataTable Clear` leaks phantom exclusions, `Import` at `row = 0` drops first CSV row, Survival tables mis-index Y columns by 1, `ExportTable All` without `SetPath` targets `/`, and script table mutations leave calculated variables & transformed tables stale
+### Issue 57 [PARTIALLY FIXED]: `prism-script.ts`: `DuplicateDataTable Clear` leaks phantom exclusions, `Import` at `row = 0` drops first CSV row, Survival tables mis-index Y columns by 1, `ExportTable All` without `SetPath` targets `/`, and script table mutations leave calculated variables & transformed tables stale
 - **Severity**: Medium
+- **Status**: Partially Fixed at `c54f5954` (`DuplicateDataTable Clear`, Survival Y indexing, `ExportTable All` bare filename, and `followChildren` calcvar/transform refresh fixed in `src/lib/prism-script.ts`)
+- **Remaining at `c54f5954`**: `Import` with `row = 0` (`src/lib/prism-script.ts:915-927`) throws `TypeError` on empty CSV (`block[0]` undefined); `followChildren` (`src/lib/prism-script.ts:448-463`) overwrites frozen transform tables (`!t.frozen` missing) and leaves stale `cachedResult` on non-frozen child analyses.
 - **Files**:
   - `src/lib/prism-script.ts:452-469, 713-776, 832-904`
   - `src/store/use-project-store.tsx:836-869, 971`
@@ -1105,8 +1146,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 58: `applyRegenDecisions` mutates the project before validating later decisions (creating duplicate graphs on retry), and `mapSidecarGraph` ignores summary formats on grouped `.prism` tables
+### Issue 58 [FIXED]: `applyRegenDecisions` mutates the project before validating later decisions (creating duplicate graphs on retry), and `mapSidecarGraph` ignores summary formats on grouped `.prism` tables
 - **Severity**: Medium
+- **Status**: Fixed at `c54f5954` (`src/lib/prism-graph-regen.ts` validates all decisions in a first pass and calls `errorFor(resolved)` in `case "grouped"`)
 - **Files**:
   - `src/lib/prism-graph-regen.ts:206-212, 365, 596-597, 625-700`
 - **Explanation**:
@@ -1116,8 +1158,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 59: `mergeGraphTables` skips the `summaryFormat` mismatch check for XY tables and silently drops extra Nested tables whose name contains `:`
+### Issue 59 [FIXED]: `mergeGraphTables` skips the `summaryFormat` mismatch check for XY tables and silently drops extra Nested tables whose name contains `:`
 - **Severity**: Medium
+- **Status**: Fixed at `c54f5954` (`src/lib/multi-table.ts` checks `summaryFormatOf` for XY tables; `src/lib/dataset.ts` parses trailing two `:` segments in `nestedGroupsOf`)
 - **Files**:
   - `src/lib/multi-table.ts:168-194, 218-234, 357-370`
   - `src/lib/dataset.ts:230-244`
@@ -1128,9 +1171,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 60: `.prism` import destroys line breaks in Info Sheet `notes` via `plainTitle()` and lacks bounds/type guards on malformed `document.json` / `content.json` and large row/column spreads
+### Issue 60 [PARTIALLY FIXED]: `.prism` import destroys line breaks in Info Sheet `notes` via `plainTitle()` and lacks bounds/type guards on malformed `document.json` / `content.json` and large row/column spreads
 - **Severity**: Medium
-- **Status**: Open (merged in `67b89f0`, reverted in `294da63`)
+- **Status**: Partially Fixed at `c54f5954` (re-applied in `4860fc4d`: Info Sheet `notes` newlines and malformed JSON / `numberOfRows` guards fixed in `src/lib/prism.ts`)
+- **Remaining at `c54f5954`**: `writePrism` (`src/lib/prism-write.ts:738-739`) still spreads per-row `occupied` Set into `Math.min(...occupied)` / `Math.max(...occupied)`, causing a call-stack overflow above ~125k occupied rows.
 - **Files**:
   - `src/lib/prism.ts:556-579, 744-749, 812, 832-843, 1083, 1271`
   - `src/lib/prism-write.ts:657-658, 1091`
@@ -1206,8 +1250,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ## Low-Severity Issues
 
-### Issue 65: UI/menu minor defects (duplicate Grubbs' table, duplicate `Fill Down`, shortcut collision, stale `Change Parameters…`)
+### Issue 65 [FIXED]: UI/menu minor defects (duplicate Grubbs' table, duplicate `Fill Down`, shortcut collision, stale `Change Parameters…`)
 - **Severity**: Low
+- **Status**: Fixed at `c54f5954` (`src/views/analyses/analysis-results-view.tsx:748-768` and `src/app-menu.ts:503, 761, 804, 898-900` fix all 4 UI/menu items)
 - **Files**:
   - `src/views/analyses/analysis-results-view.tsx:748-786`
   - `src/app-menu.ts:471, 497, 753, 796, 871-904`
@@ -1723,9 +1768,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ## New Issues Found in Recheck 3 at `d4b45130` (#98–#111)
 
-### Issue 98: `open_file` IPC permits arbitrary executable launch (no extension allowlist), Windows `cmd /C start` shell injection, and macOS `open` flag injection
+### Issue 98 [PARTIALLY FIXED]: `open_file` IPC permits arbitrary executable launch (no extension allowlist), Windows `cmd /C start` shell injection, and macOS `open` flag injection
 - **Severity**: High
-- **Status**: New
+- **Status**: Partially Fixed at `c54f5954` (extension allowlist on raw + canonical path, Windows `explorer` launcher replacing `cmd.exe`, and `reap_detached` added in `src-tauri/src/main.rs:1800-1840`)
+- **Remaining at `c54f5954`**: **High Linux regression**: `open_file` on Linux (`src-tauri/src/main.rs:2015`) passes `xdg-open -- <path>`, which fails 100% of the time (`xdg-open: unexpected option '--'`, silently swallowed by `reap_detached`); `check_openable_file` (`src-tauri/src/main.rs:1809`) also discards `canonical` and launches raw `&path`.
 - **Files**:
   - `src-tauri/src/main.rs:1752-1775, 1939-1948` (`check_openable_file`, `open_file`)
   - `src/native.ts:781` (`openSourceFile`)
@@ -1741,9 +1787,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 99: `pasteNames` (upstream 1.1.1) corrupts Nested tables (`isNested` omitted), drops column metadata/calculated formulas, and cross-renames lead/group collisions
+### Issue 99 [PARTIALLY FIXED]: `pasteNames` (upstream 1.1.1) corrupts Nested tables (`isNested` omitted), drops column metadata/calculated formulas, and cross-renames lead/group collisions
 - **Severity**: High
-- **Status**: New
+- **Status**: Partially Fixed at `c54f5954` (Nested `isGrouped || isNested` handling, column metadata remapping, `renameCalculatedReferences`, and separate `leadRenamed`/`groupRenamed` maps for `data.columns` fixed in `src/views/tables/table-data.ts`)
+- **Remaining at `c54f5954`**: `pasteNames` (`src/views/tables/table-data.ts:538-544`) still merges `leadRenamed` and `groupRenamed` into one flat `renamed` map for `TableMove` / `followTable`, causing XY tables with matching lead `"X"` and group `"X"` to cross-rename or drop `"X"`.
 - **Files**:
   - `src/views/tables/table-data.ts:498-546` (`pasteNames`)
   - `src/views/tables/grid-menu.ts:95, 208-215` (exposes `"Paste Group Names"` on Nested tables)
@@ -1761,7 +1808,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 100: Upstream 1.1.1 `axisKind` is not wired into `FormatPanel`: `rowsAt: "values"` and `histogram`/`qq-plot` lose X controls, `grouped-stacked`/`residuals` offer dead Log controls, `grouped-hbars` mislabels value axis as `"Y"`, and `scree-plot`/`dendrogram` misdeclare `XY_AXES`
 - **Severity**: High
-- **Status**: New
+- **Status**: Open (from Recheck 3 at `d4b45130`; merged in `1f5af2e9`, reverted in `34f50c12`)
 - **Files**:
   - `src/views/graphs/format-panel.tsx:453-522`
   - `src/views/graphs/grouped-lines.ts:8-10`
@@ -1784,9 +1831,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 101: Point labels on Horizontal Bars (`grouped-hbars`) with Log scale transform `y` instead of `x`, placing labels at `10^v` off-canvas and `NaN` on row 0
+### Issue 101 [PARTIALLY FIXED]: Point labels on Horizontal Bars (`grouped-hbars`) with Log scale transform `y` instead of `x`, placing labels at `10^v` off-canvas and `NaN` on row 0
 - **Severity**: High
-- **Status**: New
+- **Status**: Partially Fixed at `c54f5954` (`src/views/graphs/graph-view.tsx:870` fixes on-screen rendering via `labelOnAxes` at `src/views/graphs/plot-helpers.ts:1103-1112`)
+- **Remaining at `c54f5954`**: `buildGraphFigure` (`src/views/graphs/graph-figure.ts:852-858`) inlines its own transform and still applies `options.xScale` to horizontal category `label.y` (producing `-Infinity`/`NaN` on row 0 if `xScale === "log"`) instead of calling `labelOnAxes`.
 - **Files**:
   - `src/views/graphs/graph-view.tsx:275-279, 870-875`
   - `src/views/graphs/graph-figure.ts:787-791`
@@ -1801,9 +1849,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 102: `2db68ed1` ANOVA 13-digit centering missed `TukeyHSD` (making Tukey P values contradict centered Tukey CIs), plus Welch, Brown-Forsythe, linear trend, and post-hoc diffs
+### Issue 102 [FIXED]: `2db68ed1` ANOVA 13-digit centering missed `TukeyHSD` (making Tukey P values contradict centered Tukey CIs), plus Welch, Brown-Forsythe, linear trend, and post-hoc diffs
 - **Severity**: High
-- **Status**: New
+- **Status**: Fixed at `c54f5954` (`src/stats/column/anova.ts` and `src/stats/column/base.ts` center `TukeyHSD`, Welch, Brown-Forsythe, linear trend, lognormal `exp(m+mean(v))`, and `describe` diffs)
 - **Files**:
   - `src/stats/column/anova.ts:69-77, 218, 226, 230, 246-248`
   - `src/stats/column/base.ts:208` (`tukeyPosthocStatements`)
@@ -1819,9 +1867,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ## Medium-Severity Issues (Recheck 3)
 
-### Issue 103: `2db68ed1` linear-regression centering missed `compare-slopes.ts`, `report/checks.ts`, and `regression-overlay.ts`
+### Issue 103 [PARTIALLY FIXED]: `2db68ed1` linear-regression centering missed `compare-slopes.ts`, `report/checks.ts`, and `regression-overlay.ts`
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Partially Fixed at `c54f5954` (`src/stats/xy/compare-slopes.ts`, `src/stats/report/checks.ts`, and `fitLinear` in `src/views/graphs/regression-overlay.ts` now center before fitting)
+- **Remaining at `c54f5954`**: (1) **High regression**: `linearFitProblem` (`src/views/graphs/regression-overlay.ts:74-78`) was left uncentered while `fitLinear` (`:119-156`) double-centers, so identical X like `[0.1, 0.1, 0.1]` passes `linearFitProblem` (`sxx = 5.78e-34`) and divides by zero in `fitLinear` (`sxx = 0`), returning all-`NaN` `LinearFit`; (2) `bandAt` (`regression-overlay.ts:163-168`) still evaluates uncentered `fit.intercept + fit.slope * x0`, causing cancellation jitter on lines and CI bands at `1e13` X.
 - **Files**:
   - `src/stats/xy/compare-slopes.ts:64, 73-75`
   - `src/stats/report/checks.ts:225-226`
@@ -1835,9 +1884,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 104: `valueXAxis` drops `options.gridX`, silently disabling X gridlines on Connected Lines with `rowsAt: "values"`
+### Issue 104 [FIXED]: `valueXAxis` drops `options.gridX`, silently disabling X gridlines on Connected Lines with `rowsAt: "values"`
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Fixed at `c54f5954` (`src/views/graphs/plot-helpers.ts` `valueXAxis` now forwards `options.gridX` to `axisChrome` and `xAxisRange`)
 - **Files**:
   - `src/views/graphs/plot-helpers.ts:883-888, 1679-1680` (`valueXAxis`, `groupedScatterLayout`)
 - **Explanation**:
@@ -1847,9 +1896,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 105: `isNewer` and `seenVersion` invert semver pre-release ordering (`2.0.2-rc.1 > 2.0.2`) and reject pre-release / uppercase-`V` seen strings
+### Issue 105 [PARTIALLY FIXED]: `isNewer` and `seenVersion` invert semver pre-release ordering (`2.0.2-rc.1 > 2.0.2`) and reject pre-release / uppercase-`V` seen strings
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Partially Fixed at `c54f5954` (core semver pre-release ordering implemented in `src/lib/version.ts` and pre-release / `v?` support added to `src/lib/whats-new.ts`)
+- **Remaining at `c54f5954`**: `isNewer` (`src/lib/version.ts:38-41`) classifies numeric pre-release identifiers via `Number.isInteger(Number(xi))` instead of `/^\d+$/` (misclassifying alphanumeric `"1e2"`, `"0x10"`, `"-1"` as numeric), and `seenVersion` (`src/lib/whats-new.ts:96`) rejects SemVer `+build` metadata.
 - **Files**:
   - `src/lib/version.ts:4-15` (`isNewer`)
   - `src/lib/whats-new.ts:90-94, 102-106` (`seenVersion`)
@@ -1860,9 +1910,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 106: `clipboard_text` (macOS) passes unchecked nullable `UTF8String` pointer to `CStr::from_ptr` in `unsafe`
+### Issue 106 [FIXED]: `clipboard_text` (macOS) passes unchecked nullable `UTF8String` pointer to `CStr::from_ptr` in `unsafe`
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Fixed at `c54f5954` (`src-tauri/src/main.rs:1679-1684` `utf8_ptr_to_string` guards `ptr.is_null()` before `CStr::from_ptr`)
 - **Files**:
   - `src-tauri/src/main.rs:1645-1654` (`clipboard_text`)
 - **Explanation**:
@@ -1872,9 +1922,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 107: `noncentralTCdf` overflows `tt * tt` for `|t| ≥ 1.34e154` (returning `normalCdf(-delta)` instead of `1`/`0`) and `noncentralTTwinSeriesModeCentered` breaks at `|δ| ≥ 1e6` / large `df + δ`
+### Issue 107 [PARTIALLY FIXED]: `noncentralTCdf` overflows `tt * tt` for `|t| ≥ 1.34e154` (returning `normalCdf(-delta)` instead of `1`/`0`) and `noncentralTTwinSeriesModeCentered` breaks at `|δ| ≥ 1e6` / large `df + δ`
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Partially Fixed at `c54f5954` (`src/stats/distributions.ts` fixes `tt * tt` overflow and `Gamma(a, Inf)` via `noncentralTChiSquareLimit`)
+- **Remaining at `c54f5954`**: **High regression**: `noncentralTChiSquareLimit` (`src/stats/distributions.ts:368-370, 421-453`) drops `Z ~ N(0, 1)`, which is only valid for `df ≪ δ²`. For large `df` (including the entire `mu >= 7e5 && df >= 1.4e6` trigger and `|δ| > 1414` with large `df`), it produces up to `0.17` CDF error and an `0.081` boundary cliff at `|δ| = 1414 → 1415` (e.g. `noncentralTCdf(1416, 1e7, 1415)` → `0.9992` vs exact `0.8298`; `noncentralTCdf(1201, 1e8, 1200)` → `1.0` vs exact `0.8405`). Also see `#63`/`#80` for the remaining `mu <= 700` `rxb` underflow.
 - **Files**:
   - `src/stats/distributions.ts:135, 331-332, 413-439` (`noncentralTCdf`, `noncentralTTwinSeriesModeCentered`)
 - **Explanation**:
@@ -1889,9 +1940,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ## Low-Severity Issues (Recheck 3)
 
-### Issue 108: `WhatsNewDialog` `close()` unconditionally overwrites `titer.whats-new-seen` with the running version, regressing the seen marker after a downgrade
+### Issue 108 [PARTIALLY FIXED]: `WhatsNewDialog` `close()` unconditionally overwrites `titer.whats-new-seen` with the running version, regressing the seen marker after a downgrade
 - **Severity**: Low
-- **Status**: New
+- **Status**: Partially Fixed at `c54f5954` (`markWhatsNewSeen` in `src/lib/whats-new.ts` no longer overwrites a newer `titer.whats-new-seen` on close)
+- **Remaining at `c54f5954`**: `shouldShowWhatsNew` (`src/lib/whats-new.ts:82-84`) still checks raw `storedValue !== whatsNewVersion()` instead of `seen === null || isNewer(whatsNewVersion(), seen)`, returning `true` on downgrades and breaking the 2-second multi-window poll (`src/components/whats-new-dialog.tsx:60`).
 - **Files**:
   - `src/components/whats-new-dialog.tsx:65-68`
 - **Explanation**:
@@ -1901,9 +1953,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 109: `openSourceFile` discards the specific Rust error string returned by `open_file`
+### Issue 109 [FIXED]: `openSourceFile` discards the specific Rust error string returned by `open_file`
 - **Severity**: Low
-- **Status**: New
+- **Status**: Fixed at `c54f5954` (`invokeErrorMessage` in `src/lib/invoke-error.ts:5-6` preserves plain Tauri string rejections in `src/views/tables/import-dialog.tsx:263-271`)
 - **Files**:
   - `src/views/tables/import-dialog.tsx:236-247` (`openSourceFile`)
 - **Explanation**:
@@ -1913,9 +1965,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 110: `fitLabels` produces `dtick: NaN` on coincident adjacent ticks (`at[1] === at[0]`), and `graph-view.tsx` checks `!current` after `Plotly.relayout` instead of immediately after `Plotly.react`
+### Issue 110 [PARTIALLY FIXED]: `fitLabels` produces `dtick: NaN` on coincident adjacent ticks (`at[1] === at[0]`), and `graph-view.tsx` checks `!current` after `Plotly.relayout` instead of immediately after `Plotly.react`
 - **Severity**: Low
-- **Status**: New
+- **Status**: Partially Fixed at `c54f5954` (`fitLabels` adds the `step <= 0` guard in `src/views/graphs/plot-helpers.ts`)
+- **Remaining at `c54f5954`**: Regression in `src/views/graphs/graph-view.tsx:890-904`: the `if (!current) return;` guard was moved *before* `await Plotly.relayout(...)` (`line 893`) without keeping the guard *after* `await Plotly.relayout(...)` (`line 896`), reopening the stale-async race after relayout.
 - **Files**:
   - `src/views/graphs/plot-helpers.ts:873-875` (`fitLabels`)
   - `src/views/graphs/graph-view.tsx:899-903`
@@ -1927,12 +1980,76 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 111: `fitted-curve.ts` `x === 0` guard misses 4 other R-guarded raw-X ratio models and `asymmetric-5pl-x` underflow at tiny `HillSlope`
+### Issue 111 [FIXED]: `fitted-curve.ts` `x === 0` guard misses 4 other R-guarded raw-X ratio models and `asymmetric-5pl-x` underflow at tiny `HillSlope`
 - **Severity**: Low
-- **Status**: New
+- **Status**: Fixed at `c54f5954` (`src/views/graphs/fitted-curve.ts` adds unconditional `x === 0` limits for all 8 raw-X ratio models matching R `nonlinear-fit.ts`)
 - **Files**:
   - `src/views/graphs/fitted-curve.ts:58-64, 82, 96, 121-145, 188`
 - **Explanation**:
   R's `nonlinear-fit.ts` guards `x == 0` unconditionally for `agonist-3pl-x`, `agonist-3pl-normalized-x`, `biphasic-x`, and `bell-shaped-x`, whereas TS `fitted-curve.ts` only guards the 4 sigmoidal models when `c("EC50") <= 0` (`EC50 === 0` at `x === 0` still yields `0/0 = NaN` in the other 4 models, and `asymmetric-5pl-x` with `EC50 > 0` and tiny positive `HillSlope` can underflow `(2^(1/S)-1)^(1/HillSlope)` to `0` → `NaN` at `x === 0`).
 - **Suggested Fix**:
   Handle `x === 0` explicitly in `fitted-curve.ts` for all 8 raw-X ratio models matching R's exact limits.
+
+
+---
+
+## New Issues Found in Recheck 4 at `c54f5954` (#112–#115)
+
+### Issue 112: Two-way ANOVA `runPosthoc` still computes uncentered `mean(a) - mean(b)` at `1e13` scale
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/stats/grouped/two-way-anova.ts:301-302, 323-325` (`runPosthoc`)
+  - `src/stats/grouped/two-way-anova.ts:612` (RM sphericity-assumed post-hoc path)
+- **Explanation**:
+  Commit `989f7c0b` centered `v <- v - mean(v)` in the main ordinary and repeated-measures ANOVA R calls (lines 526, 781), **but** `runPosthoc` still passes raw uncentered cell vectors `c.a` and `c.b` into R and computes `d <- mean(a) - mean(b)` (`lines 302, 323`). At `1e13` scale (ULP $\approx 0.00195$), subtracting uncentered cell means loses 12+ digits across **every** ordinary two-way post-hoc (Tukey, Bonferroni, Šídák, Holm–Šídák, LSD, Dunnett, Games–Howell, FDR) and RM sphericity-assumed post-hoc.
+- **Minimal Reproduction**:
+  Run Two-way ANOVA (ordinary or RM sphericity-assumed) with Tukey/Šídák/Bonferroni post-hoc on Cell A `= [1e13 + 0.01, 1e13 + 0.02, 1e13 + 0.03]` and Cell B `= [1e13 + 0.05, 1e13 + 0.06, 1e13 + 0.07]`: raw `mean(a) - mean(b)` yields `-0.0390625` instead of `-0.041015625` (`4.76%` error in `diff` and `t`, amplifying to larger P-value errors).
+- **Suggested Fix**:
+  Shift each compared pair by a common origin before subtracting means in `runPosthoc` (`m0 <- a[1]; d <- mean(a - m0) - mean(b - m0)`).
+
+---
+
+### Issue 113: Three-way ANOVA `runPosthoc` computes uncentered `diff` and single-pass TS Games–Howell `variance()` at `1e13` scale
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/stats/grouped/three-way-anova.ts:135, 142-145, 259-262` (`runPosthoc`, `variance`)
+- **Explanation**:
+  Commit `989f7c0b` centered `v <- v - mean(v)` in the main `aov`/`drop1` call (line 330), **but** `runPosthoc` still computes both `const diff = mean(vi) - mean(vj)` (`line 135`) and Games–Howell's `variance(vi)` (`lines 142-143, 259-262`) in TypeScript on raw uncentered cell values. At `1e13` scale, `diff` loses precision for every post-hoc test, and single-pass `variance()` picks up $n \delta^2 / (n - 1)$ from `mean(values)`'s ULP error, corrupting Games–Howell `se`, Welch `df`, `t`, `p`, and CIs.
+- **Minimal Reproduction**:
+  Run Three-way ANOVA Games–Howell post-hoc on `vi = [1e13 + 0.01, 1e13 + 0.02, 1e13 + 0.03]`, `vj = [1e13 + 0.05, 1e13 + 0.06, 1e13 + 0.07]`: `diff` is `-0.0390625` (`4.76%` error) and `variance(vi)` is `1.0109e-4` instead of `9.5367e-5` (`6.00%` error).
+- **Suggested Fix**:
+  Shift by a common point for `diff` (`m0 = vi[0]`, `mean(vi - m0) - mean(vj - m0)`) and double-center `values` inside `variance()`.
+
+---
+
+### Issue 114: Nested ANOVA post-hoc `diff` still subtracts raw uncentered `described[i].mean - described[j].mean`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/stats/nested/nested-anova.ts:85-94`
+  - `src/stats/column/base.ts:78-79` (`describe()` centered `diff(i, j)`)
+- **Explanation**:
+  Commit `d6453524` centered `aov`, `TukeyHSD`, and `pairwise.t.test` in `nested-anova.ts` so the F statistic and post-hoc P values are accurate at `1e13` scale. However, line `85` calls `describe(asGroups)` without `pairs` and line `91` computes `diff: described[i].mean - described[j].mean` on raw uncentered group means, ignoring the centered `diff(i, j)` helper added to `describe()` in `src/stats/column/base.ts:78-79`.
+- **Minimal Reproduction**:
+  Run Nested ANOVA with Tukey or Bonferroni post-hoc on 13-digit data (`nestedBig`): `comparisons[k].diff` carries the ~0.002 ULP cancellation error while `p` is centered.
+- **Suggested Fix**:
+  Pass `pairIndices(groups.length)` into `describe(asGroups, pairs)` and set `diff: diff(i, j)` in `comparisons`.
+
+---
+
+### Issue 115: Deming regression TS `olsFit` (for `notes()`) and `demingProblem` still use single-pass uncentered sums
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/stats/xy/deming-regression.ts:56-63, 70-78, 136, 140` (`demingProblem`, `olsFit`, `notes`)
+- **Explanation**:
+  Commit `67a1cbb3` double-centered Deming + jackknife and OLS in R (`rCode`, lines 102–110), **but** left two TypeScript helpers single-pass uncentered:
+  1. `olsFit` (`lines 70-78`) formats the OLS comparison equation in `notes()` (`line 140`), causing the note equation to visibly disagree with the R-computed `OLS slope` / `OLS Y-intercept` rows on the same results sheet at `1e13` scale.
+  2. `demingProblem` (`lines 56-63`) checks `sxx === 0` / `syy === 0` / `sxy === 0` using raw uncentered `mean(xs)`/`mean(ys)`, allowing constant data like `[0.1, 0.1, 0.1]` to pass (`sxx = 5.78e-34 !== 0`) and fail in double-centered R (`NaN`).
+- **Minimal Reproduction**:
+  1. Fit Deming regression on `x = [1e13+0.1..1e13+0.6]`, `y = [1e13+5.12..1e13+5.61]`: R `olsIntercept` is `1.1068e11` while `olsFit` in `notes()` shows `1.1083e11`.
+  2. Fit `xs = [0.1, 0.1, 0.1]`, `ys = [0.1, 0.1, 0.1]`: `demingProblem` returns `undefined` instead of rejecting constant data.
+- **Suggested Fix**:
+  Double-center against `xs[0]`/`ys[0]` in both `demingProblem` and `olsFit` (or format `notes()` OLS text from R's `olsSlope`/`olsIntercept`).
