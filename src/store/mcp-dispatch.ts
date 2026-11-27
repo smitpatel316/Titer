@@ -90,7 +90,7 @@ import {
   type ExportIo,
   type ExportJobDeps,
 } from "./mcp-export";
-import { executeImportFcs, executeApplyFlowCompensation, type FlowJobDeps } from "./mcp-flow";
+import { executeImportFcs, executeApplyFlowCompensation, executePopulationStats, type FlowJobDeps } from "./mcp-flow";
 import {
   cancelR,
   isNative,
@@ -202,6 +202,9 @@ export interface JobDeps {
   /** Update a flow sample node's compensation record (seq 447;
    *  default: the real store action). */
   updateFlowSampleCompensation?: (sampleId: string, compensation: FlowCompensationRef) => void;
+  /** Create a flow population-stats table node (seq 449; default: the
+   *  real store action). */
+  createFlowStatsTable?: (table: TableData, name: string, sampleIds: readonly string[]) => string;
   /** Create a plugin analysis node on a table (default: the real store action). */
   createPluginAnalysis?: (parentId: string, pluginId: string, params?: PluginParamValues) => string;
   /** Rename any node (default: the real store action). */
@@ -379,6 +382,7 @@ function toFlowDeps(deps: JobDeps): FlowJobDeps {
     getState: deps.getState,
     createFlowSample: deps.createFlowSample,
     updateFlowSampleCompensation: deps.updateFlowSampleCompensation,
+    createFlowStatsTable: deps.createFlowStatsTable,
     flushUntilRevision: deps.flushUntilRevision,
     flush: deps.flush,
   };
@@ -1587,6 +1591,14 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         matrix_csv?: unknown;
       };
       return executeApplyFlowCompensation(toFlowDeps(deps), args, job.project_id);
+    }
+    case "flow-population-stats": {
+      // FlowJo (seq 449, F2c): per-population statistics for a sample as
+      // an ordinary table node — counts, frequencies, medians/MFIs,
+      // geo-mean, CV, robust CV/SD, percentiles per gated population.
+      // Opt-in: the executor refuses while the flow toggle is off.
+      const args = (job.args ?? {}) as { sample_id?: unknown; populations?: unknown; name?: unknown };
+      return executePopulationStats(toFlowDeps(deps), args, job.project_id);
     }
     case "merge-project": {
       // Seq 180: read another project file and append its sheets to this
@@ -2934,6 +2946,7 @@ export function useMcpJobDispatcher() {
   const createAnalysis = actions.createAnalysis;
   const createFlowSample = actions.createFlowSample;
   const updateFlowSampleCompensation = actions.updateFlowSampleCompensation;
+  const createFlowStatsTable = actions.createFlowStatsTable;
   const createPluginAnalysis = actions.createPluginAnalysis;
   const renameNode = actions.renameNode;
   const setAnalysisFrozen = actions.setAnalysisFrozen;
@@ -3015,6 +3028,7 @@ export function useMcpJobDispatcher() {
                 createAnalysis,
                 createFlowSample,
                 updateFlowSampleCompensation,
+                createFlowStatsTable,
                 createPluginAnalysis,
                 renameNode,
                 setAnalysisFrozen,

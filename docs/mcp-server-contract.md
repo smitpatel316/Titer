@@ -1,6 +1,6 @@
 # MCP server contract — Titer (v1.6.0, Phase 2) ↔ stdio bridge
 
-**Status:** Phase 2 + v1.7.4 P0 + 1.8 backup list + 1.8.0 data-file import + 1.8.0 linked paste + 1.8.0 merge project + 1.8.0 menus batch B + 1.8.0 menus batch C + 1.8.2 graph regenerate + 1.8.3 copy-graph-image + 1.8.3 sample-size-power + 1.9 cell background color + marketplace M4 plugin analyses + seq 450 convert-to-nested + FlowJo F1c import-fcs + FlowJo F2a apply-flow-compensation (82 tools: read, write, run, graph, export, cloud, flow)
+**Status:** Phase 2 + v1.7.4 P0 + 1.8 backup list + 1.8.0 data-file import + 1.8.0 linked paste + 1.8.0 merge project + 1.8.0 menus batch B + 1.8.0 menus batch C + 1.8.2 graph regenerate + 1.8.3 copy-graph-image + 1.8.3 sample-size-power + 1.9 cell background color + marketplace M4 plugin analyses + seq 450 convert-to-nested + FlowJo F1c import-fcs + FlowJo F2a apply-flow-compensation + FlowJo F2c population-stats (83 tools: read, write, run, graph, export, cloud, flow)
 **Server branch:** `check/v16-mcp-phase2` (v1.6.0); the v1.7.4 P0 tools
 (`titer_project_summary`, `titer_search`, `titer_get_analysis_params`,
 `titer_rerun_analysis`, `await_result` on `titer_run_analysis`) were
@@ -123,11 +123,11 @@ SSE stream (`text/event-stream`). Lifecycle:
    `2025-06-18`), `capabilities`, `clientInfo`. Server answers with its
    own `protocolVersion` (the negotiated one — the highest both support),
    `capabilities: { "tools": {} }`, `serverInfo: { "name": "titer",
-    "version": "<app version>" }`, and `instructions` (the 82 tools:
+    "version": "<app version>" }`, and `instructions` (the 83 tools:
     read-only vs mutating, the job model, cloud/export notes — the full
     text lives in `get_info` in `src-tauri/src/mcp.rs`).
  2. `notifications/initialized` — client sends after `initialize`.
- 3. `tools/list` — returns all 82 tools in one page (`nextCursor`
+ 3. `tools/list` — returns all 83 tools in one page (`nextCursor`
    absent). No pagination.
 4. `tools/call` — `{ "name": "<tool>", "arguments": { … } }`.
 5. Sessions: 2025-11-25 clients use protocol-level sessions; the server
@@ -378,6 +378,7 @@ plainly ("couldn't read …") instead of silently skipping.
 | `titer_import_data_file` | `project_id?`, `path`, `name?` | `{ project_id, table_id, name, table_type, rows, data_columns, notes }`. Imports a `.csv` / `.tsv` / `.txt` / `.dat` / `.prn` / `.xlsx` file as a new table in the open project (same parsers as File ▸ Import Data File…); always a new table, never appended to the active table. `notes` carries the importer's assumptions (header row, row titles, skipped sheets). |
 | `titer_import_fcs` **(FlowJo F1c, seq 443)** | `project_id?`, `path`, `sample_id?`, `name?` | `{ project_id, sample_id, name, source_path, version, event_count, parameters, datasets, has_spillover, normalisations, warnings }`. Imports an FCS 2.0–3.2 file as a new flow sample in the open project (the `flow-fcs` 0.6.0 reader parses it into the event store; the frontend adds the sample node). Summary only — never event arrays. Opt-in: the FlowJo module is off by default, so the job refuses while the toggle is off, and the tool lives in the `flow` allowlist group, not the default read set. |
 | `titer_apply_flow_compensation` **(FlowJo F2a, seq 447)** | `project_id?`, `sample_id`, `source?`, `fluorochromes?`, `matrix?`, `matrix_csv?` | `{ project_id, sample_id, fluorochromes, source, applied, event_count, parameters_compensated }`. Applies a spillover (compensation) matrix to a flow sample's stored events (the matrix is inverted and multiplied per event in the event store; the sample node records the applied matrix). The matrix comes from the sample's own $SPILLOVER (`source: "file"`, the default), a FlowJo-style matrix text (`source: "csv"`, `matrix_csv`), or an explicit fluorochrome list + matrix (`source: "manual"`). Summary only — never event arrays. Opt-in: the FlowJo module is off by default, so the job refuses while the toggle is off, and the tool lives in the `flow` allowlist group, not the default read set. |
+| `titer_flow_population_stats` **(FlowJo F2c, seq 449)** | `project_id?`, `sample_id`, `populations?`, `name?` | `{ project_id, sample_id, table_id, name, populations: [{ id, name, count, pct_parent, pct_grandparent, pct_total }], rows }`. Per-population statistics for one flow sample — counts, frequencies, medians/MFIs, geo-mean, CV, robust CV/SD and percentiles per gated population — as an ordinary Column table node. With no `populations`, the sample's own gating tree is used (or the root alone when it has none). Result is the new table's id plus per-population counts — never event arrays. Opt-in: the FlowJo module is off by default, so the job refuses while the toggle is off, and the tool lives in the `flow` allowlist group, not the default read set. |
 | `titer_merge_project` | `project_id?`, `{ path }` | `{ project_id, source, merged_tables, merged_analyses, merged_graphs, merged_figures, merged_info_sheets, merged, renamed, skipped, dropped, warnings, report }`. Same as File ▸ Merge: appends the file's sheets to this project, each renamed with an asterisk in front (Prism-style); `.prism` / `.pzfx` is converted first, then merged. Links inside the merged sheets are remapped to the new copies; links to sheets missing from the file are dropped and named in `dropped`. The current project's sheets are untouched; one undo step. Path must be local — no URLs. The file already open in this window is refused, as is a file with no sheets to merge. |
 | `titer_close_project` | `project_id?`, `save?: "save" \| "discard"` | `{ project_id, closed: true }`. `save` omitted = refuse to close a dirty project (`{ needs_confirm: true, warning: "unsaved changes" }`); pass `save: "save"` or `save: "discard"` explicitly. Never prompts. Closes the window; the snapshot is dropped. |
 
@@ -607,7 +608,7 @@ is on, §6); everything else is `false`. `idempotent_hint` is per-tool (e.g. `ti
 `titer_rename_node`, `titer_reorder_nodes` are idempotent; create/undo/
 redo/run tools are not).
 
-The allowlist (§12) groups the 82 tools differently — by what the user
+The allowlist (§12) groups the 83 tools differently — by what the user
 turns on, not by what they do. The two groupings overlap (e.g. the
 `destructive` group holds the two tools that delete data or run
 scripts); §12 is the
@@ -621,7 +622,7 @@ The Phase 2 smoke runs against the **real server in a running Titer
 app** via a terminal CLI client (no Claude Desktop sign-in needed).
 It reads endpoint + token from `<app_data>/mcp/discovery.json`, speaks
 Streamable HTTP directly (initialize → tools/list → tools/call across
-all 82 tools), and prints a PASS/FAIL line per check; exit 0 only if
+all 83 tools), and prints a PASS/FAIL line per check; exit 0 only if
 every check passes. **Prerequisite:** in Titer, Settings → AI
 Connections, turn on every group under "What your AI can do" first —
 by default the server advertises only the 7 read tools (§12), and this
@@ -635,7 +636,7 @@ fixture for the Prism-import step:
    (default out dir: a fresh temp dir; exports/saves land there).
 3. `initialize` (`protocolVersion 2025-11-25`), then
    `notifications/initialized`, then `tools/list` — with every group on,
-   expect all 82 tools, nothing else (with only the default groups, §12
+   expect all 83 tools, nothing else (with only the default groups, §12
    says 7).
 4. Create a project → create an XY table → write data → summary with
    values → edit/rename/reorder/undo/redo/duplicate → simulate a
@@ -697,7 +698,7 @@ are expected to differ until the `buildGraphFigure` follow-up (§10.1).
 The in-process Rust smoke (`mcp_smoke_job_plumbing_over_http` in
 `src-tauri/src/mcp.rs`) is the other half: with every group enabled via
 its fixture allowlist record, it asserts `tools/list` returns exactly
- 82 tools and drives the job plumbing + project/table/
+ 83 tools and drives the job plumbing + project/table/
 analysis/cloud/graph/composite/export tools over real HTTP with a
 completer task standing in for the frontend dispatcher. A second
 in-process smoke (`mcp_smoke_allowlist_default_over_http`) covers §12:
@@ -796,7 +797,7 @@ tool must assign it a group, or the suite fails).
 | Export (`export`) | `titer_export_graph`, `titer_export_figure`, `titer_export_office`, `titer_export_table_data`, `titer_export_all_graphs`, `titer_copy_graph_image` | no |
 | Cloud (Box) (`cloud`) | `titer_cloud_status`, `titer_cloud_list`, `titer_cloud_metadata`, `titer_cloud_revisions`, `titer_cloud_download`, `titer_cloud_upload`, `titer_cloud_upload_new`, `titer_cloud_create_folder`, `titer_cloud_move` | no |
 | Destructive actions (`destructive`) | `titer_delete_node`, `titer_run_script` | no |
-| Flow cytometry (FlowJo) (`flow`) | `titer_import_fcs`, `titer_apply_flow_compensation` | no |
+| Flow cytometry (FlowJo) (`flow`) | `titer_import_fcs`, `titer_apply_flow_compensation`, `titer_flow_population_stats` | no |
 
 The `destructive` group holds exactly the two tools that delete data
 or run arbitrary scripts. Table writes and edits live in `tables`,
@@ -853,5 +854,5 @@ the same human-only boundary as enable/token (D4).
   The server-side default is now seven read tools — the six plus
   `titer_list_plugin_analyses` — and Antigravity follows what the server
   advertises, so it shows seven. The config file format does not change.
-- The server still *has* 82 tools. The allowlist decides which subset
+- The server still *has* 83 tools. The allowlist decides which subset
   a given client sees — it does not remove tools from the server.

@@ -2,9 +2,9 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 82 tools: 22 read-only (list/read/job/
+// Settings → AI connections. 83 tools: 22 read-only (list/read/job/
 // activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list + refresh-linked-data + the plugin list + the 2.0 error-log read)
-// and 60 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool + the 1.9 cell-background tool + the plugin run tool + the seq 450 convert-to-nested tool + the FlowJo import-fcs tool + the FlowJo apply-flow-compensation tool), via the L0 Rust→frontend dispatch + job queue —
+// and 61 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool + the 1.9 cell-background tool + the plugin run tool + the seq 450 convert-to-nested tool + the FlowJo import-fcs tool + the FlowJo apply-flow-compensation tool + the FlowJo population-stats tool), via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 //
 // Why rmcp, not tauri-plugin-mcp-commands — see the lane log
@@ -43,7 +43,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 82 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 83 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -2231,8 +2231,8 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "flow",
         label: "Flow cytometry (FlowJo)",
-        description: "Import FCS files as flow samples and apply spillover compensation (FlowJo module, seq 443 + 447). The module is opt-in — off by default — so these tools only run when the flow toggle is on, even when this group is enabled.",
-        tools: &["titer_import_fcs", "titer_apply_flow_compensation"],
+        description: "Import FCS files as flow samples, apply spillover compensation and compute per-population statistics (FlowJo module, seq 443 + 447 + 449). The module is opt-in — off by default — so these tools only run when the flow toggle is on, even when this group is enabled.",
+        tools: &["titer_import_fcs", "titer_apply_flow_compensation", "titer_flow_population_stats"],
     },
 ];
 
@@ -3098,7 +3098,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 82 tools. Returns the new header value, or `None` when the type is
+/// 83 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -3750,6 +3750,30 @@ pub struct ApplyFlowCompensationArgs {
     /// fluorochrome (csv only).
     #[serde(default)]
     pub matrix_csv: Option<String>,
+}
+
+/// Per-population statistics for one flow sample, as an ordinary table
+/// node (FlowJo module, seq 449). The frontend computes the stats in pure
+/// TS over the event store (counts, frequencies, medians/MFIs, geo-mean,
+/// CV, robust CV/SD, percentiles per gated population); the result is the
+/// new table's id plus per-population counts — never event arrays.
+/// `populations` is an ad-hoc gating tree (same shape as the sample
+/// node's): omit it to use the sample's own gates, or the root alone
+/// when the sample has none.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PopulationStatsArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The sample's id (== its sample node's id, by convention).
+    pub sample_id: String,
+    /// Ad-hoc populations: [{ id, name, parent_id, predicate: { kind:
+    /// "range", param, min?, max? } }]. Omit to use the sample's gates.
+    #[serde(default)]
+    pub populations: Option<serde_json::Value>,
+    /// The new table's name. Omit to name it for the sample.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -7090,6 +7114,63 @@ impl TiterMcpServer {
             }
             Err(e) => {
                 self.state.log_call("titer_apply_flow_compensation", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Per-population statistics for one flow sample (FlowJo module, seq
+    /// 449) — counts, frequencies, medians/MFIs, geo-mean, CV, robust
+    /// CV/SD and percentiles per gated population, as an ordinary Column
+    /// table node. The result is the new table's id plus per-population
+    /// counts — never event arrays. Opt-in: the frontend refuses while
+    /// the flow toggle is off, and this tool is not in the default read
+    /// set (it lives in the `flow` allowlist group). With no
+    /// `populations`, the sample's own gating tree is used (or the root
+    /// alone when it has none).
+    #[tool(
+        name = "titer_flow_population_stats",
+        description = "Per-population statistics for one flow sample (FlowJo module, opt-in — off by default): counts, frequencies, medians/MFIs, geo-mean, CV, robust CV/SD and percentiles per gated population, as an ordinary table node. The result is the new table's id plus per-population counts — never event arrays. With no populations, the sample's own gating tree is used (or the root alone when it has none).",
+        annotations(
+            title = "Flow population statistics",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn flow_population_stats(
+        &self,
+        Parameters(args): Parameters<PopulationStatsArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({ "project_id": args.project_id, "sample_id": args.sample_id, "populations": args.populations, "name": args.name });
+        let outcome: Result<serde_json::Value, String> = async {
+            if args.sample_id.trim().is_empty() {
+                return Err("The sample id must not be empty.".into());
+            }
+            if let Some(name) = &args.name {
+                if name.trim().is_empty() {
+                    return Err("The stats table name must not be empty.".into());
+                }
+            }
+            let (id, _snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            self.run_table_job(
+                &id,
+                "flow-population-stats",
+                serde_json::json!({ "sample_id": args.sample_id, "populations": args.populations, "name": args.name }),
+            )
+            .await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_flow_population_stats", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_flow_population_stats", log_args, false, Some(&e));
                 Err(e)
             }
         }
@@ -10580,10 +10661,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 82 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 83 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 6 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                22 of the 82 are read-only and 60 change the open project. \
+                22 of the 83 are read-only and 61 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -13171,7 +13252,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 82 tools, so it enables every group first.
+        // this test drives all 83 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -13224,8 +13305,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            82,
-            "seven read tools + five read-more tools + three discovery tools + seven project tools + eleven table tools + fourteen analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools + two flow tools: {names:?}"
+            83,
+            "seven read tools + five read-more tools + three discovery tools + seven project tools + eleven table tools + fourteen analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools + three flow tools: {names:?}"
         );
         for name in ["titer_list_backups"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -13247,6 +13328,7 @@ mod tests {
             "titer_import_data_file",
             "titer_import_fcs",
             "titer_apply_flow_compensation",
+            "titer_flow_population_stats",
             "titer_merge_project",
             "titer_close_project",
         ] {
@@ -13657,6 +13739,60 @@ mod tests {
         assert_eq!(call_text(&applied)["sample_id"], "spill");
         assert_eq!(call_text(&applied)["applied"], true);
         assert_eq!(call_text(&applied)["parameters_compensated"], 3);
+        // flow-population-stats (seq 449): a blank sample id and a blank
+        // name are refused; the round trip, with the frontend simulated
+        // in-test, returns the stats table id and per-population counts.
+        let (pop_stats_bad_id, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(111, "titer_flow_population_stats", json!({ "sample_id": "  " })),
+        )
+        .await;
+        assert_eq!(pop_stats_bad_id["result"]["isError"], true);
+        assert!(
+            call_raw_text(&pop_stats_bad_id).contains("must not be empty"),
+            "population-stats blank sample id: {}",
+            call_raw_text(&pop_stats_bad_id)
+        );
+        let (pop_stats_bad_name, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(112, "titer_flow_population_stats", json!({ "sample_id": "flow-fixture-1", "name": "  " })),
+        )
+        .await;
+        assert_eq!(pop_stats_bad_name["result"]["isError"], true);
+        assert!(
+            call_raw_text(&pop_stats_bad_name).contains("must not be empty"),
+            "population-stats blank name: {}",
+            call_raw_text(&pop_stats_bad_name)
+        );
+        let stats_runner = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in stats_runner.take_jobs("project-1") {
+                assert_eq!(job.action, "flow-population-stats");
+                let _ = stats_runner.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "project_id": "project-1", "sample_id": "flow-fixture-1", "table_id": "stats-table-1", "name": "Fixture population stats", "populations": [{ "id": "root", "name": "All events", "count": 20000, "pct_parent": 100.0, "pct_grandparent": 100.0, "pct_total": 100.0 }, { "id": "cd4pos", "name": "CD4+", "count": 6000, "pct_parent": 30.0, "pct_grandparent": 30.0, "pct_total": 30.0 }], "rows": 2 })),
+                    None,
+                    None,
+                );
+            }
+        });
+        let (pop_stats, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(113, "titer_flow_population_stats", json!({ "sample_id": "flow-fixture-1" })),
+        )
+        .await;
+        assert_eq!(call_text(&pop_stats)["table_id"], "stats-table-1");
+        assert_eq!(call_text(&pop_stats)["rows"], 2);
+        assert_eq!(call_text(&pop_stats)["populations"].as_array().map(|a| a.len()), Some(2));
         let (save_bad_format, _) = mcp_post(
             &client,
             &url,
@@ -14635,7 +14771,7 @@ mod tests {
         // the part that actually catches it.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 82, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 83, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -14761,7 +14897,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 82, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 83, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema
@@ -15265,7 +15401,7 @@ mod tests {
         assert!(tools.contains(&"titer_send_feedback"), "feedback is in the entry: {tools:?}");
         assert_eq!(tools.len(), 12, "seven read + five read-more: {tools:?}");
         // All groups on: Antigravity gets everything the server offers —
-        // all 82 tools, including the destructive ones (seq 540: the
+        // all 83 tools, including the destructive ones (seq 540: the
         // allowlist is the only gate; the entry must not narrow it).
         let all_groups: Vec<&str> = ALLOWLIST_GROUPS.iter().map(|g| g.id).collect();
         let entry = expected_antigravity_entry(bridge, &allowed_for(&all_groups));
@@ -15275,7 +15411,7 @@ mod tests {
             .iter()
             .filter_map(|v| v.as_str())
             .collect();
-        assert_eq!(tools.len(), 82, "all tools on by default: {tools:?}");
+        assert_eq!(tools.len(), 83, "all tools on by default: {tools:?}");
         assert!(tools.contains(&"titer_delete_node"), "destructive tools included: {tools:?}");
         assert!(tools.contains(&"titer_run_script"), "destructive tools included: {tools:?}");
         assert!(tools.contains(&"titer_send_feedback"), "feedback included: {tools:?}");

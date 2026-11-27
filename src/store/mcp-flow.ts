@@ -1,5 +1,5 @@
-// Headless flow work for the MCP dispatcher (seq 443, F1c; seq 447, F2a):
-// the `import-fcs` job and the `apply-flow-compensation` job — the same
+// Headless flow work for the MCP dispatcher (seq 443, F1c; seq 447, F2a; seq 449, F2c):
+// the `import-fcs` job, the `apply-flow-compensation` job and the `flow-population-stats` job — the same
 // shape as `mcp-document.ts`'s import jobs, minus everything a human
 // does: no path picker, no prompts, no dialog. The Rust reader
 // (`flow_import_fcs`) parses the FCS file into the event store; the
@@ -15,8 +15,10 @@
 import { parseSpilloverCsv, type ApplyCompensationInput, type FlowCompensationState } from "../flow/compensation";
 import { isFlowEnabled } from "../flow/feature-flag";
 import { buildFlowSampleRef, importFcs, type FcsImportSummary } from "../flow/fcs";
-import type { FlowCompensationRef, FlowSampleRef } from "../flow/sample";
-import { createFlowStore } from "../flow/store";
+import { isSampleNode, type FlowCompensationRef, type FlowPopulationPredicate, type FlowPopulationRef, type FlowSampleRef } from "../flow/sample";
+import { buildPopulationStatsTable, computePopulationStats, resolvePopulationIndices } from "../flow/stats";
+import { createFlowStore, type FlowEventStore } from "../flow/store";
+import type { TableData } from "../store/types";
 import type { DocumentState } from "./mcp-document";
 
 /** What the flow jobs need, injectable so a harness can drive them
@@ -28,6 +30,10 @@ export interface FlowJobDeps {
   /** The store's `updateFlowSampleCompensation` action (seq 447;
    *  default: the real one). */
   updateFlowSampleCompensation?: (sampleId: string, compensation: FlowCompensationRef) => void;
+  /** The store's `createFlowStatsTable` action (seq 449; default: the real one). */
+  createFlowStatsTable?: (table: TableData, name: string, sampleIds: readonly string[]) => string;
+  /** The event store the stats job reads (seq 449; default: the live store). */
+  flowStore?: FlowEventStore;
   /** The importer (default: the real `flow_import_fcs` Tauri command). */
   importFcs?: (path: string, sampleId?: string, name?: string) => Promise<FcsImportSummary>;
   /** Apply a spillover matrix in the event store (seq 447; default: the
@@ -36,6 +42,14 @@ export interface FlowJobDeps {
   /** Wait for the store to settle after a dispatch (see mcp-dispatch.ts). */
   flushUntilRevision?: (before: number) => Promise<void>;
   flush?: () => Promise<void>;
+}
+
+/** The `flow-population-stats` job's args, as Rust sends them (snake_case,
+ *  nulls for absent `Option`s). */
+export interface PopulationStatsJobArgs {
+  sample_id?: unknown;
+  populations?: unknown;
+  name?: unknown;
 }
 
 /** The `import-fcs` job's args, as Rust sends them (snake_case, nulls for
@@ -223,5 +237,136 @@ export async function executeApplyFlowCompensation(
       event_count: node.flowSample.eventCount,
       parameters_compensated: state.fluorochromes.length,
     },
+  };
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** One ad-hoc population's predicate, parsed strictly: a job that names a
+ *  bad gate is refused, not silently reinterpreted — unlike the forgiving
+ *  file reader, which drops a bad predicate and keeps the population. */
+function readJobPredicate(raw: unknown, what: string): FlowPopulationPredicate {
+  if (!isObj(raw)) throw new Error(`Job argument "${what}" must be an object.`);
+  if (raw.kind !== "range") throw new Error(`Job argument "${what}.kind" must be "range".`);
+  const param = reqString(raw.param, `${what}.param`);
+  const min = raw.min === undefined || raw.min === null ? undefined : raw.min;
+  const max = raw.max === undefined || raw.max === null ? undefined : raw.max;
+  if (min !== undefined && typeof min !== "number") throw new Error(`Job argument "${what}.min" must be a number.`);
+  if (max !== undefined && typeof max !== "number") throw new Error(`Job argument "${what}.max" must be a number.`);
+  if (min !== undefined && max !== undefined && (min as number) > (max as number)) {
+    throw new Error(`Job argument "${what}.min" must not exceed "${what}.max".`);
+  }
+  return {
+    kind: "range",
+    param,
+    ...(min !== undefined ? { min: min as number } : {}),
+    ...(max !== undefined ? { max: max as number } : {}),
+  };
+}
+
+/** An ad-hoc populations tree, parsed strictly: every population needs an
+ *  id and a name, parent ids must be strings, ids must be unique. */
+function parsePopulations(raw: unknown): FlowPopulationRef[] {
+  if (!Array.isArray(raw)) throw new Error('Job argument "populations" must be an array of populations.');
+  if (raw.length === 0) throw new Error('Job argument "populations" must name at least one population.');
+  const pops: FlowPopulationRef[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < raw.length; i++) {
+    const entry = raw[i];
+    if (!isObj(entry)) throw new Error(`Job argument "populations[${i}]" must be an object.`);
+    const id = reqString(entry.id, `populations[${i}].id`);
+    const name = reqString(entry.name, `populations[${i}].name`);
+    if (seen.has(id)) throw new Error(`Job argument "populations[${i}].id" duplicates "${id}".`);
+    seen.add(id);
+    const parentId =
+      entry.parent_id === undefined || entry.parent_id === null
+        ? null
+        : reqString(entry.parent_id, `populations[${i}].parent_id`);
+    const population: FlowPopulationRef = { id, name, parentId };
+    if (entry.predicate !== undefined && entry.predicate !== null) {
+      population.predicate = readJobPredicate(entry.predicate, `populations[${i}].predicate`);
+    }
+    pops.push(population);
+  }
+  return pops;
+}
+
+/** Per-population statistics for one sample, as an ordinary table node.
+ *  Counts, frequencies, medians/MFIs, geo-mean, CV, robust CV/SD and
+ *  percentiles per gated population, per parameter — computed in pure TS
+ *  over the event store (`src/flow/stats.ts`), never event arrays. With no
+ *  ad-hoc `populations`, the sample node's own gating tree is used; a
+ *  sample with no gates reads as the root population alone. */
+export async function executePopulationStats(
+  deps: FlowJobDeps,
+  args: PopulationStatsJobArgs,
+  projectId: string,
+): Promise<{ result: unknown; created?: Record<string, unknown> }> {
+  if (!isFlowEnabled()) {
+    throw new Error("The FlowJo module is off — turn it on in Settings before computing population statistics.");
+  }
+  const sampleId = reqString(args.sample_id, "sample_id");
+  const name = optString(args.name, "name");
+  if (name !== undefined && !name.trim()) throw new Error("The stats table name must not be empty.");
+  const state = deps.getState();
+  const node = state.nodes[sampleId];
+  if (!node || !isSampleNode(node)) {
+    throw new Error(`No flow sample "${sampleId}" in this project — import it first (titer_import_fcs).`);
+  }
+  const ref = node.flowSample;
+  // The sample's own gating tree is trusted as filed (the forgiving reader
+  // already dropped bad predicates); an ad-hoc tree is parsed strictly.
+  const populations =
+    args.populations !== undefined && args.populations !== null
+      ? parsePopulations(args.populations)
+      : (ref.gating?.populations ?? [{ id: "root", name: "All events", parentId: null }]);
+  const store = deps.flowStore ?? createFlowStore();
+  const paramNames = ref.parameters.map((p) => p.name);
+  const columns: Float32Array[] = [];
+  for (const param of paramNames) {
+    const column = await store.getColumn(sampleId, param);
+    if (column === null) {
+      throw new Error(`Sample "${sampleId}" has no "${param}" column in the event store — re-import it.`);
+    }
+    columns.push(column);
+  }
+  const indices = resolvePopulationIndices(columns, paramNames, populations);
+  const stats = computePopulationStats(columns, paramNames, populations, indices);
+  const table = buildPopulationStatsTable(stats, paramNames);
+  const tableName = name ?? `${ref.name} population stats`;
+  const create =
+    deps.createFlowStatsTable ??
+    (() => {
+      throw new Error("This window can't create a flow stats table (no createFlowStatsTable).");
+    });
+  const beforeRevision = state.revision;
+  const tableId = create(table, tableName, [sampleId]);
+  if (deps.flushUntilRevision) await deps.flushUntilRevision(beforeRevision);
+  else await deps.flush?.();
+  const after = deps.getState();
+  const createdNode = after.nodes[tableId];
+  if (!createdNode || createdNode.type !== "table") {
+    throw new Error(
+      "Computed the population stats but their table node could not be read back — ask titer_list_projects for the new table.",
+    );
+  }
+  return {
+    result: {
+      project_id: projectId,
+      sample_id: sampleId,
+      table_id: tableId,
+      name: tableName,
+      populations: stats.map((s) => ({
+        id: s.id,
+        name: s.name,
+        count: s.count,
+        pct_parent: s.pctParent,
+        pct_grandparent: s.pctGrandparent,
+        pct_total: s.pctTotal,
+      })),
+      rows: table.rows.length,
+    },
+    created: { table_id: tableId },
   };
 }

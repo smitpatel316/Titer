@@ -45,7 +45,7 @@
 // since seq 450, which adds titer_convert_to_nested; 80 since seq 452,
 // 2.0, which adds titer_read_error_log; 81 since seq 443, FlowJo F1c,
 // which adds titer_import_fcs; 82 since seq 447, FlowJo F2a, which adds
-// titer_apply_flow_compensation),
+// titer_apply_flow_compensation; 83 since seq 449, FlowJo F2c, which adds titer_flow_population_stats),
 // 61 AnalysisType variants / schema keys / runner keys (was 54; 60 since
 // seq 177 select-transform; 61 since #46 compare-slopes).
 // ONE correction vs the audit stands: row 178 said GAP, but Compact
@@ -262,7 +262,7 @@ const scopeText = (scope: string): string => {
   }
 };
 
-const EXPECTED_TOOL_COUNT = 82;
+const EXPECTED_TOOL_COUNT = 83;
 const EXPECTED_ANALYSIS_TYPES = 61;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
@@ -781,7 +781,7 @@ const ROWS: Row[] = [
     item: "1.7.4 allowlist",
     title: "1.7.4 allowlist groups",
     status: "covered",
-    note: "11 groups covering all 82 tools exactly once; default = read group only.",
+    note: "11 groups covering all 83 tools exactly once; default = read group only.",
     checks: [{ kind: "invariant", name: "allowlist" }],
   },
   {
