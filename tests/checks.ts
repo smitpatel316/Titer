@@ -43463,6 +43463,66 @@ check("names pasted onto the columns, from a row or a column, rename them in one
   strictEqual("problem" in paste("Ctl:1", 1, grouped, "grouped"), true);
 });
 
+check("pasteNames on a nested table keeps its Group:Subgroup:Replicate structure (seq 571)", () => {
+  const paste = (text: string, from = 1, on: TableData, type: TableType = "grouped") => pasteNames(on, type, from, text);
+  const okPaste = (r: ReturnType<typeof paste>) => {
+    if ("problem" in r) throw new Error(r.problem);
+    return r;
+  };
+  // (1) Nested: pasting group names renames the groups, leaving the
+  // Subgroup:Replicate suffixes — and the per-column decimals — in place.
+  const nested = newNestedTable(2, 2, 2);
+  const renamed = okPaste(
+    paste("WT\tKO", 1, { ...nested, decimals: { "A:S1:R1": 2, "B:S2:R2": 1 } }),
+  );
+  deepStrictEqual(renamed.data.columns, [
+    "Title",
+    "WT:S1:R1", "WT:S1:R2", "WT:S2:R1", "WT:S2:R2",
+    "KO:S1:R1", "KO:S1:R2", "KO:S2:R1", "KO:S2:R2",
+  ]);
+  deepStrictEqual(renamed.renamed, { A: "WT", B: "KO" });
+  strictEqual(renamed.unplaced, 0);
+  deepStrictEqual(renamed.data.decimals, { "WT:S1:R1": 2, "KO:S2:R2": 1 });
+
+  // (2) Column metadata and calculated references follow a paste-rename.
+  const mv: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: [["r1", "1", "2", "3"]],
+    decimals: { A: 2, B: 1 },
+    variableTypes: { A: { type: "continuous", manual: true } },
+    labelVariable: "A",
+    levelOrder: { A: ["low", "high"] },
+    calculated: [{ name: "C", formula: "A + B" }],
+  };
+  const dose = okPaste(paste("Dose", 1, mv, "multiple"));
+  deepStrictEqual(dose.data.columns, ["Title", "Dose", "B", "C"]);
+  deepStrictEqual(dose.data.decimals, { Dose: 2, B: 1 });
+  deepStrictEqual(dose.data.variableTypes, { Dose: { type: "continuous", manual: true } });
+  strictEqual(dose.data.labelVariable, "Dose");
+  deepStrictEqual(dose.data.levelOrder, { Dose: ["low", "high"] });
+  deepStrictEqual(dose.data.calculated, [{ name: "C", formula: "Dose + B" }]);
+  // Swapping two names swaps their metadata and their formula references
+  // together — no half-renamed "B + B".
+  const swapped = okPaste(paste("B\tA", 1, mv, "multiple"));
+  deepStrictEqual(swapped.data.columns, ["Title", "B", "A", "C"]);
+  deepStrictEqual(swapped.data.decimals, { B: 2, A: 1 });
+  deepStrictEqual(swapped.data.calculated, [{ name: "C", formula: "B + A" }]);
+
+  // (3) A lead column and a group sharing a name rename independently.
+  const xyGrouped: TableData = {
+    columns: ["Title", "X", "X:Y1", "X:Y2", "B:Y1", "B:Y2"],
+    rows: [["r1", "0", "1", "2", "3", "4"]],
+    groups: 2,
+    replicates: 2,
+  };
+  // Pasting from the lead X renames the lead and the group apart.
+  const fromLead = okPaste(paste("Dose\tCtl", 1, xyGrouped, "xy"));
+  deepStrictEqual(fromLead.data.columns, ["Title", "Dose", "Ctl:Y1", "Ctl:Y2", "B:Y1", "B:Y2"]);
+  // Pasting from a group column leaves the lead X alone.
+  const fromGroup = okPaste(paste("Dose\tCtl", 2, xyGrouped, "xy"));
+  deepStrictEqual(fromGroup.data.columns, ["Title", "X", "Dose:Y1", "Dose:Y2", "Ctl:Y1", "Ctl:Y2"]);
+});
+
 // ── Axes ─────────────────────────────────────────────────────────────────
 
 /** A table of each type, rows titled by numbers (times), each graph type drawn on one. */

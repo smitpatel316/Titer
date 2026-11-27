@@ -1254,16 +1254,11 @@ const RESERVED_FORMULA_WORDS = new Set([...Object.keys(CONSTANTS), "AND", "OR", 
 const needsBrackets = (name: string): boolean =>
   !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || RESERVED_FORMULA_WORDS.has(name.toUpperCase());
 
-/** Renames the variable in a formula: a bare `Old` becomes `New`, and a
- *  bracketed `[Old]` becomes `[New]`. A function call named `Old` is left
- *  alone (a column is never a function), and so is text inside brackets
- *  that is not the whole name. A numeric literal is copied whole — the
- *  `e` in `1e-5` is an exponent, not the column `e` — and a new name
- *  that needs brackets gets them, so renaming to `Dose (mg)` or `E`
- *  keeps the formula readable. */
-export function renameVariableInFormula(formula: string, oldName: string, newName: string): string {
-  if (oldName === newName) return formula;
-  const replacement = needsBrackets(newName) ? `[${newName}]` : newName;
+/** Renames several variables in a formula at once: one pass, so swapping
+ *  two names ("A + B" with A→B, B→A) reads "B + A", never the half-renamed
+ *  "B + B" renaming one at a time would leave. Same rules per name as
+ *  `renameVariableInFormula`. */
+export function renameVariablesInFormula(formula: string, renames: ReadonlyMap<string, string>): string {
   let out = "";
   let i = 0;
   while (i < formula.length) {
@@ -1272,7 +1267,8 @@ export function renameVariableInFormula(formula: string, oldName: string, newNam
       const close = formula.indexOf("]", i + 1);
       if (close < 0) return out + formula.slice(i);
       const name = formula.slice(i + 1, close);
-      out += name === oldName ? `[${newName}]` : formula.slice(i, close + 1);
+      const next = renames.get(name);
+      out += next !== undefined && next !== name ? `[${next}]` : formula.slice(i, close + 1);
       i = close + 1;
       continue;
     }
@@ -1290,7 +1286,13 @@ export function renameVariableInFormula(formula: string, oldName: string, newNam
       const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(formula.slice(i))!;
       const word = m[0];
       const after = formula[i + word.length];
-      out += word === oldName && after !== "(" ? replacement : word;
+      const next = renames.get(word);
+      out +=
+        next !== undefined && next !== word && after !== "("
+          ? needsBrackets(next)
+            ? `[${next}]`
+            : next
+          : word;
       i += word.length;
       continue;
     }
@@ -1298,6 +1300,18 @@ export function renameVariableInFormula(formula: string, oldName: string, newNam
     i++;
   }
   return out;
+}
+
+/** Renames the variable in a formula: a bare `Old` becomes `New`, and a
+ *  bracketed `[Old]` becomes `[New]`. A function call named `Old` is left
+ *  alone (a column is never a function), and so is text inside brackets
+ *  that is not the whole name. A numeric literal is copied whole — the
+ *  `e` in `1e-5` is an exponent, not the column `e` — and a new name
+ *  that needs brackets gets them, so renaming to `Dose (mg)` or `E`
+ *  keeps the formula readable. */
+export function renameVariableInFormula(formula: string, oldName: string, newName: string): string {
+  if (oldName === newName) return formula;
+  return renameVariablesInFormula(formula, new Map([[oldName, newName]]));
 }
 
 /** Follows a column rename through the table's formulas: the renamed
@@ -1310,6 +1324,23 @@ export function renameCalculatedReferences(data: TableData, oldName: string, new
   const next = vars.map((v) => ({
     name: v.name === oldName ? newName : v.name,
     formula: renameVariableInFormula(v.formula, oldName, newName),
+    ...(v.error !== undefined ? { error: v.error } : {}),
+  }));
+  if (next.every((v, i) => v.name === vars[i].name && v.formula === vars[i].formula)) return data;
+  return { ...data, calculated: next };
+}
+
+/** Follows a multi-column rename through the table's formulas at once: each
+ *  renamed variable's own entry takes its new name, and every formula naming
+ *  it is rewritten in one pass (see `renameVariablesInFormula`), so swapping
+ *  two names never leaves a half-renamed formula. The same TableData back
+ *  when no formula names a renamed variable. */
+export function renameCalculatedReferencesMany(data: TableData, renames: ReadonlyMap<string, string>): TableData {
+  const vars = data.calculated ?? [];
+  if (vars.length === 0) return data;
+  const next = vars.map((v) => ({
+    name: renames.get(v.name) ?? v.name,
+    formula: renameVariablesInFormula(v.formula, renames),
     ...(v.error !== undefined ? { error: v.error } : {}),
   }));
   if (next.every((v, i) => v.name === vars[i].name && v.formula === vars[i].formula)) return data;
