@@ -25063,12 +25063,13 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
     ],
   );
   // Multiple Variables tables offer the scatter plot, the histogram, the
-  // QQ plot, the forest plot, the observed-vs-fitted graph, the scree plot, the scores
+  // QQ plot, the forest plot, the observed-vs-fitted graph, the covariance
+  // heatmap (seq 198 remainder), the scree plot, the scores
   // biplot, the cluster scatter, the dendrogram, the Elbow, Silhouette and Gap plots,
   // the bubble plot, and survival curves.
   deepStrictEqual(
     GRAPH_OPTIONS_BY_TABLE["multiple"].map((o) => o.value),
-    ["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "mv-strip-plot", "mv-summary-symbol", "mv-bar-strip", "mv-before-after-bar-strip", "mv-before-after-strip", "mv-box-whisker", "mv-violin", "mv-bar-chart", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "dendrogram", "elbow-plot", "silhouette-plot", "gap-plot", "survival"],
+    ["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "mv-strip-plot", "mv-summary-symbol", "mv-bar-strip", "mv-before-after-bar-strip", "mv-before-after-strip", "mv-box-whisker", "mv-violin", "mv-bar-chart", "volcano", "forest-plot", "observed-fitted", "covariance-heatmap", "scree-plot", "pca-biplot", "kmeans-scatter", "dendrogram", "elbow-plot", "silhouette-plot", "gap-plot", "survival"],
   );
   // Renaming a column follows the Cox analysis's params.
   const renamed = followTable(
