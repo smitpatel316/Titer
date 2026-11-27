@@ -23,8 +23,8 @@ if [ "${APT_UPDATE:-0}" = "1" ]; then
 fi
 
 # libzstd-dev (pulled in by librsvg2-dev's chain) can conflict with the
-# Hatch-pinned libzstd1 (+hatch1). Downgrade it first if present.
-if dpkg -l libzstd1 2>/dev/null | grep -q 'hatch1'; then
+# Hatch-pinned libzstd1 (+hatchN). Downgrade it first if present.
+if dpkg -l libzstd1 2>/dev/null | grep -q 'hatch[0-9]'; then
   apt-get install -y --allow-downgrades 'libzstd1=1.5.5+dfsg2-2build1.1' || true
 fi
 
