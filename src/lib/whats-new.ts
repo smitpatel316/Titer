@@ -38,6 +38,33 @@ export interface WhatsNewEntry {
 /** The news, newest first. */
 export const WHAT_S_NEW: WhatsNewEntry[] = [
   {
+    version: "2.0.5",
+    title: "Titer 2.0.5 — in-place updates fixed",
+    items: [
+      "Check for Updates installs updates in place again: 2.0.3 opened GitHub instead, because the release was stamped with the old version number.",
+      "The app now shows its real version — no more 2.0.1 on a newer build.",
+      "If an install ever fails, Titer now says what went wrong and lets you choose the manual download, instead of opening GitHub on its own.",
+    ],
+  },
+  {
+    version: "2.0.3",
+    title: "Titer 2.0.3 — bug wave #98–#111",
+    items: [
+      "Open-file safety, Nested-table paste, log-scale bar labels, and the fitted-curve and noncentral-t fixes from the #98–#111 bug wave.",
+      "13-digit precision completed: centering now covers nested and multi-way ANOVA, Welch/Brown-Forsythe, compare-slopes, Deming regression, and fitLinear.",
+      "Cycle-44 parked fixes across Prism regen, scripts, plugins, cloud, and MCP.",
+    ],
+  },
+  {
+    version: "2.0.2",
+    title: "Titer 2.0.2 — What's New, citation, precision",
+    items: [
+      "What's New now shows only what you missed since your version, most recent first, capped at three.",
+      "Citation support: the Zenodo DOI is in How to Cite, the README, and the site.",
+      "13-digit precision fixed in ANOVA and regressions; grouped bars draw their points correctly.",
+    ],
+  },
+  {
     version: "2.0.1",
     title: "Titer 2.0.1 — patch fixes",
     items: [

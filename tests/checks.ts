@@ -53,7 +53,7 @@ import {
   parseGuideSeen,
   shouldShowGuide,
 } from "../src/lib/startup-guide";
-import { WHAT_S_NEW, WHATS_NEW_SEEN_KEY, filterWhatsNewEntries, markWhatsNewSeen, readWhatsNewSeen, seenVersion, visibleWhatsNewEntries } from "../src/lib/whats-new";
+import { WHAT_S_NEW, WHATS_NEW_SEEN_KEY, filterWhatsNewEntries, markWhatsNewSeen, readWhatsNewSeen, seenVersion, visibleWhatsNewEntries, whatsNewVersion } from "../src/lib/whats-new";
 import {
   extractMethod,
   formatMethodReport,
@@ -425,7 +425,7 @@ import { executeSaveProject, toSaveWriteReport, type DocumentDeps, type Document
 import { TABLES } from "../src/views/tables/index";
 import { UPDATE_CHECK_TIMEOUT_MS, fetchWithTimeout, isNewer, latestVersion } from "../src/lib/version";
 import { decideUpdate, type ChannelManifest } from "../src/lib/channel";
-import { checkForUpdatesDaily } from "../src/updates";
+import { checkForUpdates, checkForUpdatesDaily, type UpdateDeps } from "../src/updates";
 import { titleCase } from "../src/lib/format";
 import { loadRecents } from "../src/store/recents";
 import {
@@ -22930,7 +22930,10 @@ check("updater-46: auto-updater resolves the artifact from the channel manifest 
   const nativeSrc = readFileSync("src/native.ts", "utf8");
   ok(nativeSrc.includes('invoke<string>("download_update")'), "native.ts invokes download_update with no URL argument");
   const updatesSrc = readFileSync("src/updates.ts", "utf8");
-  ok(updatesSrc.includes("await downloadUpdate()"), "installUpdate downloads with no caller-supplied asset fields");
+  // The download goes through the testable deps seam (Nov 27 2026):
+  // still no caller-supplied URL, hash, or size — the seam only swaps
+  // which function answers, never what it is asked.
+  ok(updatesSrc.includes("await deps.downloadUpdate()"), "installUpdate downloads with no caller-supplied asset fields");
   ok(updatesSrc.includes("manifest.update"), "installUpdate still refuses when the manifest names no installable asset");
 });
 check("r2-65: UI/menu minor defects — single Grubbs' table, single Fill Down, no shortcut collision, fresh Change Parameters… state", () => {
@@ -30447,6 +30450,117 @@ check("a paused channel manifest disables updates", () => {
   deepStrictEqual(decideUpdate("1.1.0", manifest), { kind: "disabled", message: "Paused for the weekend." });
 });
 
+// Nov 27 2026 (2.0.3): Check for Updates opened GitHub on every run.
+// The channel was healthy and named a 2.0.3 zip, but the zip was
+// stamped 2.0.1 (package.json was never bumped for 2.0.2/2.0.3), so the
+// shell's version-stamp guard refused the swap — and the install-failure
+// branch opened the releases page without asking. A failed install now
+// explains itself and offers the manual download as an explicit choice;
+// GitHub opens only when the user says so, or when the channel itself
+// is unreachable (the pin below). The fakes replay the exact 2.0.3
+// failure: the stamp guard's refusal, word for word.
+check("a failed in-place install never opens GitHub on its own; the manual download is an explicit choice", async () => {
+  const calls: string[] = [];
+  const manifest: ChannelManifest = {
+    version: "2.0.3",
+    update: {
+      url: "https://titer.smitpatel.net/downloads/Titer-2.0.3.zip",
+      sha256: "0".repeat(64),
+      size: 137239423,
+    },
+  };
+  const makeDeps = (manualAnswer: boolean): UpdateDeps => ({
+    isNative: true,
+    isMacOs: () => true,
+    appVersion: async () => "2.0.1",
+    fetchChannelManifest: async () => manifest,
+    lastChannelFetchError: () => null,
+    latestVersion: async () => "2.0.3",
+    askToUpdate: async () => (calls.push("askToUpdate"), true),
+    askToDownloadManually: async () => (calls.push("askToDownloadManually"), manualAnswer),
+    askToRetryUpdate: async () => false,
+    downloadUpdate: async () => "/tmp/Titer-update.zip",
+    applyUpdate: async () => {
+      throw new Error("update is stamped 2.0.1, not 2.0.3");
+    },
+    openLink: () => void calls.push("openLink"),
+    alert: async () => void calls.push("alert"),
+    quitApp: async () => void calls.push("quitApp"),
+  });
+  // The user declines the manual download: GitHub never opens, and a
+  // failed optional update does not quit the app.
+  strictEqual(await checkForUpdates(false, makeDeps(false)), true);
+  ok(calls.includes("askToDownloadManually"), "the manual download is offered after a failed install");
+  ok(!calls.includes("openLink"), "GitHub does not open when the user declines the manual download");
+  ok(!calls.includes("quitApp"), "a failed optional update does not quit");
+  // The user accepts it: GitHub opens exactly once, by their choice.
+  calls.length = 0;
+  strictEqual(await checkForUpdates(false, makeDeps(true)), true);
+  strictEqual(
+    calls.filter((c) => c === "openLink").length,
+    1,
+    "GitHub opens once, only when the user chooses the manual download",
+  );
+});
+
+check("when the channel itself is unreachable, the GitHub fallback says so", async () => {
+  const calls: string[] = [];
+  let manualReason: string | undefined;
+  const deps: UpdateDeps = {
+    isNative: true,
+    isMacOs: () => true,
+    appVersion: async () => "2.0.1",
+    fetchChannelManifest: async () => null,
+    lastChannelFetchError: () => "curl: returned error: 404",
+    latestVersion: async () => "2.0.3",
+    askToUpdate: async (_version, _forced, _installable, reason) => {
+      calls.push("askToUpdate");
+      manualReason = reason;
+      return true;
+    },
+    askToDownloadManually: async () => false,
+    askToRetryUpdate: async () => false,
+    downloadUpdate: async () => "/tmp/Titer-update.zip",
+    applyUpdate: async () => "/tmp/Titer-update.zip",
+    openLink: () => void calls.push("openLink"),
+    alert: async () => void calls.push("alert"),
+    quitApp: async () => void calls.push("quitApp"),
+  };
+  strictEqual(await checkForUpdates(false, deps), true);
+  ok(manualReason?.includes("couldn't be reached"), "the offer says the channel couldn't be reached");
+  strictEqual(
+    calls.filter((c) => c === "openLink").length,
+    1,
+    "the last-resort manual download opens GitHub once the user accepts it",
+  );
+});
+
+// The 2.0.3 defect, at the source: the app displayed 2.0.1 (and its
+// updater zip was stamped 2.0.1) while the release was 2.0.3, because
+// package.json was never bumped. The displayed version is getVersion()
+// from the bundle, and the bundle's version comes from tauri.conf.json
+// — which must keep pointing at package.json, never a literal — while
+// the Rust package version tracks it too. A release tip whose version
+// chain disagrees fails here, never in the app.
+check("the displayed version tracks package.json: tauri.conf.json points at it and Cargo.toml agrees", () => {
+  const pkg = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")) as {
+    version: string;
+  };
+  const conf = JSON.parse(readFileSync(fileURLToPath(new URL("../src-tauri/tauri.conf.json", import.meta.url)), "utf8")) as {
+    version: string;
+  };
+  strictEqual(
+    conf.version,
+    "../package.json",
+    "tauri.conf.json must derive its version from package.json, so the bundle stamp follows the bump",
+  );
+  const cargo = readFileSync(fileURLToPath(new URL("../src-tauri/Cargo.toml", import.meta.url)), "utf8");
+  ok(
+    new RegExp(`^version = "${pkg.version.replace(/\./g, "\\.")}"`, "m").test(cargo),
+    `Cargo.toml version must track package.json (${pkg.version})`,
+  );
+});
+
 check("a release is newer only when its version number is higher", () => {
   ok(isNewer("v1.1.0", "1.0.0"));
   ok(isNewer("v1.10.0", "1.9.0"));
@@ -30513,31 +30627,32 @@ check("bugfix-br-108: closing the dialog never moves the seen marker down after 
     setItem: (k: string, v: string) => void (stored[k] = v),
   };
   Object.assign(globalThis, { localStorage: storage });
+  const current = whatsNewVersion();
   try {
-    // Running 2.0.1 (package.json) with 2.1.0 already seen: the marker stays.
+    // Running the package.json version with 2.1.0 already seen: the marker stays.
     stored[WHATS_NEW_SEEN_KEY] = "2.1.0";
     markWhatsNewSeen();
     strictEqual(readWhatsNewSeen(), "2.1.0", "a downgrade close leaves the newer marker alone");
     // Same version: already seen, no rewrite needed (value unchanged).
-    stored[WHATS_NEW_SEEN_KEY] = "2.0.1";
+    stored[WHATS_NEW_SEEN_KEY] = current;
     markWhatsNewSeen();
-    strictEqual(readWhatsNewSeen(), "2.0.1");
+    strictEqual(readWhatsNewSeen(), current);
     // Older version: the marker advances to the running version.
     stored[WHATS_NEW_SEEN_KEY] = "2.0.0";
     markWhatsNewSeen();
-    strictEqual(readWhatsNewSeen(), "2.0.1");
+    strictEqual(readWhatsNewSeen(), current);
     // No record: the marker is written.
     delete stored[WHATS_NEW_SEEN_KEY];
     markWhatsNewSeen();
-    strictEqual(readWhatsNewSeen(), "2.0.1");
+    strictEqual(readWhatsNewSeen(), current);
     // Garbled record: treated as no record, the marker is written.
     stored[WHATS_NEW_SEEN_KEY] = "banana";
     markWhatsNewSeen();
-    strictEqual(readWhatsNewSeen(), "2.0.1");
+    strictEqual(readWhatsNewSeen(), current);
     // A stored pre-release newer than the running version is left alone.
-    stored[WHATS_NEW_SEEN_KEY] = "2.0.2-rc.1";
+    stored[WHATS_NEW_SEEN_KEY] = "2.1.0-rc.1";
     markWhatsNewSeen();
-    strictEqual(readWhatsNewSeen(), "2.0.2-rc.1", "a newer pre-release marker is not overwritten");
+    strictEqual(readWhatsNewSeen(), "2.1.0-rc.1", "a newer pre-release marker is not overwritten");
   } finally {
     delete (globalThis as { localStorage?: unknown }).localStorage;
   }
@@ -48117,23 +48232,37 @@ check("feedback-loop-453: feedback reachable for every user, Discussions + suppo
   // shows only the current entry; already seen, or a downgrade, shows
   // nothing.
   const shownVersions = (entries: { version: string }[]) => entries.map((e) => e.version);
-  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.0")), ["2.0.1"], "prev 2.0.0 sees only 2.0.1");
+  deepStrictEqual(
+    shownVersions(visibleWhatsNewEntries("2.0.0")),
+    ["2.0.5", "2.0.3", "2.0.2"],
+    "prev 2.0.0 sees the three newest, capped at 3",
+  );
   deepStrictEqual(
     shownVersions(visibleWhatsNewEntries("1.9.0")),
-    ["2.0.1", "2.0.0"],
-    "prev 1.9.0 sees 2.0.1 + 2.0.0",
+    ["2.0.5", "2.0.3", "2.0.2"],
+    "prev 1.9.0 sees the three newest, capped at 3",
   );
   deepStrictEqual(
     shownVersions(visibleWhatsNewEntries("1.8.1")),
-    ["2.0.1", "2.0.0", "1.9.0"],
-    "prev 1.8.1 sees all three, capped at 3",
+    ["2.0.5", "2.0.3", "2.0.2"],
+    "prev 1.8.1 sees the three newest, capped at 3",
   );
-  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.1")), [], "prev 2.0.1 sees nothing");
-  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.2")), [], "downgrade sees nothing");
-  deepStrictEqual(shownVersions(visibleWhatsNewEntries(null)), ["2.0.1"], "no record sees only the current entry");
+  deepStrictEqual(
+    shownVersions(visibleWhatsNewEntries("2.0.1")),
+    ["2.0.5", "2.0.3", "2.0.2"],
+    "prev 2.0.1 sees the three newer entries",
+  );
+  deepStrictEqual(
+    shownVersions(visibleWhatsNewEntries("2.0.2")),
+    ["2.0.5", "2.0.3"],
+    "prev 2.0.2 sees the two newer entries",
+  );
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.5")), [], "prev 2.0.5 (current) sees nothing");
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.6")), [], "downgrade sees nothing");
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries(null)), ["2.0.5"], "no record sees only the current entry");
   deepStrictEqual(
     shownVersions(visibleWhatsNewEntries("banana")),
-    ["2.0.1"],
+    ["2.0.5"],
     "garbled record sees only the current entry",
   );
   const fiveEntries = ["2.0.3", "2.0.2", "2.0.1", "2.0.0", "1.9.0"].map((v) => ({

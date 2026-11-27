@@ -85,10 +85,20 @@ export async function confirmReplace(title: string, detail: string): Promise<boo
  *  no Later — the channel says this version must not run, so the dialog
  *  has only Update Now. `installable`: false on a platform with no
  *  installable asset (Linux today) — the prompt then offers the manual
- *  download instead of promising a restart-to-install. */
-export async function askToUpdate(version: string, forced: boolean, installable: boolean): Promise<boolean> {
+ *  download instead of promising a restart-to-install. `manualReason`:
+ *  why this is a manual download at all — the channel itself is
+ *  unreachable, so no in-place update can be offered; the dialog says
+ *  so instead of silently sending the user to GitHub. */
+export async function askToUpdate(
+  version: string,
+  forced: boolean,
+  installable: boolean,
+  manualReason?: string,
+): Promise<boolean> {
   const detail = !installable
-    ? "Download it from GitHub, then replace Titer in your Applications folder."
+    ? manualReason
+      ? `${manualReason} Download it from GitHub, then replace Titer in your Applications folder.`
+      : "Download it from GitHub, then replace Titer in your Applications folder."
     : forced
       ? "This version can no longer run — update to keep using Titer."
       : "Download it now, and Titer will restart to install it.";
@@ -98,6 +108,22 @@ export async function askToUpdate(version: string, forced: boolean, installable:
     buttons: forced ? { ok: "Update Now" } : { ok: "Update Now", cancel: "Later" },
   });
   return answer === "Update Now" || answer === "Ok";
+}
+
+/** A Download from GitHub / Not Now prompt after an in-place install
+ *  fails (or the channel names no installable asset): the manual
+ *  download is offered, never opened on its own — 2.0.3 opened the
+ *  releases page after every failed install without asking. */
+export async function askToDownloadManually(version: string, detail: string): Promise<boolean> {
+  const answer = await message(
+    `Titer ${version} could not be installed automatically: ${detail}\n\nYou can download it from GitHub and replace Titer in your Applications folder instead.`,
+    {
+      title: "Download Manually Instead?",
+      kind: "warning",
+      buttons: { ok: "Download from GitHub", cancel: "Not Now" },
+    },
+  );
+  return answer === "Download from GitHub" || answer === "Ok";
 }
 
 /** A Retry / Quit prompt when a forced update cannot install. */
