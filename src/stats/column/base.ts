@@ -69,7 +69,14 @@ export async function describe(
       // An empty group is NULL in R and mean(NULL) warns; coerce once here
       // so both R_DESCRIBE and the difference below see numeric(0).
       `G<-lapply(G,function(x)if(is.null(x))numeric(0) else x);` +
-      `c(${R_DESCRIBE}${pairs.map(([i, j]) => `,d_${i}_${j}=mean(G[[${i + 1}]])-mean(G[[${j + 1}]])`).join("")})`,
+      // The difference of two group means is taken on the values shifted by
+      // the grand mean: at 1e13 scale the raw means differ from each other
+      // only past the 13th digit, so mean(A)−mean(B) loses the difference
+      // (ANOVA post-hoc diffs up to 0.22% off); the shift cancels in the
+      // difference, so it is unchanged — only precise. The descriptives
+      // above stay on the raw values: a group's own mean is what is shown.
+      `gm<-mean(unlist(G));` +
+      `c(${R_DESCRIBE}${pairs.map(([i, j]) => `,d_${i}_${j}=mean(G[[${i + 1}]]-gm)-mean(G[[${j + 1}]]-gm)`).join("")})`,
   );
   return { groups: describedBy(v, groups), diff: (i, j) => num(v[`d_${i}_${j}`]) };
 }

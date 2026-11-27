@@ -4555,6 +4555,2522 @@
    }
   ]
  },
+ "anova anovaBig {\"posthoc\":\"none\",\"equalSd\":false}": {
+  "testType": "anova",
+  "subtitle": "Welch's and Brown-Forsythe ANOVAs",
+  "stats": [
+   {
+    "label": "F (Welch)",
+    "value": 6056.173039
+   },
+   {
+    "label": "DFn",
+    "value": 8
+   },
+   {
+    "label": "DFd",
+    "value": 749.808001
+   },
+   {
+    "label": "P value",
+    "value": 0,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 5801.20715
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 8
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 1770.637892
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "G0",
+    "mean": 10000000000000,
+    "sd": 0.3457112629,
+    "sem": 0.02438459237,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G1",
+    "mean": 10000000000000,
+    "sd": 0.3792934555,
+    "sem": 0.0267532976,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G2",
+    "mean": 10000000000000,
+    "sd": 0.3695499343,
+    "sem": 0.0260660426,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G3",
+    "mean": 10000000000000,
+    "sd": 0.3495769396,
+    "sem": 0.02465725618,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G4",
+    "mean": 10000000000000,
+    "sd": 0.4051575277,
+    "sem": 0.02857760859,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G5",
+    "mean": 10000000000000,
+    "sd": 0.3678581963,
+    "sem": 0.0259467166,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G6",
+    "mean": 10000000000000,
+    "sd": 0.3195653324,
+    "sem": 0.02254040062,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G7",
+    "mean": 10000000000000,
+    "sd": 0.3615264711,
+    "sem": 0.02550011114,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G8",
+    "mean": 10000000000000,
+    "sd": 0.3429580722,
+    "sem": 0.02419039726,
+    "median": 10000000000000,
+    "n": 201
+   }
+  ],
+  "notes": "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "G0",
+     "n": 201
+    },
+    {
+     "name": "G1",
+     "n": 201
+    },
+    {
+     "name": "G2",
+     "n": 201
+    },
+    {
+     "name": "G3",
+     "n": 201
+    },
+    {
+     "name": "G4",
+     "n": 201
+    },
+    {
+     "name": "G5",
+     "n": 201
+    },
+    {
+     "name": "G6",
+     "n": 201
+    },
+    {
+     "name": "G7",
+     "n": 201
+    },
+    {
+     "name": "G8",
+     "n": 201
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001).",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of each group (Shapiro-Wilk): consistent with a normal distribution (“G0” P = 0.6424, “G1” P = 0.6336, “G2” P = 0.5014, “G3” P = 0.7144, “G4” P = 0.2001, “G5” P = 0.2356, “G6” P = 0.6419, “G7” P = 0.1333, “G8” P = 0.4263)."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.1219, Bartlett's P = 0.06419): not needed, Welch's ANOVA doesn't assume them."
+   }
+  ]
+ },
+ "anova anovaBig {\"posthoc\":\"games-howell\",\"equalSd\":false}": {
+  "testType": "anova",
+  "subtitle": "Welch's and Brown-Forsythe ANOVAs",
+  "stats": [
+   {
+    "label": "F (Welch)",
+    "value": 6056.173039
+   },
+   {
+    "label": "DFn",
+    "value": 8
+   },
+   {
+    "label": "DFd",
+    "value": 749.808001
+   },
+   {
+    "label": "P value",
+    "value": 0,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 5801.20715
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 8
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 1770.637892
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "G0",
+    "mean": 10000000000000,
+    "sd": 0.3457112629,
+    "sem": 0.02438459237,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G1",
+    "mean": 10000000000000,
+    "sd": 0.3792934555,
+    "sem": 0.0267532976,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G2",
+    "mean": 10000000000000,
+    "sd": 0.3695499343,
+    "sem": 0.0260660426,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G3",
+    "mean": 10000000000000,
+    "sd": 0.3495769396,
+    "sem": 0.02465725618,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G4",
+    "mean": 10000000000000,
+    "sd": 0.4051575277,
+    "sem": 0.02857760859,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G5",
+    "mean": 10000000000000,
+    "sd": 0.3678581963,
+    "sem": 0.0259467166,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G6",
+    "mean": 10000000000000,
+    "sd": 0.3195653324,
+    "sem": 0.02254040062,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G7",
+    "mean": 10000000000000,
+    "sd": 0.3615264711,
+    "sem": 0.02550011114,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G8",
+    "mean": 10000000000000,
+    "sd": 0.3429580722,
+    "sem": 0.02419039726,
+    "median": 10000000000000,
+    "n": 201
+   }
+  ],
+  "notes": "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions.",
+  "comparisons": [
+   {
+    "group1": "G0",
+    "group2": "G1",
+    "diff": -0.6037002488,
+    "p": 0,
+    "low": -0.7166043435,
+    "high": -0.490796154
+   },
+   {
+    "group1": "G0",
+    "group2": "G2",
+    "diff": -1.384697606,
+    "p": 0,
+    "low": -1.496024387,
+    "high": -1.273370824
+   },
+   {
+    "group1": "G0",
+    "group2": "G3",
+    "diff": -2.075239039,
+    "p": 0,
+    "low": -2.183396238,
+    "high": -1.96708184
+   },
+   {
+    "group1": "G0",
+    "group2": "G4",
+    "diff": -2.757773632,
+    "p": 0,
+    "low": -2.874956318,
+    "high": -2.640590945
+   },
+   {
+    "group1": "G0",
+    "group2": "G5",
+    "diff": -3.512058846,
+    "p": 0,
+    "low": -3.623113672,
+    "high": -3.40100402
+   },
+   {
+    "group1": "G0",
+    "group2": "G6",
+    "diff": -4.19895639,
+    "p": 0,
+    "low": -4.302526757,
+    "high": -4.095386023
+   },
+   {
+    "group1": "G0",
+    "group2": "G7",
+    "diff": -4.913032494,
+    "p": 0,
+    "low": -5.023075461,
+    "high": -4.802989526
+   },
+   {
+    "group1": "G0",
+    "group2": "G8",
+    "diff": -5.619266947,
+    "p": 0,
+    "low": -5.726393557,
+    "high": -5.512140336
+   },
+   {
+    "group1": "G1",
+    "group2": "G2",
+    "diff": -0.780997357,
+    "p": 0,
+    "low": -0.8974937632,
+    "high": -0.6645009507
+   },
+   {
+    "group1": "G1",
+    "group2": "G3",
+    "diff": -1.47153879,
+    "p": 0,
+    "low": -1.585016402,
+    "high": -1.358061179
+   },
+   {
+    "group1": "G1",
+    "group2": "G4",
+    "diff": -2.154073383,
+    "p": 0,
+    "low": -2.276167665,
+    "high": -2.031979101
+   },
+   {
+    "group1": "G1",
+    "group2": "G5",
+    "diff": -2.908358598,
+    "p": 0,
+    "low": -3.024595665,
+    "high": -2.792121531
+   },
+   {
+    "group1": "G1",
+    "group2": "G6",
+    "diff": -3.595256141,
+    "p": 0,
+    "low": -3.704380541,
+    "high": -3.486131741
+   },
+   {
+    "group1": "G1",
+    "group2": "G7",
+    "diff": -4.309332245,
+    "p": 0,
+    "low": -4.424604917,
+    "high": -4.194059573
+   },
+   {
+    "group1": "G1",
+    "group2": "G8",
+    "diff": -5.015566698,
+    "p": 0,
+    "low": -5.128064571,
+    "high": -4.903068825
+   },
+   {
+    "group1": "G2",
+    "group2": "G3",
+    "diff": -0.6905414335,
+    "p": 0,
+    "low": -0.8024501718,
+    "high": -0.5786326952
+   },
+   {
+    "group1": "G2",
+    "group2": "G4",
+    "diff": -1.373076026,
+    "p": 0,
+    "low": -1.493718319,
+    "high": -1.252433734
+   },
+   {
+    "group1": "G2",
+    "group2": "G5",
+    "diff": -2.127361241,
+    "p": 0,
+    "low": -2.242068833,
+    "high": -2.012653648
+   },
+   {
+    "group1": "G2",
+    "group2": "G6",
+    "diff": -2.814258784,
+    "p": 0,
+    "low": -2.921747949,
+    "high": -2.706769619
+   },
+   {
+    "group1": "G2",
+    "group2": "G7",
+    "diff": -3.528334888,
+    "p": 0,
+    "low": -3.64206454,
+    "high": -3.414605237
+   },
+   {
+    "group1": "G2",
+    "group2": "G8",
+    "diff": -4.234569341,
+    "p": 0,
+    "low": -4.345483869,
+    "high": -4.123654813
+   },
+   {
+    "group1": "G3",
+    "group2": "G4",
+    "diff": -0.6825345927,
+    "p": 0,
+    "low": -0.8002690694,
+    "high": -0.5648001159
+   },
+   {
+    "group1": "G3",
+    "group2": "G5",
+    "diff": -1.436819807,
+    "p": 0,
+    "low": -1.54845807,
+    "high": -1.325181545
+   },
+   {
+    "group1": "G3",
+    "group2": "G6",
+    "diff": -2.123717351,
+    "p": 0,
+    "low": -2.227914977,
+    "high": -2.019519725
+   },
+   {
+    "group1": "G3",
+    "group2": "G7",
+    "diff": -2.837793455,
+    "p": 0,
+    "low": -2.94842543,
+    "high": -2.727161479
+   },
+   {
+    "group1": "G3",
+    "group2": "G8",
+    "diff": -3.544027907,
+    "p": 0,
+    "low": -3.651760182,
+    "high": -3.436295633
+   },
+   {
+    "group1": "G4",
+    "group2": "G5",
+    "diff": -0.7542852146,
+    "p": 0,
+    "low": -0.8746774842,
+    "high": -0.6338929449
+   },
+   {
+    "group1": "G4",
+    "group2": "G6",
+    "diff": -1.441182758,
+    "p": 0,
+    "low": -1.554734361,
+    "high": -1.327631155
+   },
+   {
+    "group1": "G4",
+    "group2": "G7",
+    "diff": -2.155258862,
+    "p": 0,
+    "low": -2.274721735,
+    "high": -2.035795989
+   },
+   {
+    "group1": "G4",
+    "group2": "G8",
+    "diff": -2.861493315,
+    "p": 0,
+    "low": -2.978285296,
+    "high": -2.744701333
+   },
+   {
+    "group1": "G5",
+    "group2": "G6",
+    "diff": -0.6868975435,
+    "p": 0,
+    "low": -0.7941045852,
+    "high": -0.5796905019
+   },
+   {
+    "group1": "G5",
+    "group2": "G7",
+    "diff": -1.400973647,
+    "p": 0,
+    "low": -1.514437353,
+    "high": -1.287509941
+   },
+   {
+    "group1": "G5",
+    "group2": "G8",
+    "diff": -2.1072081,
+    "p": 0,
+    "low": -2.217849615,
+    "high": -1.996566586
+   },
+   {
+    "group1": "G6",
+    "group2": "G7",
+    "diff": -0.7140761039,
+    "p": 0,
+    "low": -0.8202329769,
+    "high": -0.6079192308
+   },
+   {
+    "group1": "G6",
+    "group2": "G8",
+    "diff": -1.420310557,
+    "p": 0,
+    "low": -1.523436248,
+    "high": -1.317184865
+   },
+   {
+    "group1": "G7",
+    "group2": "G8",
+    "diff": -0.7062344527,
+    "p": 0,
+    "low": -0.8158601249,
+    "high": -0.5966087806
+   }
+  ],
+  "comparisonsLabel": "Games-Howell multiple comparisons test",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "G0",
+     "n": 201
+    },
+    {
+     "name": "G1",
+     "n": 201
+    },
+    {
+     "name": "G2",
+     "n": 201
+    },
+    {
+     "name": "G3",
+     "n": 201
+    },
+    {
+     "name": "G4",
+     "n": 201
+    },
+    {
+     "name": "G5",
+     "n": 201
+    },
+    {
+     "name": "G6",
+     "n": 201
+    },
+    {
+     "name": "G7",
+     "n": 201
+    },
+    {
+     "name": "G8",
+     "n": 201
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001). 36 of 36 pairs differ significantly in the comparisons.",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of each group (Shapiro-Wilk): consistent with a normal distribution (“G0” P = 0.6424, “G1” P = 0.6336, “G2” P = 0.5014, “G3” P = 0.7144, “G4” P = 0.2001, “G5” P = 0.2356, “G6” P = 0.6419, “G7” P = 0.1333, “G8” P = 0.4263)."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.1219, Bartlett's P = 0.06419): not needed, Welch's ANOVA doesn't assume them."
+   }
+  ]
+ },
+ "anova anovaBig {\"posthoc\":\"t3\",\"equalSd\":false}": {
+  "testType": "anova",
+  "subtitle": "Welch's and Brown-Forsythe ANOVAs",
+  "stats": [
+   {
+    "label": "F (Welch)",
+    "value": 6056.173039
+   },
+   {
+    "label": "DFn",
+    "value": 8
+   },
+   {
+    "label": "DFd",
+    "value": 749.808001
+   },
+   {
+    "label": "P value",
+    "value": 0,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 5801.20715
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 8
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 1770.637892
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "G0",
+    "mean": 10000000000000,
+    "sd": 0.3457112629,
+    "sem": 0.02438459237,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G1",
+    "mean": 10000000000000,
+    "sd": 0.3792934555,
+    "sem": 0.0267532976,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G2",
+    "mean": 10000000000000,
+    "sd": 0.3695499343,
+    "sem": 0.0260660426,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G3",
+    "mean": 10000000000000,
+    "sd": 0.3495769396,
+    "sem": 0.02465725618,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G4",
+    "mean": 10000000000000,
+    "sd": 0.4051575277,
+    "sem": 0.02857760859,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G5",
+    "mean": 10000000000000,
+    "sd": 0.3678581963,
+    "sem": 0.0259467166,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G6",
+    "mean": 10000000000000,
+    "sd": 0.3195653324,
+    "sem": 0.02254040062,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G7",
+    "mean": 10000000000000,
+    "sd": 0.3615264711,
+    "sem": 0.02550011114,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G8",
+    "mean": 10000000000000,
+    "sd": 0.3429580722,
+    "sem": 0.02419039726,
+    "median": 10000000000000,
+    "n": 201
+   }
+  ],
+  "notes": "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions.",
+  "comparisons": [
+   {
+    "group1": "G0",
+    "group2": "G1",
+    "diff": -0.6037002488,
+    "p": 2.001954158e-12,
+    "low": -0.7199415982,
+    "high": -0.4874588994
+   },
+   {
+    "group1": "G0",
+    "group2": "G2",
+    "diff": -1.384697606,
+    "p": 1.994182597e-12,
+    "low": -1.499314488,
+    "high": -1.270080723
+   },
+   {
+    "group1": "G0",
+    "group2": "G3",
+    "diff": -2.075239039,
+    "p": 1.994515664e-12,
+    "low": -2.186592126,
+    "high": -1.963885952
+   },
+   {
+    "group1": "G0",
+    "group2": "G4",
+    "diff": -2.757773632,
+    "p": 2.001177002e-12,
+    "low": -2.878422245,
+    "high": -2.637125019
+   },
+   {
+    "group1": "G0",
+    "group2": "G5",
+    "diff": -3.512058846,
+    "p": 1.990740905e-12,
+    "low": -3.62639566,
+    "high": -3.397722032
+   },
+   {
+    "group1": "G0",
+    "group2": "G6",
+    "diff": -4.19895639,
+    "p": 2.005728916e-12,
+    "low": -4.305587835,
+    "high": -4.092324944
+   },
+   {
+    "group1": "G0",
+    "group2": "G7",
+    "diff": -4.913032494,
+    "p": 1.99673611e-12,
+    "low": -5.02632731,
+    "high": -4.799737677
+   },
+   {
+    "group1": "G0",
+    "group2": "G8",
+    "diff": -5.619266947,
+    "p": 1.993627485e-12,
+    "low": -5.729558985,
+    "high": -5.508974908
+   },
+   {
+    "group1": "G1",
+    "group2": "G2",
+    "diff": -0.780997357,
+    "p": 1.993072374e-12,
+    "low": -0.9009361374,
+    "high": -0.6610585765
+   },
+   {
+    "group1": "G1",
+    "group2": "G3",
+    "diff": -1.47153879,
+    "p": 2.002731314e-12,
+    "low": -1.588370356,
+    "high": -1.354707225
+   },
+   {
+    "group1": "G1",
+    "group2": "G4",
+    "diff": -2.154073383,
+    "p": 2.005617894e-12,
+    "low": -2.27977597,
+    "high": -2.028370796
+   },
+   {
+    "group1": "G1",
+    "group2": "G5",
+    "diff": -2.908358598,
+    "p": 2.004174604e-12,
+    "low": -3.028030411,
+    "high": -2.788686785
+   },
+   {
+    "group1": "G1",
+    "group2": "G6",
+    "diff": -3.595256141,
+    "p": 2.006061983e-12,
+    "low": -3.707608637,
+    "high": -3.482903645
+   },
+   {
+    "group1": "G1",
+    "group2": "G7",
+    "diff": -4.309332245,
+    "p": 1.995736909e-12,
+    "low": -4.428011348,
+    "high": -4.190653142
+   },
+   {
+    "group1": "G1",
+    "group2": "G8",
+    "diff": -5.015566698,
+    "p": 1.993627485e-12,
+    "low": -5.131390018,
+    "high": -4.899743378
+   },
+   {
+    "group1": "G2",
+    "group2": "G3",
+    "diff": -0.6905414335,
+    "p": 1.990296816e-12,
+    "low": -0.8057572961,
+    "high": -0.5753255708
+   },
+   {
+    "group1": "G2",
+    "group2": "G4",
+    "diff": -1.373076026,
+    "p": 2.000843935e-12,
+    "low": -1.497284283,
+    "high": -1.248867769
+   },
+   {
+    "group1": "G2",
+    "group2": "G5",
+    "diff": -2.127361241,
+    "p": 1.994515664e-12,
+    "low": -2.245458262,
+    "high": -2.009264219
+   },
+   {
+    "group1": "G2",
+    "group2": "G6",
+    "diff": -2.814258784,
+    "p": 2.009503675e-12,
+    "low": -2.924926678,
+    "high": -2.70359089
+   },
+   {
+    "group1": "G2",
+    "group2": "G7",
+    "diff": -3.528334888,
+    "p": 2.007505273e-12,
+    "low": -3.645425133,
+    "high": -3.411244644
+   },
+   {
+    "group1": "G2",
+    "group2": "G8",
+    "diff": -4.234569341,
+    "p": 2.003286426e-12,
+    "low": -4.348761931,
+    "high": -4.120376751
+   },
+   {
+    "group1": "G3",
+    "group2": "G4",
+    "diff": -0.6825345927,
+    "p": 2.006839139e-12,
+    "low": -0.8037508654,
+    "high": -0.56131832
+   },
+   {
+    "group1": "G3",
+    "group2": "G5",
+    "diff": -1.436819807,
+    "p": 1.992073173e-12,
+    "low": -1.551757138,
+    "high": -1.321882477
+   },
+   {
+    "group1": "G3",
+    "group2": "G6",
+    "diff": -2.123717351,
+    "p": 1.998734511e-12,
+    "low": -2.230994819,
+    "high": -2.016439883
+   },
+   {
+    "group1": "G3",
+    "group2": "G7",
+    "diff": -2.837793455,
+    "p": 1.996958154e-12,
+    "low": -2.951694573,
+    "high": -2.723892336
+   },
+   {
+    "group1": "G3",
+    "group2": "G8",
+    "diff": -3.544027907,
+    "p": 1.996292021e-12,
+    "low": -3.654943544,
+    "high": -3.433112271
+   },
+   {
+    "group1": "G4",
+    "group2": "G5",
+    "diff": -0.7542852146,
+    "p": 2.001399046e-12,
+    "low": -0.8782361779,
+    "high": -0.6303342512
+   },
+   {
+    "group1": "G4",
+    "group2": "G6",
+    "diff": -1.441182758,
+    "p": 1.998734511e-12,
+    "low": -1.558096776,
+    "high": -1.32426874
+   },
+   {
+    "group1": "G4",
+    "group2": "G7",
+    "diff": -2.155258862,
+    "p": 2.001510069e-12,
+    "low": -2.278253456,
+    "high": -2.032264268
+   },
+   {
+    "group1": "G4",
+    "group2": "G8",
+    "diff": -2.861493315,
+    "p": 1.994959753e-12,
+    "low": -2.981740007,
+    "high": -2.741246623
+   },
+   {
+    "group1": "G5",
+    "group2": "G6",
+    "diff": -0.6868975435,
+    "p": 2.003397448e-12,
+    "low": -0.7972748125,
+    "high": -0.5765202745
+   },
+   {
+    "group1": "G5",
+    "group2": "G7",
+    "diff": -1.400973647,
+    "p": 1.994848731e-12,
+    "low": -1.517790064,
+    "high": -1.28415723
+   },
+   {
+    "group1": "G5",
+    "group2": "G8",
+    "diff": -2.1072081,
+    "p": 2.001510069e-12,
+    "low": -2.221119523,
+    "high": -1.993296677
+   },
+   {
+    "group1": "G6",
+    "group2": "G7",
+    "diff": -0.7140761039,
+    "p": 1.99673611e-12,
+    "low": -0.8233715981,
+    "high": -0.6047806096
+   },
+   {
+    "group1": "G6",
+    "group2": "G8",
+    "diff": -1.420310557,
+    "p": 1.994293619e-12,
+    "low": -1.526484043,
+    "high": -1.31413707
+   },
+   {
+    "group1": "G7",
+    "group2": "G8",
+    "diff": -0.7062344527,
+    "p": 2.000843935e-12,
+    "low": -0.8190997413,
+    "high": -0.5933691642
+   }
+  ],
+  "comparisonsLabel": "Dunnett's T3 multiple comparisons test",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "G0",
+     "n": 201
+    },
+    {
+     "name": "G1",
+     "n": 201
+    },
+    {
+     "name": "G2",
+     "n": 201
+    },
+    {
+     "name": "G3",
+     "n": 201
+    },
+    {
+     "name": "G4",
+     "n": 201
+    },
+    {
+     "name": "G5",
+     "n": 201
+    },
+    {
+     "name": "G6",
+     "n": 201
+    },
+    {
+     "name": "G7",
+     "n": 201
+    },
+    {
+     "name": "G8",
+     "n": 201
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001). 36 of 36 pairs differ significantly in the comparisons.",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of each group (Shapiro-Wilk): consistent with a normal distribution (“G0” P = 0.6424, “G1” P = 0.6336, “G2” P = 0.5014, “G3” P = 0.7144, “G4” P = 0.2001, “G5” P = 0.2356, “G6” P = 0.6419, “G7” P = 0.1333, “G8” P = 0.4263)."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.1219, Bartlett's P = 0.06419): not needed, Welch's ANOVA doesn't assume them."
+   }
+  ]
+ },
+ "anova anovaBig {\"posthoc\":\"fdr\",\"equalSd\":false}": {
+  "testType": "anova",
+  "subtitle": "Welch's and Brown-Forsythe ANOVAs",
+  "stats": [
+   {
+    "label": "F (Welch)",
+    "value": 6056.173039
+   },
+   {
+    "label": "DFn",
+    "value": 8
+   },
+   {
+    "label": "DFd",
+    "value": 749.808001
+   },
+   {
+    "label": "P value",
+    "value": 0,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 5801.20715
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 8
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 1770.637892
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "G0",
+    "mean": 10000000000000,
+    "sd": 0.3457112629,
+    "sem": 0.02438459237,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G1",
+    "mean": 10000000000000,
+    "sd": 0.3792934555,
+    "sem": 0.0267532976,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G2",
+    "mean": 10000000000000,
+    "sd": 0.3695499343,
+    "sem": 0.0260660426,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G3",
+    "mean": 10000000000000,
+    "sd": 0.3495769396,
+    "sem": 0.02465725618,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G4",
+    "mean": 10000000000000,
+    "sd": 0.4051575277,
+    "sem": 0.02857760859,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G5",
+    "mean": 10000000000000,
+    "sd": 0.3678581963,
+    "sem": 0.0259467166,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G6",
+    "mean": 10000000000000,
+    "sd": 0.3195653324,
+    "sem": 0.02254040062,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G7",
+    "mean": 10000000000000,
+    "sd": 0.3615264711,
+    "sem": 0.02550011114,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G8",
+    "mean": 10000000000000,
+    "sd": 0.3429580722,
+    "sem": 0.02419039726,
+    "median": 10000000000000,
+    "n": 201
+   }
+  ],
+  "notes": "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions. The False Discovery Rate (Benjamini-Hochberg) controls the expected share of false discoveries among the comparisons called significant, rather than the chance of any false positive; no confidence intervals are reported for it.",
+  "comparisons": [
+   {
+    "group1": "G0",
+    "group2": "G1",
+    "diff": -0.6037002488,
+    "p": 1.069312482e-47
+   },
+   {
+    "group1": "G0",
+    "group2": "G2",
+    "diff": -1.384697606,
+    "p": 3.478071214e-137
+   },
+   {
+    "group1": "G0",
+    "group2": "G3",
+    "diff": -2.075239039,
+    "p": 2.372070501e-201
+   },
+   {
+    "group1": "G0",
+    "group2": "G4",
+    "diff": -2.757773632,
+    "p": 3.717354564e-230
+   },
+   {
+    "group1": "G0",
+    "group2": "G5",
+    "diff": -3.512058846,
+    "p": 1.855796178e-281
+   },
+   {
+    "group1": "G0",
+    "group2": "G6",
+    "diff": -4.19895639,
+    "p": 3.56e-322
+   },
+   {
+    "group1": "G0",
+    "group2": "G7",
+    "diff": -4.913032494,
+    "p": 0
+   },
+   {
+    "group1": "G0",
+    "group2": "G8",
+    "diff": -5.619266947,
+    "p": 0
+   },
+   {
+    "group1": "G1",
+    "group2": "G2",
+    "diff": -0.780997357,
+    "p": 4.783784028e-66
+   },
+   {
+    "group1": "G1",
+    "group2": "G3",
+    "diff": -1.47153879,
+    "p": 9.500895151e-143
+   },
+   {
+    "group1": "G1",
+    "group2": "G4",
+    "diff": -2.154073383,
+    "p": 5.538287892e-188
+   },
+   {
+    "group1": "G1",
+    "group2": "G5",
+    "diff": -2.908358598,
+    "p": 1.487622018e-243
+   },
+   {
+    "group1": "G1",
+    "group2": "G6",
+    "diff": -3.595256141,
+    "p": 2.751981545e-283
+   },
+   {
+    "group1": "G1",
+    "group2": "G7",
+    "diff": -4.309332245,
+    "p": 1.315127399e-309
+   },
+   {
+    "group1": "G1",
+    "group2": "G8",
+    "diff": -5.015566698,
+    "p": 0
+   },
+   {
+    "group1": "G2",
+    "group2": "G3",
+    "diff": -0.6905414335,
+    "p": 7.945073326e-59
+   },
+   {
+    "group1": "G2",
+    "group2": "G4",
+    "diff": -1.373076026,
+    "p": 4.325153938e-125
+   },
+   {
+    "group1": "G2",
+    "group2": "G5",
+    "diff": -2.127361241,
+    "p": 4.068922302e-196
+   },
+   {
+    "group1": "G2",
+    "group2": "G6",
+    "diff": -2.814258784,
+    "p": 1.260241722e-247
+   },
+   {
+    "group1": "G2",
+    "group2": "G7",
+    "diff": -3.528334888,
+    "p": 5.754129148e-279
+   },
+   {
+    "group1": "G2",
+    "group2": "G8",
+    "diff": -4.234569341,
+    "p": 2.447184322e-312
+   },
+   {
+    "group1": "G3",
+    "group2": "G4",
+    "diff": -0.6825345927,
+    "p": 1.467044449e-53
+   },
+   {
+    "group1": "G3",
+    "group2": "G5",
+    "diff": -1.436819807,
+    "p": 5.289112826e-142
+   },
+   {
+    "group1": "G3",
+    "group2": "G6",
+    "diff": -2.123717351,
+    "p": 8.375159753e-210
+   },
+   {
+    "group1": "G3",
+    "group2": "G7",
+    "diff": -2.837793455,
+    "p": 1.523834799e-247
+   },
+   {
+    "group1": "G3",
+    "group2": "G8",
+    "diff": -3.544027907,
+    "p": 1.280397181e-288
+   },
+   {
+    "group1": "G4",
+    "group2": "G5",
+    "diff": -0.7542852146,
+    "p": 5.311401641e-60
+   },
+   {
+    "group1": "G4",
+    "group2": "G6",
+    "diff": -1.441182758,
+    "p": 1.121424901e-136
+   },
+   {
+    "group1": "G4",
+    "group2": "G7",
+    "diff": -2.155258862,
+    "p": 1.933968931e-190
+   },
+   {
+    "group1": "G4",
+    "group2": "G8",
+    "diff": -2.861493315,
+    "p": 3.950768484e-236
+   },
+   {
+    "group1": "G5",
+    "group2": "G6",
+    "diff": -0.6868975435,
+    "p": 9.683930834e-62
+   },
+   {
+    "group1": "G5",
+    "group2": "G7",
+    "diff": -1.400973647,
+    "p": 1.733744232e-136
+   },
+   {
+    "group1": "G5",
+    "group2": "G8",
+    "diff": -2.1072081,
+    "p": 1.199375884e-199
+   },
+   {
+    "group1": "G6",
+    "group2": "G7",
+    "diff": -0.7140761039,
+    "p": 4.510494802e-66
+   },
+   {
+    "group1": "G6",
+    "group2": "G8",
+    "diff": -1.420310557,
+    "p": 2.550277307e-151
+   },
+   {
+    "group1": "G7",
+    "group2": "G8",
+    "diff": -0.7062344527,
+    "p": 1.788149215e-62
+   }
+  ],
+  "comparisonsLabel": "False Discovery Rate (Benjamini-Hochberg) multiple comparisons",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "G0",
+     "n": 201
+    },
+    {
+     "name": "G1",
+     "n": 201
+    },
+    {
+     "name": "G2",
+     "n": 201
+    },
+    {
+     "name": "G3",
+     "n": 201
+    },
+    {
+     "name": "G4",
+     "n": 201
+    },
+    {
+     "name": "G5",
+     "n": 201
+    },
+    {
+     "name": "G6",
+     "n": 201
+    },
+    {
+     "name": "G7",
+     "n": 201
+    },
+    {
+     "name": "G8",
+     "n": 201
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001). 36 of 36 pairs differ significantly in the comparisons.",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of each group (Shapiro-Wilk): consistent with a normal distribution (“G0” P = 0.6424, “G1” P = 0.6336, “G2” P = 0.5014, “G3” P = 0.7144, “G4” P = 0.2001, “G5” P = 0.2356, “G6” P = 0.6419, “G7” P = 0.1333, “G8” P = 0.4263)."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.1219, Bartlett's P = 0.06419): not needed, Welch's ANOVA doesn't assume them."
+   }
+  ]
+ },
+ "anova anovaSmall {\"posthoc\":\"none\",\"equalSd\":false}": {
+  "testType": "anova",
+  "subtitle": "Welch's and Brown-Forsythe ANOVAs",
+  "stats": [
+   {
+    "label": "F (Welch)",
+    "value": 46.69770977
+   },
+   {
+    "label": "DFn",
+    "value": 2
+   },
+   {
+    "label": "DFd",
+    "value": 7.74811272
+   },
+   {
+    "label": "P value",
+    "value": 0.000047593965,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 53.51455314
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 2
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 9.724984096
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0.000005642970106,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 10000000000000,
+    "sd": 0.2852599073,
+    "sem": 0.1275721088,
+    "median": 10000000000000,
+    "n": 5
+   },
+   {
+    "name": "B",
+    "mean": 10000000000000,
+    "sd": 0.1793209151,
+    "sem": 0.0801947512,
+    "median": 10000000000000,
+    "n": 5
+   },
+   {
+    "name": "C",
+    "mean": 10000000000000,
+    "sd": 0.1773099758,
+    "sem": 0.07929543179,
+    "median": 10000000000000,
+    "n": 5
+   }
+  ],
+  "notes": "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 5
+    },
+    {
+     "name": "B",
+     "n": 5
+    },
+    {
+     "name": "C",
+     "n": 5
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001).",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of each group (Shapiro-Wilk): consistent with a normal distribution (“A” P = 0.7282, “B” P = 0.5221, “C” P = 0.1759)."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.6994, Bartlett's P = 0.5662): not needed, Welch's ANOVA doesn't assume them."
+   }
+  ]
+ },
+ "anova anovaSmall {\"posthoc\":\"games-howell\",\"equalSd\":false}": {
+  "testType": "anova",
+  "subtitle": "Welch's and Brown-Forsythe ANOVAs",
+  "stats": [
+   {
+    "label": "F (Welch)",
+    "value": 46.69770977
+   },
+   {
+    "label": "DFn",
+    "value": 2
+   },
+   {
+    "label": "DFd",
+    "value": 7.74811272
+   },
+   {
+    "label": "P value",
+    "value": 0.000047593965,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 53.51455314
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 2
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 9.724984096
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0.000005642970106,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 10000000000000,
+    "sd": 0.2852599073,
+    "sem": 0.1275721088,
+    "median": 10000000000000,
+    "n": 5
+   },
+   {
+    "name": "B",
+    "mean": 10000000000000,
+    "sd": 0.1793209151,
+    "sem": 0.0801947512,
+    "median": 10000000000000,
+    "n": 5
+   },
+   {
+    "name": "C",
+    "mean": 10000000000000,
+    "sd": 0.1773099758,
+    "sem": 0.07929543179,
+    "median": 10000000000000,
+    "n": 5
+   }
+  ],
+  "notes": "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions.",
+  "comparisons": [
+   {
+    "group1": "A",
+    "group2": "B",
+    "diff": -0.710546875,
+    "p": 0.005879018492,
+    "low": -1.158612079,
+    "high": -0.2624816706
+   },
+   {
+    "group1": "A",
+    "group2": "C",
+    "diff": -1.43828125,
+    "p": 0.00009587905863,
+    "low": -1.885694025,
+    "high": -0.9908684751
+   },
+   {
+    "group1": "B",
+    "group2": "C",
+    "diff": -0.727734375,
+    "p": 0.0005100059505,
+    "low": -1.049998967,
+    "high": -0.4054697826
+   }
+  ],
+  "comparisonsLabel": "Games-Howell multiple comparisons test",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 5
+    },
+    {
+     "name": "B",
+     "n": 5
+    },
+    {
+     "name": "C",
+     "n": 5
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001). 3 of 3 pairs differ significantly in the comparisons: “A” vs. “B”, “A” vs. “C”, “B” vs. “C”.",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of each group (Shapiro-Wilk): consistent with a normal distribution (“A” P = 0.7282, “B” P = 0.5221, “C” P = 0.1759)."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.6994, Bartlett's P = 0.5662): not needed, Welch's ANOVA doesn't assume them."
+   }
+  ]
+ },
+ "anova anovaSmall {\"posthoc\":\"t3\",\"equalSd\":false}": {
+  "testType": "anova",
+  "subtitle": "Welch's and Brown-Forsythe ANOVAs",
+  "stats": [
+   {
+    "label": "F (Welch)",
+    "value": 46.69770977
+   },
+   {
+    "label": "DFn",
+    "value": 2
+   },
+   {
+    "label": "DFd",
+    "value": 7.74811272
+   },
+   {
+    "label": "P value",
+    "value": 0.000047593965,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 53.51455314
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 2
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 9.724984096
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0.000005642970106,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 10000000000000,
+    "sd": 0.2852599073,
+    "sem": 0.1275721088,
+    "median": 10000000000000,
+    "n": 5
+   },
+   {
+    "name": "B",
+    "mean": 10000000000000,
+    "sd": 0.1793209151,
+    "sem": 0.0801947512,
+    "median": 10000000000000,
+    "n": 5
+   },
+   {
+    "name": "C",
+    "mean": 10000000000000,
+    "sd": 0.1773099758,
+    "sem": 0.07929543179,
+    "median": 10000000000000,
+    "n": 5
+   }
+  ],
+  "notes": "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions.",
+  "comparisons": [
+   {
+    "group1": "A",
+    "group2": "B",
+    "diff": -0.710546875,
+    "p": 0.006715578523,
+    "low": -1.175733419,
+    "high": -0.2453603309
+   },
+   {
+    "group1": "A",
+    "group2": "C",
+    "diff": -1.43828125,
+    "p": 0.0001079449095,
+    "low": -1.902847308,
+    "high": -0.9737151918
+   },
+   {
+    "group1": "B",
+    "group2": "C",
+    "diff": -0.727734375,
+    "p": 0.0005698236298,
+    "low": -1.061341387,
+    "high": -0.3941273629
+   }
+  ],
+  "comparisonsLabel": "Dunnett's T3 multiple comparisons test",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 5
+    },
+    {
+     "name": "B",
+     "n": 5
+    },
+    {
+     "name": "C",
+     "n": 5
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001). 3 of 3 pairs differ significantly in the comparisons: “A” vs. “B”, “A” vs. “C”, “B” vs. “C”.",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of each group (Shapiro-Wilk): consistent with a normal distribution (“A” P = 0.7282, “B” P = 0.5221, “C” P = 0.1759)."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.6994, Bartlett's P = 0.5662): not needed, Welch's ANOVA doesn't assume them."
+   }
+  ]
+ },
+ "anova anovaSmall {\"posthoc\":\"fdr\",\"equalSd\":false}": {
+  "testType": "anova",
+  "subtitle": "Welch's and Brown-Forsythe ANOVAs",
+  "stats": [
+   {
+    "label": "F (Welch)",
+    "value": 46.69770977
+   },
+   {
+    "label": "DFn",
+    "value": 2
+   },
+   {
+    "label": "DFd",
+    "value": 7.74811272
+   },
+   {
+    "label": "P value",
+    "value": 0.000047593965,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 53.51455314
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 2
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 9.724984096
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0.000005642970106,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 10000000000000,
+    "sd": 0.2852599073,
+    "sem": 0.1275721088,
+    "median": 10000000000000,
+    "n": 5
+   },
+   {
+    "name": "B",
+    "mean": 10000000000000,
+    "sd": 0.1793209151,
+    "sem": 0.0801947512,
+    "median": 10000000000000,
+    "n": 5
+   },
+   {
+    "name": "C",
+    "mean": 10000000000000,
+    "sd": 0.1773099758,
+    "sem": 0.07929543179,
+    "median": 10000000000000,
+    "n": 5
+   }
+  ],
+  "notes": "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions. The False Discovery Rate (Benjamini-Hochberg) controls the expected share of false discoveries among the comparisons called significant, rather than the chance of any false positive; no confidence intervals are reported for it.",
+  "comparisons": [
+   {
+    "group1": "A",
+    "group2": "B",
+    "diff": -0.710546875,
+    "p": 0.002406617029
+   },
+   {
+    "group1": "A",
+    "group2": "C",
+    "diff": -1.43828125,
+    "p": 0.0001140132773
+   },
+   {
+    "group1": "B",
+    "group2": "C",
+    "diff": -0.727734375,
+    "p": 0.0002967416466
+   }
+  ],
+  "comparisonsLabel": "False Discovery Rate (Benjamini-Hochberg) multiple comparisons",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 5
+    },
+    {
+     "name": "B",
+     "n": 5
+    },
+    {
+     "name": "C",
+     "n": 5
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001). 3 of 3 pairs differ significantly in the comparisons: “A” vs. “B”, “A” vs. “C”, “B” vs. “C”.",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of each group (Shapiro-Wilk): consistent with a normal distribution (“A” P = 0.7282, “B” P = 0.5221, “C” P = 0.1759)."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.6994, Bartlett's P = 0.5662): not needed, Welch's ANOVA doesn't assume them."
+   }
+  ]
+ },
+ "anova anovaBig {\"posthoc\":\"tukey\"}": {
+  "testType": "anova",
+  "subtitle": "One-way ANOVA",
+  "stats": [
+   {
+    "label": "F",
+    "value": 5801.20715
+   },
+   {
+    "label": "DFn",
+    "value": 8
+   },
+   {
+    "label": "DFd",
+    "value": 1800
+   },
+   {
+    "label": "P value",
+    "value": 0,
+    "p": true
+   },
+   {
+    "label": "R squared (eta squared)",
+    "value": 0.9626630824
+   },
+   {
+    "label": "Cohen's f",
+    "value": 5.077710398
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.9626630824,
+    "partialEta2": 0.9626630824,
+    "cohensF": 5.077710398,
+    "partialEta2Lo": 0.9599036533,
+    "partialEta2Hi": 0.9648126933
+   }
+  ],
+  "groups": [
+   {
+    "name": "G0",
+    "mean": 10000000000000,
+    "sd": 0.3457112629,
+    "sem": 0.02438459237,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G1",
+    "mean": 10000000000000,
+    "sd": 0.3792934555,
+    "sem": 0.0267532976,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G2",
+    "mean": 10000000000000,
+    "sd": 0.3695499343,
+    "sem": 0.0260660426,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G3",
+    "mean": 10000000000000,
+    "sd": 0.3495769396,
+    "sem": 0.02465725618,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G4",
+    "mean": 10000000000000,
+    "sd": 0.4051575277,
+    "sem": 0.02857760859,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G5",
+    "mean": 10000000000000,
+    "sd": 0.3678581963,
+    "sem": 0.0259467166,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G6",
+    "mean": 10000000000000,
+    "sd": 0.3195653324,
+    "sem": 0.02254040062,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G7",
+    "mean": 10000000000000,
+    "sd": 0.3615264711,
+    "sem": 0.02550011114,
+    "median": 10000000000000,
+    "n": 201
+   },
+   {
+    "name": "G8",
+    "mean": 10000000000000,
+    "sd": 0.3429580722,
+    "sem": 0.02419039726,
+    "median": 10000000000000,
+    "n": 201
+   }
+  ],
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor).",
+  "comparisons": [
+   {
+    "group1": "G0",
+    "group2": "G1",
+    "diff": -0.6037002488,
+    "p": 1.085653789e-11,
+    "low": -0.7154913176,
+    "high": -0.49190918
+   },
+   {
+    "group1": "G0",
+    "group2": "G2",
+    "diff": -1.384697606,
+    "p": 1.085653789e-11,
+    "low": -1.496488675,
+    "high": -1.272906537
+   },
+   {
+    "group1": "G0",
+    "group2": "G3",
+    "diff": -2.075239039,
+    "p": 1.085653789e-11,
+    "low": -2.187030108,
+    "high": -1.96344797
+   },
+   {
+    "group1": "G0",
+    "group2": "G4",
+    "diff": -2.757773632,
+    "p": 1.085653789e-11,
+    "low": -2.869564701,
+    "high": -2.645982563
+   },
+   {
+    "group1": "G0",
+    "group2": "G5",
+    "diff": -3.512058846,
+    "p": 1.085653789e-11,
+    "low": -3.623849915,
+    "high": -3.400267778
+   },
+   {
+    "group1": "G0",
+    "group2": "G6",
+    "diff": -4.19895639,
+    "p": 1.085653789e-11,
+    "low": -4.310747459,
+    "high": -4.087165321
+   },
+   {
+    "group1": "G0",
+    "group2": "G7",
+    "diff": -4.913032494,
+    "p": 1.085653789e-11,
+    "low": -5.024823563,
+    "high": -4.801241425
+   },
+   {
+    "group1": "G0",
+    "group2": "G8",
+    "diff": -5.619266947,
+    "p": 1.085653789e-11,
+    "low": -5.731058015,
+    "high": -5.507475878
+   },
+   {
+    "group1": "G1",
+    "group2": "G2",
+    "diff": -0.780997357,
+    "p": 1.085653789e-11,
+    "low": -0.8927884258,
+    "high": -0.6692062882
+   },
+   {
+    "group1": "G1",
+    "group2": "G3",
+    "diff": -1.47153879,
+    "p": 1.085653789e-11,
+    "low": -1.583329859,
+    "high": -1.359747722
+   },
+   {
+    "group1": "G1",
+    "group2": "G4",
+    "diff": -2.154073383,
+    "p": 1.085653789e-11,
+    "low": -2.265864452,
+    "high": -2.042282314
+   },
+   {
+    "group1": "G1",
+    "group2": "G5",
+    "diff": -2.908358598,
+    "p": 1.085653789e-11,
+    "low": -3.020149666,
+    "high": -2.796567529
+   },
+   {
+    "group1": "G1",
+    "group2": "G6",
+    "diff": -3.595256141,
+    "p": 1.085653789e-11,
+    "low": -3.70704721,
+    "high": -3.483465072
+   },
+   {
+    "group1": "G1",
+    "group2": "G7",
+    "diff": -4.309332245,
+    "p": 1.085653789e-11,
+    "low": -4.421123314,
+    "high": -4.197541176
+   },
+   {
+    "group1": "G1",
+    "group2": "G8",
+    "diff": -5.015566698,
+    "p": 1.085653789e-11,
+    "low": -5.127357767,
+    "high": -4.903775629
+   },
+   {
+    "group1": "G2",
+    "group2": "G3",
+    "diff": -0.6905414335,
+    "p": 1.085653789e-11,
+    "low": -0.8023325023,
+    "high": -0.5787503647
+   },
+   {
+    "group1": "G2",
+    "group2": "G4",
+    "diff": -1.373076026,
+    "p": 1.085653789e-11,
+    "low": -1.484867095,
+    "high": -1.261284957
+   },
+   {
+    "group1": "G2",
+    "group2": "G5",
+    "diff": -2.127361241,
+    "p": 1.085653789e-11,
+    "low": -2.239152309,
+    "high": -2.015570172
+   },
+   {
+    "group1": "G2",
+    "group2": "G6",
+    "diff": -2.814258784,
+    "p": 1.085653789e-11,
+    "low": -2.926049853,
+    "high": -2.702467715
+   },
+   {
+    "group1": "G2",
+    "group2": "G7",
+    "diff": -3.528334888,
+    "p": 1.085653789e-11,
+    "low": -3.640125957,
+    "high": -3.416543819
+   },
+   {
+    "group1": "G2",
+    "group2": "G8",
+    "diff": -4.234569341,
+    "p": 1.085653789e-11,
+    "low": -4.34636041,
+    "high": -4.122778272
+   },
+   {
+    "group1": "G3",
+    "group2": "G4",
+    "diff": -0.6825345927,
+    "p": 1.085653789e-11,
+    "low": -0.7943256615,
+    "high": -0.5707435239
+   },
+   {
+    "group1": "G3",
+    "group2": "G5",
+    "diff": -1.436819807,
+    "p": 1.085653789e-11,
+    "low": -1.548610876,
+    "high": -1.325028738
+   },
+   {
+    "group1": "G3",
+    "group2": "G6",
+    "diff": -2.123717351,
+    "p": 1.085653789e-11,
+    "low": -2.23550842,
+    "high": -2.011926282
+   },
+   {
+    "group1": "G3",
+    "group2": "G7",
+    "diff": -2.837793455,
+    "p": 1.085653789e-11,
+    "low": -2.949584523,
+    "high": -2.726002386
+   },
+   {
+    "group1": "G3",
+    "group2": "G8",
+    "diff": -3.544027907,
+    "p": 1.085653789e-11,
+    "low": -3.655818976,
+    "high": -3.432236839
+   },
+   {
+    "group1": "G4",
+    "group2": "G5",
+    "diff": -0.7542852146,
+    "p": 1.085653789e-11,
+    "low": -0.8660762833,
+    "high": -0.6424941458
+   },
+   {
+    "group1": "G4",
+    "group2": "G6",
+    "diff": -1.441182758,
+    "p": 1.085653789e-11,
+    "low": -1.552973827,
+    "high": -1.329391689
+   },
+   {
+    "group1": "G4",
+    "group2": "G7",
+    "diff": -2.155258862,
+    "p": 1.085653789e-11,
+    "low": -2.267049931,
+    "high": -2.043467793
+   },
+   {
+    "group1": "G4",
+    "group2": "G8",
+    "diff": -2.861493315,
+    "p": 1.085653789e-11,
+    "low": -2.973284383,
+    "high": -2.749702246
+   },
+   {
+    "group1": "G5",
+    "group2": "G6",
+    "diff": -0.6868975435,
+    "p": 1.085653789e-11,
+    "low": -0.7986886123,
+    "high": -0.5751064747
+   },
+   {
+    "group1": "G5",
+    "group2": "G7",
+    "diff": -1.400973647,
+    "p": 1.085653789e-11,
+    "low": -1.512764716,
+    "high": -1.289182579
+   },
+   {
+    "group1": "G5",
+    "group2": "G8",
+    "diff": -2.1072081,
+    "p": 1.085653789e-11,
+    "low": -2.218999169,
+    "high": -1.995417031
+   },
+   {
+    "group1": "G6",
+    "group2": "G7",
+    "diff": -0.7140761039,
+    "p": 1.085653789e-11,
+    "low": -0.8258671727,
+    "high": -0.6022850351
+   },
+   {
+    "group1": "G6",
+    "group2": "G8",
+    "diff": -1.420310557,
+    "p": 1.085653789e-11,
+    "low": -1.532101625,
+    "high": -1.308519488
+   },
+   {
+    "group1": "G7",
+    "group2": "G8",
+    "diff": -0.7062344527,
+    "p": 1.085653789e-11,
+    "low": -0.8180255215,
+    "high": -0.5944433839
+   }
+  ],
+  "comparisonsLabel": "Tukey's multiple comparisons test",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "G0",
+     "n": 201
+    },
+    {
+     "name": "G1",
+     "n": 201
+    },
+    {
+     "name": "G2",
+     "n": 201
+    },
+    {
+     "name": "G3",
+     "n": 201
+    },
+    {
+     "name": "G4",
+     "n": 201
+    },
+    {
+     "name": "G5",
+     "n": 201
+    },
+    {
+     "name": "G6",
+     "n": 201
+    },
+    {
+     "name": "G7",
+     "n": 201
+    },
+    {
+     "name": "G8",
+     "n": 201
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001). The differences between the groups account for 96.27% of all the variation in the values (R²). 36 of 36 pairs differ significantly in the comparisons.",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of each group (Shapiro-Wilk): consistent with a normal distribution (“G0” P = 0.6424, “G1” P = 0.6336, “G2” P = 0.5014, “G3” P = 0.7144, “G4” P = 0.2001, “G5” P = 0.2356, “G6” P = 0.6419, “G7” P = 0.1333, “G8” P = 0.4263)."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.1219, Bartlett's P = 0.06419): consistent with equal SDs."
+   }
+  ]
+ },
+ "anova anovaSmall {\"posthoc\":\"tukey\"}": {
+  "testType": "anova",
+  "subtitle": "One-way ANOVA",
+  "stats": [
+   {
+    "label": "F",
+    "value": 53.51455314
+   },
+   {
+    "label": "DFn",
+    "value": 2
+   },
+   {
+    "label": "DFd",
+    "value": 12
+   },
+   {
+    "label": "P value",
+    "value": 0.000001049949569,
+    "p": true
+   },
+   {
+    "label": "R squared (eta squared)",
+    "value": 0.8991843224
+   },
+   {
+    "label": "Cohen's f",
+    "value": 2.986484922
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.8991843224,
+    "partialEta2": 0.8991843224,
+    "cohensF": 2.986484922,
+    "partialEta2Lo": 0.6837325229,
+    "partialEta2Hi": 0.9359303969
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 10000000000000,
+    "sd": 0.2852599073,
+    "sem": 0.1275721088,
+    "median": 10000000000000,
+    "n": 5
+   },
+   {
+    "name": "B",
+    "mean": 10000000000000,
+    "sd": 0.1793209151,
+    "sem": 0.0801947512,
+    "median": 10000000000000,
+    "n": 5
+   },
+   {
+    "name": "C",
+    "mean": 10000000000000,
+    "sd": 0.1773099758,
+    "sem": 0.07929543179,
+    "median": 10000000000000,
+    "n": 5
+   }
+  ],
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor).",
+  "comparisons": [
+   {
+    "group1": "A",
+    "group2": "B",
+    "diff": -0.710546875,
+    "p": 0.0006948932136,
+    "low": -1.081455418,
+    "high": -0.339638332
+   },
+   {
+    "group1": "A",
+    "group2": "C",
+    "diff": -1.43828125,
+    "p": 6.932433226e-7,
+    "low": -1.809189793,
+    "high": -1.067372707
+   },
+   {
+    "group1": "B",
+    "group2": "C",
+    "diff": -0.727734375,
+    "p": 0.0005677971031,
+    "low": -1.098642918,
+    "high": -0.356825832
+   }
+  ],
+  "comparisonsLabel": "Tukey's multiple comparisons test",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 5
+    },
+    {
+     "name": "B",
+     "n": 5
+    },
+    {
+     "name": "C",
+     "n": 5
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001). The differences between the groups account for 89.92% of all the variation in the values (R²). 3 of 3 pairs differ significantly in the comparisons: “A” vs. “B”, “A” vs. “C”, “B” vs. “C”.",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of each group (Shapiro-Wilk): consistent with a normal distribution (“A” P = 0.7282, “B” P = 0.5221, “C” P = 0.1759)."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.6994, Bartlett's P = 0.5662): consistent with equal SDs."
+   }
+  ]
+ },
  "anova column {\"posthoc\":\"fdr\"}": {
   "testType": "anova",
   "subtitle": "One-way ANOVA",

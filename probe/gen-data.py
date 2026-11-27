@@ -63,6 +63,140 @@ def mpf_list(vs):
     return [mp.mpf(v) for v in vs]
 
 
+def f_p(F, df1, df2):
+    z = mp.mpf(df2) / (df2 + df1 * F)
+    return mp.betainc(mp.mpf(df2) / 2, mp.mpf(df1) / 2, 0, z, regularized=True)
+
+
+def t_p(t, df):
+    z = mp.mpf(df) / (df + t ** 2)
+    return mp.betainc(mp.mpf(df) / 2, mp.mpf(1) / 2, 0, z, regularized=True)
+
+
+def welch_exact(groups):
+    """Welch's ANOVA (oneway.test, var.equal=FALSE): F, dfn, dfd, p."""
+    gs = [mpf_list(v) for v in groups]
+    k = len(gs)
+    n = [len(v) for v in gs]
+    means = [sum(v) / len(v) for v in gs]
+    s2 = [sum((x - m) ** 2 for x in v) / (len(v) - 1) for v, m in zip(gs, means)]
+    w = [ni / si for ni, si in zip(n, s2)]
+    W = sum(w)
+    mstar = sum(wi * mi for wi, mi in zip(w, means)) / W
+    num = sum(wi * (mi - mstar) ** 2 for wi, mi in zip(w, means)) / (k - 1)
+    lam = sum((1 / (ni - 1)) * (1 - wi / W) ** 2 for ni, wi in zip(n, w))
+    den = 1 + 2 * (k - 2) / (k * k - 1) * lam
+    F = num / den
+    df1 = k - 1
+    df2 = (k * k - 1) / (3 * lam)
+    return {"F": float(F), "dfn": df1, "dfd": float(df2), "p": float(f_p(F, df1, df2))}
+
+
+def bf_exact(groups):
+    """Brown-Forsythe's F* (Brown and Forsythe, 1974): F*, dfn, dfd, p."""
+    gs = [mpf_list(v) for v in groups]
+    k = len(gs)
+    n = [len(v) for v in gs]
+    N = sum(n)
+    means = [sum(v) / len(v) for v in gs]
+    s2 = [sum((x - m) ** 2 for x in v) / (len(v) - 1) for v, m in zip(gs, means)]
+    gm = sum(sum(v) for v in gs) / N
+    ssb = sum(ni * (m - gm) ** 2 for ni, m in zip(n, means))
+    bfw = [(1 - ni / N) * si for ni, si in zip(n, s2)]
+    F = ssb / sum(bfw)
+    c = [b / sum(bfw) for b in bfw]
+    df2 = 1 / sum(ci ** 2 / (ni - 1) for ci, ni in zip(c, n))
+    return {"bfF": float(F), "bfDfn": k - 1, "bfDfd": float(df2),
+            "bfP": float(f_p(F, k - 1, df2))}
+
+
+def smm_p(t, mc, df):
+    """Dunnett's T3 P: P(max of mc |t| > t), the studentized maximum modulus,
+    1 - int (2*Phi(t*s)-1)^mc * ds(s,df) ds over the chi df's 1e-12 lims —
+    the same truncation R's smm() uses, so values below ~2e-12 sit on that
+    floor in both (the integral is ~1 there; R's integrate() carries ~0.5%
+    noise on the floor, so anovaBig's T3 P values are not pinned tightly)."""
+    r1 = mp.sqrt(mp.mpf(float(stats.chi2.ppf(1e-12, float(df)))) / df)
+    r2 = mp.sqrt(mp.mpf(float(stats.chi2.ppf(1 - 1e-12, float(df)))) / df)
+    ds = lambda s: (
+        (df * s ** 2) ** (df / 2 - 1) * mp.e ** (-(df * s ** 2) / 2) * 2 * df * s
+        / (2 ** (df / 2) * mp.gamma(df / 2))
+    )
+    f = lambda s: (2 * mp.ncdf(t * s) - 1) ** mc * ds(s)
+    return 1 - mp.quad(f, [r1, r2])
+
+
+def welch_pairs_exact(groups):
+    """Per-pair Welch t/df/two-sided p, Games-Howell p + CI (scipy
+    studentized_range), Dunnett's T3 p (smm above), and the BH-adjusted
+    FDR p over the pair family — keys "i_j" in pair order."""
+    gs = [mpf_list(v) for v in groups]
+    k = len(gs)
+    n = [len(v) for v in gs]
+    means = [sum(v) / len(v) for v in gs]
+    s2 = [sum((x - m) ** 2 for x in v) / (len(v) - 1) for v, m in zip(gs, means)]
+    pairs = {}
+    raw_p = []
+    for i in range(k):
+        for j in range(i + 1, k):
+            e = s2[i] / n[i] + s2[j] / n[j]
+            t = (means[i] - means[j]) / mp.sqrt(e)
+            df = e ** 2 / ((s2[i] / n[i]) ** 2 / (n[i] - 1) + (s2[j] / n[j]) ** 2 / (n[j] - 1))
+            p = t_p(t, df)
+            q = abs(t) * mp.sqrt(2)
+            gh_p = mp.mpf(float(stats.studentized_range.sf(float(q), k, float(df))))
+            qcrit = mp.mpf(float(stats.studentized_range.ppf(0.95, k, float(df))))
+            se = mp.sqrt(e)
+            diff = means[i] - means[j]
+            pairs[f"{i}_{j}"] = {
+                "diff": float(diff), "t": float(t), "df": float(df), "p": float(p),
+                "gh_p": float(gh_p),
+                "gh_lo": float(diff - qcrit / mp.sqrt(2) * se),
+                "gh_hi": float(diff + qcrit / mp.sqrt(2) * se),
+                "t3_p": float(smm_p(abs(t), k * (k - 1) // 2, df)),
+            }
+            raw_p.append((f"{i}_{j}", p))
+    order = sorted(raw_p, key=lambda kv: kv[1])
+    m = len(order)
+    least = mp.mpf(1)
+    for idx in range(m - 1, -1, -1):
+        least = min(least, m / (idx + 1) * order[idx][1])
+        pairs[order[idx][0]]["fdr_p"] = float(least)
+    return pairs
+
+
+def tukey_exact(groups):
+    """Per-pair Tukey HSD p + CI (scipy studentized_range) on the POOLED
+    mse / residual df — the ordinary ANOVA's post-hoc, so unlike the
+    Games-Howell pairs above every pair shares one mse and one df.
+    q = |diff| / sqrt(mse*(1/ni+1/nj)/2); P = sf(q, k, dfw); the CI is
+    diff +/- qcrit * sqrt(mse*(1/ni+1/nj)/2) with qcrit = ppf(0.95, k, dfw)
+    — the same half-width Titer's centered Tukey CI builds (its cv is
+    qcrit/sqrt(2) times sqrt(mse*(1/ni+1/nj))). Keys "i_j" in pair order."""
+    gs = [mpf_list(v) for v in groups]
+    k = len(gs)
+    n = [len(v) for v in gs]
+    means = [sum(v) / len(v) for v in gs]
+    ssw = sum(sum((x - m) ** 2 for x in v) for v, m in zip(gs, means))
+    dfw = sum(n) - k
+    mse = ssw / dfw
+    pairs = {}
+    for i in range(k):
+        for j in range(i + 1, k):
+            diff = means[i] - means[j]
+            se = mp.sqrt(mse * (mp.mpf(1) / n[i] + mp.mpf(1) / n[j]) / 2)
+            q = abs(diff) / se
+            p = mp.mpf(float(stats.studentized_range.sf(float(q), k, float(dfw))))
+            qcrit = mp.mpf(float(stats.studentized_range.ppf(0.95, k, float(dfw))))
+            pairs[f"{i}_{j}"] = {
+                "diff": float(diff),
+                "tukey_p": float(p),
+                "tukey_lo": float(diff - qcrit * se),
+                "tukey_hi": float(diff + qcrit * se),
+            }
+    return pairs
+
+
 def anova_exact(groups):
     gs = [mpf_list(v) for v in groups]
     k = len(gs)
@@ -186,6 +320,12 @@ def multireg_exact(x1v, x2v, yv):
 expected = {
     "anovaBig": anova_exact(anova_big),
     "anovaSmall": anova_exact(anova_small),
+    "welchBig": {**welch_exact(anova_big), **bf_exact(anova_big),
+                 "pairs": welch_pairs_exact(anova_big)},
+    "welchSmall": {**welch_exact(anova_small), **bf_exact(anova_small),
+                   "pairs": welch_pairs_exact(anova_small)},
+    "tukeyBig": tukey_exact(anova_big),
+    "tukeySmall": tukey_exact(anova_small),
     "linreg": linreg_exact(xs, ys),
     "linregWeighted1y": linreg_exact(xs, ys, weights=[1 / y for y in ys]),
     "linregOrigin": None,  # origin fit: slope-only; computed in the probe via R
