@@ -1577,6 +1577,23 @@ export function groupedBarPositions(groups: number, labels: string[], barGap: nu
   };
 }
 
+/** Category positions for the "Superimposed" arrangement with points
+ *  overlaid: every group's bar stands at the row's center (`r`) — the bars
+ *  overlay, they don't stand side by side — so a bar, its points and its
+ *  significance bracket share one place. Ticks are the row labels, one per
+ *  row. Used only when points are overlaid: without points the bars stay on
+ *  Plotly's "category" axis and need no numeric positions, and without
+ *  numeric positions a numeric scatter x would land as new categories to
+ *  the right of the bars (BUG-REPORT #92). */
+export function superimposedPositions(labels: string[]): CategoryPositions {
+  return {
+    posOf: (_g, r) => r,
+    tickvals: labels.map((_, i) => i),
+    ticktext: labels,
+    range: [-0.5, labels.length - 0.5],
+  };
+}
+
 /** Category positions for the "Separated" arrangement: each group gets its own
  *  block of `rows` slots (with a 1-slot gap between blocks) instead of sharing
  *  a slot per row, so groups sit side by side rather than interleaved. Ticks

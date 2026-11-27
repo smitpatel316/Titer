@@ -23,6 +23,7 @@ import {
   seriesError,
   seriesMarker,
   seriesPoints,
+  superimposedPositions,
   scatterOffsets,
   type Paint,
 } from "./plot-helpers";
@@ -49,8 +50,10 @@ import type { SummaryFormat } from "../../lib/summary-format";
  *  Superimposed bars keep their row-centered X coordinates (`r`) even with
  *  `showPoints` on — splitting them into side-by-side numeric positions
  *  would break the superimposition and desync the bars from the
- *  significance brackets, which sit at `r` (Issue #92); their points sit
- *  at the row center too. */
+ *  significance brackets, which sit at `r` (Issue #92). With points on,
+ *  bars AND points both take those row-center NUMERIC positions, at the
+ *  full cluster width, with a numeric axis — a numeric scatter x on a
+ *  "category" axis would land as new categories to the right of the bars. */
 export function buildGroupedBars(
   columns: Column[],
   options: GraphOptions,
@@ -78,17 +81,32 @@ export function buildGroupedBars(
   // them from the significance brackets at `r`.
   const superimposed = mode === "group" && options.groupLayout === "superimposed";
   // Numeric category positions whenever the bars leave the "category" axis:
-  // separated blocks, or interleaved bars with points overlaid (the points
-  // need numeric places to sit on their own bar). Interleaved bars with
-  // points use the grouped-bar geometry — Plotly sizes bars from the
-  // smallest gap between bar positions, so the old `groupOffset` centers
-  // made them thin with a bigger gap between paired bars than between
-  // conditions (seq 547); the explicit width below restores the
-  // category-axis proportions. Separated bars already get their width
-  // from a 1-slot spacing, so they need neither. Superimposed bars need
-  // neither either: they stay on the category axis at the row centers.
+  // separated blocks, interleaved bars with points overlaid (the points
+  // need numeric places to sit on their own bar), or superimposed bars with
+  // points overlaid — every group's bar AND its points stand at the row
+  // center `r`, so the overlay stays overlaid and the points land on their
+  // bar instead of as new categories to the right of it (Issue #92).
+  // Interleaved bars with points use the grouped-bar geometry — Plotly
+  // sizes bars from the smallest gap between bar positions, so the old
+  // `groupOffset` centers made them thin with a bigger gap between paired
+  // bars than between conditions (seq 547); the explicit width below
+  // restores the category-axis proportions. Separated bars already get
+  // their width from a 1-slot spacing, so they need neither. Superimposed
+  // bars without points stay on the category axis at the row centers and
+  // need neither either.
   const barGeom = pointsOn && !separated && !superimposed ? groupedBarGeometry(groups.length, options.barGap) : undefined;
-  const positions = separated ?? (pointsOn && !superimposed ? groupedBarPositions(groups.length, labels, options.barGap) : undefined);
+  const positions =
+    separated ??
+    (pointsOn
+      ? superimposed
+        ? superimposedPositions(labels)
+        : groupedBarPositions(groups.length, labels, options.barGap)
+      : undefined);
+  // Explicit width for the numeric-positions path: the interleaved
+  // geometry's per-group slice, or the full cluster width (0.8 of the slot
+  // less the gap) for superimposed bars — every group overlays at the row
+  // center, so each bar is the whole cluster wide.
+  const barWidth = barGeom ? barGeom.width : superimposed && pointsOn ? 0.8 * (1 - options.barGap) : undefined;
 
   // A summary table's stats and a replicates table's both carry a lower
   // side for the asymmetric kinds (range, IQR, geometric SD/CI) — the two
@@ -123,7 +141,7 @@ export function buildGroupedBars(
       [horizontal ? "x" : "y"]: center,
       // Explicit width: Plotly centers an explicit-width bar on its x, so
       // the bars keep their category-axis width when the axis goes numeric.
-      ...(barGeom ? { width: barGeom.width } : {}),
+      ...(barWidth !== undefined ? { width: barWidth } : {}),
       marker: paint.bars(g.name, i),
       ...(errArr
         ? {
@@ -140,10 +158,14 @@ export function buildGroupedBars(
   // stay inside their bar for any group count; separated bars are wide
   // enough that the legacy ±0.06 spread already fits.
   if (pointsOn) {
-    const jitterAmp = barGeom ? 2 * barGeom.width : 0.4;
+    // Superimposed points spread at the legacy amplitude (0.4) around the
+    // row center — jitter (±0.15) × 0.4 = ±0.06, well inside the
+    // full-cluster-wide bar; interleaved points scale to the bar width.
+    const jitterAmp = superimposed ? 0.4 : barGeom ? 2 * barGeom.width : 0.4;
     groups.forEach((g, gi) => {
-      // No numeric positions (superimposed): the points sit at the row
-      // center, on their bar — the same `r` the significance brackets use.
+      // Row-center numeric positions (superimposed) or the grouped-bar
+      // centers (interleaved): the points sit on their own bar — the same
+      // `r` the significance brackets use.
       const basePos = (r: number) => (positions ? positions.posOf(gi, r) : r);
       const px: number[] = [];
       const py: number[] = [];
@@ -200,7 +222,10 @@ export function buildGroupedBars(
  *  `buildGroupedBars`, on the bars' own numeric positions with the figure's
  *  numeric axis — drawing them here instead appended float scatter X onto
  *  the bars' categorical axis (Issue #31), and drawing them in both places
- *  drew every point twice, with a second legend entry. */
+ *  drew every point twice, with a second legend entry. That routing covers
+ *  the default `showPoints: false` path too, superimposed included: the
+ *  bars go numeric at the row centers with the points on them, so no
+ *  builder can emit categorical bars + numeric points (Issue #92). */
 export function buildGroupedBarsScatter(
   columns: Column[],
   options: GraphOptions,

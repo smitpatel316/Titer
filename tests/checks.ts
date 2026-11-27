@@ -8582,10 +8582,13 @@ check("seq 223: superimposed grouped bars overlap at one x (barmode overlay, no 
 });
 
 // BUG-REPORT Recheck-2 #92: superimposed bars + showPoints. With points on,
-// the bars used to switch to interleaved numeric positions (r ± center(g)),
-// splitting the superimposed bars apart and desyncing them from the
-// significance brackets (which sit at the row center r). They must stay
-// row-centered on the category axis, with their points at the row center too.
+// the bars used to stay on the "category" axis at ["r1", "r2"] while the
+// points took numeric x — Plotly then rendered each float scatter x as a
+// new category, so all 8 points landed in 8 slots to the right of the bars
+// with float tick labels (v2.0.2 proof PNG). Bars AND points must share the
+// row-center NUMERIC axis: bars at [0, 1] at the full cluster width, points
+// within the bar half-width of their row center, axis numeric with the row
+// ticks — and the significance brackets still sit at the row center r.
 check("BUG-REPORT #92: superimposed grouped bars stay row-centered with showPoints, brackets align", () => {
   const close = (a: number | undefined, b: number) => a !== undefined && Math.abs(a - b) < 1e-9;
   type Trace = {
@@ -8604,17 +8607,41 @@ check("BUG-REPORT #92: superimposed grouped bars stay row-centered with showPoin
   const fig = GRAPHS["grouped-bars"].build(dataset.columns, options, paintOf(options, 2), dataset.titles);
   const traces = fig.data as Trace[];
   strictEqual(traces.length, 4);
-  // Both groups' bars stand at the row labels — one x per row, full
-  // category width, overlaid — not split into ±0.20 side-by-side bars.
-  deepStrictEqual(traces[0].x, ["r1", "r2"]);
-  deepStrictEqual(traces[1].x, ["r1", "r2"]);
-  strictEqual(traces[0].width, undefined);
-  strictEqual(traces[1].width, undefined);
+  // The axis is numeric with the row ticks — never type "category" under
+  // numeric bar/point x.
+  const xaxis = fig.layout.xaxis as {
+    type?: string;
+    tickmode?: string;
+    tickvals?: number[];
+    ticktext?: string[];
+    range?: number[];
+  };
+  strictEqual(xaxis.type, undefined);
+  strictEqual(xaxis.tickmode, "array");
+  deepStrictEqual(xaxis.tickvals, [0, 1]);
+  deepStrictEqual(xaxis.ticktext, ["r1", "r2"]);
+  deepStrictEqual(xaxis.range, [-0.5, 1.5]);
+  // Both groups' bars stand at the row centers — one numeric x per row,
+  // identical across groups — at the full cluster width (0.8 × (1 − 0.1)
+  // = 0.72), overlaid, not split into side-by-side bars.
+  deepStrictEqual(traces[0].x, [0, 1]);
+  deepStrictEqual(traces[1].x, [0, 1]);
+  ok(close(traces[0].width, 0.72) && close(traces[1].width, 0.72));
   strictEqual(fig.layout.barmode, "overlay");
-  strictEqual((fig.layout.xaxis as { type?: string }).type, "category");
-  // The points sit at the row center (the legacy ±0.06 spread), on their bar.
-  ok((traces[2].x as number[]).every((x, k) => Math.abs(x - Math.floor(k / 2)) <= 0.061));
-  ok((traces[3].x as number[]).every((x, k) => Math.abs(x - Math.floor(k / 2)) <= 0.061));
+  // Every point sits on its bar: within the bar half-width (0.36) of its
+  // row center — the legacy ±0.06 spread, the same jitter as before.
+  ok((traces[2].x as number[]).every((x, k) => Math.abs(x - Math.floor(k / 2)) <= 0.36));
+  ok((traces[3].x as number[]).every((x, k) => Math.abs(x - Math.floor(k / 2)) <= 0.36));
+  // Without points the bars stay on the category axis — the numeric
+  // routing exists only because numeric point x needs it.
+  const noPts = GRAPHS["grouped-bars"].build(
+    dataset.columns,
+    { ...newGraphOptions("grouped-bars"), groupLayout: "superimposed" as const },
+    paintOf(options, 2),
+    dataset.titles,
+  );
+  deepStrictEqual((noPts.data as Trace[])[0].x, ["r1", "r2"]);
+  strictEqual((noPts.layout.xaxis as { type?: string }).type, "category");
   // And a significance bracket between the two groups at row 0 draws at the
   // row center (x 0..0) — over the bars, not between split ones.
   const brOptions: GraphOptions = { ...options, sigPairs: [pairKey("A", "B")] };
@@ -8683,6 +8710,31 @@ check("BUG-REPORT #31: grouped-bars-scatter with default showPoints draws points
     (on.data as Trace[]).map((t) => t.type),
     ["bar", "bar", "scatter", "scatter"],
   );
+  // Superimposed with the default showPoints off takes the same numeric
+  // routing (BUG-REPORT #92 via this builder): bars at the row centers at
+  // the full cluster width, points on the bars, axis numeric — never
+  // categorical bars + numeric points.
+  const sup = GRAPHS["grouped-bars-scatter"].build(
+    dataset.columns,
+    { ...options, groupLayout: "superimposed" as const },
+    paintOf(options, 2),
+    dataset.titles,
+  );
+  const supTraces = sup.data as Trace[];
+  strictEqual(supTraces.length, 4);
+  const supXaxis = sup.layout.xaxis as { type?: string; tickmode?: string; tickvals?: number[]; ticktext?: string[]; range?: number[] };
+  strictEqual(supXaxis.type, undefined);
+  strictEqual(supXaxis.tickmode, "array");
+  deepStrictEqual(supXaxis.tickvals, [0, 1]);
+  deepStrictEqual(supXaxis.ticktext, ["r1", "r2"]);
+  deepStrictEqual(supXaxis.range, [-0.5, 1.5]);
+  deepStrictEqual(supTraces[0].x, [0, 1]);
+  deepStrictEqual(supTraces[1].x, [0, 1]);
+  ok(close(supTraces[0].width, 0.72) && close(supTraces[1].width, 0.72));
+  strictEqual(sup.layout.barmode, "overlay");
+  ok((supTraces[2].x as number[]).every((x, k) => Math.abs(x - Math.floor(k / 2)) <= 0.36));
+  ok((supTraces[3].x as number[]).every((x, k) => Math.abs(x - Math.floor(k / 2)) <= 0.36));
+  ok((supTraces.slice(2).flatMap((t) => t.x as number[]) as number[]).every((x) => x >= -0.5 && x <= 1.5));
 });
 
 check("seq 223: bars with individual points draws bars plus one points trace per group", () => {
