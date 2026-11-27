@@ -1334,21 +1334,25 @@ fn decode_base64(base64: &str) -> Result<Vec<u8>, cloud::CloudError> {
 /// The provider client for one account: the real Box client, or the
 /// in-memory mock (dev/QA only — the file layer, conflict dialog and offline
 /// behaviour without network or real accounts).
+/// The provider client for one `cloud_*` call. Box calls share ONE
+/// client per account (see `cached_box_client` in cloud_box.rs): two
+/// fresh clients racing a refresh each spend the same single-use refresh
+/// token, and the loser used to delete the winner's fresh pair.
 fn cloud_provider(
     app: &AppHandle,
     mock: &cloud::MockProvider,
     provider: &str,
     account_id: &str,
-) -> Result<Box<dyn cloud::CloudProvider>, cloud::CloudError> {
+) -> Result<std::sync::Arc<dyn cloud::CloudProvider>, cloud::CloudError> {
     match provider {
-        cloud::PROVIDER_MOCK => Ok(Box::new(mock.clone())),
+        cloud::PROVIDER_MOCK => Ok(std::sync::Arc::new(mock.clone())),
         cloud::PROVIDER_BOX => {
             let accounts = load_cloud_registry(app);
             let account =
                 accounts.iter().find(|a| a.provider == cloud::PROVIDER_BOX && a.id == account_id).ok_or_else(|| {
                     cloud::CloudError::NotAuthenticated { message: "That Box account isn't connected.".into() }
                 })?;
-            Ok(Box::new(cloud_box::BoxClient::from_account(&account.id, &account.login, &account.name)?))
+            Ok(cloud_box::cached_box_client(&account.id, &account.login, &account.name)?)
         }
         _ => Err(cloud::CloudError::provider("Unknown cloud provider.")),
     }
@@ -1415,6 +1419,10 @@ fn cloud_save_box_credentials(client_id: String, client_secret: String) -> Resul
 #[tauri::command]
 async fn cloud_connect_box(app: AppHandle) -> Result<cloud::CloudAccount, cloud::CloudError> {
     let account = cloud_box::connect_box(load_box_prefer_byo(&app)).await?;
+    // The connect saved a fresh pair to the keychain: drop any cached
+    // client from before the reconnect, which still holds the old pair
+    // in memory.
+    cloud_box::drop_cached_box_client(&account.id);
     let mut accounts = load_cloud_registry(&app);
     accounts.retain(|a| !(a.provider == account.provider && a.id == account.id));
     accounts.push(account.clone());
@@ -1422,14 +1430,17 @@ async fn cloud_connect_box(app: AppHandle) -> Result<cloud::CloudAccount, cloud:
     Ok(account)
 }
 
-/// Disconnect: revokes server-side AND deletes the keychain entry, then
-/// drops the account from the registry. The open document and its cache
-/// stay; the next save fails with a clear error and the local-copy escape
-/// hatch. `revoke()` deletes the local tokens even when the server-side
-/// revocation fails, so the account is dropped from the registry either
-/// way — and the revoke error is returned (not swallowed), so the user
-/// sees the "token may still be valid at Box" warning instead of a
-/// "revoked and removed" claim that isn't true.
+/// Disconnect: drops the account from the registry, then revokes
+/// server-side best-effort and deletes the keychain entry. The old order
+/// (provider client first, `?` on failure) left a permanent zombie
+/// account whenever the tokens were already gone — a failed refresh had
+/// deleted them, or Box had revoked them — because the early return ran
+/// before the registry removal. The open document and its cache stay; the
+/// next save fails with a clear error and the local-copy escape hatch.
+/// `revoke()` deletes the local tokens even when the server-side
+/// revocation fails, so the revoke error is returned (not swallowed), and
+/// the user sees the "token may still be valid at Box" warning instead of
+/// a "revoked and removed" claim that isn't true.
 #[tauri::command]
 async fn cloud_disconnect(
     app: AppHandle,
@@ -1437,12 +1448,23 @@ async fn cloud_disconnect(
     provider: String,
     account_id: String,
 ) -> Result<(), cloud::CloudError> {
-    let client = cloud_provider(&app, &mock, &provider, &account_id)?;
-    let revoke_result = client.revoke().await;
+    // Build the client first (it needs the registry entry), but remove
+    // the registry entry before ANY early return can skip it: a disconnect
+    // must never leave a zombie account behind when there is nothing left
+    // to revoke.
+    let client = cloud_provider(&app, &mock, &provider, &account_id);
     let mut accounts = load_cloud_registry(&app);
     accounts.retain(|a| !(a.provider == provider && a.id == account_id));
     save_cloud_registry(&app, &accounts)?;
-    revoke_result
+    cloud_box::drop_cached_box_client(&account_id);
+    // Best-effort revoke: the account is already gone from the registry,
+    // so "not authenticated" (tokens already deleted) is a clean
+    // disconnect, not an error.
+    match client {
+        Ok(client) => client.revoke().await,
+        Err(cloud::CloudError::NotAuthenticated { .. }) => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 #[tauri::command]
@@ -1468,15 +1490,16 @@ async fn cloud_download(
 ) -> Result<cloud::RemoteDownload, cloud::CloudError> {
     let downloaded = cloud_provider(&app, &mock, &provider, &account_id)?.download(&file_id).await?;
     let bytes = decode_base64(&downloaded.base64)?;
-    cloud::write_cache(&app, &provider, &file_id, &downloaded.name, &bytes)?;
+    let meta = cloud::CacheMeta::from(&downloaded);
+    cloud::write_cache(&app, &provider, &file_id, &downloaded.name, &bytes, &meta)?;
     Ok(downloaded)
 }
 
 /// The cache copy of a remote file, for opening while offline. The version
-/// is unknown from the cache alone — the in-memory handle keeps the version
-/// from the original download, and saving while offline is refused anyway.
-/// Async (seq 248): the cache read runs on a blocking-pool thread, like
-/// every other file-IO command.
+/// comes from the cache sidecar (see `write_cache`): a legacy cache written
+/// before the sidecar returns `version: None`, and a later save of it
+/// conflicts rather than silently clobbering. Async (seq 248): the cache
+/// read runs on a blocking-pool thread, like every other file-IO command.
 #[tauri::command]
 async fn cloud_read_cache(
     app: AppHandle,
@@ -1485,13 +1508,19 @@ async fn cloud_read_cache(
     name: String,
 ) -> Result<cloud::RemoteDownload, cloud::CloudError> {
     let cache_name = name.clone();
-    let bytes = tokio::task::spawn_blocking(move || cloud::read_cache(&app, &provider, &file_id, &cache_name))
+    let cached = tokio::task::spawn_blocking(move || cloud::read_cache(&app, &provider, &file_id, &cache_name))
         .await
         .map_err(|e| cloud::CloudError::provider(e.to_string()))?
         .ok_or_else(|| cloud::CloudError::NotFound {
             message: "No saved copy of that file is on this computer.".into(),
         })?;
-    Ok(cloud::RemoteDownload { base64: BASE64.encode(&bytes), name, version: None, sha1: None, modified_at: None })
+    Ok(cloud::RemoteDownload {
+        base64: BASE64.encode(&cached.bytes),
+        name,
+        version: cached.version,
+        sha1: cached.sha1,
+        modified_at: cached.modified_at,
+    })
 }
 
 #[tauri::command]
@@ -1504,13 +1533,15 @@ async fn cloud_upload(
     name: String,
     base64: String,
     expected_version: Option<String>,
+    force: bool,
 ) -> Result<cloud::RemoteVersion, cloud::CloudError> {
     let bytes = decode_base64(&base64)?;
     let saved = cloud_provider(&app, &mock, &provider, &account_id)?
-        .upload_version(&file_id, &bytes, expected_version.as_deref())
+        .upload_version(&file_id, &bytes, expected_version.as_deref(), force)
         .await?;
     // The cache now holds what was just saved.
-    cloud::write_cache(&app, &provider, &file_id, &name, &bytes)?;
+    let meta = cloud::CacheMeta::from(&saved);
+    cloud::write_cache(&app, &provider, &file_id, &name, &bytes, &meta)?;
     Ok(saved)
 }
 

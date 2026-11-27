@@ -46258,6 +46258,139 @@ check("r2-90 webr: ensurePackages does not resolve until every package is ready 
 });
 
 
+// ── Cloud / Box (BUG-REPORT.md Round 2 Issues 9, 10, 45) ────────────────
+// Pins for the cycle-44 fix lane (Plane seq 473, 474, 500). Each check
+// mirrors its sweep probe (probe-bugreport<N>-44.ts) 1:1: the probe failed
+// 0/5, 0/4, 0/5 on tip 139ddb5 and passes on the fixed code, so these
+// pins fail pre-fix and pass post-fix by the same assertions.
+
+/** The brace-matched body of the Rust function starting at `sig`. */
+function rustFnBody(src: string, sig: string): string {
+  const at = src.indexOf(sig);
+  if (at < 0) return "";
+  const brace = src.indexOf("{", at);
+  let depth = 0;
+  for (let i = brace; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}") {
+      depth--;
+      if (depth === 0) return src.slice(at, i + 1);
+    }
+  }
+  return src.slice(at);
+}
+
+check(
+  "r2-9 (seq 473): cloud conflict Overwrite reaches the upload as a force, and offline-opened files keep their version",
+  () => {
+    // Issue 9: `writeFile` collapsed explicit `null` (force-overwrite) into
+    // `handle.version` via `??`, so Overwrite always conflicted again; and
+    // the offline cache stored bytes only, so an offline-opened file saved
+    // with no version and silently clobbered remote edits.
+    const cloud = readFileSync("src/lib/cloud.ts", "utf8");
+    const doc = readFileSync("src/store/use-document.ts", "utf8");
+    const cloudRs = readFileSync("src-tauri/src/cloud.rs", "utf8");
+    const boxRs = readFileSync("src-tauri/src/cloud_box.rs", "utf8");
+    ok(
+      !cloud.includes("expectedVersion ?? handle.version"),
+      "writeFile must distinguish explicit null (force) from an omitted expectedVersion — `??` collapses them",
+    );
+    ok(
+      doc.includes("writeCloudFile(pending.handle, pending.bytes, null)") &&
+        !cloud.includes("expectedVersion ?? handle.version"),
+      "resolveConflict Overwrite passes null, and writeFile must carry it through as a force, not the stale version",
+    );
+    const writeCache = cloudRs.slice(cloudRs.indexOf("pub fn write_cache"), cloudRs.indexOf("pub fn read_cache"));
+    ok(writeCache.includes("version"), "write_cache must persist version metadata alongside the cached bytes");
+    ok(
+      cloudRs
+        .slice(cloudRs.indexOf("pub fn read_cache"), cloudRs.indexOf("pub fn read_cache") + 400)
+        .includes("version"),
+      "read_cache must return version metadata, not bytes alone",
+    );
+    const upload = boxRs.slice(
+      boxRs.indexOf("async fn upload_version"),
+      boxRs.indexOf("async fn upload_version") + 2500,
+    );
+    ok(
+      upload.includes("expected_version.is_none()") ||
+        upload.includes("force") ||
+        !upload.includes("if let Some(expected) = expected_version"),
+      "upload_version must refuse (or require force) when expected_version is None on a versioned file",
+    );
+    // The offline-open path keeps the cached version on the handle, so a
+    // later save stays conditional instead of uploading blind.
+    ok(
+      doc.includes("readCachedDownload(handle)") && doc.includes("cachedVersion ?? handle.version"),
+      "openOfflineCopy must read the cached version metadata onto the handle",
+    );
+  },
+);
+
+check(
+  "r2-10 (seq 474): concurrent Box token refreshes serialize per account and never delete a fresh pair; disconnect never leaves a zombie account",
+  () => {
+    // Issue 10: a fresh BoxClient per IPC call + a lock dropped before the
+    // refresh await let two refreshes race the single-use refresh token,
+    // and the loser deleted the winner's fresh pair; a disconnect whose
+    // tokens were already gone returned before removing the registry entry.
+    const boxRs = readFileSync("src-tauri/src/cloud_box.rs", "utf8");
+    const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
+    const provider = rustFnBody(mainRs, "fn cloud_provider(");
+    ok(
+      provider.includes("Mutex") ||
+        provider.includes("OnceLock") ||
+        provider.includes("cache") ||
+        provider.includes("refresh"),
+      "cloud_provider must reuse a shared per-account client or refresh guard instead of a fresh BoxClient per call",
+    );
+    const access = rustFnBody(boxRs, "async fn access_token(&self)");
+    ok(
+      access.includes("refresh_tokens") && !access.includes("let tokens = self.tokens.lock()"),
+      "access_token must not drop the token lock before awaiting the refresh",
+    );
+    ok(
+      !access.includes('delete_tokens("box", &self.account.id)'),
+      "a failed refresh must not delete the keychain tokens (they may be another request's fresh pair)",
+    );
+    const disconnect = rustFnBody(mainRs, "async fn cloud_disconnect(");
+    ok(
+      disconnect.indexOf("load_cloud_registry") < disconnect.indexOf("cloud_provider") ||
+        disconnect.includes("NotAuthenticated"),
+      "cloud_disconnect must remove the account from the registry even when cloud_provider fails with NotAuthenticated",
+    );
+  },
+);
+
+check(
+  "r2-45 (seq 500): Box OAuth loopback binds before the browser opens, loops past non-callback sockets, and never blocks a worker or leaks the listener",
+  () => {
+    // Issue 45: bind-after-open race, a single accept() that any
+    // /favicon.ico aborted, a 300 s recv_timeout blocking the caller, and
+    // a detached accept thread leaking the port on timeout.
+    const cloudRs = readFileSync("src-tauri/src/cloud.rs", "utf8");
+    const boxRs = readFileSync("src-tauri/src/cloud_box.rs", "utf8");
+    const connect = rustFnBody(boxRs, "connect_box");
+    ok(
+      !connect.includes("ephemeral_loopback_port"),
+      "connect_box must keep one bound listener across the browser open (no bind-drop-rebind)",
+    );
+    const wait = rustFnBody(cloudRs, "pub fn wait_for_code");
+    ok(!wait.includes("TcpListener::bind"), "wait_for_code must not re-bind a port the browser flow already raced on");
+    const acceptAt = wait.indexOf("listener.accept()");
+    const loopAt = wait.indexOf("loop");
+    ok(
+      acceptAt >= 0 && loopAt >= 0 && loopAt < acceptAt,
+      "wait_for_code must loop accept() past non-callback connections (not a single accept)",
+    );
+    ok(!wait.includes("recv_timeout"), "wait_for_code must not block the caller in recv_timeout");
+    ok(
+      wait.includes("join") || wait.includes("abort") || wait.includes("JoinHandle"),
+      "the spawned listener thread must be joined or aborted on timeout (not detached)",
+    );
+  },
+);
+
 // ── Run ──────────────────────────────────────────────────────────────────
 
 // Descriptives are computed by R since the v1.0.7 rebase, so checks that run

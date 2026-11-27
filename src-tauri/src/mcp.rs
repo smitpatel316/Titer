@@ -3411,9 +3411,11 @@ fn upload_project_bytes(
         return std::fs::read(path)
             .map_err(|e| format!("Couldn't read the project's file at “{path}” ({e}) — save it first, then upload."));
     }
-    crate::cloud::read_cache(app, &record.provider, &record.file_id, &record.name).ok_or_else(|| {
-        "This project has no file on disk yet — save it with titer_save_project first, then upload.".to_string()
-    })
+    crate::cloud::read_cache(app, &record.provider, &record.file_id, &record.name)
+        .map(|cached| cached.bytes)
+        .ok_or_else(|| {
+            "This project has no file on disk yet — save it with titer_save_project first, then upload.".to_string()
+        })
 }
 
 // ── Analyses — run-analysis core (L4, v1.6.0) ───────────────────────────

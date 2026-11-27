@@ -853,8 +853,9 @@ export const cloudReadCache = (provider: ProviderId, file_id: string, name: stri
   invoke<RemoteDownload>("cloud_read_cache", { provider, fileId: file_id, name });
 
 /** Saves a new remote version, conditional on `expected_version` when
- *  given (`null` = overwrite anyway — the conflict dialog's explicit third
- *  choice only). Returns the new version. */
+ *  given. `force` is the conflict dialog's explicit "overwrite anyway":
+ *  without it, an upload with no known version is refused (conflict)
+ *  instead of silently clobbering remote edits. Returns the new version. */
 export const cloudUpload = (
   provider: ProviderId,
   account_id: string,
@@ -862,7 +863,17 @@ export const cloudUpload = (
   name: string,
   base64: string,
   expected_version: string | null,
-) => invoke<RemoteVersion>("cloud_upload", { provider, accountId: account_id, fileId: file_id, name, base64, expectedVersion: expected_version });
+  force: boolean,
+) =>
+  invoke<RemoteVersion>("cloud_upload", {
+    provider,
+    accountId: account_id,
+    fileId: file_id,
+    name,
+    base64,
+    expectedVersion: expected_version,
+    force,
+  });
 
 /** A new remote file in `folder_id` ("Save as a copy" lands here). */
 export const cloudUploadNew = (

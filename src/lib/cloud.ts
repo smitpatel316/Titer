@@ -231,22 +231,34 @@ export async function writeFile(
     await native.writeFile(handle.path, bytes);
     return null;
   }
+  // Three distinct cases — `??` would collapse two of them: `undefined`
+  // means "the version seen at open/last-save" (the handle's), `null`
+  // means "overwrite anyway" (the conflict dialog's explicit third choice
+  // only), and a string means "conditional on this version". The force
+  // flag travels separately so the Rust side can tell an explicit
+  // overwrite from a version that is simply unknown (an offline-opened
+  // file): the latter must conflict, never silently clobber remote edits.
+  const expected = expectedVersion === undefined ? handle.version : expectedVersion;
   return native.cloudUpload(
     handle.provider,
     handle.accountId,
     handle.fileId,
     handle.path.split("/").pop() ?? handle.path,
     bytesToBase64(bytes),
-    expectedVersion ?? handle.version,
+    expected,
+    expectedVersion === null,
   );
 }
 
 /** The cache copy of a remote file, for opening while offline. */
 export async function readCachedFile(handle: Extract<FileHandle, { kind: "remote" }>): Promise<Uint8Array> {
-  const cached = await native.cloudReadCache(
-    handle.provider,
-    handle.fileId,
-    handle.path.split("/").pop() ?? handle.path,
-  );
+  const cached = await readCachedDownload(handle);
   return base64ToBytes(cached.base64);
+}
+
+/** The cache copy with its version metadata: an offline-opened file keeps
+ *  the version the cache was written at, so a later save stays conditional
+ *  on it instead of uploading with no version at all. */
+export async function readCachedDownload(handle: Extract<FileHandle, { kind: "remote" }>): Promise<RemoteDownload> {
+  return native.cloudReadCache(handle.provider, handle.fileId, handle.path.split("/").pop() ?? handle.path);
 }
