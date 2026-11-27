@@ -68,17 +68,25 @@ export function evaluate(
     if (model === "agonist-3pl-x") return bottom;
     if (model === "agonist-3pl-normalized-x") return 0;
     if (model === "biphasic-x") {
-      return (
-        bottom +
-        rise * (c("Frac") * (c("nH1") < 0 ? 1 : 0) + (1 - c("Frac")) * (c("nH2") < 0 ? 1 : 0))
-      );
+      // A missing (NaN) Frac/nH contributes nothing: the bounded fit keeps
+      // nH1/nH2 positive and Frac in [0, 1], so with both phases rising the
+      // limit is Bottom; a phase only contributes when its nH is finitely
+      // negative AND Frac is known. (Without this, a coefficient set
+      // lacking Frac/nH1/nH2 made the guard itself return NaN.)
+      const frac = c("Frac");
+      const w1 = c("nH1") < 0 && Number.isFinite(frac) ? frac : 0;
+      const w2 = c("nH2") < 0 && Number.isFinite(frac) ? 1 - frac : 0;
+      return bottom + rise * (w1 + w2);
     }
     if (model === "bell-shaped-x") {
-      return (
-        c("Dip") +
-        (c("Plateau1") - c("Dip")) * (c("nH1") < 0 ? 1 : 0) +
-        (c("Plateau2") - c("Dip")) * (c("nH2") > 0 ? 1 : 0)
-      );
+      // Likewise NaN-safe: a missing Dip is 0 and a missing plateau spans
+      // 0 from Dip, so a coefficient set lacking Dip/Plateau1/Plateau2
+      // returns the finite base level instead of NaN.
+      const dip = c("Dip");
+      const d = Number.isFinite(dip) ? dip : 0;
+      const s1 = Number.isFinite(c("Plateau1")) && Number.isFinite(dip) ? c("Plateau1") - dip : 0;
+      const s2 = Number.isFinite(c("Plateau2")) && Number.isFinite(dip) ? c("Plateau2") - dip : 0;
+      return d + s1 * (c("nH1") < 0 ? 1 : 0) + s2 * (c("nH2") > 0 ? 1 : 0);
     }
   }
   // A centered polynomial's terms are powers of (X − centeredX), not of X.

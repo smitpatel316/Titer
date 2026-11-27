@@ -14286,6 +14286,32 @@ check("R2-111: x === 0 guard covers all 8 raw-X ratio models, incl. asymmetric-5
     ] as never, 0),
     0,
   );
+  // Residual limbs (cycle 52): the biphasic-x / bell-shaped-x guards did
+  // arithmetic on Frac/nH1/nH2/Dip/Plateau1/Plateau2, so a coefficient set
+  // lacking those terms made the guard itself return NaN at x == 0
+  // (coef() returns NaN for a missing term). The guards are now NaN-safe:
+  // a missing term contributes nothing, so the limit is the finite base
+  // level (Bottom for biphasic-x with both phases rising; 0 for
+  // bell-shaped-x with no Dip/plateaus). Complete coefficient sets still
+  // return R's exact limits above.
+  strictEqual(
+    evaluateFittedCurve("biphasic-x", [
+      { term: "Bottom", estimate: 0 },
+      { term: "Top", estimate: 100 },
+      { term: "Hill slope", estimate: 1 },
+      { term: "EC50", estimate: 0 },
+    ] as never, 0),
+    0,
+  );
+  strictEqual(
+    evaluateFittedCurve("bell-shaped-x", [
+      { term: "Bottom", estimate: 0 },
+      { term: "Top", estimate: 100 },
+      { term: "Hill slope", estimate: 1 },
+      { term: "EC50", estimate: 0 },
+    ] as never, 0),
+    0,
+  );
 });
 
 // BUG-REPORT.md Round 2 Issue 86 (High, cycle 44): the sign-aware X = 0
