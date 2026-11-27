@@ -454,6 +454,8 @@ export function axesRangeInputs(graphType: GraphType): { x: boolean; y: boolean 
  *  panel: heatmap and volcano have no Y scale). */
 export function logScaleOffered(graphType: GraphType): { x: boolean; y: boolean } {
   if (graphType === "roc-curve") return { x: false, y: false };
+  // A forest plot's Y is its covariate names, not values: no log scale there.
+  if (graphType === "forest-plot") return { x: true, y: false };
   return { x: true, y: true };
 }
 

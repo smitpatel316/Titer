@@ -17,7 +17,10 @@ import type { GraphFigure } from ".";
 export const powStacked: GraphModule = {
   label: "Stacked bar",
   family: "grouped",
-  axes: () => ({ x: "labels", y: "range" }),
+  // Y is a scale axis, not range-only: the Format panel offers it and the
+  // layout honors it (yAxisRange). Contrast grouped-stacked, whose value
+  // axis stays linear by design (a slice's height must say its value).
+  axes: () => ({ x: "labels", y: "scale" }),
   defaults: { stackAs: "percent" },
   patterns: () => true,
   build: (columns: Column[], options: GraphOptions, paint: Paint, titles?: (string | null)[]): GraphFigure => {

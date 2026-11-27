@@ -31,7 +31,15 @@ function referenceLine(): Record<string, unknown> {
 }
 
 function build(_columns: Column[], options: GraphOptions, _paint: Paint): GraphFigure {
-  const layout = xyLayout(options, "Hazard ratio", 1, { yName: "" });
+  // Y is the covariate names, so no scale, range or step applies there (the
+  // panel offers none of them). Scrub them so a stale option cannot move
+  // the labels axis; xyLayout would otherwise apply yScale/yMin/yMax/yStep.
+  const layout = xyLayout(
+    { ...options, yScale: "linear", yMin: undefined, yMax: undefined, yStep: undefined },
+    "Hazard ratio",
+    1,
+    { yName: "" },
+  );
   return {
     data: [],
     layout: {
