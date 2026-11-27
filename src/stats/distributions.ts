@@ -392,24 +392,40 @@ export function noncentralTCdf(t: number, df: number, delta: number): number {
       const rxb = Math.pow(1 - x, b);
       const albeta = 0.5 * Math.log(Math.PI) + lgamma(b) - lgamma(a + b);
       let xodd = regularizedIncompleteBeta(x, a, b);
-      let godd = 2 * rxb * Math.exp(a * Math.log(x) - albeta);
+      // Bug 107 (mu-gap limb): godd/geven are proportional to
+      // rxb = (1−x)^(df/2), which underflows to exactly 0 once
+      // b·|ln(1−x)| ≳ 744 — e.g. t = 39, df = 1e5 gives −754.8, so
+      // the increments stayed 0 forever, the beta factors froze at
+      // their j = 0 values (≈1), and the series summed to a bogus
+      // 1.0 for a true 0.9445. Track both increments in log space
+      // instead: they grow by ~x·(a+b)/a per step and re-enter
+      // double range around the Poisson mode, exactly where the
+      // beta factors need to fall. Math.exp of anything below −745
+      // is 0 in JS, so no threshold is needed — decrements that
+      // small contribute exactly 0. (Just above the cliff the
+      // increments start subnormal and lose bits, so this also
+      // repairs the ~1e-4 error at t = 38.6, df = 1e5, δ = 37.)
+      const log1mx = Math.log1p(-x);
+      let logGodd = Math.log(2) + b * log1mx + a * Math.log(x) - albeta;
+      let logGeven = Math.log(b) + Math.log(x) + b * log1mx;
       let xeven = 1 - rxb;
-      let geven = b * x * rxb;
       tnc = p * xodd + q * xeven;
       let en = 1;
       let errbd = Infinity;
       while (errbd > 1e-12 && en <= 100000) {
         a += 1;
+        const godd = Math.exp(logGodd);
+        const geven = Math.exp(logGeven);
         xodd -= godd;
         xeven -= geven;
-        godd = (godd * x * (a + b - 1)) / a;
-        geven = (geven * x * (a + b - 0.5)) / (a + 0.5);
+        logGodd += Math.log(x) + Math.log(a + b - 1) - Math.log(a);
+        logGeven += Math.log(x) + Math.log(a + b - 0.5) - Math.log(a + 0.5);
         p = (p * lambda) / (2 * en);
         q = (q * lambda) / (2 * en + 1);
         s -= p;
         en += 1;
         tnc += p * xodd + q * xeven;
-        errbd = 2 * s * (xodd - godd);
+        errbd = 2 * s * (xodd - Math.exp(logGodd));
       }
     }
   }

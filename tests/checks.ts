@@ -29294,6 +29294,27 @@ check("noncentral t CDF stays finite and accurate at extreme t, delta and df (bu
   close(noncentralTCdf(1000, 1e8, 1000), 0.500019847433776, 1e-9, "nct(1000; 1e8, 1000)");
 });
 
+// Bug 107 (mu-gap limb, cycle 52): the linear-recurrence branch (μ ≤ 700)
+// was still wrong in one wedge — t ≈ δ ≈ 37–39 at very large df, where
+// rxb = (1−x)^(df/2) underflows to exactly 0 (b·ln(1−x) ≲ −744) so the
+// beta increments godd/geven stayed 0 forever and the series summed to
+// a bogus 1.0. References are SciPy scipy.stats.nct.cdf values.
+check("noncentral t CDF is accurate in the mu-gap wedge: large df, t near delta (bug 107)", () => {
+  const close = (got: number, want: number, tol: number, label: string) => {
+    ok(Math.abs(got - want) < tol, `${label} = ${got} (want ${want} ± ${tol})`);
+  };
+  // Was 0.9999999999991026 (bogus 1.0): rxb underflowed (b·ln(1−x) = −754.8).
+  close(noncentralTCdf(39, 1e5, 37.4), 0.9445156015352535, 1e-9, "nct(39; 1e5, 37.4)");
+  // Was 0.9999999999990729 (bogus 1.0): same wedge, δ = 37.
+  close(noncentralTCdf(39, 1e5, 37), 0.9768332112853271, 1e-9, "nct(39; 1e5, 37)");
+  // Was 0.9999999999991026 (bogus 1.0): same wedge at df = 5e4.
+  close(noncentralTCdf(39, 5e4, 37.4), 0.9438316204599887, 1e-9, "nct(39; 5e4, 37.4)");
+  // Was 0.9443996268211283 (error 1.3e-4): just above the underflow cliff
+  // the increments started subnormal and lost bits; log-space tracking
+  // restores full precision.
+  close(noncentralTCdf(38.6, 1e5, 37), 0.9445294618322225, 1e-9, "nct(38.6; 1e5, 37)");
+});
+
 check("plot a function plots Prism's statistical distributions (seq 203)", async () => {
   const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
   const close = (got: (number | null)[], want: number[]) =>
