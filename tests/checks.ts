@@ -546,7 +546,16 @@ import {
 import { evaluateUserEquation, parseCustomParameters, parseUserEquation } from "../src/stats/xy/user-defined";
 import { monteCarloRCode, percentile } from "../src/stats/simulation/monte-carlo";
 import { applyResimulation } from "../src/stats/simulation/simulate";
-import { goToSheetEntries, linkedSheetIds, pingPongTarget, pushHistory } from "../src/lib/sheet-navigation";
+import {
+  familyPanelEntries,
+  familySheetIds,
+  goToSheetEntries,
+  linkedSheetIds,
+  nextSheetId,
+  pingPongTarget,
+  pushHistory,
+  sectionFirstSheetId,
+} from "../src/lib/sheet-navigation";
 import { repointCandidates } from "../src/lib/repoint-analysis";
 import { addMonteCarloHistogram } from "../src/views/graphs/monte-carlo-histogram";
 import { addGeneratedCurves } from "../src/views/graphs/generated-curves";
@@ -2560,6 +2569,124 @@ check("seq 240: setActive tracks recent sheets; the View menu offers Go to Sheet
   ok(/Previous Sheet/.test(menu) && /CmdOrCtrl\+Alt\+Z/.test(menu), "View menu lacks Previous Sheet (CmdOrCtrl+Alt+Z)");
   const shell = readFileSync("src/components/app-shell.tsx", "utf8");
   ok(/go-to-sheet/.test(shell), "app-shell doesn't render the Go to Sheet dialog");
+});
+
+// seq 240 remainder (G5/H4/H5): Next Sheet cycles forward through the same
+// outline order Go to Sheet lists, wrapping from the last sheet to the
+// first — the forward counterpart of Previous Sheet's ping-pong.
+check("seq 240 remainder: Next Sheet cycles forward through the outline order and wraps", () => {
+  const nodes = {
+    t1: { id: "t1", type: "table", name: "Doses", parentId: null },
+    a1: { id: "a1", type: "analysis", name: "Fit", parentId: "t1" },
+    g1: { id: "g1", type: "graph", name: "Plot", parentId: "t1" },
+    t2: { id: "t2", type: "table", name: "Doses 2", parentId: null },
+    f1: { id: "f1", type: "figure", name: "Figure", parentId: null },
+    i1: { id: "i1", type: "info", name: "Notes", parentId: null, info: { linkedTableId: "t1" } },
+  } as unknown as Record<string, ProjectNode>;
+  const childOrder = { t1: ["a1", "g1"], t2: [] };
+  const rootOrder = ["t1", "t2", "f1", "i1"];
+  strictEqual(nextSheetId(nodes, rootOrder, childOrder, "t1"), "a1");
+  strictEqual(nextSheetId(nodes, rootOrder, childOrder, "a1"), "g1");
+  strictEqual(nextSheetId(nodes, rootOrder, childOrder, "g1"), "t2");
+  strictEqual(nextSheetId(nodes, rootOrder, childOrder, "t2"), "f1");
+  strictEqual(nextSheetId(nodes, rootOrder, childOrder, "f1"), "i1");
+  strictEqual(nextSheetId(nodes, rootOrder, childOrder, "i1"), "t1");
+  strictEqual(nextSheetId(nodes, rootOrder, childOrder, null), null);
+  strictEqual(nextSheetId({}, [], {}, "t1"), null);
+  // A lone sheet has nowhere to go.
+  strictEqual(
+    nextSheetId({ t1: nodes.t1 } as unknown as Record<string, ProjectNode>, ["t1"], {}, "t1"),
+    "t1",
+  );
+});
+
+// seq 240 remainder (H4): Go to Section jumps straight to the first sheet
+// of a section — Data, Results, Graphs, Layouts or Info — or nowhere when
+// the project has no sheet in that section.
+check("seq 240 remainder: Go to Section jumps to the first sheet of each section", () => {
+  const nodes = {
+    t1: { id: "t1", type: "table", name: "Doses", parentId: null },
+    a1: { id: "a1", type: "analysis", name: "Fit", parentId: "t1" },
+    g1: { id: "g1", type: "graph", name: "Plot", parentId: "t1" },
+    f1: { id: "f1", type: "figure", name: "Figure", parentId: null },
+    i1: { id: "i1", type: "info", name: "Notes", parentId: null, info: { linkedTableId: "t1" } },
+  } as unknown as Record<string, ProjectNode>;
+  const childOrder = { t1: ["a1", "g1"] };
+  const rootOrder = ["t1", "f1", "i1"];
+  strictEqual(sectionFirstSheetId("Data", nodes, rootOrder, childOrder), "t1");
+  strictEqual(sectionFirstSheetId("Results", nodes, rootOrder, childOrder), "a1");
+  strictEqual(sectionFirstSheetId("Graphs", nodes, rootOrder, childOrder), "g1");
+  strictEqual(sectionFirstSheetId("Layouts", nodes, rootOrder, childOrder), "f1");
+  strictEqual(sectionFirstSheetId("Info", nodes, rootOrder, childOrder), "i1");
+  strictEqual(
+    sectionFirstSheetId("Graphs", { t1: nodes.t1 } as unknown as Record<string, ProjectNode>, ["t1"], {}),
+    null,
+  );
+});
+
+// seq 240 remainder (G5): a sheet's family is the table that owns it with
+// everything under it, plus the info sheets tied to that table — a graph's
+// family is its table's family, an info sheet's is its linked table's.
+check("seq 240 remainder: a sheet's family is its table, children and linked info sheets", () => {
+  const nodes = {
+    t1: { id: "t1", type: "table", name: "Doses", parentId: null },
+    a1: { id: "a1", type: "analysis", name: "Fit", parentId: "t1" },
+    g1: { id: "g1", type: "graph", name: "Plot", parentId: "t1" },
+    i1: { id: "i1", type: "info", name: "Notes", parentId: null, info: { linkedTableId: "t1" } },
+    t2: { id: "t2", type: "table", name: "Other", parentId: null },
+    f1: {
+      id: "f1",
+      type: "figure",
+      name: "Figure",
+      parentId: null,
+      panels: [{ graphId: "g1", label: "A", title: "" }],
+    },
+  } as unknown as Record<string, ProjectNode>;
+  const childOrder = { t1: ["a1", "g1"], t2: [] };
+  deepStrictEqual(familySheetIds(nodes.t1, nodes, childOrder), ["t1", "a1", "g1", "i1"]);
+  deepStrictEqual(familySheetIds(nodes.g1, nodes, childOrder), ["t1", "a1", "g1", "i1"]);
+  deepStrictEqual(familySheetIds(nodes.i1, nodes, childOrder), ["t1", "a1", "g1", "i1"]);
+  deepStrictEqual(familySheetIds(nodes.t2, nodes, childOrder), ["t2"]);
+  // A figure's family is itself plus the graphs it shows.
+  deepStrictEqual(familySheetIds(nodes.f1, nodes, childOrder), ["f1", "g1"]);
+});
+
+// seq 240 remainder (G5): the Family panel lists that family with the
+// table at the top and its children and info sheets indented under it.
+check("seq 240 remainder: the Family panel indents children under their table", () => {
+  const nodes = {
+    t1: { id: "t1", type: "table", name: "Doses", parentId: null },
+    a1: { id: "a1", type: "analysis", name: "Fit", parentId: "t1" },
+    g1: { id: "g1", type: "graph", name: "Plot", parentId: "t1" },
+    i1: { id: "i1", type: "info", name: "Notes", parentId: null, info: { linkedTableId: "t1" } },
+  } as unknown as Record<string, ProjectNode>;
+  const childOrder = { t1: ["a1", "g1"] };
+  deepStrictEqual(
+    familyPanelEntries(nodes.g1, nodes, childOrder).map((e) => `${e.depth}:${e.section}:${e.label}`),
+    ["0:Data:Doses", "1:Results:Fit", "1:Graphs:Plot", "1:Info:Notes"],
+  );
+  deepStrictEqual(
+    familyPanelEntries(nodes.t1, nodes, childOrder).map((e) => e.id),
+    ["t1", "a1", "g1", "i1"],
+  );
+});
+
+// seq 240 remainder (G5/O4/H4/H5): the UI carries the four pieces — the
+// Family panel at the Navigator bottom (family members bold in the tree),
+// the linked-sheets button, Go to Section and Next Sheet in the View menu,
+// and family-grouped Gallery cards.
+check("seq 240 remainder: Navigator Family panel, linked-sheets button, Go to Section, Next Sheet", () => {
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(/Go to Section/.test(menu), "View menu lacks Go to Section");
+  ok(/Next Sheet/.test(menu) && /CmdOrCtrl\+Alt\+X/.test(menu), "View menu lacks Next Sheet (CmdOrCtrl+Alt+X)");
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(/go-to-linked/.test(shell), "app-shell doesn't render the Linked Sheets picker");
+  ok(/Linked Sheets/.test(shell), "app-shell lacks the linked-sheets button");
+  const sidebar = readFileSync("src/components/project-sidebar.tsx", "utf8");
+  ok(/Family/.test(sidebar) && /familyPanelEntries/.test(sidebar), "Navigator lacks the Family panel");
+  ok(/emphasized/.test(sidebar), "Navigator doesn't bold family members");
+  const gallery = readFileSync("src/components/gallery-view.tsx", "utf8");
+  ok(/Family/.test(gallery) && /tableName/.test(gallery), "Gallery doesn't group cards by family");
 });
 
 // ── seq 300 (F6 / Shift+F6 pane cycling) ───────────────────────────────
