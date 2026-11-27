@@ -4270,6 +4270,53 @@ async function disagreements(): Promise<string[]> {
     )
       out.push(`Origin fit at 1e13: slope ${oSlope}, CI [${oLo}, ${oHi}], R² ${oR2}, P ${oP}`);
   }
+  // fitLinear (the graph overlay's TS closed form) at 1e13 (Nov 2026): its
+  // ssRes is the residual sum of squares behind s, R² and P, and the
+  // uncentered residual y − (b + slope·x) lost it to rounding — unweighted
+  // ssRes 1.0% off, s 0.5%, P 4.1%; the 1/y-weighted slope 1.5e-6 off.
+  // Centered (differences against the first point, then averaged) it
+  // matches the mpmath exact values (probe/expected-precision.json,
+  // "fitLinear") to ~1e-15. ssRes is not a field (s = √(ssRes/dof) is),
+  // so s is the pinned quantity. Through the origin the fit is scaled
+  // instead (centering would change the model); its ssRes keeps the
+  // inherent ~1% floor — the slope's own double rounding moves every
+  // residual by slope-error × x — so s is pinned within 5% and P within
+  // 25%, the same bound as the R origin fit above.
+  {
+    const { x: bx, ys: bys } = splitXY(readTable(xyBig).columns);
+    const bigPairs = xyPoints(bx!, bys[0]);
+    const { x: ox, ys: oys } = splitXY(readTable(xyBigOrigin).columns);
+    const originPairs = xyPoints(ox!, oys[0]);
+    const rel = (got: number | null | undefined, want: number) =>
+      got == null ? Infinity : Math.abs(got - want) / Math.abs(want);
+    const fit = fitLinear(bigPairs.x, bigPairs.y, false);
+    const fitW = fitLinear(bigPairs.x, bigPairs.y, false, "1/y");
+    const fitO = fitLinear(originPairs.x, originPairs.y, true);
+    if (
+      fit == null ||
+      fitW == null ||
+      fitO == null ||
+      rel(fit.slope, 2.001231060606061) > 1e-9 ||
+      rel(fit.intercept, -12310605060.59633) > 1e-9 ||
+      rel(fit.s, 0.1317132785526953) > 1e-9 ||
+      rel(fit.r2, 0.9983226194932232) > 1e-9 ||
+      rel(fit.p, 2.1660877195882448e-12) > 1e-9 ||
+      rel(fit.r, 0.9991609577506635) > 1e-9 ||
+      rel(fitW.slope, 2.001231060606063) > 1e-9 ||
+      rel(fitW.intercept, -12310605060.620771) > 1e-9 ||
+      rel(fitW.s, 2.9451984437580016e-08) > 1e-9 ||
+      rel(fitW.r2, 0.9983226194932232) > 1e-9 ||
+      rel(fitW.p, 2.1660877195884823e-12) > 1e-9 ||
+      rel(fitW.r, 0.9991609577506635) > 1e-9 ||
+      rel(fitO.slope, 2.0000000000000036) > 1e-9 ||
+      rel(fitO.s, 0.044621770813754597) > 0.05 ||
+      rel(fitO.r2, 1) > 1e-9 ||
+      rel(fitO.p, 2.2055762756384253e-133) > 0.25
+    )
+      out.push(
+        `fitLinear at 1e13: unweighted s ${fit?.s}, R² ${fit?.r2}, P ${fit?.p}; weighted s ${fitW?.s}, P ${fitW?.p}; origin s ${fitO?.s}, P ${fitO?.p}`,
+      );
+  }
   // Deming regression (plan 13): the TS closed form must match the R closed
   // form on the reference table, and λ must run the right way round. The
   // slope decreases monotonically in λ, from the inverse-regression slope
