@@ -1671,6 +1671,18 @@ fn accent_color() -> Option<String> {
 
 /// The text on the clipboard, if it holds some: what a command of Titer's own reads (Paste
 /// Column Names), which the web view could only do after asking, unlike a paste.
+/// A `*const c_char` from AppKit as an owned String (BUG-REPORT #106):
+/// -[NSString UTF8String] can return NULL (e.g. unpaired UTF-16
+/// surrogates on the pasteboard); CStr::from_ptr on NULL is immediate UB,
+/// so a NULL pointer bails out instead of being read.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn utf8_ptr_to_string(ptr: *const std::ffi::c_char) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+    Some(unsafe { std::ffi::CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
+}
+
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn clipboard_text() -> Option<String> {
@@ -1680,7 +1692,7 @@ fn clipboard_text() -> Option<String> {
             objc2::msg_send![objc2::class!(NSString), stringWithUTF8String: c"public.utf8-plain-text".as_ptr()];
         let text: *mut AnyObject = objc2::msg_send![board.as_ref()?, stringForType: kind];
         let utf8: *const std::ffi::c_char = objc2::msg_send![text.as_ref()?, UTF8String];
-        Some(std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned())
+        utf8_ptr_to_string(utf8)
     }
 }
 
@@ -1780,6 +1792,11 @@ fn open_support_email() {
 /// The guard every file opener shares (seq 451): the path must name an
 /// existing file, so a moved or deleted source says so instead of opening
 /// nothing (or, on Windows, a bare `start` window).
+/// BUG-REPORT #98: the OS launcher must never receive an executable — a
+/// compromised webview could hand it a `.command` / `.exe` / `.pkg`, and a
+/// `.csv` symlink could point at one. So the data-file extension allowlist
+/// is enforced on the given path AND on the canonical (symlink-resolved)
+/// target.
 fn check_openable_file(path: &str) -> Result<(), String> {
     if path.is_empty() {
         return Err("No file to open.".to_string());
@@ -1787,7 +1804,20 @@ fn check_openable_file(path: &str) -> Result<(), String> {
     if !std::path::Path::new(path).is_file() {
         return Err(format!("“{path}” couldn't be found — the file may have moved or been deleted."));
     }
+    const OPENABLE: &[&str] = &["csv", "tsv", "txt", "dat", "prn", "xlsx"];
+    check_extension(path, OPENABLE)?;
+    let canonical = std::fs::canonicalize(path).map_err(|_| format!("Titer can't access {path}"))?;
+    check_extension(&canonical.to_string_lossy(), OPENABLE)?;
     Ok(())
+}
+
+/// Reap a detached launcher child on its own thread: dropping a `Child`
+/// without waiting leaves a zombie until Titer exits (BUG-REPORT #98).
+fn reap_detached(child: std::process::Child) {
+    std::thread::spawn(move || {
+        let mut child = child;
+        let _ = child.wait();
+    });
 }
 
 /// Opens a file in its default app (seq 451): the Import dialog's
@@ -1798,11 +1828,15 @@ fn check_openable_file(path: &str) -> Result<(), String> {
 #[tauri::command]
 fn open_file(path: String) -> Result<(), String> {
     check_openable_file(&path)?;
-    std::process::Command::new("open")
+    // "--" keeps a relative path starting with "-" from being read as an
+    // `open` flag (BUG-REPORT #98).
+    let child = std::process::Command::new("open")
+        .arg("--")
         .arg(&path)
         .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    reap_detached(child);
+    Ok(())
 }
 
 /// Quitting (Titer ▸ Quit, the Dock, the app switcher, logout) asks the app delegate
@@ -1966,16 +2000,22 @@ fn open_support_email() {
 }
 
 /// Linux: the same file opener as on macOS, via xdg-open (Windows:
-/// `cmd /C start`, whose empty first argument is the window title).
+/// `explorer`, which takes the path as one argv element — no shell, so
+/// `& | ^ %VAR%` in a filename are literal, unlike the old `cmd /C start`,
+/// which ran the path through cmd.exe; BUG-REPORT #98).
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn open_file(path: String) -> Result<(), String> {
     check_openable_file(&path)?;
     #[cfg(target_os = "windows")]
-    let spawned = std::process::Command::new("cmd").args(["/C", "start", "", &path]).spawn();
+    let spawned = std::process::Command::new("explorer").arg(&path).spawn();
+    // "--" keeps a relative path starting with "-" from being read as an
+    // `xdg-open` flag (BUG-REPORT #98).
     #[cfg(not(target_os = "windows"))]
-    let spawned = std::process::Command::new("xdg-open").arg(&path).spawn();
-    spawned.map(|_| ()).map_err(|e| e.to_string())
+    let spawned = std::process::Command::new("xdg-open").arg("--").arg(&path).spawn();
+    let child = spawned.map_err(|e| e.to_string())?;
+    reap_detached(child);
+    Ok(())
 }
 
 /// Linux: no spinning wheel; the page never shows one here.
@@ -2781,5 +2821,72 @@ mod tests {
         for (w, h) in [(576.0, 288.0), (1.0, 1.0), (1e5, 1e5)] {
             assert!(check_keynote_image_size(w, h).is_ok(), "({w}, {h}) must be accepted");
         }
+    }
+
+    // ── BUG-REPORT #98 (seq 570): `open_file` must refuse executables ───
+    // `check_openable_file` used to validate only `is_file()`, so a
+    // compromised webview could hand the OS launcher a `.command` /
+    // `.scpt` / `.pkg` / `.exe` — and a symlink named `.csv` could point
+    // at one. The gate is an extension allowlist on the given path AND
+    // on the canonical (symlink-resolved) target.
+    #[test]
+    fn check_openable_file_rejects_executable_extensions() {
+        let dir = move_scratch_dir("openable-exec");
+        for bad in ["run.command", "run.scpt", "run.terminal", "run.pkg", "run.dmg", "run.exe", "run.bat", "run.desktop"] {
+            let path = dir.join(bad);
+            fs::write(&path, b"x").expect("fixture");
+            let err = check_openable_file(&path.to_string_lossy()).expect_err(&format!("{bad} must be refused"));
+            assert!(err.contains("can't access"), "the error should name the refusal: {err}");
+            assert!(path.exists(), "a refused open leaves the file alone");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn check_openable_file_accepts_data_extensions() {
+        let dir = move_scratch_dir("openable-data");
+        for good in ["data.csv", "data.tsv", "data.txt", "data.dat", "data.prn", "data.xlsx", "DATA.CSV"] {
+            let path = dir.join(good);
+            fs::write(&path, b"x").expect("fixture");
+            assert!(check_openable_file(&path.to_string_lossy()).is_ok(), "{good} must open");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn check_openable_file_rejects_a_csv_symlink_to_an_executable() {
+        let dir = move_scratch_dir("openable-symlink");
+        let target = dir.join("run.command");
+        fs::write(&target, b"x").expect("fixture");
+        let link = dir.join("data.csv");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+        let err = check_openable_file(&link.to_string_lossy()).expect_err("a .csv link to a .command must be refused");
+        assert!(err.contains("can't access"), "the error should name the refusal: {err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn check_openable_file_still_reports_a_missing_file() {
+        let dir = move_scratch_dir("openable-missing");
+        let err = check_openable_file(&dir.join("gone.csv").to_string_lossy()).expect_err("a missing file must error");
+        assert!(err.contains("couldn't be found"), "a missing file must say so: {err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── BUG-REPORT #106: the NULL guard behind `clipboard_text` ─────────
+    // -[NSString UTF8String] can return NULL (e.g. unpaired UTF-16
+    // surrogates on the pasteboard); CStr::from_ptr on NULL is immediate
+    // UB. The macOS `clipboard_text` reads through `utf8_ptr_to_string`,
+    // which bails on NULL — pinned here at the helper level, since the
+    // AppKit call itself only exists on macOS.
+    #[test]
+    fn utf8_ptr_to_string_rejects_null() {
+        assert_eq!(utf8_ptr_to_string(std::ptr::null()), None);
+    }
+
+    #[test]
+    fn utf8_ptr_to_string_reads_a_valid_pointer() {
+        let text = std::ffi::CString::new("pasted").expect("CString");
+        assert_eq!(utf8_ptr_to_string(text.as_ptr()), Some("pasted".to_string()));
     }
 }

@@ -28,6 +28,7 @@ import {
 } from "../src/lib/revert";
 import { moveTargetPath, renameTargetPath } from "../src/lib/paths";
 import { extractFamily } from "../src/lib/family";
+import { invokeErrorMessage } from "../src/lib/invoke-error";
 import { applyWand, wandExamples, wandReportMessage } from "../src/lib/wand";
 import {
   TEMPLATES,
@@ -1920,6 +1921,17 @@ check("Save Family As extracts the table, its children and its linked info sheet
   // Not a table → null.
   strictEqual(extractFamily(source, "a1"), null);
   strictEqual(extractFamily(source, "no-such-node"), null);
+});
+
+// BUG-REPORT #109: a string `invoke` rejection surfaces verbatim —
+// Tauri 2 rejects with a plain string, so the specific Rust message
+// ("…couldn't be found…") must reach the alert, not the generic fallback.
+check("a string invoke rejection surfaces verbatim, not the generic fallback (BUG-REPORT #109)", () => {
+  const specific = "“gone.csv” couldn't be found — the file may have moved or been deleted.";
+  strictEqual(invokeErrorMessage(specific, "The file couldn't be opened."), specific);
+  strictEqual(invokeErrorMessage(new Error("boom"), "The file couldn't be opened."), "boom");
+  strictEqual(invokeErrorMessage("", "The file couldn't be opened."), "The file couldn't be opened.");
+  strictEqual(invokeErrorMessage(undefined, "The file couldn't be opened."), "The file couldn't be opened.");
 });
 
 // seq 234: Save a Copy — the whole project as it stands, byte-faithful

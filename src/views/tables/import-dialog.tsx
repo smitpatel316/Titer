@@ -20,6 +20,7 @@
 import * as React from "react";
 import { alert, openFileInDefaultApp } from "../../native";
 import { infoSheetsOf } from "../../lib/info-sheets";
+import { invokeErrorMessage } from "../../lib/invoke-error";
 import { useProjectStore } from "../../store/use-project-store";
 import { Button } from "../../ui/controls";
 import {
@@ -263,11 +264,10 @@ export function ImportDialog({
     try {
       await openFileInDefaultApp(offer.path);
     } catch (err) {
-      await alert(
-        "Couldn't Open File",
-        err instanceof Error ? err.message : "The file couldn't be opened.",
-        "error",
-      );
+      // Tauri 2 rejects `invoke` with a plain string (BUG-REPORT #109), so
+      // the specific Rust message ("…couldn't be found…") would otherwise
+      // be discarded for the generic fallback.
+      await alert("Couldn't Open File", invokeErrorMessage(err, "The file couldn't be opened."), "error");
     }
   };
   // The keydown listener is registered once (deps [] below), so it must
