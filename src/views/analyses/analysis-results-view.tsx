@@ -501,6 +501,33 @@ export function AnalysisResultsView({
         </>
       )}
 
+      {result.cleanedData && (
+        <>
+          <Table
+            title="Cleaned data"
+            columns={result.cleanedData.table.columns.map((label, i) => ({ label, numeric: i > 0 }))}
+            rows={result.cleanedData.table.rows.map((row) =>
+              row.map((cell, j) =>
+                j === 0 ? (
+                  (cell ?? "")
+                ) : cell == null ? (
+                  <span className="text-secondary">—</span>
+                ) : (
+                  cell
+                ),
+              ),
+            )}
+          />
+          {onCreateTable && (
+            <div>
+              <Button variant="accent" onClick={() => onCreateTable("xy", result.cleanedData!.table)}>
+                Create table
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+
       {result.comparisons && result.comparisons.length > 0 && (
         <Table
           title={result.comparisonsLabel ?? "Multiple comparisons"}

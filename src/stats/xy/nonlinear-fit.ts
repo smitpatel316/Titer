@@ -13,6 +13,7 @@
 import type {
   AnalysisOutcome,
   Column,
+  NonlinearConvergence,
   NonlinearDifficultFitHandling,
   NonlinearFitMethod,
   NonlinearModel,
@@ -450,6 +451,60 @@ const nls200Tol = (expr: string, start: string) =>
  *  `theta` lists the start parameters, in start order, as R strings. */
 const nlsDerivTol = (expr: string, start: string, theta: string) =>
   `m<-nls(y~eval(deriv(~${expr},${theta})),start=${start},control=nls.control(maxiter=200,tol=1e-3))`;
+
+/** Seq 200: the nls convergence controls (Prism's Method tab) — maxiter +
+ *  tol, as R's nls.control() takes them. The specs hardcode maxiter 200 and
+ *  (on the relaxed-tolerance rungs) tol 1e-3; a user-chosen control rewrites
+ *  those (see withNlsControl). R's default tol is 1e-5, so a medium
+ *  convergence run emits no tol at all and keeps byte-identical R. */
+export interface NlsControl {
+  maxiter: number;
+  tol: number;
+}
+/** The tol each convergence level maps to (see NONLINEAR_CONVERGENCES in
+ *  types.ts): quick loosens R's default, strict tightens it. */
+export const NLS_CONTROL_TOL: Record<NonlinearConvergence, number> = { quick: 1e-3, medium: 1e-5, strict: 1e-8 };
+
+/** Rewrite a spec's nls.control calls for a user-chosen control (seq 200).
+ *  The maxiter is replaced everywhere, and tol is set on the rungs that
+ *  carry none — while the deliberate 1e-3 escape hatch keeps its
+ *  tolerance. Fits with no control at all (the plan-08/09 exponential and
+ *  classic port fits, which run on R's default maxiter 50) gain one, so
+ *  the cap applies to them too. A spec built without a control is returned
+ *  unchanged, so default runs keep byte-identical R and pinned numbers. */
+export function withNlsControl(spec: ModelSpec, control: NlsControl): ModelSpec {
+  const tolPart = control.tol !== 1e-5 ? `,tol=${control.tol}` : "";
+  const rewrite = (fit: string): string =>
+    fit
+      .replaceAll("nls.control(maxiter=200,tol=1e-3)", `nls.control(maxiter=${control.maxiter},tol=1e-3)`)
+      .replaceAll("nls.control(maxiter=200)", `nls.control(maxiter=${control.maxiter}${tolPart})`)
+      .replaceAll(
+        'algorithm="port")',
+        `algorithm="port",control=nls.control(maxiter=${control.maxiter}${tolPart}))`,
+      );
+  return {
+    ...spec,
+    fit: rewrite(spec.fit),
+    ...(spec.retryFits ? { retryFits: spec.retryFits.map((r) => ({ ...r, fit: rewrite(r.fit) })) } : {}),
+  };
+}
+
+/** The start list of a spec's primary fit, as R code (seq 200, "don't
+ *  fit"): the `start=` argument of the `nls(...)` call — `list(...)`,
+ *  `c(...)` (the 5PLs, whose starts are the 4PL fit's coefficients) or
+ *  `local({...})` (the growth models). lm specs have no start list and
+ *  return null. The parse reuses matchParen, like transformNlsCall. */
+export function startExpressionOf(spec: ModelSpec): string | null {
+  const call = spec.fit;
+  const yAt = call.indexOf("y~");
+  const startAt = yAt < 0 ? -1 : call.indexOf(",start=", yAt);
+  if (startAt < 0) return null;
+  const rest = call.slice(startAt + 7);
+  if (!rest.startsWith("list(") && !rest.startsWith("c(") && !rest.startsWith("local(")) return null;
+  const closeAt = matchParen(rest, rest.indexOf("("));
+  if (closeAt < 0) return null;
+  return rest.slice(0, closeAt + 1);
+}
 
 /** The polynomial models (seq 201): the only models `centered` applies to. */
 export const POLYNOMIAL_MODELS = ["quadratic", "cubic", "quartic", "quintic", "sextic"] as const;
@@ -2412,6 +2467,11 @@ export function prepareFit(
    *  ignored entirely — before the model-specific X filtering below and
    *  before the minimum-points rule — and counted in `rangeExcluded`. */
   range?: { min?: number; max?: number },
+  /** Seq 200 (Prism's Method tab): how a Y data set's replicates are
+   *  fitted — each replicate as its own point ("each", default), or the
+   *  mean of the replicates at each X ("means"). A single-column set is
+   *  the same either way. */
+  replicates: "each" | "means" = "each",
 ): {
   xCol: Column;
   yCol: Column;
@@ -2419,6 +2479,10 @@ export function prepareFit(
   ys: number[];
   rows: number[];
   columns: string[];
+  /** The replicate count behind each fitted point (1 when each replicate
+   *  is its own point) — the weighting N-multiplier (Prism multiplies
+   *  each weighting factor by N when fitting means). */
+  ns: number[];
   rangeExcluded: number;
 } | { error: string } {
   const { x: xCol, ys: yCols } = splitXY(columns);
@@ -2454,6 +2518,30 @@ export function prepareFit(
           },
           { x: [] as number[], y: [] as number[], rows: [] as number[], columns: [] as string[] },
         );
+  // Seq 200: fit the means — collapse the replicate columns to one point
+  // per row (the row mean over its present values), as Prism does. A row's
+  // X is shared by its replicates, so the mean's X is that row's X; `ns`
+  // counts the replicates behind each mean. Single-column sets collapse
+  // to themselves (one value per row), so the option is a no-op there.
+  let ns: number[] = complete.x.map(() => 1);
+  if (replicates === "means" && cols.length > 1) {
+    const byRow = new Map<number, { x: number; values: number[] }>();
+    complete.x.forEach((x, i) => {
+      const r = complete.rows[i];
+      const slot = byRow.get(r) ?? { x, values: [] };
+      slot.values.push(complete.y[i]);
+      byRow.set(r, slot);
+    });
+    const rows = [...byRow.keys()].sort((a, b) => a - b);
+    complete.x = rows.map((r) => byRow.get(r)!.x);
+    complete.y = rows.map((r) => {
+      const v = byRow.get(r)!.values;
+      return v.reduce((s, n) => s + n, 0) / v.length;
+    });
+    complete.rows = rows;
+    complete.columns = rows.map(() => yCol.name);
+    ns = rows.map((r) => byRow.get(r)!.values.length);
+  }
   // Seq 166 (Prism Range tab): drop the out-of-range points first, so the
   // model-specific X filtering, the minimum-points rule and the
   // enzyme/plateau validations below all see only the fitted points.
@@ -2472,6 +2560,7 @@ export function prepareFit(
     complete.y = kept(complete.y);
     complete.rows = kept(complete.rows);
     complete.columns = keptStr(complete.columns);
+    ns = kept(ns);
   }
   const spec = specOverride ?? modelSpec(model);
   const nParams = spec.terms.length - fixedCount;
@@ -2486,18 +2575,22 @@ export function prepareFit(
   let ys = complete.y;
   if (spec.positiveX || spec.nonNegativeX) {
     const keep = spec.positiveX ? (x: number) => x > 0 : (x: number) => x >= 0;
+    const keptNs: number[] = [];
     xs = [];
     ys = [];
     complete.x.forEach((x, i) => {
       if (keep(x)) {
         xs.push(x);
         ys.push(complete.y[i]);
+        keptNs.push(ns[i]);
       }
     });
+    ns = keptNs;
   }
   if (spec.positiveY) {
     const kept = ys.filter((y) => y > 0);
     const keptXs = xs.filter((_, i) => ys[i] > 0);
+    ns = ns.filter((_, i) => ys[i] > 0);
     xs = keptXs;
     ys = kept;
   }
@@ -2552,7 +2645,7 @@ export function prepareFit(
       ((!spec.positiveX && !spec.nonNegativeX) || (spec.positiveX ? complete.x[i] > 0 : complete.x[i] >= 0)) &&
       (!spec.positiveY || complete.y[i] > 0),
   );
-  return { xCol, yCol, xs, ys, rows, columns: pointColumns, rangeExcluded };
+  return { xCol, yCol, xs, ys, rows, columns: pointColumns, ns, rangeExcluded };
 }
 
 /** Seq 323 — Prism's unstable-parameter check (Prism 8/9 Curve Fitting

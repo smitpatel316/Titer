@@ -15,14 +15,22 @@ import type {
   Column,
   FitRow,
   InterpolatedRow,
+  NonlinearConvergence,
   NonlinearModel,
   NonlinearRegressionParams,
   NonlinearWeightScheme,
   RegressionCoefficient,
   StatRow,
 } from "../types";
+import type { TableData } from "../../store/types";
 import { describe, missingColumn, pRow, rVec } from "../column/base";
-import { NONLINEAR_DIFFICULT_FIT_HANDLINGS, NONLINEAR_FIT_METHODS, routQError } from "../types";
+import {
+  NONLINEAR_CONVERGENCES,
+  NONLINEAR_DIFFICULT_FIT_HANDLINGS,
+  NONLINEAR_FIT_METHODS,
+  NONLINEAR_WEIGHT_SCHEMES,
+  routQError,
+} from "../types";
 import { num } from "../../lib/format";
 import { maxOf, minOf } from "../../lib/summary";
 import { pointKeyOf } from "../../lib/columns";
@@ -33,9 +41,11 @@ import {
   ENZYME_MODELS,
   EXPONENTIAL_MODELS,
   CLASSIC_MODELS,
+  NLS_CONTROL_TOL,
   applyFitOptions,
   applyAmbiguousFlags,
   applyUnstableFlags,
+  derivedSources,
   ecAnything,
   fitEntries,
   fitError,
@@ -49,11 +59,14 @@ import {
   modelSpec,
   parseFit,
   prepareFit,
+  startExpressionOf,
   startExpressions,
+  withNlsControl,
   type AppliedFitOptions,
   type DerivedRow,
   type FitOptions,
   type ModelSpec,
+  type NlsControl,
   type NonlinearFit,
 } from "./nonlinear-fit";
 import {
@@ -538,50 +551,94 @@ export function aicc(ss: number, n: number, k: number): number | null {
 }
 
 // ── Plan 26: weighting ───────────────────────────────────────────────────
-const WEIGHT_LABEL: Record<Exclude<NonlinearWeightScheme, "none">, string> = {
-  "1/y": "1/Y",
-  "1/y2": "1/Y²",
-  "1/x": "1/X",
-  "1/x2": "1/X²",
-  "1/sd2": "1/SD²",
-};
+/** The display label of a weighting scheme (seq 200): 1/Y^K names its
+ *  exponent (`1/Y^1.5`); the others are the fixed plan-26 labels. */
+function weightLabel(scheme: Exclude<NonlinearWeightScheme, "none">, exponent?: number): string {
+  switch (scheme) {
+    case "1/y":
+      return "1/Y";
+    case "1/y2":
+      return "1/Y²";
+    case "1/x":
+      return "1/X";
+    case "1/x2":
+      return "1/X²";
+    case "1/sd2":
+      return "1/SD²";
+    case "1/yk":
+      return `1/Y^${exponent ?? "K"}`;
+  }
+}
 
 /** The per-point weights for a scheme, from the fitted points. 1/SD² takes
  *  each fitted row's replicate SD — the SD across the table's Y columns on
  *  that row (so the table needs ≥ 2 Y columns, and every fitted row needs ≥
  *  2 values with a nonzero SD). 1/Y needs Y > 0; 1/X needs X > 0; 1/Y² and
  *  1/X² need Y ≠ 0 / X ≠ 0 (they are fine for negative values arithmetically
- *  but, as a variance model, assume scatter grows with |Y| / |X|). */
+ *  but, as a variance model, assume scatter grows with |Y| / |X|). 1/Y^K
+ *  (seq 200, Prism's general weighting) needs the exponent K > 0 and weights
+ *  1/|Y|^K, so K = 2 is 1/Y² and K = 1 is 1/Y on positive Y. When fitting
+ *  means, each weight is multiplied by the replicate count N behind the
+ *  point (Prism's rule) — `first.ns`; the 1/SD² spread is then taken across
+ *  the fitted set's own columns (`sdCols`), not the whole table. */
 function computeWeights(
   scheme: NonlinearWeightScheme,
-  first: { xs: number[]; ys: number[]; rows: number[] },
+  first: { xs: number[]; ys: number[]; rows: number[]; ns?: number[] },
   yCols: Column[],
+  /** The exponent K for 1/Y^K (seq 200): required with scheme "1/yk". */
+  exponent?: number,
+  /** The columns the 1/SD² spread is taken across (seq 200): the fitted
+   *  set's columns when fitting means, else the table's Y columns (the
+   *  plan-26 behaviour — unchanged). */
+  sdCols?: Column[],
 ): { weights?: number[] } | { error: string } {
+  // Seq 200: an unknown scheme is refused here, before the switch — a
+  // computeWeights that falls off the end returns undefined and the runner
+  // crashes on `"error" in undefined` instead of refusing.
+  if (!NONLINEAR_WEIGHT_SCHEMES.includes(scheme))
+    return { error: "Choose a weighting scheme: none, 1/Y, 1/Y², 1/X, 1/X², 1/SD², or 1/Y^K." };
+  let weights: number[] | undefined;
   switch (scheme) {
     case "none":
       return {};
     case "1/y":
       if (first.ys.some((y) => y <= 0))
         return { error: "Weighting by 1/Y needs all Y > 0 — some fitted Y are ≤ 0." };
-      return { weights: first.ys.map((y) => 1 / y) };
+      weights = first.ys.map((y) => 1 / y);
+      break;
     case "1/y2":
       if (first.ys.some((y) => y === 0))
         return { error: "Weighting by 1/Y² needs Y ≠ 0 — some fitted Y are 0." };
-      return { weights: first.ys.map((y) => 1 / (y * y)) };
+      weights = first.ys.map((y) => 1 / (y * y));
+      break;
     case "1/x":
       if (first.xs.some((x) => x <= 0))
         return { error: "Weighting by 1/X needs all X > 0 — some fitted X are ≤ 0." };
-      return { weights: first.xs.map((x) => 1 / x) };
+      weights = first.xs.map((x) => 1 / x);
+      break;
     case "1/x2":
       if (first.xs.some((x) => x === 0))
         return { error: "Weighting by 1/X² needs X ≠ 0 — some fitted X are 0." };
-      return { weights: first.xs.map((x) => 1 / (x * x)) };
+      weights = first.xs.map((x) => 1 / (x * x));
+      break;
+    case "1/yk": {
+      const k = exponent;
+      if (k == null || !Number.isFinite(k) || k <= 0)
+        return { error: "Weighting by 1/Y^K needs the exponent K (greater than 0)." };
+      if (first.ys.some((y) => y === 0))
+        return { error: "Weighting by 1/Y^K needs Y ≠ 0 — some fitted Y are 0." };
+      // |Y|^K, so negative Y still gives a positive weight (the scatter
+      // grows with |Y|); K = 2 is exactly 1/Y², K = 1 is exactly 1/Y.
+      weights = first.ys.map((y) => 1 / Math.abs(y) ** k);
+      break;
+    }
     case "1/sd2": {
-      if (yCols.length < 2)
+      const cols = sdCols ?? yCols;
+      if (cols.length < 2)
         return { error: "Weighting by 1/SD² needs replicates — at least two Y data sets measuring the same thing." };
-      const weights: number[] = [];
+      weights = [];
       for (const r of first.rows) {
-        const values = yCols.map((c) => c.byRow[r]).filter((v): v is number => v != null);
+        const values = cols.map((c) => c.byRow[r]).filter((v): v is number => v != null);
         if (values.length < 2)
           return { error: "Weighting by 1/SD² needs at least two Y values on every fitted row — some rows have fewer." };
         const mean = values.reduce((s, v) => s + v, 0) / values.length;
@@ -589,9 +646,23 @@ function computeWeights(
         if (sd === 0) return { error: "Weighting by 1/SD² needs a nonzero replicate SD — some rows' replicates agree exactly." };
         weights.push(1 / (sd * sd));
       }
-      return { weights };
+      break;
     }
   }
+  // Prism multiplies each weighting factor by N when fitting means.
+  const ns = first.ns;
+  if (ns && ns.some((n) => n !== 1)) weights = weights!.map((w, i) => w * ns[i]);
+  return { weights };
+}
+
+/** The nls convergence control a run's params ask for (seq 200), or
+ *  undefined when the run takes the defaults (maxiter 200, medium) — so a
+ *  default run's spec keeps byte-identical R. Callers validate first. */
+function nlsControlOf(params: NonlinearRegressionParams | undefined): NlsControl | undefined {
+  const maxIterations = params?.maxIterations ?? 200;
+  const convergence: NonlinearConvergence = params?.convergence ?? "medium";
+  if (maxIterations === 200 && convergence === "medium") return undefined;
+  return { maxiter: maxIterations, tol: NLS_CONTROL_TOL[convergence] };
 }
 
 /** A global fit's coefficients for one series: shared parameters as fitted,
@@ -1277,6 +1348,46 @@ function excludeRoutOutliers(
   return { kept, outliers };
 }
 
+/** The cleaned-data table (seq 200, Prism 8+ Method tab → Outliers): the
+ *  fitted data with ROUT's outliers removed — one row per fitted row, the
+ *  outlier cells blank. `preps` are the fitted sets BEFORE ROUT (their
+ *  rows, columns and values name the fitted points); `outlierKeys` are the
+ *  outliers' point keys (`pointKeyOf`). One table column per fitted column
+ *  (a replicate set's sub-columns stay separate; a means fit's points all
+ *  share the set's name, so they collapse to one column holding the means),
+ *  so the table is a real XY table the results view can offer as "Create
+ *  table". Values come from the preps themselves — the fitted values, which
+ *  for a means fit are the means, not any one replicate. */
+function cleanedDataTable(
+  xCol: Column,
+  preps: { yCol: Column; xs: number[]; ys: number[]; rows: number[]; columns: string[] }[],
+  outlierKeys: Set<string>,
+  titles: (string | null)[],
+): TableData {
+  const colNames: string[] = [];
+  for (const p of preps) for (const c of p.columns) if (!colNames.includes(c)) colNames.push(c);
+  const rows = [...new Set(preps.flatMap((p) => p.rows))].sort((a, b) => a - b);
+  return {
+    columns: ["Title", xCol.name, ...colNames],
+    rows: rows.map((r) => {
+      const cells: (string | null)[] = [titles[r] ?? null, null];
+      for (const name of colNames) {
+        let cell: string | null = null;
+        for (const p of preps) {
+          const i = p.columns.findIndex((c, j) => c === name && p.rows[j] === r);
+          if (i >= 0) {
+            if (cells[1] == null) cells[1] = String(p.xs[i]);
+            if (!outlierKeys.has(pointKeyOf(name, r))) cell = String(p.ys[i]);
+            break;
+          }
+        }
+        cells.push(cell);
+      }
+      return cells;
+    }),
+  };
+}
+
 /** The notes' ROUT sentence (upstream 1.0.9's wording): what Q was, and
  *  that the flagged points were left out — or that none were found. */
 function routNotes(q: number, outliers: CurveOutlier[], setNames: string[]): string {
@@ -1475,7 +1586,7 @@ async function compareModels(
   // points (positive X, enough of them) — otherwise R fails cryptically
   // ("subscript out of bounds", "NA/NaN/Inf in 'x'"). And both models
   // must fit the SAME points, or the F test / AICc compare different data.
-  const preparedB = prepareFit(columns, params.y, otherModel, 0, undefined, fitRange(params));
+  const preparedB = prepareFit(columns, params.y, otherModel, 0, undefined, fitRange(params), params?.replicates ?? "each");
   if ("error" in preparedB) return preparedB;
   if (
     preparedB.xs.length !== first.xs.length ||
@@ -1507,11 +1618,15 @@ async function compareModels(
     // A centered comparison centers both models the same way.
     ...(params.centered === true ? { centered: true } : {}),
   });
+  // Seq 200: the comparison model takes the same convergence control as
+  // the primary (the primary's spec was rewritten by the runner).
+  const controlB = nlsControlOf(params);
+  const specBEff = controlB ? withNlsControl(specB, controlB) : specB;
   // Both fits take the weights (R3-12): the summary code already weighted
   // the sums of squares, but the lm()/nls() calls themselves were
   // unweighted — wrong estimates and invalid F-test / AICc values.
   const effA = applyFitOptions(spec, { weights }).spec;
-  const effB = applyFitOptions(specB, { weights }).spec;
+  const effB = applyFitOptions(specBEff, { weights }).spec;
   const nested = nestedPair(model, otherModel);
   const dfn = nested ? Math.abs(effA.terms.length - effB.terms.length) : 0;
   const nestedValid = nested !== null && dfn > 0;
@@ -1721,7 +1836,7 @@ async function runGlobalNonlinear(
   ];
   const yCols: Column[] = [first.yCol];
   for (const name of extraNames) {
-    const p = prepareFit(columns, name, model, Object.keys(fixed).length, undefined, fitRange(params));
+    const p = prepareFit(columns, name, model, Object.keys(fixed).length, undefined, fitRange(params), params?.replicates ?? "each");
     if ("error" in p) return p;
     series.push({ name, xs: p.xs, ys: p.ys, rows: p.rows, columns: p.columns, rangeExcluded: p.rangeExcluded });
     yCols.push(p.yCol);
@@ -1812,7 +1927,8 @@ async function runGlobalNonlinear(
   const def: GlobalModelDef = {
     formula,
     params: defs,
-    maxiter: 200,
+    // Seq 200: the user's max-iterations cap applies to the stacked fit too.
+    maxiter: params?.maxIterations ?? 200,
     evaluate: (coefficients, series, _seriesIndex, x) => {
       // The raw coefficients name variables (`Top[Control]`, `h`); rename
       // them to this series' display terms before evaluating.
@@ -2127,6 +2243,98 @@ function narrowToXY(
   return [xCol, yCol];
 }
 
+/** "Don't fit" (seq 200, Prism's Diagnostics tab): the curve plotted from
+ *  the initial values, not fitted — the coefficients ARE the data-derived
+ *  starts, with no standard errors, and R² / Sy.x come from the curve
+ *  evaluated at those starts (the TS evaluator, so the result and the
+ *  overlay can never disagree). The starts and the derived values are
+ *  evaluated in R (one call): the start list, then each derived quantity's
+ *  plain expression with `cf` the start vector (`b` too — the ECx builder
+ *  writes `b[[...]]`, though ECx itself is refused with don't-fit). A
+ *  derived expression that errors (a start outside its domain) reports NA,
+ *  not a failure, and there are no CIs (nothing was fitted). The log-Y
+ *  R²/SST mirror fitSummaryStatements (log-scale residuals and total SS).
+ *  Single- and several-Y paths only; the runner refuses the combinations
+ *  that need a real fit. */
+async function dontFitParsed(
+  model: NonlinearModel,
+  spec: ModelSpec,
+  xs: number[],
+  ys: number[],
+  params: NonlinearRegressionParams | undefined,
+): Promise<
+  { coefficients: RegressionCoefficient[]; derived: DerivedRow[]; stats: StatRow[] } | { error: string }
+> {
+  const start = startExpressionOf(spec);
+  if (start == null)
+    return {
+      error: `“${MODEL_LABEL[model]}” has no initial values to plot — it is fitted directly, so there is no initial-values curve.`,
+    };
+  // A 5PL's starts come from a 4PL fit (its start list nests an nls call),
+  // so there is no plain initial-values curve to plot.
+  if (start.includes("nls("))
+    return {
+      error: `“${MODEL_LABEL[model]}” has no plain initial-values curve to plot — its starting values come from a 4PL fit. Fit the curve instead.`,
+    };
+  const derived = spec.derived ?? [];
+  const derivedAssigns = derived
+    .map((d, i) => `d${i}=tryCatch(${d.expr},error=function(e)NA_real_)`)
+    .join(",");
+  let v: RVector;
+  try {
+    v = await evalNamedVector(
+      `x<-${rVec(xs)};y<-${rVec(ys)};st<-${start};cf<-unlist(st);b<-cf;` +
+        `c(cf${derivedAssigns ? `,${derivedAssigns}` : ""})`,
+    );
+  } catch (err) {
+    return {
+      error: `The initial values could not be calculated (${err instanceof Error ? err.message : String(err)}).`,
+    };
+  }
+  const coefficients: RegressionCoefficient[] = spec.terms.map((t) => ({
+    term: termLabel(t),
+    estimate: typeof v[t] === "number" && Number.isFinite(v[t]) ? v[t] : null,
+    stdError: null,
+    t: null,
+    p: null,
+    low: null,
+    high: null,
+  }));
+  if (coefficients.some((c) => c.estimate == null))
+    return {
+      error: `“${MODEL_LABEL[model]}” has no initial values to plot — some starting values could not be calculated from these data.`,
+    };
+  const derivedRows: DerivedRow[] = derived.map((d, i) => {
+    const sources = derivedSources(d, spec.terms);
+    const value = v[`d${i}`];
+    return {
+      label: d.label,
+      value: typeof value === "number" && Number.isFinite(value) ? value : null,
+      ...(sources.length ? { sources } : {}),
+    };
+  });
+  // The curve at the starts, via the same evaluator the overlays use.
+  const fitted = xs.map((x) =>
+    evaluateCurve(model, coefficients, x, params?.ligandConcentration, params?.customEquation),
+  );
+  const n = xs.length;
+  const k = spec.terms.length;
+  const res = ys.map((y, i) => (spec.logY ? Math.log(y) - fitted[i] : y - fitted[i]));
+  const ss = res.reduce((s, r) => s + r * r, 0);
+  const scaled = spec.logY ? ys.map((y) => Math.log(y)) : ys;
+  const mean = scaled.reduce((s, y) => s + y, 0) / n;
+  const sst = scaled.reduce((s, y) => s + (y - mean) ** 2, 0);
+  const df = n - k;
+  const stats: StatRow[] = [
+    { label: "R squared", value: sst === 0 ? null : 1 - ss / sst },
+    { label: "Sy.x", value: df > 0 ? Math.sqrt(ss / df) : null },
+    { label: "Sum of squares", value: ss },
+    { label: "Degrees of freedom", value: df },
+    { label: "N", value: n },
+  ];
+  return { coefficients, derived: derivedRows, stats };
+}
+
 export async function runNonlinearRegression(
   columnsIn: Column[],
   params: NonlinearRegressionParams | undefined,
@@ -2215,6 +2423,7 @@ export async function runNonlinearRegression(
 
   // ── Plan 26 validation (all combinations refused up front, plainly) ──
   const weightsScheme = params?.weights ?? "none";
+  const weightExponent = params?.weightExponent;
   const fixed = params?.fixed ?? {};
   const bounds = params?.bounds ?? {};
   const fixedNames = Object.keys(fixed);
@@ -2316,6 +2525,53 @@ export async function runNonlinearRegression(
     return { error: "Fixing or bounding parameters is only supported for nonlinear (nls) curves, not for line/polynomial fits." };
   if (comparingSets && (weightsScheme !== "none" || fixedNames.length || boundNames.length))
     return { error: "Weighting, fixed parameters and bounds can't be combined with comparing two data sets yet — fit each data set separately." };
+  // ── Seq 200 validation: convergence + max iterations, 1/Y^K, replicates,
+  // cleaned data, don't fit — all refused up front, plainly. ──
+  const replicates = params?.replicates ?? "each";
+  if (replicates !== "each" && replicates !== "means")
+    return {
+      error: "Choose how replicates are fitted: each replicate as its own point, or the mean of the replicates.",
+    };
+  const maxIterations = params?.maxIterations ?? 200;
+  if (!Number.isInteger(maxIterations) || maxIterations < 1)
+    return { error: "Maximum iterations must be a whole number of at least 1." };
+  if (maxIterations > 100000) return { error: "Maximum iterations must be no more than 100000." };
+  const convergence = params?.convergence ?? "medium";
+  if (!(NONLINEAR_CONVERGENCES as readonly string[]).includes(convergence))
+    return { error: "Choose a convergence criteria: quick, medium, or strict." };
+  const nlsControl = nlsControlOf(params);
+  if (weightsScheme === "1/yk" && (weightExponent == null || !Number.isFinite(weightExponent) || weightExponent <= 0))
+    return { error: "Weighting by 1/Y^K needs the exponent K (greater than 0)." };
+  if (weightsScheme !== "1/yk" && weightExponent != null)
+    return { error: "The weighting exponent K only applies to 1/Y^K weighting." };
+  const cleanedData = params?.cleanedData === true;
+  if (cleanedData && !useRout)
+    return { error: "The cleaned-data table needs ROUT — it is the fitted data with ROUT's outliers removed." };
+  if (cleanedData && global)
+    return { error: "The cleaned-data table can't be combined with a global fit yet — fit each data set on its own first." };
+  const dontFit = params?.dontFit === true;
+  if (dontFit) {
+    if (spec.kind === "lm")
+      return {
+        error: `“${MODEL_LABEL[model]}” has no initial values to plot — it is fitted directly, so there is no initial-values curve.`,
+      };
+    if (weightsScheme !== "none")
+      return { error: "“Don't fit” plots the plain initial-values curve — it can't be combined with weighting." };
+    if (comparingModels || comparingSets || global || params?.interpolate || useRout)
+      return {
+        error:
+          "“Don't fit” plots one curve from its initial values — it can't be combined with comparing, a global fit, interpolation, or ROUT.",
+      };
+    if (fixedNames.length || boundNames.length)
+      return { error: "“Don't fit” plots the curve from the initial values — fixed parameters and bounds don't apply to it." };
+    if (fitMethod !== "least-squares")
+      return { error: "“Don't fit” plots the plain initial-values curve — it can't be combined with a robust or Poisson fit." };
+    if (params?.ecx != null)
+      return { error: "“Don't fit” plots the curve from the initial values — there is no fitted ECx to report." };
+  }
+  // A non-default convergence control rewrites the spec's nls.control
+  // calls (see withNlsControl); the default keeps byte-identical R.
+  if (nlsControl) spec = withNlsControl(spec, nlsControl);
   // v2 item 23: a user-defined equation fits on its own for now — the comparison and
   // global paths build their specs from curated models, and cannot build one from an
   // equation yet. Each refusal names what to do instead.
@@ -2367,11 +2623,16 @@ export async function runNonlinearRegression(
     let anyRetried = false;
     let retryMethod: string | undefined;
     let multiRangeExcluded = 0;
+    // Seq 200: the fitted sets BEFORE ROUT — the cleaned-data table's rows.
+    const multiPreRout: { yCol: Column; xs: number[]; ys: number[]; rows: number[]; columns: string[] }[] = [];
     for (const name of params.ys!) {
-      let prep = prepareFit(columns, name, model, fixedNames.length, spec, fitRange(params));
+      let prep = prepareFit(columns, name, model, fixedNames.length, spec, fitRange(params), replicates);
       if ("error" in prep) return prep;
       multiRangeExcluded += prep.rangeExcluded;
-      const wr = computeWeights(weightsScheme, prep, yColsAll);
+      // Seq 200: 1/Y^K takes its exponent; fitting means takes the set's
+      // own columns for the 1/SD² spread (not the whole table's).
+      const setCols = datasetColumns(yColsAll, name);
+      const wr = computeWeights(weightsScheme, prep, yColsAll, weightExponent, replicates === "means" ? setCols : undefined);
       if ("error" in wr) return wr;
       let setFitOpts: FitOptions = {
         ...(wr.weights ? { weights: wr.weights } : {}),
@@ -2386,6 +2647,8 @@ export async function runNonlinearRegression(
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) };
       }
+      // Seq 200: the pre-ROUT prep is the cleaned-data table's row source.
+      multiPreRout.push(prep);
       if (useRout) {
         let det: { out: boolean[] };
         try {
@@ -2415,13 +2678,19 @@ export async function runNonlinearRegression(
       if (fitMethod === "poisson" && prep.ys.some((y) => y < 0))
         return { error: "Poisson fitting needs counts — all Y values must be 0 or more." };
       let fitted: NonlinearFit;
-      try {
-        fitted = await fitModelSpec(prep.xs, prep.ys, spec, "", termLabel, setFitOpts);
-      } catch (err) {
-        if (isTwoSiteCompetition(model)) return twoSiteError;
-        const failed = fitError(err, model);
-        return { error: `“${name}”: ${"error" in failed ? failed.error : "could not be fitted."}` };
-      }
+      // Seq 200: "don't fit" plots the initial-values curve — no nls call.
+      if (dontFit) {
+        const df = await dontFitParsed(model, spec, prep.xs, prep.ys, params);
+        if ("error" in df) return { error: `“${name}”: ${df.error}` };
+        fitted = { coefficients: df.coefficients, derived: df.derived, stats: df.stats, rCode: "" };
+      } else
+        try {
+          fitted = await fitModelSpec(prep.xs, prep.ys, spec, "", termLabel, setFitOpts);
+        } catch (err) {
+          if (isTwoSiteCompetition(model)) return twoSiteError;
+          const failed = fitError(err, model);
+          return { error: `“${name}”: ${"error" in failed ? failed.error : "could not be fitted."}` };
+        }
       if (fitted.retried) {
         anyRetried = true;
         retryMethod = fitted.retryMethod;
@@ -2471,6 +2740,9 @@ export async function runNonlinearRegression(
       false,
       useRout ? { outliers: routOutliers, q: qPercent } : undefined,
       false,
+      cleanedData && useRout
+        ? { table: cleanedDataTable(xCol, multiPreRout, new Set(routOutliers.map((o) => o.key)), titles) }
+        : undefined,
     );
   }
 
@@ -2478,10 +2750,22 @@ export async function runNonlinearRegression(
   if (comparingSets && !other) return { error: xyProblem(columns, params.compareWith)! };
   if (other && !spec.dose) return { error: "Only dose-response curves can be compared." };
 
-  let first = prepareFit(columns, params?.y, model, fixedNames.length, spec, fitRange(params));
+  let first = prepareFit(columns, params?.y, model, fixedNames.length, spec, fitRange(params), replicates);
   if ("error" in first) return first;
-  // Weighting needs the fitted points (and, for 1/SD², their rows).
-  const weightResult = computeWeights(weightsScheme, first, yCols.flatMap((s) => s.columns));
+  // Weighting needs the fitted points (and, for 1/SD², their rows). Seq
+  // 200: 1/Y^K takes its exponent; fitting means takes the fitted set's
+  // own columns for the 1/SD² spread (not the whole table's).
+  const firstSetCols = datasetColumns(
+    yCols.flatMap((s) => s.columns),
+    first.yCol.name,
+  );
+  const weightResult = computeWeights(
+    weightsScheme,
+    first,
+    yCols.flatMap((s) => s.columns),
+    weightExponent,
+    replicates === "means" ? firstSetCols : undefined,
+  );
   if ("error" in weightResult) return weightResult;
   let weights = weightResult.weights;
   let fitOpts: FitOptions = {
@@ -2513,7 +2797,9 @@ export async function runNonlinearRegression(
   // ROUT (upstream 1.0.9): the first set's outliers found, then left out of
   // its fit. Detection runs on the unfiltered points with the effective spec
   // (weights included), so the weights are re-subset to the kept points and
-  // the effective spec rebuilt on them.
+  // the effective spec rebuilt on them. Seq 200: the pre-ROUT prep is the
+  // cleaned-data table's row source.
+  const firstPreRout = first;
   let routOutliers: CurveOutlier[] = [];
   if (useRout) {
     let det: { out: boolean[] };
@@ -2545,10 +2831,13 @@ export async function runNonlinearRegression(
 
   let second: { xs: number[]; ys: number[]; rows: number[]; columns: string[] } | undefined;
   let secondRangeExcluded = 0;
+  // Seq 200: the second set's pre-ROUT prep — the cleaned-data table's rows.
+  let secondPreRout: { yCol: Column; xs: number[]; ys: number[]; rows: number[]; columns: string[] } | undefined;
   if (other) {
-    const p = prepareFit(columns, params.compareWith, model, 0, undefined, fitRange(params));
+    const p = prepareFit(columns, params.compareWith, model, 0, undefined, fitRange(params), replicates);
     if ("error" in p) return p;
     secondRangeExcluded = p.rangeExcluded;
+    secondPreRout = p;
     // ROUT: the second set's outliers found on its own fit, then left out —
     // a comparison refuses weights/fixed/bounds, so the plain spec fits it.
     if (useRout) {
@@ -2595,6 +2884,19 @@ export async function runNonlinearRegression(
   const logX = model.endsWith("-logx");
   const [lo, hi] = [minOf(first.xs), maxOf(first.xs)];
   const rout = useRout ? { outliers: routOutliers, q: qPercent } : undefined;
+  // Seq 200: the cleaned-data table — the fitted sets before ROUT, with
+  // ROUT's outliers blanked. The comparison path's second set joins it.
+  const cleanedTable =
+    cleanedData && useRout
+      ? {
+          table: cleanedDataTable(
+            xCol,
+            [firstPreRout, ...(secondPreRout ? [secondPreRout] : [])],
+            new Set(routOutliers.map((o) => o.key)),
+            titles,
+          ),
+        }
+      : undefined;
 
   let v: RVector;
   let retried: boolean | undefined;
@@ -2655,6 +2957,33 @@ export async function runNonlinearRegression(
     // (post-ROUT), not the raw column.
     if (fitMethod === "poisson" && first.ys.some((y) => y < 0))
       return { error: "Poisson fitting needs counts — all Y values must be 0 or more." };
+    // Seq 200: "don't fit" plots the initial-values curve — no nls call.
+    if (dontFit) {
+      const df = await dontFitParsed(model, spec, first.xs, first.ys, params);
+      if ("error" in df) return df;
+      return assembleResult(
+        model,
+        spec,
+        xCol,
+        pooledY,
+        other,
+        sets,
+        [{ coefficients: df.coefficients, derived: df.derived, stats: df.stats }],
+        [],
+        [],
+        titles,
+        { ...first, rangeExcluded: first.rangeExcluded + secondRangeExcluded },
+        undefined,
+        undefined,
+        params,
+        [],
+        "",
+        false,
+        rout,
+        sets.length > 1,
+        cleanedTable,
+      );
+    }
     try {
       const fitted = await fitModelSpec(first.xs, first.ys, spec, "", termLabel, fitOpts);
       retried = fitted.retried;
@@ -2674,7 +3003,7 @@ export async function runNonlinearRegression(
       // One R call already ran; reuse its entries by re-reading them out of
       // the same shape — simplest is to keep the parsed fit and build the
       // result from it (no second R call).
-      return assembleResult(model, spec, xCol, pooledY, other, sets, [fitted], [], [], titles, { ...first, rangeExcluded: first.rangeExcluded + secondRangeExcluded }, fitted.retried, fitted.retryMethod, params, [], "", false, rout);
+      return assembleResult(model, spec, xCol, pooledY, other, sets, [fitted], [], [], titles, { ...first, rangeExcluded: first.rangeExcluded + secondRangeExcluded }, fitted.retried, fitted.retryMethod, params, [], "", false, rout, sets.length > 1, cleanedTable);
     } catch (err) {
       if (isTwoSiteCompetition(model)) return twoSiteError;
       return fitError(err, model);
@@ -2752,7 +3081,7 @@ export async function runNonlinearRegression(
       high: inverted ? null : high,
     };
   });
-  return assembleResult(model, spec, xCol, pooledY, other, sets, parsed, interpolated, v, titles, { ...first, rangeExcluded: first.rangeExcluded + secondRangeExcluded }, retried, retryMethod, params, [], "", invertedCI, rout);
+  return assembleResult(model, spec, xCol, pooledY, other, sets, parsed, interpolated, v, titles, { ...first, rangeExcluded: first.rangeExcluded + secondRangeExcluded }, retried, retryMethod, params, [], "", invertedCI, rout, sets.length > 1, cleanedTable);
 }
 
 /** The notes' weighting / fixed-parameter / bounds sentences (plan 26): a
@@ -2781,14 +3110,34 @@ function frameworkNotes(
   if (scheme && scheme !== "none") {
     parts.push(
       method === "least-squares"
-        ? `Weighted by ${WEIGHT_LABEL[scheme]}; R² and the sum of squares are weighted.`
-        : `Weighted by ${WEIGHT_LABEL[scheme]} (combined with the fitting method's weights).`,
+        ? `Weighted by ${weightLabel(scheme, params?.weightExponent)}; R² and the sum of squares are weighted.`
+        : `Weighted by ${weightLabel(scheme, params?.weightExponent)} (combined with the fitting method's weights).`,
     );
     if (scheme === "1/y2" && first.ys.some((y) => y <= 0))
       parts.push("Some Y are ≤ 0; 1/Y² weights still apply arithmetically but, as a variance model, assume scatter grows with |Y|.");
     if (scheme === "1/x2" && first.xs.some((x) => x <= 0))
       parts.push("Some X are ≤ 0; 1/X² weights still apply arithmetically but, as a variance model, assume scatter grows with |X|.");
   }
+  // Seq 200: the Method-tab choices that change the fit — named only when
+  // they differ from the defaults, so a plain run's notes stay unchanged.
+  const maxIterations = params?.maxIterations;
+  if (maxIterations != null && maxIterations !== 200) parts.push(`Maximum iterations: ${maxIterations}.`);
+  const convergence = params?.convergence;
+  if (convergence != null && convergence !== "medium")
+    parts.push(`Convergence: ${convergence} (R's nls tolerance ${NLS_CONTROL_TOL[convergence]}).`);
+  if (params?.replicates === "means")
+    parts.push("Fitted the mean of the replicates at each X (each weight multiplied by the replicate count).");
+  if (params?.dontFit === true) {
+    // The coefficients ARE the starts on a don't-fit run, so name them
+    // (the true evaluated starts, not a re-derivation — every model,
+    // including the ones whose starts need a fit or lm, is covered).
+    parts.push("This curve was not fitted — it is plotted from the initial values of the parameters.");
+    parts.push(
+      `Starting values: ${coefficients.map((c) => `${c.term} = ${num(c.estimate)}`).join(", ")}.`,
+    );
+  }
+  if (params?.cleanedData === true)
+    parts.push("A table of the cleaned data (the fitted data with ROUT's outliers removed) is included below.");
   const fixed = params?.fixed ?? {};
   if (Object.keys(fixed).length)
     parts.push(
@@ -2914,6 +3263,9 @@ async function assembleResult(
   /** A comparison (extra-sum-of-squares F test) between the sets, rather
    *  than several sets fitted on their own: defaults to sets.length > 1. */
   comparison = sets.length > 1,
+  /** The cleaned-data table (seq 200, ROUT + cleanedData): the fitted data
+   *  with ROUT's outliers removed — attached to the result as-is. */
+  cleanedData?: { table: TableData },
 ): Promise<AnalysisOutcome> {
   const other = comparison;
   // Seq 201: a centered polynomial's center is the mean of the fitted X's
@@ -3151,6 +3503,9 @@ async function assembleResult(
     // asked for it (the values are on the coefficients either way).
     ...(params?.reportDependency === true ? { showDependency: true } : {}),
     ...(rout?.outliers.length ? { curveOutliers: rout.outliers } : {}),
+    // Seq 200: the cleaned-data table (ROUT + cleanedData) — the results
+    // view renders it with a "Create table" button.
+    ...(cleanedData ? { cleanedData } : {}),
     // The overlays need [L] to evaluate a homologous curve (plan 28).
     ...(params?.ligandConcentration != null ? { ligandConcentration: params.ligandConcentration } : {}),
     // The overlays need the equation to evaluate a user-defined curve (v2 item 23).

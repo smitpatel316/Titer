@@ -13167,8 +13167,11 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
     "model",
     "weights",
     "fitMethod",
+    "convergence",
+    "maxIterations",
     "difficultFitHandling",
     "reportDependency",
+    "dontFit",
     "fitRange",
     "compareWith",
     "compareModel",
@@ -13184,8 +13187,11 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
       "model",
       "weights",
       "fitMethod",
+      "convergence",
+      "maxIterations",
       "difficultFitHandling",
       "reportDependency",
+      "dontFit",
       "fitRange",
       "compareWith",
       "compareModel",
@@ -13198,7 +13204,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
   );
   deepStrictEqual(
     asked({ y: "A", kind: "dose", model: "homologous-competition-logx" }).map((q) => q.id),
-    ["ys", "kind", "model", "weights", "fitMethod", "difficultFitHandling", "reportDependency", "fitRange", "compareWith", "compareModel", "global", "constrain", "ligandConcentration"],
+    ["ys", "kind", "model", "weights", "fitMethod", "convergence", "maxIterations", "difficultFitHandling", "reportDependency", "dontFit", "fitRange", "compareWith", "compareModel", "global", "constrain", "ligandConcentration"],
   );
   ok(!asked({ y: "A", kind: "dose", model: "sigmoidal-4pl-logx" }).some((q) => q.id === "fitKi"));
   deepStrictEqual(
@@ -13235,6 +13241,7 @@ check("the curve wizard asks about weighting, comparing models and global fits",
     "none",
     "1/y",
     "1/y2",
+    "1/yk",
     "1/x",
     "1/x2",
     "1/sd2",
@@ -45146,6 +45153,373 @@ check("r2-90 webr: ensurePackages does not resolve until every package is ready 
     outcome.B?.startsWith("rejected:"),
     `the joined caller B must not resolve while the retry is still loading, got ${outcome.B} (status ${packageStatus("survival").status})`,
   );
+});
+
+
+// ── Seq 200 remainder: nonlinear fitting completion ────────────────────
+// Pre-fix-fail pins (Nov 26): one per sub-item — convergence criteria +
+// max iterations, general 1/Y^K weighting, fit-means vs fit-replicates,
+// cleaned-data table, "don't fit" initial-values curve. Each fails on the
+// pre-fix code (the param is ignored or the option does not exist) and
+// passes once the feature lands.
+
+// Seq 200 (a): convergence criteria + max iterations — the fit's
+// nls.control is hardcoded (maxiter=200, tol=1e-5); Prism's Method tab
+// offers Quick / Medium / Strict convergence and a max-iterations cap
+// (Prism default 1000). A tiny cap must stop the fit, a bogus value must
+// be refused, and a non-default setting must be named in the notes.
+check("seq 200: nonlinear convergence criteria and max iterations are honoured", async () => {
+  const doseLog: TableData = {
+    columns: ["Title", "X", "Response"],
+    rows: [
+      ["", "-3", "2.1"],
+      ["", "-2.5", "3.4"],
+      ["", "-2", "8.2"],
+      ["", "-1.5", "19.5"],
+      ["", "-1", "41.2"],
+      ["", "-0.5", "68.9"],
+      ["", "0", "86.1"],
+      ["", "0.5", "94.2"],
+      ["", "1", "97.8"],
+      ["", "1.5", "99.1"],
+    ],
+  };
+  const base = await runAnalysis("nonlinear-regression", doseLog, { model: "sigmoidal-4pl-logx" });
+  ok(!("error" in base) && base.coefficients, `baseline 4PL failed: ${"error" in base ? base.error : ""}`);
+  const baseBottom = base.coefficients?.find((c) => c.term === "Bottom")?.estimate;
+  // A one-iteration cap cannot converge the fit.
+  const capped = await runAnalysis("nonlinear-regression", doseLog, { model: "sigmoidal-4pl-logx", maxIterations: 1 });
+  ok("error" in capped && /iteration/i.test(capped.error), `maxIterations 1 should stop the fit, got ${JSON.stringify(capped)}`);
+  // A non-positive or non-integer cap is refused before R runs.
+  deepStrictEqual(await runAnalysis("nonlinear-regression", doseLog, { model: "sigmoidal-4pl-logx", maxIterations: 0 }), {
+    error: "Maximum iterations must be a whole number of at least 1.",
+  });
+  deepStrictEqual(await runAnalysis("nonlinear-regression", doseLog, { model: "sigmoidal-4pl-logx", maxIterations: 2.5 }), {
+    error: "Maximum iterations must be a whole number of at least 1.",
+  });
+  // An unknown convergence level is refused, not defaulted.
+  deepStrictEqual(
+    await runAnalysis("nonlinear-regression", doseLog, { model: "sigmoidal-4pl-logx", convergence: "bogus" as never }),
+    { error: "Choose a convergence criteria: quick, medium, or strict." },
+  );
+  // A loose-but-sufficient cap + quick convergence still converges — to the
+  // same values — and the notes name the non-default settings.
+  const quick = await runAnalysis("nonlinear-regression", doseLog, {
+    model: "sigmoidal-4pl-logx",
+    maxIterations: 5,
+    convergence: "quick",
+  });
+  ok(!("error" in quick) && quick.coefficients, `quick 5-iteration fit failed: ${"error" in quick ? quick.error : ""}`);
+  const quickBottom = quick.coefficients?.find((c) => c.term === "Bottom")?.estimate;
+  ok(
+    quickBottom != null && baseBottom != null && Math.abs(quickBottom - baseBottom) < 1e-6,
+    `quick fit moved Bottom: ${quickBottom} vs ${baseBottom}`,
+  );
+  ok(quick.notes.includes("Maximum iterations: 5"), `notes should name the cap: ${quick.notes}`);
+  ok(quick.notes.includes("quick"), `notes should name quick convergence: ${quick.notes}`);
+});
+
+// Seq 200 (b): general 1/Y^K weighting — Prism's seventh weighting choice
+// ("Weight by 1/Y^K", general weighting). K=2 must equal 1/Y² and K=1 must
+// equal 1/Y on the same data; a missing or non-positive K is refused.
+check("seq 200: general 1/Y^K weighting (K=2 equals 1/Y², K=1 equals 1/Y)", async () => {
+  const xs = [-3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5];
+  // Heteroscedastic noise (scatter grows with Y), so the weighting moves the fit.
+  const eps = [0.02, -0.03, 0.01, 0.04, -0.02, 0.03, -0.01, 0.02, -0.04, 0.01];
+  const curve = (x: number) => 2 + 98 / (1 + 10 ** (-1 - x));
+  const table: TableData = {
+    columns: ["Title", "X", "Response"],
+    rows: xs.map((x, i) => ["", String(x), String(curve(x) * (1 + eps[i]))]),
+  };
+  const coefs = (r: AnalysisOutcome) => {
+    if ("error" in r) throw new Error(`fit failed: ${r.error}`);
+    return r.coefficients!.map((c) => c.estimate);
+  };
+  const close = (a: (number | null)[], b: (number | null)[], label: string) => {
+    ok(a.length === b.length, `${label}: different coefficient counts`);
+    a.forEach((v, i) => {
+      ok(v != null && b[i] != null && Math.abs(v - b[i]!) < 1e-9, `${label}: coefficient ${i} differs: ${v} vs ${b[i]}`);
+    });
+  };
+  const y2 = await runAnalysis("nonlinear-regression", table, { model: "sigmoidal-4pl-logx", weights: "1/y2" });
+  const yk2 = await runAnalysis("nonlinear-regression", table, {
+    model: "sigmoidal-4pl-logx",
+    weights: "1/yk",
+    weightExponent: 2,
+  });
+  close(coefs(yk2), coefs(y2), "1/Y^2 vs 1/Y²");
+  const y1 = await runAnalysis("nonlinear-regression", table, { model: "sigmoidal-4pl-logx", weights: "1/y" });
+  const yk1 = await runAnalysis("nonlinear-regression", table, {
+    model: "sigmoidal-4pl-logx",
+    weights: "1/yk",
+    weightExponent: 1,
+  });
+  close(coefs(yk1), coefs(y1), "1/Y^1 vs 1/Y");
+  // A fractional K is a genuinely different weighting — it must move the fit
+  // away from the unweighted one.
+  const unweighted = await runAnalysis("nonlinear-regression", table, { model: "sigmoidal-4pl-logx" });
+  const yk15 = await runAnalysis("nonlinear-regression", table, {
+    model: "sigmoidal-4pl-logx",
+    weights: "1/yk",
+    weightExponent: 1.5,
+  });
+  const moved = coefs(yk15).some((v, i) => v != null && coefs(unweighted)[i] != null && Math.abs(v - coefs(unweighted)[i]!) > 1e-6);
+  ok(moved, "1/Y^1.5 should move the fit away from the unweighted one");
+  ok(!("error" in yk15) && yk15.notes.includes("1/Y^1.5"), `notes should name the scheme: ${"error" in yk15 ? yk15.error : yk15.notes}`);
+  // A missing or non-positive K is refused before R runs.
+  deepStrictEqual(await runAnalysis("nonlinear-regression", table, { model: "sigmoidal-4pl-logx", weights: "1/yk" }), {
+    error: "Weighting by 1/Y^K needs the exponent K (greater than 0).",
+  });
+  deepStrictEqual(
+    await runAnalysis("nonlinear-regression", table, { model: "sigmoidal-4pl-logx", weights: "1/yk", weightExponent: 0 }),
+    { error: "Weighting by 1/Y^K needs the exponent K (greater than 0)." },
+  );
+  // An unknown weighting scheme is refused, never silently unweighted.
+  deepStrictEqual(
+    await runAnalysis("nonlinear-regression", table, { model: "sigmoidal-4pl-logx", weights: "1/y3" as never }),
+    { error: "Choose a weighting scheme: none, 1/Y, 1/Y², 1/X, 1/X², 1/SD², or 1/Y^K." },
+  );
+});
+
+// Seq 200 (c): fit the means vs fit the replicates — Prism's Method-tab
+// choice for replicate data. Fitting the means must equal fitting a table
+// holding the row means, with N = rows (not replicate points).
+check("seq 200: fitting the means of replicates equals fitting the row means", async () => {
+  const repTable: TableData = {
+    columns: ["Title", "X", "A:Y1", "A:Y2", "A:Y3"],
+    groups: 1,
+    replicates: 3,
+    rows: [
+      ["", "-2", "10", "11", "9"],
+      ["", "-1", "40", "42", "38"],
+      ["", "0", "70", "71", "69"],
+      ["", "1", "90", "91", "89"],
+      ["", "2", "98", "99", "97"],
+    ],
+  };
+  const meansTable: TableData = {
+    columns: ["Title", "X", "Mean"],
+    rows: [
+      ["", "-2", "10"],
+      ["", "-1", "40"],
+      ["", "0", "70"],
+      ["", "1", "90"],
+      ["", "2", "98"],
+    ],
+  };
+  const each = await runAnalysis("nonlinear-regression", repTable, { y: "A", model: "sigmoidal-4pl-logx" });
+  ok(!("error" in each) && each.coefficients, `replicates fit failed: ${"error" in each ? each.error : ""}`);
+  strictEqual(each.fit?.rows.find((r) => r.label === "N")?.values?.[0], 15);
+  const means = await runAnalysis("nonlinear-regression", repTable, {
+    y: "A",
+    model: "sigmoidal-4pl-logx",
+    replicates: "means",
+  });
+  ok(!("error" in means) && means.coefficients, `means fit failed: ${"error" in means ? means.error : ""}`);
+  strictEqual(means.fit?.rows.find((r) => r.label === "N")?.values?.[0], 5);
+  const direct = await runAnalysis("nonlinear-regression", meansTable, { y: "Mean", model: "sigmoidal-4pl-logx" });
+  ok(!("error" in direct) && direct.coefficients, `direct means fit failed: ${"error" in direct ? direct.error : ""}`);
+  for (const term of ["Bottom", "Top", "LogEC50", "Hill slope"]) {
+    const a = means.coefficients?.find((c) => c.term === term)?.estimate;
+    const b = direct.coefficients?.find((c) => c.term === term)?.estimate;
+    ok(a != null && b != null && Math.abs(a - b) < 1e-9, `means ${term} differs from the direct means fit: ${a} vs ${b}`);
+  }
+  // With a single Y column, fitting the means is the same fit.
+  const single = await runAnalysis("nonlinear-regression", meansTable, {
+    y: "Mean",
+    model: "sigmoidal-4pl-logx",
+    replicates: "means",
+  });
+  ok(!("error" in single) && single.coefficients, `single-column means fit failed: ${"error" in single ? single.error : ""}`);
+  for (const term of ["Bottom", "Top", "LogEC50", "Hill slope"]) {
+    const a = single.coefficients?.find((c) => c.term === term)?.estimate;
+    const b = direct.coefficients?.find((c) => c.term === term)?.estimate;
+    ok(a != null && b != null && Math.abs(a - b) < 1e-9, `single-column means ${term} differs: ${a} vs ${b}`);
+  }
+  // An unknown replicates choice is refused, not defaulted.
+  deepStrictEqual(
+    await runAnalysis("nonlinear-regression", repTable, { y: "A", model: "sigmoidal-4pl-logx", replicates: "pooled" as never }),
+    { error: "Choose how replicates are fitted: each replicate as its own point, or the mean of the replicates." },
+  );
+});
+
+// Seq 200 (d): cleaned-data table — Prism 8+ Method-tab option: with ROUT
+// on, create a table of the cleaned data (outliers removed). The outlier's
+// cell is blank; every other fitted value is intact.
+check("seq 200: ROUT with the cleaned-data option creates a table without the outliers", async () => {
+  const doseLog: TableData = {
+    columns: ["Title", "X", "Response"],
+    rows: [
+      ["", "-3", "2.1"],
+      ["", "-2.5", "3.4"],
+      ["", "-2", "8.2"],
+      ["", "-1.5", "19.5"],
+      ["", "-1", "41.2"],
+      ["", "-0.5", "68.9"],
+      ["", "0", "86.1"],
+      ["", "0.5", "94.2"],
+      ["", "1", "97.8"],
+      ["", "1.5", "99.1"],
+    ],
+  };
+  const corrupted: TableData = {
+    ...doseLog,
+    rows: doseLog.rows.map((r) => (r[1] === "0" ? ["", "0", "20"] : r)),
+  };
+  const on = await runAnalysis("nonlinear-regression", corrupted, {
+    model: "sigmoidal-4pl-logx",
+    rout: true,
+    cleanedData: true,
+  });
+  ok(!("error" in on) && on.coefficients, `ROUT fit failed: ${"error" in on ? on.error : ""}`);
+  deepStrictEqual(on.curveOutliers, [{ set: "Response", label: "Row 7", x: 0, y: 20, key: "Response#6" }]);
+  ok(on.cleanedData, "the cleaned-data table is missing from the result");
+  deepStrictEqual(on.cleanedData?.table.columns, ["Title", "X", "Response"]);
+  strictEqual(on.cleanedData?.table.rows.length, 10);
+  // The outlier's cell (row 7, X = 0) is blank; the rest are the source values.
+  const cleaned = on.cleanedData!.table.rows;
+  strictEqual(cleaned[6]?.[2], null);
+  deepStrictEqual(
+    cleaned.map((r) => r[2]),
+    ["2.1", "3.4", "8.2", "19.5", "41.2", "68.9", null, "94.2", "97.8", "99.1"],
+  );
+  deepStrictEqual(
+    cleaned.map((r) => r[1]),
+    ["-3", "-2.5", "-2", "-1.5", "-1", "-0.5", "0", "0.5", "1", "1.5"],
+  );
+  // Without the option, no cleaned-data table is attached.
+  const plain = await runAnalysis("nonlinear-regression", corrupted, { model: "sigmoidal-4pl-logx", rout: true });
+  ok(!("error" in plain) && plain.cleanedData === undefined, "no cleaned-data table should attach without the option");
+  // The option needs ROUT — without it there are no outliers to remove.
+  deepStrictEqual(
+    await runAnalysis("nonlinear-regression", corrupted, { model: "sigmoidal-4pl-logx", cleanedData: true }),
+    { error: "The cleaned-data table needs ROUT — it is the fitted data with ROUT's outliers removed." },
+  );
+});
+
+// Seq 200 (e): "don't fit" — Prism's Diagnostics-tab option: plot the curve
+// defined by the initial values instead of fitting. The coefficients are
+// the data-derived starts (Bottom = min Y, Top = max Y, LogEC50 = median X,
+// Hill slope from the curve's sign), with no standard errors, and the notes
+// say the curve was not fitted.
+check("seq 200: don't fit plots the curve from the initial values", async () => {
+  const xs = [-3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5];
+  const curve = (x: number) => 100 / (1 + 10 ** (0 - x));
+  const ys = xs.map(curve);
+  const table: TableData = {
+    columns: ["Title", "X", "Response"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const fitted = await runAnalysis("nonlinear-regression", table, { model: "sigmoidal-4pl-logx" });
+  ok(!("error" in fitted) && fitted.coefficients, `baseline fit failed: ${"error" in fitted ? fitted.error : ""}`);
+  const fittedBottom = fitted.coefficients?.find((c) => c.term === "Bottom")?.estimate;
+  ok(fittedBottom != null && Math.abs(fittedBottom) < 1e-6, `baseline Bottom should be ~0, got ${fittedBottom}`);
+  const out = await runAnalysis("nonlinear-regression", table, { model: "sigmoidal-4pl-logx", dontFit: true });
+  ok(!("error" in out) && out.coefficients, `don't-fit run failed: ${"error" in out ? out.error : ""}`);
+  const median = (v: number[]) => {
+    const s = [...v].sort((a, b) => a - b);
+    return s.length % 2 === 1 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+  };
+  const expected: Record<string, number> = {
+    Bottom: Math.min(...ys),
+    Top: Math.max(...ys),
+    LogEC50: median(xs),
+    "Hill slope": 1,
+  };
+  for (const [term, value] of Object.entries(expected)) {
+    const c = out.coefficients?.find((cc) => cc.term === term);
+    ok(c != null && c.estimate != null && Math.abs(c.estimate - value) < 1e-9, `don't-fit ${term} should be its start ${value}, got ${c?.estimate}`);
+    strictEqual(c?.stdError, null, `don't-fit ${term} has no standard error (it was not fitted)`);
+  }
+  // The initial-values curve's R² is below the fitted 1 — it is the starts'
+  // curve, not the fit — and the notes say so.
+  const r2 = out.fit?.rows.find((r) => r.label === "R squared")?.values?.[0];
+  ok(r2 != null && r2 > 0.9 && r2 < 1, `don't-fit R² should be the initial curve's (< 1), got ${r2}`);
+  ok(out.notes.includes("not fitted"), `notes should say the curve was not fitted: ${out.notes}`);
+  ok(out.notes.includes("initial values"), `notes should name the initial values: ${out.notes}`);
+  // A line has no initial values to plot — refused plainly, as are the
+  // combinations that need a fit.
+  deepStrictEqual(await runAnalysis("nonlinear-regression", table, { model: "line", dontFit: true }), {
+    error: "“Line” has no initial values to plot — it is fitted directly, so there is no initial-values curve.",
+  });
+  deepStrictEqual(
+    await runAnalysis("nonlinear-regression", table, { model: "sigmoidal-4pl-logx", dontFit: true, weights: "1/y" }),
+    { error: "“Don't fit” plots the plain initial-values curve — it can't be combined with weighting." },
+  );
+});
+
+// Seq 200: the wizard asks the new questions — 1/Y^K + its exponent,
+// convergence + max iterations, replicates, the cleaned-data option, and
+// "don't fit" — and finish maps them to params.
+check("seq 200: the curve wizard asks about 1/Y^K, convergence, replicates, cleaned data and don't-fit", () => {
+  const wizard = WIZARDS["nonlinear-regression"]!;
+  const twoY = readTable({ columns: ["Title", "X", "A", "B"], rows: [["", "1", "2", "3"]] });
+  const rep = readTable({
+    columns: ["Title", "X", "A:Y1", "A:Y2", "A:Y3"],
+    groups: 1,
+    replicates: 3,
+    rows: [["", "1", "2", "3", "4"]],
+  });
+  const asked = (a: Record<string, string | string[]>, table: Dataset) =>
+    wizard.questions(a, table).flatMap((q) => (q ? [q] : []));
+  const options = (a: Record<string, string | string[]>, table: Dataset, id: string) => {
+    const q = asked(a, table).find((q) => q.id === id);
+    return q?.kind === "choice" ? q.options.map((o) => o.value) : [];
+  };
+  const ids = (a: Record<string, string | string[]>, table: Dataset) => asked(a, table).map((q) => q.id);
+  const base = { y: "A", kind: "dose", model: "sigmoidal-4pl-logx" };
+  ok(options(base, twoY, "weights").includes("1/yk"), "weights should offer 1/Y^K");
+  ok(ids({ ...base, weights: "1/yk" }, twoY).includes("weightExponent"), "1/Y^K should ask for K");
+  ok(!ids(base, twoY).includes("weightExponent"), "weightExponent hides without 1/Y^K");
+  deepStrictEqual(options(base, twoY, "convergence"), ["quick", "medium", "strict"]);
+  ok(ids(base, twoY).includes("maxIterations"), "the wizard should ask for max iterations");
+  ok(!ids(base, twoY).includes("replicates"), "replicates hides without replicate columns");
+  ok(ids({ y: "A", kind: "dose", model: "sigmoidal-4pl-logx" }, rep).includes("replicates"), "replicates shows on replicate data");
+  deepStrictEqual(options({ y: "A", kind: "dose", model: "sigmoidal-4pl-logx" }, rep, "replicates"), ["each", "means"]);
+  ok(ids(base, twoY).includes("dontFit"), "the wizard should ask fit vs don't-fit");
+  ok(!ids({ ...base, rout: "no" }, twoY).includes("cleanedData"), "cleanedData hides without ROUT");
+  ok(ids({ ...base, rout: "yes" }, twoY).includes("cleanedData"), "cleanedData shows with ROUT");
+  deepStrictEqual(
+    wizard.finish(
+      {
+        ys: ["A"],
+        kind: "dose",
+        model: "sigmoidal-4pl-logx",
+        weights: "1/yk",
+        weightExponent: "1.5",
+        convergence: "quick",
+        maxIterations: "500",
+        replicates: "means",
+        rout: "yes",
+        cleanedData: "yes",
+        dontFit: "no",
+      },
+      twoY,
+    ),
+    {
+      type: "nonlinear-regression",
+      params: {
+        y: "A",
+        model: "sigmoidal-4pl-logx",
+        weights: "1/yk",
+        weightExponent: 1.5,
+        convergence: "quick",
+        maxIterations: 500,
+        replicates: "means",
+        rout: true,
+        cleanedData: true,
+      },
+    },
+  );
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "dose", model: "sigmoidal-4pl-logx", dontFit: "yes" }, twoY).params,
+    { y: "A", model: "sigmoidal-4pl-logx", dontFit: true },
+  );
+  // Defaults leave the new params out entirely.
+  deepStrictEqual(wizard.finish({ ys: ["A"], kind: "dose", model: "sigmoidal-4pl-logx" }, twoY).params, {
+    y: "A",
+    model: "sigmoidal-4pl-logx",
+  });
 });
 
 

@@ -1274,7 +1274,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "area-under-curve": ["baseline", "ignorePeaksBelow", "peaksAboveBaselineOnly", "sets"],
   "row-means-totals": ["ys", "x", "rowScope", "sets"],
   "nonlinear-regression": [
-    "x", "y", "ys", "model", "centered", "fitMethod", "difficultFitHandling", "reportDependency", "compareWith", "compare", "interpolate", "weights", "fitXMin", "fitXMax", "fixed", "bounds", "fixedConstants",
+    "x", "y", "ys", "model", "centered", "fitMethod", "difficultFitHandling", "reportDependency", "compareWith", "compare", "interpolate", "weights", "weightExponent", "maxIterations", "convergence", "replicates", "cleanedData", "dontFit", "fitXMin", "fitXMax", "fixed", "bounds", "fixedConstants",
     "boundsConstants", "compareModel", "globalY", "sharedParams", "ligandConcentration", "ligandKd",
     "ligandConcentrationConstant", "ligandKdConstant", "fitKi", "rout", "q", "ecx", "customEquation", "customParameters",
     "sets",

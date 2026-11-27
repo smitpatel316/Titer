@@ -774,7 +774,18 @@ export interface FractionOfTotalParams {
 export type NonlinearModel = (typeof NONLINEAR_MODELS)[number];
 
 /** Params for "nonlinear-regression" (XY table): which Y data set to fit, and which curve. */
-export type NonlinearWeightScheme = "none" | "1/y" | "1/y2" | "1/x" | "1/x2" | "1/sd2";
+export type NonlinearWeightScheme = "none" | "1/y" | "1/y2" | "1/x" | "1/x2" | "1/sd2" | "1/yk";
+/** The nonlinear weighting schemes (seq 200): the six plan-26 schemes plus
+ *  Prism's general 1/Y^K weighting, whose exponent K the run supplies. */
+export const NONLINEAR_WEIGHT_SCHEMES = ["none", "1/y", "1/y2", "1/x", "1/x2", "1/sd2", "1/yk"] as const;
+/** Prism's convergence criteria (seq 200, Method tab): quick (2 iterations
+ *  in a row change the sum of squares by less than 0.01%), medium (default:
+ *  5 in a row by less than 0.0001%), strict (5 in a row by less than
+ *  0.00000001%). R's nls() judges convergence on the relative offset, not
+ *  Prism's consecutive-sum-of-squares rule, so the levels map onto its tol:
+ *  quick 1e-3, medium 1e-5 (R's default), strict 1e-8. */
+export const NONLINEAR_CONVERGENCES = ["quick", "medium", "strict"] as const;
+export type NonlinearConvergence = (typeof NONLINEAR_CONVERGENCES)[number];
 /** The fitting method a nonlinear regression uses (seq 200, Prism's Method
  *  tab): least squares (every point counts equally), robust (Tukey biweight
  *  — an outlier-resistant refit), or Poisson (counts — maximum Poisson
@@ -806,8 +817,29 @@ export interface NonlinearRegressionParams {
   /** Interpolate the unknowns: the rows holding a Y but no X get the X the curve gives them. */
   interpolate?: boolean;
   /** Weighting (plan 26): "none" (default) or a scheme — 1/Y, 1/Y², 1/X, 1/X²,
-   *  or 1/SD² (replicate SDs across the table's Y columns, per row). */
+   *  1/SD² (replicate SDs across the table's Y columns, per row), or 1/Y^K
+   *  (seq 200, Prism's general weighting — see `weightExponent`). */
   weights?: NonlinearWeightScheme;
+  /** The exponent K for 1/Y^K weighting (seq 200): weights are 1/Y^K.
+   *  Required with weights "1/yk"; refused with any other scheme. */
+  weightExponent?: number;
+  /** Maximum iterations (seq 200, Prism's Method tab; Prism's default is
+   *  1000, Titer's 200 — the hardcoded nls.control value until now). */
+  maxIterations?: number;
+  /** Convergence criteria (seq 200): quick, medium (default), or strict. */
+  convergence?: NonlinearConvergence;
+  /** How replicate Y values are fitted (seq 200, Prism's Method tab):
+   *  each replicate as its own point (default), or the mean of the
+   *  replicates at each X (Prism multiplies each weighting factor by the
+   *  replicate count N when fitting means). */
+  replicates?: "each" | "means";
+  /** Also create a table of the cleaned data (seq 200, Prism 8+ Method
+   *  tab): the fitted data with ROUT's outliers removed. Needs rout. */
+  cleanedData?: boolean;
+  /** Don't fit (seq 200, Prism's Diagnostics tab): plot the curve defined
+   *  by the initial values instead of fitting — the coefficients are the
+   *  data-derived starts, with no standard errors. nls models only. */
+  dontFit?: boolean;
   /** Fit only the points inside an X range (Prism 11 Range tab, "Don't fit
    *  points when X is less than / greater than …", seq 166): points with
    *  X < `fitXMin` or X > `fitXMax` are ignored entirely — not fitted, not
@@ -2808,6 +2840,12 @@ export interface AnalysisResult {
   statisticLabel?: string;
   /** The points a curve's ROUT left out: data set, row, X, Y and key (`pointKeyOf`). */
   curveOutliers?: { set: string; label: string; x: number; y: number; key: string }[];
+  /** Optional cleaned-data table ("nonlinear-regression" with ROUT +
+   *  cleanedData, seq 200): the fitted data with ROUT's outliers removed —
+   *  one row per fitted row, outlier cells blank. The results view renders
+   *  it and offers "Create table" to add it to the project as a real XY
+   *  table (the `extracted` mechanism's shape, under its own heading). */
+  cleanedData?: { table: TableData };
   /** Optional per-Y correlations table ("correlation", "x-vs-every-y" mode). */
   correlations?: CorrelationRow[];
   /** Optional per-Y area-under-curve table ("area-under-curve"). */

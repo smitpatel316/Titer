@@ -4229,10 +4229,19 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["none", "No weighting (recommended unless scatter grows with Y)"],
         ["1/y", "Weight by 1/Y"],
         ["1/y2", "Weight by 1/Y²"],
+        // Seq 200: Prism's general weighting — 1/Y^K, with K chosen below.
+        ["1/yk", "Weight by 1/Y^K (general weighting — choose the exponent K)"],
         ["1/x", "Weight by 1/X"],
         ["1/x2", "Weight by 1/X²"],
         ...(!isMV && yNames(table).length > 1 ? [["1/sd2", "Weight by 1/SD² (needs replicates)"] as [string, string]] : []),
       ];
+      // Seq 200: the fitted data set's replicate columns — the replicates
+      // question only shows when the fitted set has more than one (a
+      // Multiple Variables fit has no replicates, so it never shows there).
+      const fittedSet = isMV
+        ? undefined
+        : splitXY(table.columns).ys.find((s) => s.name === ys[0]);
+      const fittedSetColumns = fittedSet?.columns.length ?? 0;
       const terms = a.model
         ? a.model === "user-defined"
           ? (() => {
@@ -4291,6 +4300,16 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             },
           },
         choice("weights", "Weight the points?", weightOptions),
+        // Seq 200 (Prism's general weighting): 1/Y^K needs its exponent K.
+        a.weights === "1/yk" && {
+          id: "weightExponent",
+          ask: "Weight by 1/Y^K — what is K? (K = 2 is 1/Y², K = 1 is 1/Y; the scatter grows with Y^K.)",
+          kind: "text",
+          label: "Weighting exponent K =",
+          initial: "",
+          placeholder: "e.g. 1.5",
+          parse: (text: string) => parseRequiredPositive(text, "weighting exponent K"),
+        },
         // Seq 200: the fitting method — least squares, robust (outliers
         // barely move the fit), or Poisson (counts).
         choice("fitMethod", "How should the curve be fitted?", [
@@ -4298,6 +4317,34 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ["robust", "Robust regression (Tukey biweight — outliers barely move the fit)"],
           ["poisson", "Poisson (for counts — maximum Poisson likelihood)"],
         ]),
+        // Seq 200 (Prism's Method tab): the convergence criteria — how
+        // small the sum-of-squares change must be before the fit stops —
+        // and the maximum iterations (Prism's default is 1000; Titer's
+        // 200). R's nls() judges convergence on the relative offset, not
+        // Prism's consecutive-change rule, so quick/medium/strict map
+        // onto its tol (1e-3 / 1e-5 / 1e-8).
+        choice("convergence", "How strictly should the fit converge?", [
+          ["quick", "Quick — stop when the sum of squares changes by less than 0.01% twice in a row"],
+          ["medium", "Medium — less than 0.0001% five times in a row (recommended)"],
+          ["strict", "Strict — less than 0.00000001% five times in a row"],
+        ]),
+        {
+          id: "maxIterations",
+          ask: "Maximum iterations — the most steps the fit may take before it stops (leave blank for 200; Prism's default is 1000).",
+          kind: "text",
+          label: "Maximum iterations =",
+          initial: "",
+          placeholder: "e.g. 500",
+          parse: (text: string) => parseOptionalNumber(text, "maximum iterations"),
+        },
+        // Seq 200 (Prism's Method tab): fit each replicate as its own
+        // point, or the mean of the replicates at each X — only when the
+        // fitted data set has replicates.
+        fittedSetColumns > 1 &&
+          choice("replicates", "How should the replicates be fitted?", [
+            ["each", "Fit each replicate as its own point"],
+            ["means", "Fit the mean of the replicates at each X"],
+          ]),
         // Seq 323 (Prism's Confidence tab): what happens when a parameter
         // is unstable — the data don't determine it (the fit's Hessian
         // condition number exceeds 10/√ε, about 6.7×10⁸). Seq 387: a
@@ -4317,6 +4364,16 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ["no", "No"],
           ["yes", "Yes — show dependency for each parameter"],
         ]),
+        // Seq 200 (Prism's Diagnostics tab): don't fit — plot the curve
+        // defined by the initial values of the parameters instead. A line
+        // or polynomial has no initial values to plot, so it is not
+        // offered there (the runner refuses it too).
+        a.model !== undefined &&
+          modelSpec(a.model as NonlinearModel).kind !== "lm" &&
+          choice("dontFit", "Don't fit the curve — plot the initial-values curve instead?", [
+            ["no", "No — fit the curve"],
+            ["yes", "Yes — plot the curve defined by the initial values (not fitted)"],
+          ]),
         // Seq 166 (Prism 11 Range tab): "Don't fit points when X is less
         // than / greater than …" — points outside the range are ignored
         // entirely. Either bound alone is enough; both blank fits all.
@@ -4369,6 +4426,13 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           choice("rout", "Identify outliers, points too far from the curve, and leave them out of the fit?", [
             ["no", "No — fit every point"],
             ["yes", "Yes — ROUT method (Q = 1%)"],
+          ]),
+        // Seq 200 (Prism 8+ Method tab → Outliers): also create a table of
+        // the cleaned data — the fitted data with ROUT's outliers removed.
+        a.rout === "yes" &&
+          choice("cleanedData", "Also create a table of the cleaned data (the fitted data with ROUT's outliers removed)?", [
+            ["no", "No"],
+            ["yes", "Yes — create a cleaned-data table"],
           ]),
         a.model !== "user-defined" &&
           choice("compareModel", "Also fit another model to the same data and compare (F test + AICc)?", [
@@ -4489,6 +4553,15 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
               };
             })()
           : {};
+      // Seq 200: the new Method/Diagnostics answers — an invalid value is
+      // omitted here and the runner refuses it plainly (the `custom`
+      // precedent above). A default (medium, 200, each) is omitted too,
+      // so a plain run's params stay unchanged.
+      const weightExponent =
+        a.weights === "1/yk"
+          ? parseRequiredPositive(String(a.weightExponent ?? ""), "weighting exponent K")
+          : { value: undefined };
+      const maxIterations = parseOptionalNumber(String(a.maxIterations ?? ""), "maximum iterations");
       const compareModel =
         a.compareModel !== undefined && a.compareModel !== "none"
           ? { compareModel: a.compareModel as NonlinearModel }
@@ -4581,6 +4654,23 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ? { ecx: { ec10: 10, ec20: 20, ec80: 80, ec90: 90 }[a.ecx as string] as number }
             : {}),
           ...weights,
+          // Seq 200: 1/Y^K's exponent, the convergence criteria, the
+          // maximum iterations, the replicates choice, the cleaned-data
+          // table and don't-fit — each omitted at its default.
+          ...(a.weights === "1/yk" && weightExponent.value !== undefined
+            ? { weightExponent: weightExponent.value }
+            : {}),
+          ...(a.convergence !== undefined && a.convergence !== "medium"
+            ? { convergence: a.convergence as NonlinearRegressionParams["convergence"] }
+            : {}),
+          ...(maxIterations.value !== undefined && maxIterations.value !== 200
+            ? { maxIterations: maxIterations.value }
+            : {}),
+          ...(a.replicates !== undefined && a.replicates !== "each"
+            ? { replicates: a.replicates as "each" | "means" }
+            : {}),
+          ...(a.cleanedData === "yes" ? { cleanedData: true } : {}),
+          ...(a.dontFit === "yes" ? { dontFit: true } : {}),
           ...range,
           ...(a.centered === "yes" ? { centered: true } : {}),
           ...(a.fitMethod !== undefined && a.fitMethod !== "least-squares"
