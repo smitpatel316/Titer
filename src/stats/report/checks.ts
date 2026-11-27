@@ -221,9 +221,30 @@ export async function checksOf(
               : weights === "1/x2"
                 ? `1/${rVec(x.values)}^2`
                 : undefined;
-      const fit = wVec
-        ? `{w<-${wVec};resid(lm(${rVec(y.values)}~${rVec(x.values)}${origin ? "+0" : ""},weights=w))*sqrt(w)}`
-        : `resid(lm(${rVec(y.values)}~${rVec(x.values)}${origin ? "+0" : ""}))`;
+      // Center x/y before lm() (Nov 2026, #103 seq 575): at ~1e13 scale the
+      // uncentered QR loses the residuals to rounding (ssRes off by ~20%).
+      // Centered residuals equal the uncentered ones in exact arithmetic
+      // (the intercept absorbs the shift), so only the numerics change.
+      // Weighted centering uses the weighted means. Through-origin (+0)
+      // is NOT centered — centering would change the model (same bound as
+      // the R origin fit in linear-regression.ts).
+      const wExpr =
+        weights === "1/y"
+          ? "1/yv"
+          : weights === "1/y2"
+            ? "1/yv^2"
+            : weights === "1/x"
+              ? "1/xv"
+              : weights === "1/x2"
+                ? "1/xv^2"
+                : undefined;
+      const fit = origin
+        ? wVec
+          ? `{w<-${wVec};resid(lm(${rVec(y.values)}~${rVec(x.values)}+0,weights=w))*sqrt(w)}`
+          : `resid(lm(${rVec(y.values)}~${rVec(x.values)}+0))`
+        : wExpr
+          ? `{xv<-${rVec(x.values)};yv<-${rVec(y.values)};w<-${wExpr};xw<-sum(w*xv)/sum(w);yw<-sum(w*yv)/sum(w);x0<-xv-xw;y0<-yv-yw;resid(lm(y0~x0,weights=w))*sqrt(w)}`
+          : `{xv<-${rVec(x.values)};yv<-${rVec(y.values)};x0<-xv-mean(xv);y0<-yv-mean(yv);resid(lm(y0~x0))}`;
       normality = {
         parts: [{ name: wVec ? "the weighted residuals" : "the residuals", r: fit }],
         what: "of the residuals",
