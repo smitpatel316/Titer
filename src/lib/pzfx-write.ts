@@ -138,10 +138,57 @@ const escapeXml = (s: unknown): string => {
 
 /** Split Titer Y columns into `.pzfx` datasets. Mirrors
  *  `prism-write.ts` `groupDatasets` (summary groups, then replicate groups,
- *  then singles, in that order; datasets sorted by first column position). */
+ *  then singles, in that order; datasets sorted by first column position).
+ *  Rule 0 covers Titer colon groups ("A:Y1"… / "A:Mean", "A:SD", "A:N"):
+ *  native XY tables name subcolumns after the group, split at the LAST ":". */
 function groupYColumns(columns: WriteColumn[]): WriteSet[] {
   const sets: WriteSet[] = [];
   const used = new Set<number>();
+  // 0. Titer colon groups: a summary set's suffixes are the summary
+  // format's subcolumn labels (the same labels summary-format.ts defines);
+  // replicates are "Y1"…"Yn" consecutive from 1. A lone "A:Y1" stays a
+  // single, like a lone "Base_1".
+  const colonSummary: { suffixes: string[]; yFormat: string }[] = [
+    { suffixes: [":Mean", ":SD", ":N"], yFormat: "SDN" },
+    { suffixes: [":Mean", ":SEM", ":N"], yFormat: "SEN" },
+    { suffixes: [":Mean", ":CV", ":N"], yFormat: "CVN" },
+    { suffixes: [":Mean", ":SD"], yFormat: "SD" },
+    { suffixes: [":Mean", ":SEM"], yFormat: "SE" },
+    { suffixes: [":Mean", ":CV"], yFormat: "CV" },
+    { suffixes: [":Mean", ":+error", ":−error"], yFormat: "low-high" },
+    { suffixes: [":Mean", ":Upper limit", ":Lower limit"], yFormat: "upper-lower-limits" },
+  ];
+  for (let i = 0; i < columns.length; i++) {
+    if (used.has(i)) continue;
+    const sep = columns[i].name.lastIndexOf(":");
+    if (sep <= 0) continue;
+    const base = columns[i].name.slice(0, sep);
+    const first = columns[i].name.slice(sep + 1);
+    if (first === "") continue;
+    let matched = false;
+    for (const { suffixes, yFormat } of colonSummary) {
+      if (suffixes[0].slice(1) !== first) continue;
+      const group = suffixes.map((s) => columns.findIndex((c, j) => !used.has(j) && c.name === base + s));
+      if (group.every((g) => g >= 0)) {
+        group.forEach((g) => used.add(g));
+        sets.push({ title: base, columns: group, yFormat });
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+    if (first !== "Y1") continue;
+    const group = [i];
+    for (let n = 2; ; n++) {
+      const j = columns.findIndex((c, k) => !used.has(k) && c.name === `${base}:Y${n}`);
+      if (j < 0) break;
+      group.push(j);
+    }
+    if (group.length > 1) {
+      group.forEach((g) => used.add(g));
+      sets.push({ title: base, columns: group, yFormat: "replicates" });
+    }
+  }
   // 1. Summary groups: exact suffix sets, same base.
   for (let i = 0; i < columns.length; i++) {
     if (used.has(i)) continue;
