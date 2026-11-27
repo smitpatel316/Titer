@@ -36,10 +36,24 @@ function pickXY(columns: Column[], params: DemingRegressionParams | undefined): 
   ];
 }
 
+/** Deviations from the mean, double-centered against the first value: `v −
+ *  values[0]` is exact when the values cluster (Sterbenz), and the second
+ *  mean is taken at O(spread) scale where it is exact to ~1e-16 — so a
+ *  single mean subtraction's rounding error δ (~5e-4 at 1e13) never lands in
+ *  the sums, and constant data gives exactly-0 sums instead of 5.78e-34. */
+function centered(values: number[]): number[] {
+  if (values.length === 0) return [];
+  const origin = values[0];
+  const devs = values.map((v) => v - origin);
+  const m = mean(devs);
+  return devs.map((d) => d - m);
+}
+
 /** Why Deming regression can't run on these columns, if it can't: λ must be
  *  positive, the pairs must exist and number at least 3 (the jackknife needs
  *  them), and X and Y must both vary and covary — otherwise the closed form
- *  has no defined slope. */
+ *  has no defined slope. The variation checks use double-centered sums, so
+ *  constant data is caught exactly instead of passing on rounding residue. */
 function demingProblem(columns: Column[], params: DemingRegressionParams | undefined): string | undefined {
   const lambda = (params ?? DEFAULTS).lambda;
   if (!Number.isFinite(lambda) || lambda <= 0)
@@ -53,11 +67,11 @@ function demingProblem(columns: Column[], params: DemingRegressionParams | undef
   const n = xs.length;
   if (n < 3)
     return `Deming regression needs at least 3 complete pairs for the jackknife confidence intervals; this table has ${n}.`;
-  const xbar = mean(xs);
-  const ybar = mean(ys);
-  const sxx = xs.reduce((s, xi) => s + (xi - xbar) ** 2, 0);
-  const syy = ys.reduce((s, yi) => s + (yi - ybar) ** 2, 0);
-  const sxy = xs.reduce((s, xi, i) => s + (xi - xbar) * (ys[i] - ybar), 0);
+  const xc = centered(xs);
+  const yc = centered(ys);
+  const sxx = xc.reduce((s, v) => s + v * v, 0);
+  const syy = yc.reduce((s, v) => s + v * v, 0);
+  const sxy = xc.reduce((s, v, i) => s + v * yc[i], 0);
   if (sxx === 0) return `“${groups[0].name}” is constant — Deming regression needs X values that vary.`;
   if (syy === 0) return `“${groups[1].name}” is constant — Deming regression needs Y values that vary.`;
   if (sxy === 0) return "X and Y do not covary — Deming regression has no defined slope here";
@@ -66,15 +80,18 @@ function demingProblem(columns: Column[], params: DemingRegressionParams | undef
 
 /** The OLS slope/intercept of the paired values, for the notes' comparison —
  *  computed here in TS (the same arithmetic the R call runs) because `notes`
- *  doesn't receive the R values. */
+ *  doesn't receive the R values. Double-centered like the R `lm` it mirrors,
+ *  so the printed equation agrees with the R `OLS slope` / `OLS Y-intercept`
+ *  rows at 1e13 scale; the intercept is taken back to X = 0 the same way R
+ *  does (ȳ − b·x̄, with the raw means). */
 function olsFit(xs: number[], ys: number[]): { slope: number; intercept: number } | null {
   if (xs.length < 2) return null;
-  const xbar = mean(xs);
-  const ybar = mean(ys);
-  const sxx = xs.reduce((s, xi) => s + (xi - xbar) ** 2, 0);
+  const xc = centered(xs);
+  const yc = centered(ys);
+  const sxx = xc.reduce((s, v) => s + v * v, 0);
   if (sxx === 0) return null;
-  const slope = xs.reduce((s, xi, i) => s + (xi - xbar) * (ys[i] - ybar), 0) / sxx;
-  return { slope, intercept: ybar - slope * xbar };
+  const slope = xc.reduce((s, v, i) => s + v * yc[i], 0) / sxx;
+  return { slope, intercept: mean(ys) - slope * mean(xs) };
 }
 
 export const demingRegressionSpec: ColumnTestSpec<DemingRegressionParams> = {
