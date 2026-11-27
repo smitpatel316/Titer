@@ -105,7 +105,11 @@ export {
 } from "./workflow-dependency";
 export {
   PLUGIN_SAFETY_NOTICE,
+  PLUGIN_WEBVIEW_FRAME_URL,
+  PLUGIN_WEBVIEW_INIT_TYPE,
+  PLUGIN_WEBVIEW_READY_TYPE,
   PLUGIN_WEBVIEW_SANDBOX,
+  buildPluginWebviewInit,
   buildPluginWebviewSrcDoc,
   createPluginHostRouter,
   escapePluginSource,
@@ -124,6 +128,7 @@ export {
   teardownPluginWebview,
   type PluginHostHandler,
   type PluginHostHandlers,
+  type PluginWebviewInit,
   type PluginWebviewLaunchOptions,
   type PluginWebviewSession,
 } from "./isolation";

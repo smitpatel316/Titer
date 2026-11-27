@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- Plugin Isolation frame — marketplace M5 (seq 437), R2 rework (seq 475).
+  --
+  -- This is a bundled static asset (Vite copies public/ into dist, so it is
+  -- served same-origin in dev and in release builds). It holds NO inline
+  -- script element: the release CSP (src-tauri/tauri.conf.json, script-src
+  -- 'self' 'wasm-unsafe-eval' 'unsafe-eval' — no 'unsafe-inline') blocks
+  -- inline scripts in an iframe document, so the old srcDoc document with
+  -- its two inline script blocks never ran in production. The bridge +
+  -- executor live in the external plugin-isolation.js, allowed by
+  -- script-src 'self'; the plugin's entry source arrives afterwards by
+  -- postMessage (titer-plugin-init, built by buildPluginWebviewInit in
+  -- src/plugins/isolation.ts) and runs via new Function, allowed by
+  -- 'unsafe-eval'. The frame is sandboxed (allow-scripts, no
+  -- allow-same-origin) by its host element, so it has an opaque origin and
+  -- no DOM access to the app — its only host access is the postMessage
+  -- bridge to interceptPluginCall. -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Plugin</title>
+    <script src="./plugin-isolation.js"></script>
+  </head>
+  <body></body>
+</html>
