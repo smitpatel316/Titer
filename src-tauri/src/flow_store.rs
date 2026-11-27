@@ -784,6 +784,10 @@ mod tests {
         let sample = inner.samples.get("s1").unwrap();
         assert_eq!(sample.columns[2], vec![1.0, 3.0, 5.0, 7.0, 9.0]);
         assert_eq!(sample.columns[0], vec![100.0, 200.0, 300.0, 400.0, 500.0]);
+        // The guard stays alive past the last `sample` use (no early drop),
+        // and apply_transform re-locks this same non-reentrant Mutex — drop
+        // it explicitly first, or the error-path calls deadlock (gate hang).
+        drop(inner);
         assert!(store.apply_transform("no-such", "CD4", &|x| x).is_err());
         assert!(store.apply_transform("s1", "no-such", &|x| x).is_err());
     }
