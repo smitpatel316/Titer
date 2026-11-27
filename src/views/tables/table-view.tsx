@@ -880,7 +880,7 @@ function FunctionBrowser({
                     <button
                       key={fn.name}
                       type="button"
-                      onClick={() => onInsert(FUNCTION_BROWSER_CLAUSES.has(fn.name) ? ` ${fn.name} ` : `${fn.name}()`)}
+                      onClick={() => onInsert(FUNCTION_BROWSER_CLAUSES.has(fn.name) ? `${fn.name} ` : `${fn.name}()`)}
                       className="flex w-full flex-col items-start rounded-md px-2 py-1 text-left hover:bg-control"
                       title={`Insert ${fn.name} into the formula`}
                     >
