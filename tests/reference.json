@@ -12900,6 +12900,138 @@
  "deming-regression deming {\"y\":\"Y\",\"lambda\":0}": {
   "error": "The error variance ratio must be a finite number greater than 0."
  },
+ "deming-regression xyBig {\"y\":\"Y\",\"lambda\":1}": {
+  "testType": "deming-regression",
+  "subtitle": "Deming regression",
+  "equation": "Y = 2.004*X − 39220000000",
+  "stats": [
+   {
+    "label": "Slope",
+    "value": 2.003922418
+   },
+   {
+    "label": "Slope 95% CI lower",
+    "value": 1.951864397
+   },
+   {
+    "label": "Slope 95% CI upper",
+    "value": 2.055980438
+   },
+   {
+    "label": "Y-intercept",
+    "value": -39224174570
+   },
+   {
+    "label": "Intercept 95% CI lower",
+    "value": -559804376500
+   },
+   {
+    "label": "Intercept 95% CI upper",
+    "value": 481356027300
+   },
+   {
+    "label": "Lambda",
+    "value": 1
+   },
+   {
+    "label": "OLS slope",
+    "value": 2.001231061
+   },
+   {
+    "label": "OLS Y-intercept",
+    "value": -12310605060
+   },
+   {
+    "label": "Complete pairs",
+    "value": 10
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 10000000000000,
+    "sd": 1.513825177,
+    "sem": 0.4787135539,
+    "median": 10000000000000,
+    "n": 10
+   },
+   {
+    "name": "Y",
+    "mean": 20000000000000,
+    "sd": 3.032058101,
+    "sem": 0.9588209598,
+    "median": 20000000000000,
+    "n": 10
+   }
+  ],
+  "notes": "Deming regression of “Y” on “X”, λ = 1 (equal error in X and Y). 95% confidence intervals are leave-one-out jackknife intervals. The ordinary least-squares fit is Y = 2.001*X − 12310000000, for comparison — OLS assumes X is measured without error, so it attenuates the slope. If the slope CI excludes 1 there is proportional bias; if the intercept CI excludes 0 there is constant bias. Assumes the errors in X and Y are independent and roughly homoscedastic."
+ },
+ "deming-regression xyBig {\"y\":\"Y\",\"lambda\":0.25}": {
+  "testType": "deming-regression",
+  "subtitle": "Deming regression",
+  "equation": "Y = 2.004*X − 43960000000",
+  "stats": [
+   {
+    "label": "Slope",
+    "value": 2.004396257
+   },
+   {
+    "label": "Slope 95% CI lower",
+    "value": 1.952321131
+   },
+   {
+    "label": "Slope 95% CI upper",
+    "value": 2.056471384
+   },
+   {
+    "label": "Y-intercept",
+    "value": -43962571380
+   },
+   {
+    "label": "Intercept 95% CI lower",
+    "value": -564713837300
+   },
+   {
+    "label": "Intercept 95% CI upper",
+    "value": 476788694500
+   },
+   {
+    "label": "Lambda",
+    "value": 0.25
+   },
+   {
+    "label": "OLS slope",
+    "value": 2.001231061
+   },
+   {
+    "label": "OLS Y-intercept",
+    "value": -12310605060
+   },
+   {
+    "label": "Complete pairs",
+    "value": 10
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 10000000000000,
+    "sd": 1.513825177,
+    "sem": 0.4787135539,
+    "median": 10000000000000,
+    "n": 10
+   },
+   {
+    "name": "Y",
+    "mean": 20000000000000,
+    "sd": 3.032058101,
+    "sem": 0.9588209598,
+    "median": 20000000000000,
+    "n": 10
+   }
+  ],
+  "notes": "Deming regression of “Y” on “X”, λ = 0.25 (the error variance in Y is 0.25× that in X). 95% confidence intervals are leave-one-out jackknife intervals. The ordinary least-squares fit is Y = 2.001*X − 12310000000, for comparison — OLS assumes X is measured without error, so it attenuates the slope. If the slope CI excludes 1 there is proportional bias; if the intercept CI excludes 0 there is constant bias. Assumes the errors in X and Y are independent and roughly homoscedastic."
+ },
  "deming-regression demingNoCovary {\"y\":\"Y\",\"lambda\":1}": {
   "error": "X and Y do not covary — Deming regression has no defined slope here"
  },

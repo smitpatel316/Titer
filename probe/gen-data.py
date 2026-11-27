@@ -617,6 +617,58 @@ expected["linregOrigin"] = {
 # intercept fit on the origin data (for the multi-Y pin's Y2 column)
 expected["linregOriginAsIntercept"] = linreg_exact(xs, ys_o)
 
+
+def deming_exact(x, y, lam):
+    """Deming slope/intercept + leave-one-out jackknife SEs/CIs (mpmath).
+
+    Mirrors the R code exactly: b = (d + sqrt(d^2 + 4*lam*sxy^2)) / (2*sxy)
+    with d = syy - lam*sxx on the centered sums, a = ybar - b*xbar, and the
+    jackknife SE sqrt((k-1)/k * sum((th_i - mean(th))^2)) over the k usable
+    replicates, CIs b +/- 1.96*SE. The OLS slope/intercept for the same data
+    are the linreg_exact values above.
+    """
+    X, Y = mpf_list(x), mpf_list(y)
+    n = len(X)
+    lam = mp.mpf(lam)
+
+    def fit(xx, yy):
+        nn = len(xx)
+        mxx = sum(xx) / nn
+        myy = sum(yy) / nn
+        sxx2 = sum((xi - mxx) ** 2 for xi in xx)
+        syy2 = sum((yi - myy) ** 2 for yi in yy)
+        sxy2 = sum((xi - mxx) * (yi - myy) for xi, yi in zip(xx, yy))
+        d = syy2 - lam * sxx2
+        b = (d + mp.sqrt(d**2 + 4 * lam * sxy2**2)) / (2 * sxy2)
+        return b, myy - b * mxx
+
+    b, a = fit(X, Y)
+    bs, aas = [], []
+    for i in range(n):
+        bi, ai = fit([v for j, v in enumerate(X) if j != i],
+                     [v for j, v in enumerate(Y) if j != i])
+        bs.append(bi)
+        aas.append(ai)
+    k = n
+    bbar = sum(bs) / k
+    abar = sum(aas) / k
+    seb = mp.sqrt(mp.mpf(k - 1) / k * sum((v - bbar) ** 2 for v in bs))
+    sea = mp.sqrt(mp.mpf(k - 1) / k * sum((v - abar) ** 2 for v in aas))
+    z = mp.mpf("1.96")
+    return {
+        "slope": float(b), "intercept": float(a),
+        "slopeSe": float(seb), "interceptSe": float(sea),
+        "slopeCiLo": float(b - z * seb), "slopeCiHi": float(b + z * seb),
+        "interceptCiLo": float(a - z * sea),
+        "interceptCiHi": float(a + z * sea),
+        "n": n, "looDropped": 0,
+    }
+
+
+# Deming at 1e13 on the same xyBig doubles (Nov 2026 Deming precision lane)
+expected["deming"] = deming_exact(xs, ys, 1)
+expected["deming025"] = deming_exact(xs, ys, mp.mpf("0.25"))
+
 # --- tables for reference.ts (string cells, "" = blank) ---
 def col_table(names, groups):
     cols = ["Title"] + names
