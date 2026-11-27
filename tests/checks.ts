@@ -14180,6 +14180,104 @@ check("R2-36: raw-X sigmoidal R guards are sign-aware at X = 0 (falling curves t
   ok(hill != null && hill < 0, `falling 4PL-X Hill slope should stay negative, got ${hill}`);
 });
 
+// BUG-REPORT.md Round 2 Issue 111 (Low, cycle 44): fitted-curve.ts's
+// x === 0 guard covered only the 4 sigmoidal raw-X models (and only when
+// EC50 <= 0), while R guards all 8 raw-X ratio models unconditionally —
+// EC50 === 0 at x === 0 is 0/0 = NaN in agonist-3pl-x,
+// agonist-3pl-normalized-x, biphasic-x and bell-shaped-x, and
+// asymmetric-5pl-x underflows (2^(1/S)-1)^(1/HillSlope) to 0 at tiny
+// positive HillSlope, again 0/0 = NaN. evaluate() now returns R's exact
+// limits at x === 0 for all 8 models.
+check("R2-111: x === 0 guard covers all 8 raw-X ratio models, incl. asymmetric-5pl-x underflow", () => {
+  // agonist-3pl-x: R returns Bottom unconditionally at x == 0.
+  const agonist3 = [
+    { term: "Bottom", estimate: 1 },
+    { term: "Top", estimate: 100 },
+    { term: "EC50", estimate: 0 },
+  ] as never;
+  strictEqual(evaluateFittedCurve("agonist-3pl-x", agonist3, 0), 1);
+  strictEqual(
+    evaluateFittedCurve("agonist-3pl-x", [
+      { term: "Bottom", estimate: 1 },
+      { term: "Top", estimate: 100 },
+      { term: "EC50", estimate: 10 },
+    ] as never, 0),
+    1,
+  );
+  // agonist-3pl-normalized-x: R returns 0 unconditionally at x == 0.
+  strictEqual(
+    evaluateFittedCurve("agonist-3pl-normalized-x", [{ term: "EC50", estimate: 0 }] as never, 0),
+    0,
+  );
+  strictEqual(
+    evaluateFittedCurve("agonist-3pl-normalized-x", [{ term: "EC50", estimate: 10 }] as never, 0),
+    0,
+  );
+  // biphasic-x: R returns Bottom+(Top-Bottom)*(Frac*ifelse(nH1<0,1,0)+
+  // (1-Frac)*ifelse(nH2<0,1,0)) at x == 0.
+  const biphasic = (ec50_1: number, ec50_2: number, nh1: number, nh2: number) =>
+    [
+      { term: "Bottom", estimate: 1 },
+      { term: "Top", estimate: 100 },
+      { term: "Frac", estimate: 0.5 },
+      { term: "EC50_1", estimate: ec50_1 },
+      { term: "EC50_2", estimate: ec50_2 },
+      { term: "nH1", estimate: nh1 },
+      { term: "nH2", estimate: nh2 },
+    ] as never;
+  strictEqual(evaluateFittedCurve("biphasic-x", biphasic(0, 10, 1, 1), 0), 1);
+  strictEqual(evaluateFittedCurve("biphasic-x", biphasic(0, 10, -1, 1), 0), 50.5);
+  strictEqual(evaluateFittedCurve("biphasic-x", biphasic(10, 0, 1, -1), 0), 50.5);
+  // bell-shaped-x: R returns Dip+(Plateau1-Dip)*ifelse(nH1<0,1,0)+
+  // (Plateau2-Dip)*ifelse(nH2>0,1,0) at x == 0 (note nH2 > 0: the second
+  // term is (x/EC50_2)^nH2, which vanishes at x == 0 for nH2 > 0).
+  const bell = (ec50_1: number, ec50_2: number, nh1: number, nh2: number) =>
+    [
+      { term: "Dip", estimate: 10 },
+      { term: "Plateau1", estimate: 100 },
+      { term: "Plateau2", estimate: 50 },
+      { term: "EC50_1", estimate: ec50_1 },
+      { term: "EC50_2", estimate: ec50_2 },
+      { term: "nH1", estimate: nh1 },
+      { term: "nH2", estimate: nh2 },
+    ] as never;
+  strictEqual(evaluateFittedCurve("bell-shaped-x", bell(0, 10, 1, 1), 0), 50);
+  strictEqual(evaluateFittedCurve("bell-shaped-x", bell(0, 10, -1, 1), 0), 140);
+  strictEqual(evaluateFittedCurve("bell-shaped-x", bell(10, 10, 1, -1), 0), 10);
+  // asymmetric-5pl-x with EC50 > 0 and tiny positive HillSlope: the
+  // (2^(1/S)-1)^(1/HillSlope) factor underflows to 0, so the formula is
+  // 0/0 = NaN at x == 0 — R's unconditional guard returns Bottom.
+  const fivePl = (hill: number) =>
+    [
+      { term: "Bottom", estimate: 1 },
+      { term: "Top", estimate: 100 },
+      { term: "EC50", estimate: 10 },
+      { term: "Hill slope", estimate: hill },
+      { term: "Asymmetry (S)", estimate: 2 },
+    ] as never;
+  strictEqual(evaluateFittedCurve("asymmetric-5pl-x", fivePl(0.001), 0), 1);
+  strictEqual(evaluateFittedCurve("asymmetric-5pl-x", fivePl(-0.001), 0), 100);
+  // The guard is unconditional for the already-covered models too, matching
+  // R: HillSlope == 0 with EC50 > 0 returns the R limit (Bottom / 0), not
+  // the formula's midpoint ((EC50/0)^0 = 1).
+  strictEqual(
+    evaluateFittedCurve("sigmoidal-4pl-x", [
+      { term: "Bottom", estimate: 1 },
+      { term: "Top", estimate: 100 },
+      { term: "EC50", estimate: 10 },
+      { term: "Hill slope", estimate: 0 },
+    ] as never, 0),
+    1,
+  );
+  strictEqual(
+    evaluateFittedCurve("agonist-4pl-normalized-x", [
+      { term: "EC50", estimate: 10 },
+      { term: "Hill slope", estimate: 0 },
+    ] as never, 0),
+    0,
+  );
+});
+
 // BUG-REPORT.md Round 2 Issue 86 (High, cycle 44): the sign-aware X = 0
 // guard ifelse(HillSlope<0, Top, Bottom) truncated unshared Top[g]/
 // Bottom[g] to length 1 in global fits — R's ifelse returns the length of
