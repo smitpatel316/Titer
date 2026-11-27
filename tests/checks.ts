@@ -19453,6 +19453,18 @@ check("titer_export_office accepts the mode and colour options through MCP (Offi
   ok(mcp.includes("Unknown office colour"), "the Rust tool must validate the colour");
   ok(mcp.includes('"mode": mode'), "the Rust tool must forward the mode to the job");
   ok(mcp.includes('"color_mode": color_mode'), "the Rust tool must forward the colour to the job");
+  // Black & white rides the shared colour-mode gate (export-graph /
+  // export-figure / copy), not just the office tool: the Rust constant
+  // and its format rule must know it, or the shell would refuse it
+  // before the page ever saw it.
+  ok(
+    mcp.includes('const EXPORT_COLOR_MODES: &[&str] = &["color", "grayscale", "cmyk", "blackwhite"]'),
+    "the Rust export colour modes must include blackwhite",
+  );
+  ok(
+    mcp.includes('if color_mode == "blackwhite" && format != "png"'),
+    "the Rust gate must refuse black & white for every format but PNG",
+  );
 });
 
 check("the graph and figure senders carry the chosen options into the render and the document (Office options)", () => {

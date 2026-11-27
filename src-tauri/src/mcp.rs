@@ -4586,8 +4586,8 @@ fn read_method_file(path: &str) -> Result<String, String> {
 /// <Documents>/Titer Exports (the L8 default-path rule). `width_in` /
 /// `height_in` override the graph's saved size, in inches (one alone
 /// derives the other from the saved aspect ratio). `color_mode` is
-/// color (default), grayscale, or cmyk — CMYK only for EPS, PDF and
-/// TIFF. PDF is true vector, falling back to raster when the drawing
+/// color (default), grayscale, cmyk, or blackwhite — CMYK only for EPS, PDF and
+/// TIFF; black & white only for PNG. PDF is true vector, falling back to raster when the drawing
 /// has content that can't be vectorised; EPS is true vector.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ExportGraphArgs {
@@ -4605,7 +4605,7 @@ pub struct ExportGraphArgs {
     /// "100" | "150" | "300" | "600" | "900" | "1200". Omit for "300".
     #[serde(default)]
     pub dpi: Option<String>,
-    /// "color" | "grayscale" | "cmyk". Omit for "color". CMYK only for EPS, PDF and TIFF (naive conversion, no ICC profile).
+    /// "color" | "grayscale" | "cmyk" | "blackwhite". Omit for "color". CMYK only for EPS, PDF and TIFF (naive conversion, no ICC profile); black & white only for PNG.
     #[serde(default)]
     pub color_mode: Option<String>,
     /// Where to write the file. Omit for the default path (see above).
@@ -4642,7 +4642,7 @@ pub struct ExportFigureArgs {
     /// "100" | "150" | "300" | "600" | "900" | "1200". Omit for "300".
     #[serde(default)]
     pub dpi: Option<String>,
-    /// "color" | "grayscale" | "cmyk". Omit for "color". CMYK only for EPS, PDF and TIFF (naive conversion, no ICC profile).
+    /// "color" | "grayscale" | "cmyk" | "blackwhite". Omit for "color". CMYK only for EPS, PDF and TIFF (naive conversion, no ICC profile); black & white only for PNG.
     #[serde(default)]
     pub color_mode: Option<String>,
     /// Where to write the file. Omit for the default path (see above).
@@ -4681,8 +4681,8 @@ pub struct CopyGraphImageArgs {
     /// "100" | "150" | "300" | "600" | "900" | "1200". Omit for "300".
     #[serde(default)]
     pub dpi: Option<String>,
-    /// "color" | "grayscale" | "cmyk". Omit for "color". CMYK falls back
-    /// to colour (the clipboard has no CMYK form, as the UI copy does).
+    /// "color" | "grayscale" | "cmyk" | "blackwhite". Omit for "color". CMYK falls back
+    /// to colour (the clipboard has no CMYK form, as the UI copy does); black & white only for PNG.
     #[serde(default)]
     pub color_mode: Option<String>,
 }
@@ -9423,7 +9423,7 @@ impl TiterMcpServer {
     /// TIFF at 300 DPI (an explicit format/dpi wins over the preset).
     #[tool(
         name = "titer_export_graph",
-        description = "Export one graph as an image file: format png/jpeg/svg/pdf/tiff/eps/bmp, dpi 100/150/300/600/900/1200 (default 300, ignored for SVG/EPS/PDF); preset publication = TIFF at 300 DPI (an explicit format/dpi wins over the preset). PDF is true vector (falls back to raster when the drawing has content that can't be vectorised); EPS is true vector. color_mode color/grayscale/cmyk (default color; CMYK only for EPS/PDF/TIFF, naive conversion, no ICC profile). Rendered offscreen — the graph need not be open on screen. path omitted = beside the project file, else <Documents>/Titer Exports. width_in/height_in override the graph's saved size in inches (one alone derives the other from the aspect ratio). Returns the written path, pixel size, vector flag, and capped/reason when the export was shrunk to the largest image Titer draws.",
+        description = "Export one graph as an image file: format png/jpeg/svg/pdf/tiff/eps/bmp, dpi 100/150/300/600/900/1200 (default 300, ignored for SVG/EPS/PDF); preset publication = TIFF at 300 DPI (an explicit format/dpi wins over the preset). PDF is true vector (falls back to raster when the drawing has content that can't be vectorised); EPS is true vector. color_mode color/grayscale/cmyk/blackwhite (default color; CMYK only for EPS/PDF/TIFF, naive conversion, no ICC profile; black & white only for PNG). Rendered offscreen — the graph need not be open on screen. path omitted = beside the project file, else <Documents>/Titer Exports. width_in/height_in override the graph's saved size in inches (one alone derives the other from the aspect ratio). Returns the written path, pixel size, vector flag, and capped/reason when the export was shrunk to the largest image Titer draws.",
         annotations(
             title = "Export graph",
             read_only_hint = false,
@@ -9504,7 +9504,7 @@ impl TiterMcpServer {
     /// 300 DPI (an explicit format/dpi wins over the preset).
     #[tool(
         name = "titer_export_figure",
-        description = "Export one figure as an image file: format png/jpeg/svg/pdf/tiff/eps/bmp, dpi 100/150/300/600/900/1200 (default 300, ignored for SVG/EPS/PDF); preset publication = TIFF at 300 DPI (an explicit format/dpi wins over the preset). PDF is true vector (falls back to raster when a panel has content that can't be vectorised); EPS is true vector. color_mode color/grayscale/cmyk (default color; CMYK only for EPS/PDF/TIFF, naive conversion, no ICC profile). Rendered offscreen — the figure need not be open on screen. width_in/height_in override the figure's saved size in inches (one alone derives the other from the aspect ratio). path omitted = beside the project file, else <Documents>/Titer Exports. Returns the written path, pixel size, vector flag, missing-panel count, and capped/reason when the export was shrunk.",
+        description = "Export one figure as an image file: format png/jpeg/svg/pdf/tiff/eps/bmp, dpi 100/150/300/600/900/1200 (default 300, ignored for SVG/EPS/PDF); preset publication = TIFF at 300 DPI (an explicit format/dpi wins over the preset). PDF is true vector (falls back to raster when a panel has content that can't be vectorised); EPS is true vector. color_mode color/grayscale/cmyk/blackwhite (default color; CMYK only for EPS/PDF/TIFF, naive conversion, no ICC profile; black & white only for PNG). Rendered offscreen — the figure need not be open on screen. width_in/height_in override the figure's saved size in inches (one alone derives the other from the aspect ratio). path omitted = beside the project file, else <Documents>/Titer Exports. Returns the written path, pixel size, vector flag, missing-panel count, and capped/reason when the export was shrunk.",
         annotations(
             title = "Export figure",
             read_only_hint = false,
@@ -9588,7 +9588,7 @@ impl TiterMcpServer {
     /// copied id, dpi, colour mode and pixel size.
     #[tool(
         name = "titer_copy_graph_image",
-        description = "Copy one graph (or a whole figure) to the system clipboard as a PNG at dpi 100/150/300/600/900/1200 (default 300), rendered offscreen — the graph/figure need not be open on screen. The GUI's one-click copy, driven headlessly (native pasteboard write: temp PNG + osascript as PNGf on macOS). Exactly one of graph_id / figure_id; with neither, the active graph/figure is copied. color_mode color/grayscale (default color; cmyk falls back to colour — the clipboard has no CMYK form). PNG only: a vector-PDF clipboard is best-effort on Mac only and is NOT offered here. An error (unknown id, nothing plotted) leaves the clipboard untouched. Returns the copied id, dpi, colour mode and pixel size.",
+        description = "Copy one graph (or a whole figure) to the system clipboard as a PNG at dpi 100/150/300/600/900/1200 (default 300), rendered offscreen — the graph/figure need not be open on screen. The GUI's one-click copy, driven headlessly (native pasteboard write: temp PNG + osascript as PNGf on macOS). Exactly one of graph_id / figure_id; with neither, the active graph/figure is copied. color_mode color/grayscale/blackwhite (default color; cmyk falls back to colour — the clipboard has no CMYK form; black & white only for PNG). PNG only: a vector-PDF clipboard is best-effort on Mac only and is NOT offered here. An error (unknown id, nothing plotted) leaves the clipboard untouched. Returns the copied id, dpi, colour mode and pixel size.",
         annotations(
             title = "Copy graph image",
             read_only_hint = false,
@@ -9620,7 +9620,7 @@ impl TiterMcpServer {
             let color_mode = args.color_mode.as_deref().unwrap_or("color");
             if !EXPORT_COLOR_MODES.contains(&color_mode) {
                 return Err(format!(
-                    "Unknown colour mode “{color_mode}” — the colour modes are color, grayscale, cmyk."
+                    "Unknown colour mode “{color_mode}” — the colour modes are color, grayscale, cmyk, blackwhite."
                 ));
             }
             let project_id = self.state.resolve_project(args.project_id.as_deref())?;
@@ -10123,20 +10123,28 @@ fn resolve_export_preset(
 }
 /// The export colour modes. CMYK exists only for EPS, PDF and TIFF
 /// (PNG/JPEG/SVG/BMP have no CMYK form — the naive print conversion,
-/// K = 1 − max, no ICC profile).
-const EXPORT_COLOR_MODES: &[&str] = &["color", "grayscale", "cmyk"];
+/// K = 1 − max, no ICC profile). Black & white exists only for PNG (a
+/// 50% luminance threshold — the Office send's mode, seq 217 remainder).
+const EXPORT_COLOR_MODES: &[&str] = &["color", "grayscale", "cmyk", "blackwhite"];
 
 /// A colour mode for a format: CMYK is refused for the formats that
-/// have no CMYK form, naming the ones that do.
+/// have no CMYK form, naming the ones that do; black & white is refused
+/// for every format but PNG.
 fn validate_color_mode(format: &str, color_mode: &str) -> Result<(), String> {
     if !EXPORT_COLOR_MODES.contains(&color_mode) {
         return Err(format!(
-            "Unknown colour mode “{color_mode}” — the colour modes are color, grayscale, cmyk."
+            "Unknown colour mode “{color_mode}” — the colour modes are color, grayscale, cmyk, blackwhite."
         ));
     }
     if color_mode == "cmyk" && !matches!(format, "eps" | "pdf" | "tiff") {
         return Err(
             "CMYK is only available for EPS, PDF and TIFF — PNG, JPEG, SVG and BMP have no CMYK form."
+                .to_string(),
+        );
+    }
+    if color_mode == "blackwhite" && format != "png" {
+        return Err(
+            "Black & white is only available for PNG — the other formats have no black & white form."
                 .to_string(),
         );
     }

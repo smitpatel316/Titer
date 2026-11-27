@@ -1025,8 +1025,9 @@ async function defaultCopyRender(
  *  PNG at `dpi` and write it to the system clipboard. Exactly one of
  *  `graph_id` / `figure_id`; with neither, the active graph/figure is
  *  copied. `dpi` 100/150/300/600/900/1200 (default 300);
- *  `color_mode` color/grayscale (default color; cmyk falls back to
- *  colour, as the UI copy does — the clipboard has no CMYK). */
+ *  `color_mode` color/grayscale/blackwhite (default color; cmyk falls back to
+ *  colour, as the UI copy does — the clipboard has no CMYK). Black & white
+ *  is the same PNG-only threshold the Office send uses (seq 217 remainder). */
 export async function executeCopyGraphImage(job: McpJob, deps: ExportJobDeps): Promise<ExportJobOutcome> {
   const args = argsOf(job);
   const graphId = optStr(job, args, "graph_id");
@@ -1040,8 +1041,8 @@ export async function executeCopyGraphImage(job: McpJob, deps: ExportJobDeps): P
   }
   const dpi = dpiRaw as Resolution;
   const colorModeRaw = optStr(job, args, "color_mode") ?? "color";
-  if (colorModeRaw !== "color" && colorModeRaw !== "grayscale" && colorModeRaw !== "cmyk") {
-    throw jobErr(job, `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk.`);
+  if (colorModeRaw !== "color" && colorModeRaw !== "grayscale" && colorModeRaw !== "cmyk" && colorModeRaw !== "blackwhite") {
+    throw jobErr(job, `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk, blackwhite (PNG only).`);
   }
   // CMYK falls back to colour, as the UI copy does (the clipboard has no CMYK).
   const colorMode = (colorModeRaw === "cmyk" ? "color" : colorModeRaw) as ColorMode;
