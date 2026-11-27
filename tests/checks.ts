@@ -45103,61 +45103,6 @@ check("r2-96 webr: the claim-timeout release is ownership-checked — a foreign 
   strictEqual(freed["deming"], 1, "the owner's own release must free the claim");
 });
 
-// BUG-REPORT Round 2 #90: `ensurePackages` checked only `status ===
-// "failed"` after awaiting a joined in-flight batch, so an evicted joined
-// batch settling while a retry had flipped the packages back to "loading"
-// resolved as success while packages were still loading — and the
-// downstream `library(...)` failed. It now loops until every wanted
-// package is `ready` (joining the retry's batch), throwing only on a
-// terminal `failed` or a spent deadline. Runtime half: a stub engine
-// (claim evals always win, install evals reject after 600 ms) runs the
-// exact interleaving — A times out and evicts, B joins A's batch, C
-// retries and flips the state back to loading — and B must reject, not
-// resolve. This pin runs last and leaves `connectR` stubbed: nothing
-// after it needs the live engine (the runner only tallies and exits).
-check("r2-90 webr: ensurePackages does not resolve until every package is ready (evicted joined batch)", async () => {
-  const webr = readFileSync("src/stats/webr.ts", "utf8");
-  const ensureFn = webr.slice(webr.indexOf("export async function ensurePackages"), webr.indexOf("/** B2 — evict every package"));
-  ok(
-    /while \(!wanted\.every\(\(n\) => stateOf\(n\)\.status === "ready"\)\)/.test(ensureFn),
-    "ensurePackages must loop until every wanted package is ready",
-  );
-
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  connectR(async (code: string): Promise<RVector> => {
-    if (code.includes("webr::install")) {
-      await sleep(600);
-      throw new Error("stub install failure");
-    }
-    if (code.includes("c(released=1)")) return { released: 1 };
-    if (code.includes(".helix_install_claims")) return { survival: 1 };
-    return {};
-  });
-  const outcome: Record<string, string> = {};
-  const a = ensurePackages(["survival"], { timeoutMs: 300 }).then(
-    () => { outcome.A = "resolved"; },
-    (e: unknown) => { outcome.A = `rejected:${e instanceof Error ? e.name : e}`; },
-  );
-  await sleep(50);
-  const b = ensurePackages(["survival"], { timeoutMs: 5000 }).then(
-    () => { outcome.B = "resolved"; },
-    (e: unknown) => { outcome.B = `rejected:${e instanceof Error ? e.name : e}`; },
-  );
-  await sleep(300); // t=350: A has timed out + evicted; C retries.
-  const c = ensurePackages(["survival"], { timeoutMs: 5000 }).then(
-    () => { outcome.C = "resolved"; },
-    (e: unknown) => { outcome.C = `rejected:${e instanceof Error ? e.name : e}`; },
-  );
-  await Promise.allSettled([a, b, c]);
-  ok(outcome.A?.startsWith("rejected:"), `A must time out and reject, got ${outcome.A}`);
-  ok(outcome.C?.startsWith("rejected:"), `the retry C must reject on its failed install, got ${outcome.C}`);
-  ok(
-    outcome.B?.startsWith("rejected:"),
-    `the joined caller B must not resolve while the retry is still loading, got ${outcome.B} (status ${packageStatus("survival").status})`,
-  );
-});
-
-
 // ── Seq 200 remainder: nonlinear fitting completion ────────────────────
 // Pre-fix-fail pins (Nov 26): one per sub-item — convergence criteria +
 // max iterations, general 1/Y^K weighting, fit-means vs fit-replicates,
@@ -45591,3 +45536,61 @@ process.exitCode = failed ? 1 : 0;
 // process alive forever and `npm test` stalls here.
 repoServer?.close();
 process.exit(process.exitCode);
+
+
+
+// BUG-REPORT Round 2 #90: `ensurePackages` checked only `status ===
+// "failed"` after awaiting a joined in-flight batch, so an evicted joined
+// batch settling while a retry had flipped the packages back to "loading"
+// resolved as success while packages were still loading — and the
+// downstream `library(...)` failed. It now loops until every wanted
+// package is `ready` (joining the retry's batch), throwing only on a
+// terminal `failed` or a spent deadline. Runtime half: a stub engine
+// (claim evals always win, install evals reject after 600 ms) runs the
+// exact interleaving — A times out and evicts, B joins A's batch, C
+// retries and flips the state back to loading — and B must reject, not
+// resolve. This pin runs last and leaves `connectR` stubbed: nothing
+// after it needs the live engine (the runner only tallies and exits).
+// Keep it last: any check added after it gets the stub instead of R
+// (the seq-200 pins sit above it for this reason).
+check("r2-90 webr: ensurePackages does not resolve until every package is ready (evicted joined batch)", async () => {
+  const webr = readFileSync("src/stats/webr.ts", "utf8");
+  const ensureFn = webr.slice(webr.indexOf("export async function ensurePackages"), webr.indexOf("/** B2 — evict every package"));
+  ok(
+    /while \(!wanted\.every\(\(n\) => stateOf\(n\)\.status === "ready"\)\)/.test(ensureFn),
+    "ensurePackages must loop until every wanted package is ready",
+  );
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  connectR(async (code: string): Promise<RVector> => {
+    if (code.includes("webr::install")) {
+      await sleep(600);
+      throw new Error("stub install failure");
+    }
+    if (code.includes("c(released=1)")) return { released: 1 };
+    if (code.includes(".helix_install_claims")) return { survival: 1 };
+    return {};
+  });
+  const outcome: Record<string, string> = {};
+  const a = ensurePackages(["survival"], { timeoutMs: 300 }).then(
+    () => { outcome.A = "resolved"; },
+    (e: unknown) => { outcome.A = `rejected:${e instanceof Error ? e.name : e}`; },
+  );
+  await sleep(50);
+  const b = ensurePackages(["survival"], { timeoutMs: 5000 }).then(
+    () => { outcome.B = "resolved"; },
+    (e: unknown) => { outcome.B = `rejected:${e instanceof Error ? e.name : e}`; },
+  );
+  await sleep(300); // t=350: A has timed out + evicted; C retries.
+  const c = ensurePackages(["survival"], { timeoutMs: 5000 }).then(
+    () => { outcome.C = "resolved"; },
+    (e: unknown) => { outcome.C = `rejected:${e instanceof Error ? e.name : e}`; },
+  );
+  await Promise.allSettled([a, b, c]);
+  ok(outcome.A?.startsWith("rejected:"), `A must time out and reject, got ${outcome.A}`);
+  ok(outcome.C?.startsWith("rejected:"), `the retry C must reject on its failed install, got ${outcome.C}`);
+  ok(
+    outcome.B?.startsWith("rejected:"),
+    `the joined caller B must not resolve while the retry is still loading, got ${outcome.B} (status ${packageStatus("survival").status})`,
+  );
+});
