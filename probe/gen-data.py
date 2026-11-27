@@ -58,6 +58,20 @@ ym = [1000 + 2 * (a - BASE) - 1.5 * (b - BASE) + g(0, 0.2) for a, b in zip(x1, x
 # --- Compare slopes: C = 3*x + 1000 + noise on the same X (slope 3).
 # Drawn AFTER every earlier dataset, so the existing tables are unchanged.
 ys_c = [3 * x + 1000 + g(0, 0.1) for x in xs]
+# --- Nested ANOVA: 3 groups x 3 subgroups x 3 replicates, ~1e13 ---
+# Group offsets 0 / 1.8 / 3.6, subgroup jitter N(0, 0.3), replicate noise
+# N(0, 0.15). The subcolumn means (what R sees) spread ~0.3 within a group
+# and ~1.8 between groups — the uncentered aov loses ~1% of F here.
+nested_raw = []
+for gi in range(3):
+    off = gi * 1.8
+    for si in range(3):
+        jit = g(0, 0.3)
+        nested_raw.append([BASE + off + jit + g(0, 0.15) for _ in range(3)])
+# TS subgroup means: JS `mean` is a naive left-to-right double sum / n, and
+# Python's float sum matches it op-for-op, so these are the exact doubles R
+# receives (the pooled means, one per subgroup, in column order).
+nested_means = [[sum(sub) / 3 for sub in nested_raw[gi * 3:(gi + 1) * 3]] for gi in range(3)]
 
 
 # --- exact helpers (mpmath, 50 digits; inputs are the exact doubles) ---
@@ -426,6 +440,36 @@ expected = {
     "slopesThree": slopes_exact(xs, [ys, ys_o, ys_c]),
 }
 
+# nested ANOVA exact: main table from the TS subgroup means, plus the
+# Tukey HSD and Bonferroni post-hoc p-values (equal n = 3, dfw = 6).
+# NOTE on the Tukey values: they are the true exact values (scipy's
+# studentized_range.sf agrees with independent quad integration of the
+# studentized-range density to ~1e-11). R's own ptukey cannot reproduce the
+# 0_2 pair: at q ≈ 16.6, df 6 it returns 5.7064e-05 against the exact
+# 5.7128e-05 — a 1.1e-3 far-tail floor in R, not in the fit (the fit's diffs
+# and MSE are exact to ~1e-15). tests/reference.ts therefore checks that
+# pair at 2e-3, the other two at 1e-6.
+from scipy.stats import studentized_range
+from scipy.stats import t as tdist
+
+_nested = anova_exact(nested_means)
+_nm = [mpf_list(v) for v in nested_means]
+_nmeans = [sum(v) / len(v) for v in _nm]
+_ngm = sum(sum(v) for v in _nm) / 9
+_msw = mp.mpf(_nested["ssE"]) / 6
+_tukey = {}
+_bonf = {}
+for _i in range(3):
+    for _j in range(_i + 1, 3):
+        _d = abs(_nmeans[_i] - _nmeans[_j])
+        _q = _d / mp.sqrt(_msw / 3)
+        _tukey[f"{_i}_{_j}"] = float(studentized_range.sf(float(_q), 3, 6))
+        _t = _d / mp.sqrt(_msw * (mp.mpf(1) / 3 + mp.mpf(1) / 3))
+        _bonf[f"{_i}_{_j}"] = float(min(1, 3 * 2 * tdist.sf(float(_t), 6)))
+expected["nestedBig"] = {
+    **_nested, "grand": float(_ngm), "tukey": _tukey, "bonferroni": _bonf,
+}
+
 # origin exact (slope-only): slope = sum(x*y)/sum(x^2), se from sigma^2/sum(x^2)
 Xo, Yo = mpf_list(xs), mpf_list(ys_o)
 sxy = sum(a * b for a, b in zip(Xo, Yo))
@@ -473,6 +517,11 @@ tables = {
     "xyBigSlopes": {"columns": ["Title", "X", "A", "B", "C"],
                     "rows": [["", repr(x), repr(a), repr(b), repr(c)]
                              for x, a, b, c in zip(xs, ys, ys_o, ys_c)]},
+    "nestedBig": {"columns": ["Title"] + [f"{g}:S{s}:R{r}"
+                                           for g in ("Control", "Treated", "High")
+                                           for s in (1, 2, 3) for r in (1, 2, 3)],
+                  "rows": [[""] + [repr(v) for sub in nested_raw for v in sub]],
+                  "groups": 3, "subgroups": 3, "replicates": 3},
 }
 
 (WT / "tests" / "testdata").mkdir(parents=True, exist_ok=True)
