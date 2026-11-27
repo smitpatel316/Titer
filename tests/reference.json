@@ -48601,7 +48601,7 @@
     "n": 10
    }
   ],
-  "notes": "Ordinary least-squares regression of “Weight” on 3 predictor(s), fit on 9 complete rows. Each coefficient's P value tests whether that predictor's slope differs from zero, holding the others fixed. “Height” and “Age” and “Dose” are strongly collinear with the other predictor(s) (VIF above 10) — their coefficient is imprecise.",
+  "notes": "Ordinary least-squares regression of “Weight” on 3 predictor(s), fit on 9 complete rows. Each coefficient's P value tests whether that predictor's slope differs from zero, holding the others fixed. “Height” and “Age” and “Dose” are strongly collinear with the other predictor(s) (VIF above 10) — their coefficient is imprecise. Row 8 has a Cook's distance of 2.40 (above 1). Durbin–Watson 2.78 — above 2.5, so the residuals may be negatively autocorrelated in row order. The residuals' size varies with the fitted values (Spearman P < 0.05) — the scatter may not be constant.",
   "coefficients": [
    {
     "term": "Intercept",
@@ -48698,6 +48698,112 @@
     ]
    ]
   },
+  "residuals": [
+   {
+    "row": 1,
+    "observed": 70,
+    "fitted": 70.22329398,
+    "residual": -0.2232939784,
+    "standardized": -0.298918,
+    "leverage": 0.5476502817,
+    "cooks": 0.02704413751
+   },
+   {
+    "row": 2,
+    "observed": 82,
+    "fitted": 81.70879955,
+    "residual": 0.2912004527,
+    "standardized": 0.3176603035,
+    "leverage": 0.3187874579,
+    "cooks": 0.01180550292
+   },
+   {
+    "row": 3,
+    "observed": 65,
+    "fitted": 64.65285387,
+    "residual": 0.3471461275,
+    "standardized": 0.3874340452,
+    "leverage": 0.3491910384,
+    "cooks": 0.02013469873
+   },
+   {
+    "row": 4,
+    "observed": 90,
+    "fitted": 91.88808293,
+    "residual": -1.888082928,
+    "standardized": -2.211008796,
+    "leverage": 0.4088664249,
+    "cooks": 0.8453114875
+   },
+   {
+    "row": 5,
+    "observed": 75,
+    "fitted": 74.59245827,
+    "residual": 0.4075417342,
+    "standardized": 0.408183303,
+    "leverage": 0.1919129562,
+    "cooks": 0.009892285266
+   },
+   {
+    "row": 6,
+    "observed": 58,
+    "fitted": 58.14967719,
+    "residual": -0.149677187,
+    "standardized": -0.1950748488,
+    "leverage": 0.5227641022,
+    "cooks": 0.01042113975
+   },
+   {
+    "row": 7,
+    "observed": 88,
+    "fitted": 87.01070041,
+    "residual": 0.9892995859,
+    "standardized": 1.182559609,
+    "leverage": 0.4326722741,
+    "cooks": 0.2666313117
+   },
+   {
+    "row": 8,
+    "observed": 72,
+    "fitted": 72.64709211,
+    "residual": -0.647092111,
+    "standardized": -1.408737906,
+    "leverage": 0.8289605679,
+    "cooks": 2.40457339
+   },
+   {
+    "row": 9,
+    "observed": 95,
+    "fitted": 94.1270417,
+    "residual": 0.8729583044,
+    "standardized": 1.014002236,
+    "leverage": 0.3991948967,
+    "cooks": 0.1707926597
+   }
+  ],
+  "residualDiagnostics": {
+   "durbinWatson": 2.777240693,
+   "shapiroWilk": {
+    "statistic": 0.9022187343,
+    "p": 0.2651395633
+   },
+   "dagostinoPearson": {
+    "statistic": null,
+    "p": null
+   },
+   "andersonDarling": {
+    "statistic": 0.3900805117,
+    "p": 0.3023540923
+   },
+   "kolmogorovSmirnov": {
+    "statistic": 0.1854742353,
+    "p": 0.8635024109
+   },
+   "heteroscedasticity": {
+    "rho": 0.8,
+    "p": 0.01382826279
+   }
+  },
   "analyzed": {
    "sets": [
     {
@@ -48775,7 +48881,7 @@
     "n": 10
    }
   ],
-  "notes": "Ordinary least-squares regression of “Weight” on 2 predictor(s), fit on 9 complete rows. Each coefficient's P value tests whether that predictor's slope differs from zero, holding the others fixed.",
+  "notes": "Ordinary least-squares regression of “Weight” on 2 predictor(s), fit on 9 complete rows. Each coefficient's P value tests whether that predictor's slope differs from zero, holding the others fixed. Row 8 has a Cook's distance of 1.53 (above 1).",
   "coefficients": [
    {
     "term": "Intercept",
@@ -48850,6 +48956,112 @@
      0.04085726266
     ]
    ]
+  },
+  "residuals": [
+   {
+    "row": 1,
+    "observed": 70,
+    "fitted": 71.37339129,
+    "residual": -1.373391293,
+    "standardized": -0.9107966216,
+    "leverage": 0.4820819337,
+    "cooks": 0.2573838917
+   },
+   {
+    "row": 2,
+    "observed": 82,
+    "fitted": 83.32715537,
+    "residual": -1.327155371,
+    "standardized": -0.7033277619,
+    "leverage": 0.1889580452,
+    "cooks": 0.03841637063
+   },
+   {
+    "row": 3,
+    "observed": 65,
+    "fitted": 64.13418955,
+    "residual": 0.8658104459,
+    "standardized": 0.5070482762,
+    "leverage": 0.3358558915,
+    "cooks": 0.04333791495
+   },
+   {
+    "row": 4,
+    "observed": 90,
+    "fitted": 90.15473885,
+    "residual": -0.1547388527,
+    "standardized": -0.08584623606,
+    "leverage": 0.259932161,
+    "cooks": 0.0008627992273
+   },
+   {
+    "row": 5,
+    "observed": 75,
+    "fitted": 73.53035632,
+    "residual": 1.46964368,
+    "standardized": 0.7545905728,
+    "leverage": 0.135994204,
+    "cooks": 0.02987481601
+   },
+   {
+    "row": 6,
+    "observed": 58,
+    "fitted": 57.32857801,
+    "residual": 0.6714219851,
+    "standardized": 0.4484238583,
+    "leverage": 0.4893433445,
+    "cooks": 0.06423043405
+   },
+   {
+    "row": 7,
+    "observed": 88,
+    "fitted": 85.0505302,
+    "residual": 2.949469802,
+    "standardized": 1.617062141,
+    "leverage": 0.242208391,
+    "cooks": 0.2785938704
+   },
+   {
+    "row": 8,
+    "observed": 72,
+    "fitted": 75.25373115,
+    "residual": -3.253731147,
+    "standardized": -2.179070138,
+    "leverage": 0.4921491141,
+    "cooks": 1.533845642
+   },
+   {
+    "row": 9,
+    "observed": 95,
+    "fitted": 94.84732925,
+    "residual": 0.1526707502,
+    "standardized": 0.09205448493,
+    "leverage": 0.373476915,
+    "cooks": 0.001683818726
+   }
+  ],
+  "residualDiagnostics": {
+   "durbinWatson": 2.444886866,
+   "shapiroWilk": {
+    "statistic": 0.9822779561,
+    "p": 0.9749608305
+   },
+   "dagostinoPearson": {
+    "statistic": null,
+    "p": null
+   },
+   "andersonDarling": {
+    "statistic": 0.1761336737,
+    "p": 0.8904492943
+   },
+   "kolmogorovSmirnov": {
+    "statistic": 0.1326876857,
+    "p": 0.9905951661
+   },
+   "heteroscedasticity": {
+    "rho": -0.2,
+    "p": 0.6134038801
+   }
   },
   "analyzed": {
    "sets": [
@@ -48930,7 +49142,7 @@
     "n": 12
    }
   ],
-  "notes": "Ordinary least-squares regression of “Y” on 2 predictor(s), fit on 12 complete rows. Each coefficient's P value tests whether that predictor's slope differs from zero, holding the others fixed.",
+  "notes": "Ordinary least-squares regression of “Y” on 2 predictor(s), fit on 12 complete rows. Each coefficient's P value tests whether that predictor's slope differs from zero, holding the others fixed. Row 8 has high leverage (0.520, above 2p/n = 0.500). Row 9 has high leverage (0.668, above 2p/n = 0.500) and a Cook's distance of 2.41 (above 1).",
   "coefficients": [
    {
     "term": "Intercept",
@@ -49005,6 +49217,139 @@
      0.001212407536
     ]
    ]
+  },
+  "residuals": [
+   {
+    "row": 1,
+    "observed": 1000.779352,
+    "fitted": 1000.74119,
+    "residual": 0.03816171212,
+    "standardized": 0.3107097051,
+    "leverage": 0.2302531922,
+    "cooks": 0.0096260064
+   },
+   {
+    "row": 2,
+    "observed": 999.493609,
+    "fitted": 999.4662422,
+    "residual": 0.02736676453,
+    "standardized": 0.2139414672,
+    "leverage": 0.1650532023,
+    "cooks": 0.003016017355
+   },
+   {
+    "row": 3,
+    "observed": 997.0167264,
+    "fitted": 997.1344684,
+    "residual": -0.1177420266,
+    "standardized": -0.9595597473,
+    "leverage": 0.2317177451,
+    "cooks": 0.09256808503
+   },
+   {
+    "row": 4,
+    "observed": 1005.258879,
+    "fitted": 1005.414665,
+    "residual": -0.1557856152,
+    "standardized": -1.303290371,
+    "leverage": 0.2709217099,
+    "cooks": 0.210392745
+   },
+   {
+    "row": 5,
+    "observed": 997.5339628,
+    "fitted": 997.5385888,
+    "residual": -0.004625972763,
+    "standardized": -0.03751238117,
+    "leverage": 0.2240053815,
+    "cooks": 0.0001354028336
+   },
+   {
+    "row": 6,
+    "observed": 1001.147854,
+    "fitted": 1001.153197,
+    "residual": -0.005343624732,
+    "standardized": -0.04070678778,
+    "leverage": 0.1206939356,
+    "cooks": 0.00007581546305
+   },
+   {
+    "row": 7,
+    "observed": 1002.055014,
+    "fitted": 1001.909978,
+    "residual": 0.1450364718,
+    "standardized": 1.087968417,
+    "leverage": 0.09317453245,
+    "cooks": 0.04054010182
+   },
+   {
+    "row": 8,
+    "observed": 1007.695283,
+    "fitted": 1007.78151,
+    "residual": -0.08622633762,
+    "standardized": -0.8888365463,
+    "leverage": 0.5197825844,
+    "cooks": 0.2850403677
+   },
+   {
+    "row": 9,
+    "observed": 1002.689276,
+    "fitted": 1002.536541,
+    "residual": 0.1527356309,
+    "standardized": 1.894525927,
+    "leverage": 0.6683488925,
+    "cooks": 2.411024549
+   },
+   {
+    "row": 10,
+    "observed": 1001.503254,
+    "fitted": 1001.368987,
+    "residual": 0.1342667513,
+    "standardized": 1.043257253,
+    "leverage": 0.1548068505,
+    "cooks": 0.06645012129
+   },
+   {
+    "row": 11,
+    "observed": 999.561141,
+    "fitted": 999.4547828,
+    "residual": 0.1063582222,
+    "standardized": 0.8062603385,
+    "leverage": 0.1120400504,
+    "cooks": 0.02734067648
+   },
+   {
+    "row": 12,
+    "observed": 998.1947408,
+    "fitted": 998.4289428,
+    "residual": -0.2342019759,
+    "standardized": -1.881302656,
+    "leverage": 0.2092019232,
+    "cooks": 0.3121017118
+   }
+  ],
+  "residualDiagnostics": {
+   "durbinWatson": 1.676929213,
+   "shapiroWilk": {
+    "statistic": 0.9371566731,
+    "p": 0.4621390694
+   },
+   "dagostinoPearson": {
+    "statistic": null,
+    "p": null
+   },
+   "andersonDarling": {
+    "statistic": 0.2897369958,
+    "p": 0.5498842041
+   },
+   "kolmogorovSmirnov": {
+    "statistic": 0.1498363172,
+    "p": 0.9142489957
+   },
+   "heteroscedasticity": {
+    "rho": 0.2867132867,
+    "p": 0.3664084561
+   }
   },
   "analyzed": {
    "sets": [
@@ -72148,6 +72493,61 @@
      "text": "Fitted count",
      "standoff": 2
     }
+   }
+  }
+ },
+ "graph covariance-heatmap multiple": {
+  "data": [],
+  "layout": {
+   "paper_bgcolor": "#ffffff",
+   "plot_bgcolor": "#ffffff",
+   "dragmode": false,
+   "font": {
+    "color": "#111827",
+    "family": "system-ui, -apple-system, sans-serif",
+    "size": 13
+   },
+   "margin": {
+    "l": 16,
+    "r": 78,
+    "t": 16,
+    "b": 16
+   },
+   "showlegend": false,
+   "xaxis": {
+    "type": "category",
+    "categoryorder": "array",
+    "categoryarray": [],
+    "autotickangles": [
+     0,
+     90
+    ],
+    "showgrid": false,
+    "zeroline": false,
+    "linecolor": "#111827",
+    "linewidth": 1,
+    "ticks": "outside",
+    "ticklen": 5,
+    "tickwidth": 1,
+    "exponentformat": "none",
+    "fixedrange": true,
+    "automargin": true
+   },
+   "yaxis": {
+    "type": "category",
+    "categoryorder": "array",
+    "categoryarray": [],
+    "autorange": "reversed",
+    "showgrid": false,
+    "zeroline": false,
+    "linecolor": "#111827",
+    "linewidth": 1,
+    "ticks": "outside",
+    "ticklen": 5,
+    "tickwidth": 1,
+    "exponentformat": "none",
+    "fixedrange": true,
+    "automargin": true
    }
   }
  },
