@@ -1052,11 +1052,9 @@ impl MockProvider {
 // caller. Errors are plain strings: no key, no value, no keychain detail ever
 // leaves Rust.
 //
-// PENDING: registration in `generate_handler!` (src-tauri/src/main.rs) —
-// that file is owned by the `bugfix/br-1-81-main-rs` lane. Until the three
-// lines land, invoking these commands fails with Tauri's unknown-command
-// error (surfaced plainly by the TS side). The `#[tauri::command]` macro
-// generates the caller, so these fns are not dead code before then.
+// Registered in `generate_handler!` (src-tauri/src/main.rs) as
+// `cloud::plugin_secure_get/set/delete` — the TS side invokes them by
+// those names (see src/plugins/secure-storage.ts).
 
 /// Keychain service for plugin storage entries (separate from the cloud
 /// service: plugin entries must never be mistaken for cloud accounts).
@@ -1095,10 +1093,6 @@ fn plugin_secure_entry(plugin_id: &str, key: &str) -> Result<keyring::Entry, Str
 
 /// Store a plugin's secret in the OS keychain. Overwrites any previous
 /// value under the same (plugin id, key).
-// dead_code is allowed until the `generate_handler!` registration lands
-// (main.rs, owned by the br-1-81 lane): until then nothing calls these
-// commands, and the helpers they call are dead with them.
-#[allow(dead_code)]
 #[tauri::command]
 pub fn plugin_secure_set(plugin_id: String, key: String, value: String) -> Result<(), String> {
     if !plugin_secure_valid_id(&plugin_id) || !plugin_secure_valid_key(&key) {
@@ -1116,7 +1110,6 @@ pub fn plugin_secure_set(plugin_id: String, key: String, value: String) -> Resul
 
 /// Read a plugin's secret from the OS keychain. `None` when nothing is
 /// stored under the key — a missing key is not an error.
-#[allow(dead_code)]
 #[tauri::command]
 pub fn plugin_secure_get(plugin_id: String, key: String) -> Result<Option<String>, String> {
     if !plugin_secure_valid_id(&plugin_id) || !plugin_secure_valid_key(&key) {
@@ -1135,7 +1128,6 @@ pub fn plugin_secure_get(plugin_id: String, key: String) -> Result<Option<String
 
 /// Delete a plugin's secret from the OS keychain. Returns whether
 /// anything was stored (`false` when the key was already absent).
-#[allow(dead_code)]
 #[tauri::command]
 pub fn plugin_secure_delete(plugin_id: String, key: String) -> Result<bool, String> {
     if !plugin_secure_valid_id(&plugin_id) || !plugin_secure_valid_key(&key) {
