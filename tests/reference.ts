@@ -3543,8 +3543,14 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["nested3", nested3, "nested-anova", { posthoc: "bonferroni" }],
   // 1e13-scale precision (Nov 2026): nested ANOVA on subcolumn means — pre-fix
   // the uncentered F was 69.119 against the exact 68.981, the Tukey p-values
-  // up to 5.9e-3 off; post-fix all match the mpmath exact values
-  // (probe/expected-precision.json) to ~1e-12.
+  // up to 5.9e-3 off; post-fix the main table matches the mpmath exact values
+  // (probe/expected-precision.json) to ~1e-12. The Tukey p-values do NOT
+  // match to 1e-12: R's ptukey itself is ~1.1e-3 off the true
+  // studentized-range sf in the far tail (q ~ 16.6, pair 0_2 — verified
+  // against scipy + independent quadrature, which agree to ~1e-11; the
+  // other two pairs agree with R to ~2e-11), so that pair is pinned at
+  // 2e-3 and the other two at 1e-6 (see the disagreements() check below).
+  // All three still fail pre-fix (5.9e-3 / 5.3e-3 / 1.4e-3 off).
   ["nestedBig", nestedBig, "nested-anova", { posthoc: "none" }],
   ["nestedBig", nestedBig, "nested-anova", { posthoc: "tukey" }],
   ["nestedBig", nestedBig, "nested-anova", { posthoc: "bonferroni" }],
@@ -4239,8 +4245,13 @@ async function disagreements(): Promise<string[]> {
   // (probe/expected-precision.json, computed from the TS subgroup means — the
   // doubles R receives). Pre-fix the F was 69.119 against the exact 68.981
   // and the Tukey p-values up to 5.9e-3 off; post-fix the main table matches
-  // to ~1e-12 and the post-hoc p-values to the scipy studentized-range / t
-  // values below (tolerances carry headroom over the measured agreement).
+  // to ~1e-12 and the Bonferroni p-values to ~1e-15. The Tukey p-values are
+  // pinned per pair, not at a flat 1e-6: R's ptukey itself is ~1.1e-3 off the
+  // true studentized-range sf in the far tail (q ~ 16.6, pair 0_2 — scipy
+  // and an independent quadrature agree to ~1e-11 there, and R's other two
+  // pairs agree to ~2e-11), so 1e-6 is unachievable through TukeyHSD for
+  // that pair; it is checked at 2e-3, the other two at 1e-6. All three
+  // still fail pre-fix (5.9e-3 / 5.3e-3 / 1.4e-3 off).
   {
     const nStat = (r: AnalysisResult | { error: string }, label: string) =>
       "error" in r ? null : r.stats.find((s) => s.label === label)?.value;
@@ -4262,9 +4273,17 @@ async function disagreements(): Promise<string[]> {
       ["tukey", [0.0017704410897247946, 5.7127634021991724e-05, 0.003982732802081279]],
       ["bonferroni", [0.0021864560260264443, 6.93679079560287e-05, 0.004960154226929977]],
     ] as const) {
+      // Tukey's 0_2 pair gets a 2e-3 tolerance, not 1e-6: at q ≈ 16.6 R's own
+      // ptukey is the floor — ptukey(16.594, 3, 6, lower.tail=FALSE) returns
+      // 5.7064e-05 against the exact 5.7128e-05 (verified by independent
+      // scipy quad integration, which agrees with scipy's sf to ~1e-11),
+      // while the fit's diffs and MSE are exact to ~1e-15. Pre-fix the three
+      // Tukey p-values were 5.9e-3 / 5.3e-3 / 1.4e-3 off, so all three
+      // tolerances still fail on uncentered code.
+      const tol = posthoc === "tukey" ? [1e-6, 2e-3, 1e-6] : [1e-6, 1e-6, 1e-6];
       const r = await runAnalysis("nested-anova", nestedBig, { posthoc });
       const ps = "error" in r ? [] : (r.comparisons ?? []).map((c) => c.p);
-      if (ps.length !== 3 || ps.some((p, i) => rel(p, want[i]) > 1e-6))
+      if (ps.length !== 3 || ps.some((p, i) => rel(p, want[i]) > tol[i]))
         out.push(`Nested ANOVA ${posthoc} at 1e13: p-values ${JSON.stringify(ps)}`);
     }
   }

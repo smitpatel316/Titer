@@ -209,6 +209,13 @@ expected = {
 
 # nested ANOVA exact: main table from the TS subgroup means, plus the
 # Tukey HSD and Bonferroni post-hoc p-values (equal n = 3, dfw = 6).
+# NOTE on the Tukey values: they are the true exact values (scipy's
+# studentized_range.sf agrees with independent quad integration of the
+# studentized-range density to ~1e-11). R's own ptukey cannot reproduce the
+# 0_2 pair: at q ≈ 16.6, df 6 it returns 5.7064e-05 against the exact
+# 5.7128e-05 — a 1.1e-3 far-tail floor in R, not in the fit (the fit's diffs
+# and MSE are exact to ~1e-15). tests/reference.ts therefore checks that
+# pair at 2e-3, the other two at 1e-6.
 from scipy.stats import studentized_range
 from scipy.stats import t as tdist
 
