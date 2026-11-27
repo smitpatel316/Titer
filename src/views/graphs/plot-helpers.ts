@@ -22,6 +22,11 @@ import { paletteColor, paletteOf, withOpacity } from "../../lib/palettes";
 import { boxOf, geometricCi, geometricMean, geometricSdFactor, mean, median, quantile, sd, sem } from "../../lib/summary";
 import { summaryFormatDef, type SummaryFormat } from "../../lib/summary-format";
 import { tCrit95 } from "../../lib/student-t";
+import { parseCell } from "../../lib/numeric";
+
+/** The axes of most graphs: categories along X, values up Y; of XY graphs, values on both. */
+export const CATEGORY_AXES = () => ({ x: "labels", y: "scale" }) as const;
+export const XY_AXES = () => ({ x: "scale", y: "scale" }) as const;
 
 export const INK = "#111827"; // axes + titles only
 export const GUIDE = "#9CA3AF"; // what guides the eye: threshold lines, a name's leader line
@@ -449,6 +454,8 @@ export function axesRangeInputs(graphType: GraphType): { x: boolean; y: boolean 
  *  panel: heatmap and volcano have no Y scale). */
 export function logScaleOffered(graphType: GraphType): { x: boolean; y: boolean } {
   if (graphType === "roc-curve") return { x: false, y: false };
+  // A forest plot's Y is its covariate names, not values: no log scale there.
+  if (graphType === "forest-plot") return { x: true, y: false };
   return { x: true, y: true };
 }
 
@@ -808,10 +815,77 @@ function axisChrome(options: GraphOptions, grid: GraphOptions["gridX"] = "none")
     ticks,
     ticklen: options.tickLength,
     tickwidth: options.axisWidth,
+    // Numbers written out (100,000; 0.00001), never Plotly's SI suffixes: "0.1M" reads as
+    // molar, "10µ" as micro.
+    exponentformat: "none",
     fixedrange: true,
     automargin: true,
   };
 }
+
+/** An axis of categories (columns, rows) at `positions`, a label each; those that would
+ *  overlap are thinned once the graph is drawn (`fitLabels`). Labels turn straight to
+ *  vertical as the graph narrows: at Plotly's 30° step the last one would slip off the
+ *  right edge and be dropped. */
+const categoryTicks = (labels: string[], positions: number[]) => ({
+  tickmode: "array",
+  tickvals: positions,
+  ticktext: labels,
+  autotickangles: [0, 90],
+});
+
+/** The places in `positions` (in order) kept at least `gap` apart, from the first. */
+function spaced(positions: number[], gap: number): number[] {
+  const kept: number[] = [];
+  positions.forEach((p, i) => {
+    if (!kept.length || Math.abs(p - positions[kept.at(-1)!]) >= gap - 1e-9) kept.push(i);
+  });
+  return kept;
+}
+
+/** An axis as Plotly drew it: its length in px, its range (log10 of the values on a log
+ *  axis, places on an axis of categories), and its ticks, each at such a place. */
+type DrawnAxis = { _length?: number; range?: number[]; type?: string; _vals?: { x: number; text: string }[] };
+
+/** What spaces the labels of any axis that overlap once drawn (`layout` as given, `drawn`
+ *  as Plotly resolved it), never closer than Plotly's own spacing for categories (1.2 × the
+ *  font size): an axis whose ticks are listed (categories, a log axis's powers) keeps only
+ *  some, an axis of numbers whose step was typed too small for its length (Plotly draws a
+ *  thousand ticks at most, then none) takes the smallest round multiple of it that fits
+ *  (1 on 0 to 1000000: every 100000). Null when every label fits. */
+export function fitLabels(
+  layout: Record<string, unknown>,
+  drawn: Record<string, DrawnAxis | undefined>,
+  fontSize: number,
+): Record<string, unknown> | null {
+  const update: Record<string, unknown> = {};
+  for (const name of ["xaxis", "yaxis"] as const) {
+    const { _length, range, type, _vals } = drawn[name] ?? {};
+    if (!_length || !range || !_vals || _vals.length < 2) continue;
+    const gap = (Math.round(1.2 * fontSize) * Math.abs(range[1] - range[0])) / _length;
+    const at = _vals.map((v) => v.x);
+    const kept = spaced(at, gap);
+    if (kept.length === at.length) continue;
+    if ((layout[name] as { tickvals?: unknown } | undefined)?.tickvals) {
+      update[`${name}.tickvals`] = kept.map((i) => (type === "log" ? 10 ** at[i] : at[i]));
+      update[`${name}.ticktext`] = kept.map((i) => _vals[i].text);
+    } else {
+      const step = Math.abs(at[1] - at[0]);
+      const round = [1, 2, 5].map((m) => m * 10 ** Math.floor(Math.log10(gap / step)));
+      update[`${name}.dtick`] = step * ([...round, round[0] * 10].find((k) => step * k >= gap) ?? 1);
+    }
+  }
+  return Object.keys(update).length ? update : null;
+}
+
+/** A numeric X axis: its scale, range and step (`xScale`, `xMin`…), titled `xName` until
+ *  titled by hand. */
+const valueXAxis = (options: GraphOptions, xName = "") => ({
+  type: "linear",
+  ...axisChrome(options),
+  ...xAxisRange(options), // type "log" when X is on a log scale
+  ...axisTitle(options.xLabel || xName, options.xTitleGap),
+});
 
 /** A power's tick label: written out from 0.000001 to 1000000 while short (8 characters
  *  at most), so an axis is all figures or, beyond, all powers, never a mix in practice. */
@@ -1052,7 +1126,7 @@ export function whiskerBounds(
  *  Descriptive statistics, whiskers to the minimum and maximum): Plotly only draws them.
  *  `whisker` moves the fences (Tukey, percentiles); the quartiles never move. */
 export function boxTrace(x: number[], values: number[][], whisker: GraphOptions["whisker"] = "min-max") {
-  const boxes = values.map(boxOf);
+  const boxes = values.map((v) => boxOf(v));
   const fences = values.map((v) => whiskerBounds(v, whisker));
   const field = (k: keyof (typeof boxes)[number]) => boxes.map((b) => b[k]);
   return {
@@ -1131,12 +1205,10 @@ export function baseLayout(
     ...chromeLayout(options),
     showlegend: false,
     xaxis: {
-      tickmode: "array",
-      tickvals: names.map((_, i) => i),
-      ticktext: names,
-      // Labels turn straight to vertical as the graph narrows: at Plotly's 30° step the
-      // last one would slip off the right edge and be dropped.
-      autotickangles: [0, 90],
+      ...categoryTicks(
+        names,
+        names.map((_, i) => i),
+      ),
       // Symmetric half-unit padding so categories never hug the Y axis (uniform across graph types).
       range: [-0.5, names.length - 0.5],
       ...axisChrome(options, options.gridX),
@@ -1257,6 +1329,14 @@ export function rowLabels(rows: number, titles: (string | null)[] = []): string[
     seen.set(label, repeat + 1);
     return label + "​".repeat(repeat); // an invisible mark keeps repeats apart
   });
+}
+
+/** Where each row stands on a numeric X axis: its title's number, when every row holding
+ *  a value is titled by one (times, doses); a row without values, nowhere (null). */
+export function rowValues(columns: Column[], titles: (string | null)[] = []): (number | null)[] | undefined {
+  const held = new Set(columns.flatMap((c) => c.rows));
+  const at = Array.from({ length: rowCountOf(columns) }, (_, r) => parseCell(titles[r] ?? null));
+  return held.size && at.every((v, r) => v != null || !held.has(r)) ? at : undefined;
 }
 
 /** Group `g`'s replicate values at row `r` (numeric cells only). */
@@ -1549,8 +1629,9 @@ export function groupedBarLayout(
           tickvals: opts.positions.tickvals,
           ticktext: opts.positions.ticktext,
           range: opts.positions.range,
+          autotickangles: [0, 90],
         }
-      : { type: "category" }),
+      : { type: "category", autotickangles: [0, 90] }),
     ...axisChrome(options, categoryGrid),
     ...axisTitle(options.xLabel, options.xTitleGap),
   };
@@ -1564,26 +1645,31 @@ export function groupedBarLayout(
 }
 
 /** Scatter layout for the grouped family: a numeric X axis with row-number ticks
- *  (so groups can be offset within each row) and a legend once there's >1 group. */
+ *  (so groups can be offset within each row), or, with `atValues`, the rows' values on a
+ *  numeric axis (`rowValues`); a legend once there's >1 group. */
 export function groupedScatterLayout(
   options: GraphOptions,
   labels: string[],
   seriesCount: number,
   positions?: CategoryPositions,
   seriesNames: string[] = [],
+  atValues?: boolean,
 ): Record<string, unknown> {
   return {
     ...chromeLayout(options, seriesCount > 1 ? legendRightMargin(options, seriesNames) : undefined),
     showlegend: seriesCount > 1,
     legend: legendOf(options),
-    xaxis: {
-      tickmode: "array",
-      tickvals: positions ? positions.tickvals : labels.map((_, i) => i),
-      ticktext: positions ? positions.ticktext : labels,
-      range: positions ? positions.range : [-0.5, labels.length - 0.5],
-      ...axisChrome(options, options.gridX),
-      ...axisTitle(options.xLabel, options.xTitleGap),
-    },
+    xaxis: atValues
+      ? valueXAxis(options)
+      : {
+          tickmode: "array",
+          tickvals: positions ? positions.tickvals : labels.map((_, i) => i),
+          ticktext: positions ? positions.ticktext : labels,
+          range: positions ? positions.range : [-0.5, labels.length - 0.5],
+          autotickangles: [0, 90],
+          ...axisChrome(options, options.gridX),
+          ...axisTitle(options.xLabel, options.xTitleGap),
+        },
     yaxis: {
       ...axisChrome(options, options.gridY),
       ...yAxisRange(options, undefined, options.gridY),

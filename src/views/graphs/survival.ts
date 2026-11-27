@@ -10,7 +10,7 @@ import type { CoxPHParams } from "../../stats/types";
 import type { GraphModule, GraphFigure } from ".";
 import { pairUp, readTable, type Column } from "../../lib/dataset";
 import { num } from "../../lib/format";
-import { addNote, INK, marginsFor, textWidth, xyLayout, type Paint } from "./plot-helpers";
+import { addNote, INK, marginsFor, textWidth, XY_AXES, xyLayout, type Paint } from "./plot-helpers";
 import { withOpacity } from "../../lib/palettes";
 import { kaplanMeier, type KaplanMeier } from "../../lib/kaplan-meier";
 
@@ -304,7 +304,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
   return fig;
 }
 
-export const survival: GraphModule = { label: "Survival curve", family: "xy", lines: () => true, build };
+export const survival: GraphModule = { label: "Survival curve", family: "xy", axes: XY_AXES, lines: () => true, build };
 
 /** The survival graph's columns from a Multiple Variables table + a Cox
  *  analysis's params: the time column, then one event-code column per value

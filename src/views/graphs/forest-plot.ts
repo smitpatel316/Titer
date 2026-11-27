@@ -8,7 +8,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult } from "../../stats/types";
 import type { Column } from "../../lib/dataset";
-import { addNote, GUIDE, INK, xyLayout, type Paint } from "./plot-helpers";
+import { addNote, GUIDE, INK, type Paint, xyLayout } from "./plot-helpers";
 import { num } from "../../lib/format";
 import type { GraphFigure, GraphModule } from ".";
 
@@ -31,7 +31,15 @@ function referenceLine(): Record<string, unknown> {
 }
 
 function build(_columns: Column[], options: GraphOptions, _paint: Paint): GraphFigure {
-  const layout = xyLayout(options, "Hazard ratio", 1, { yName: "" });
+  // Y is the covariate names, so no scale, range or step applies there (the
+  // panel offers none of them). Scrub them so a stale option cannot move
+  // the labels axis; xyLayout would otherwise apply yScale/yMin/yMax/yStep.
+  const layout = xyLayout(
+    { ...options, yScale: "linear", yMin: undefined, yMax: undefined, yStep: undefined },
+    "Hazard ratio",
+    1,
+    { yName: "" },
+  );
   return {
     data: [],
     layout: {
@@ -139,4 +147,4 @@ export function addForestPlot(
   ];
 }
 
-export const forestPlot: GraphModule = { label: "Forest plot", family: "xy", points: () => true, build };
+export const forestPlot: GraphModule = { label: "Forest plot", family: "xy", axes: () => ({ x: "scale", y: "labels" }), points: () => true, build };

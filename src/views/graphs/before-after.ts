@@ -16,21 +16,22 @@ import { groupsOf, type Column } from "../../lib/dataset";
 import { withOpacity } from "../../lib/palettes";
 import { pointKeyOf } from "../../lib/columns";
 import {
-  INK,
   baseLayout,
+  CATEGORY_AXES,
   centers,
   COLUMN_BAR,
   errors,
   groupedScatterLayout,
   groupOffset,
+  INK,
   legendRightMargin,
   marginsFor,
   onAxis,
+  type Paint,
   rowCountOf,
   rowLabels,
   separatedPositions,
   seriesMarker,
-  type Paint,
 } from "./plot-helpers";
 
 /** One subject's line: its points in column/group order, each with its own style. */
@@ -296,6 +297,7 @@ function buildGroupedBeforeAfter(
 export const beforeAfter: GraphModule = {
   label: "Before-and-after",
   family: "column",
+  axes: CATEGORY_AXES,
   points: () => true,
   lines: () => true,
   summarizes: () => true,
@@ -363,6 +365,7 @@ function buildMvBeforeAfterBarStrip(
 export const mvBeforeAfterBarStrip: GraphModule = {
   label: "Before-after bar and strip plot",
   family: "column",
+  axes: CATEGORY_AXES,
   points: () => true,
   lines: () => true,
   patterns: () => true,
@@ -373,6 +376,7 @@ export const mvBeforeAfterBarStrip: GraphModule = {
 export const groupedBeforeAfter: GraphModule = {
   label: "Before-and-after",
   family: "grouped",
+  axes: CATEGORY_AXES,
   points: () => true,
   lines: () => true,
   summarizes: () => true,

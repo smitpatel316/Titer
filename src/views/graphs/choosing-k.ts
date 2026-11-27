@@ -10,7 +10,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult, ChoosingKRow } from "../../stats/types";
 import type { Column } from "../../lib/dataset";
-import { GUIDE, INK, xyLayout, type Paint } from "./plot-helpers";
+import { GUIDE, INK, type Paint, XY_AXES, xyLayout } from "./plot-helpers";
 import type { GraphFigure, GraphModule } from ".";
 
 /** The one series each graph draws, as the Series section names it. */
@@ -158,6 +158,7 @@ function gapBuild(_columns: Column[], options: GraphOptions, _paint: Paint): Gra
 export const elbowPlot: GraphModule = {
   label: "Elbow plot",
   family: "multiple",
+  axes: XY_AXES,
   points: () => false,
   build: elbowBuild,
 };
@@ -165,6 +166,7 @@ export const elbowPlot: GraphModule = {
 export const silhouettePlot: GraphModule = {
   label: "Silhouette plot",
   family: "multiple",
+  axes: XY_AXES,
   points: () => false,
   build: silhouetteBuild,
 };
@@ -172,6 +174,7 @@ export const silhouettePlot: GraphModule = {
 export const gapPlot: GraphModule = {
   label: "Gap plot",
   family: "multiple",
+  axes: XY_AXES,
   points: () => false,
   build: gapBuild,
 };

@@ -74,6 +74,8 @@ interface MenuContext {
   renameGroup: (column: number) => void;
   /** Opens Create Series for the selection (Prism: Insert → Create Series…). */
   createSeries: (range: Range) => void;
+  /** Names the columns from the clipboard's text, from this one rightwards. */
+  pasteNames: (column: number) => void;
   /** Shows a grouped table's Groups panel. */
   showGroups: () => void;
   /** Opens the Data Sets dialog (seq 309). */
@@ -88,7 +90,7 @@ interface MenuContext {
   breakLink: () => void;
 }
 
-export function gridMenu({ data, type, zone, range, update, rename, renameGroup, showGroups, showDataSets, tableFrozen, pasteLink, refreshLink, breakLink, createSeries }: MenuContext): MenuItems {
+export function gridMenu({ data, type, zone, range, update, rename, renameGroup, pasteNames, showGroups, showDataSets, tableFrozen, pasteLink, refreshLink, breakLink, createSeries }: MenuContext): MenuItems {
   const nested = isNested(data);
   const grouped = isGrouped(data) || nested;
   const rows = range.r1 - range.r0 + 1;
@@ -200,6 +202,15 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
         text: "Rename Group",
         enabled: !tableFrozen,
         action: () => renameGroup(range.c0),
+      });
+    }
+    // Paste column names from the clipboard, from this column rightwards.
+    if (zone === "column") {
+      const what = grouped && range.c0 >= leadOf(data) ? (type === "xy" ? "Data Set" : "Group") : "Column";
+      items.push({
+        text: `Paste ${what} Names`,
+        enabled: !tableFrozen,
+        action: () => pasteNames(range.c0),
       });
     }
   }

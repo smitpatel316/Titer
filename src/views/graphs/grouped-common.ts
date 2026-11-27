@@ -9,6 +9,7 @@ import { groupsOf, type Column } from "../../lib/dataset";
 import {
   rowCountOf,
   rowLabels,
+  rowValues,
   perRowStats,
   perRowSummaryStats,
   groupOffset,
@@ -215,7 +216,9 @@ export function buildGroupedBarsScatter(
  *  each group across the row categories, so parallel lines mean no interaction and
  *  crossing/diverging lines highlight one (Prism's interaction graph). On a
  *  summary table the centers are the stored Means and the whiskers the stored
- *  errors, as for bars. */
+ *  errors, as for bars. With `rowsAt` "values", the rows stand at their titles'
+ *  numbers (`rowValues`), as times on a time axis, when every row holding data
+ *  has one. */
 export function buildGroupedLines(
   columns: Column[],
   options: GraphOptions,
@@ -226,7 +229,8 @@ export function buildGroupedLines(
   const groups = groupsOf(columns);
   const rows = rowCountOf(columns);
   const labels = rowLabels(rows, titles);
-  const x = labels.map((_, i) => i);
+  const values = options.rowsAt === "values" ? rowValues(columns, titles) : undefined;
+  const x = values ?? labels.map((_, i) => i);
 
   const data = groups.map((g, i) => {
     // One group, one series: its center/error override governs every row.
@@ -258,7 +262,7 @@ export function buildGroupedLines(
     };
   });
 
-  return { data, layout: groupedScatterLayout(options, labels, groups.length, undefined, groups.map((g) => g.name)) };
+  return { data, layout: groupedScatterLayout(options, labels, groups.length, undefined, groups.map((g) => g.name), !!values) };
 }
 
 /** Interleaved scatter (individual values): every replicate as a jittered point,

@@ -9,7 +9,7 @@
 // empty 0–1 plot.
 import type { GraphOptions } from "../../store/types";
 import type { AnalysisOutcome, AnalysisResult, RegressionCoefficient } from "../../stats/types";
-import { extent, type Paint } from "./plot-helpers";
+import { extent, type Paint, XY_AXES } from "./plot-helpers";
 import { pairUp, type Column } from "../../lib/dataset";
 import type { GraphFigure, GraphModule } from ".";
 import { xyScatter } from "./xy-scatter";
@@ -116,6 +116,7 @@ export function logisticCurveNote(outcome: AnalysisOutcome | null): string | nul
 export const logisticCurveGraph: GraphModule = {
   label: "Logistic curve",
   family: "xy",
+  axes: XY_AXES,
   points: () => true,
   lines: () => true,
   build,

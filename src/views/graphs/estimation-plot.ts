@@ -25,7 +25,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult } from "../../stats/types";
 import type { Column } from "../../lib/dataset";
-import { addNote, baseLayout, GUIDE, INK, scatterOffsets, seriesPoints, type Paint } from "./plot-helpers";
+import { addNote, baseLayout, CATEGORY_AXES, GUIDE, INK, type Paint, scatterOffsets, seriesPoints } from "./plot-helpers";
 import { num } from "../../lib/format";
 import { pointKeyOf } from "../../lib/columns";
 import type { GraphFigure, GraphModule } from ".";
@@ -242,6 +242,7 @@ export function addEstimationPlot(
 export const estimationPlot: GraphModule = {
   label: "Estimation plot",
   family: "column",
+  axes: CATEGORY_AXES,
   points: () => true,
   build,
 };

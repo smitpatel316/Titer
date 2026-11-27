@@ -9,7 +9,7 @@ import type { GraphOptions } from "../../store/types";
 import type { GraphModule, GraphFigure } from ".";
 import { splitXY, type Column } from "../../lib/dataset";
 import type { SummaryFormat } from "../../lib/summary-format";
-import { rightYDataset, seriesMarker, seriesPoints, xyDrawn, xyLayout, type Paint } from "./plot-helpers";
+import { type Paint, rightYDataset, seriesMarker, seriesPoints, XY_AXES, xyDrawn, xyLayout } from "./plot-helpers";
 
 function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?: (string | null)[], summary?: SummaryFormat): GraphFigure {
   const { x: xCol, ys } = splitXY(columns);
@@ -68,6 +68,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
 export const xyBarScatter: GraphModule = {
   label: "Bar + scatter",
   family: "xy",
+  axes: XY_AXES,
   points: (options) => options.xyStyle !== "line",
   lines: (options) => options.xyStyle !== "points",
   patterns: () => true,

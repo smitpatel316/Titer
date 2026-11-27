@@ -9,7 +9,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { GraphModule, GraphFigure } from ".";
 import type { Column } from "../../lib/dataset";
-import { baseLayout, boxTrace, columnPoints, seriesMarker, whiskerBounds, type Paint } from "./plot-helpers";
+import { baseLayout, boxTrace, CATEGORY_AXES, columnPoints, seriesMarker, whiskerBounds, type Paint } from "./plot-helpers";
 
 function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFigure {
   const data: unknown[] = [];
@@ -64,6 +64,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
 export const boxViolin: GraphModule = {
   label: "Box and violin",
   family: "column",
+  axes: CATEGORY_AXES,
   defaults: { fill: 0.5, pointSize: 5, outline: 2 },
   points: (options) => options.showPoints || options.whisker === "min-max-all",
   build,

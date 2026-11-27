@@ -6,7 +6,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult } from "../../stats/types";
 import type { Column } from "../../lib/dataset";
-import { INK, xyLayout, type Paint } from "./plot-helpers";
+import { INK, type Paint, XY_AXES, xyLayout } from "./plot-helpers";
 import type { GraphFigure, GraphModule } from ".";
 
 /** The one series this graph draws, as the Series section names it. */
@@ -82,6 +82,7 @@ function build(_columns: Column[], options: GraphOptions, _paint: Paint): GraphF
 export const screePlot: GraphModule = {
   label: "Scree plot",
   family: "multiple",
+  axes: XY_AXES,
   points: () => false,
   build,
 };

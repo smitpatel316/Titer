@@ -10,7 +10,7 @@ import type { GraphOptions } from "../../store/types";
 import { pairUp, type Column } from "../../lib/dataset";
 import { computeBlandAltman } from "../../stats/column/bland-altman";
 import { num } from "../../lib/format";
-import { extent, GUIDE, INK, plotAreaPx, seriesPoints, xyLayout, type Paint } from "./plot-helpers";
+import { extent, GUIDE, INK, type Paint, plotAreaPx, seriesPoints, XY_AXES, xyLayout } from "./plot-helpers";
 import { pointKeyOf } from "../../lib/columns";
 import type { GraphFigure, GraphModule } from ".";
 
@@ -121,6 +121,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
 export const blandAltmanGraph: GraphModule = {
   label: "Bland-Altman plot",
   family: "xy",
+  axes: XY_AXES,
   points: () => true,
   lines: () => true,
   build,

@@ -1,7 +1,7 @@
 {
   "app": "titer",
   "schemaVersion": 1,
-  "savedAt": "2026-11-22T23:40:54.532Z",
+  "savedAt": "2026-11-26T23:47:31.275Z",
   "project": {
     "nodes": {
       "t-viab": {
@@ -155,7 +155,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-kinase": {
@@ -286,7 +287,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-growth": {
@@ -439,7 +441,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-volume": {
@@ -615,7 +618,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "g-volume-bars": {
@@ -731,7 +735,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "g-volume-violin": {
@@ -842,7 +847,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-pk": {
@@ -978,7 +984,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-il6": {
@@ -1118,7 +1125,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "g-il6-bars": {
@@ -1228,7 +1236,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-immune": {
@@ -1353,7 +1362,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-surv": {
@@ -1553,7 +1563,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-nested": {
@@ -1672,7 +1683,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-rnaseq": {
@@ -11846,7 +11858,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-genes": {
@@ -11975,7 +11988,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-deseq": {
@@ -13086,7 +13100,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-ki67": {
@@ -13230,7 +13245,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-elisa": {
@@ -13371,7 +13387,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-markers": {
@@ -13560,7 +13577,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "g-markers-ki67": {
@@ -13664,7 +13682,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-response": {
@@ -13791,7 +13810,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "t-exposure": {
@@ -13962,7 +13982,8 @@
           "lettersFont": "default",
           "lettersSize": 14,
           "lettersColor": "#111827",
-          "lettersFontAuto": false
+          "lettersFontAuto": false,
+          "rowsAt": "order"
         }
       },
       "f-main": {

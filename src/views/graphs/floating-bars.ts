@@ -14,13 +14,14 @@ import { groupsOf, type Column } from "../../lib/dataset";
 import type { SummaryFormat } from "../../lib/summary-format";
 import {
   baseLayout,
+  CATEGORY_AXES,
   groupedBarLayout,
   maxOf,
   minOf,
+  type Paint,
   perRowSummaryStats,
   rowCountOf,
   rowLabels,
-  type Paint,
 } from "./plot-helpers";
 
 function build(
@@ -111,6 +112,7 @@ function build(
 export const floatingBars: GraphModule = {
   label: "Floating bars",
   family: "grouped",
+  axes: CATEGORY_AXES,
   patterns: () => true,
   build,
 };

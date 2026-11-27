@@ -6,7 +6,7 @@ import type { GraphOptions } from "../../store/types";
 import type { GraphModule, GraphFigure } from ".";
 import { splitXY, type Column } from "../../lib/dataset";
 import type { SummaryFormat } from "../../lib/summary-format";
-import { addNote, rightYDataset, seriesMarker, seriesPoints, xErrorColumn, xyDrawn, xyLayout, type Paint } from "./plot-helpers";
+import { addNote, rightYDataset, seriesMarker, seriesPoints, xErrorColumn, XY_AXES, xyDrawn, xyLayout, type Paint } from "./plot-helpers";
 
 /** The most points an XY scatter draws in total. An SVG `scatter` trace costs
  *  about 0.1 ms of blocked UI thread per point — timed renders (R2-G-F18,
@@ -88,6 +88,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
 export const xyScatter: GraphModule = {
   label: "Scatter or line",
   family: "xy",
+  axes: XY_AXES,
   points: (options) => options.xyStyle !== "line",
   lines: (options) => options.xyStyle !== "points",
   // Replicates are summarized only when shown as their center.

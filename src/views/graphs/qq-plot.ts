@@ -55,4 +55,10 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
   return fig;
 }
 
-export const qqPlot: GraphModule = { label: "QQ plot", family: "column", points: () => true, build };
+export const qqPlot: GraphModule = {
+  label: "QQ plot",
+  family: "column",
+  axes: () => ({ x: "range", y: "scale" }),
+  points: () => true,
+  build,
+};

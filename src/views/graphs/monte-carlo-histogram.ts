@@ -25,6 +25,9 @@ function build(_columns: Column[], options: GraphOptions, _paint: Paint): GraphF
 export const monteCarloHistogram: GraphModule = {
   label: "Monte Carlo histogram",
   family: "column",
+  // X is a scale axis, not range-only: the statistic is a numeric value,
+  // the panel offers the scale control and xyLayout honors it.
+  axes: () => ({ x: "scale", y: "scale" }),
   defaults: { fill: 0.7 },
   patterns: () => true,
   build,
