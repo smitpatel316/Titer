@@ -890,12 +890,12 @@ export function GraphView({ node }: { node: ProjectNode }) {
         { ...formatted.layout, ...size },
         { displayModeBar: false, scrollZoom: false, doubleClick: false, plotGlPixelRatio: glRatio, edits: MOVABLE },
       );
+      if (!current) return;
       // Labels that would overlap, on any axis, are spaced.
       const thinned = fitLabels(fig.layout, (el as { _fullLayout?: never })._fullLayout ?? {}, options.fontSize);
       if (thinned) await Plotly.relayout(el, thinned);
       if (plottedRef.current !== el) listen(el as PlotElement);
       plottedRef.current = el;
-      if (!current) return;
       setDrawn(fig.data);
       // A selected point that's no longer drawn (its row deleted…) leaves the selection.
       if ([...selected].some((key) => !keys.has(key)))

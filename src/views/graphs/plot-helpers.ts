@@ -851,6 +851,9 @@ export function fitLabels(
       update[`${name}.ticktext`] = kept.map((i) => _vals[i].text);
     } else {
       const step = Math.abs(at[1] - at[0]);
+      // Coincident adjacent ticks (step 0) make the step a degenerate 0/NaN
+      // dtick — leave the axis alone rather than relayouting a broken step.
+      if (!(step > 0) || !Number.isFinite(gap)) continue;
       const round = [1, 2, 5].map((m) => m * 10 ** Math.floor(Math.log10(gap / step)));
       update[`${name}.dtick`] = step * ([...round, round[0] * 10].find((k) => step * k >= gap) ?? 1);
     }
@@ -862,8 +865,8 @@ export function fitLabels(
  *  titled by hand. */
 const valueXAxis = (options: GraphOptions, xName = "") => ({
   type: "linear",
-  ...axisChrome(options),
-  ...xAxisRange(options), // type "log" when X is on a log scale
+  ...axisChrome(options, options.gridX),
+  ...xAxisRange(options, undefined, options.gridX), // type "log" when X is on a log scale
   ...axisTitle(options.xLabel || xName, options.xTitleGap),
 });
 
