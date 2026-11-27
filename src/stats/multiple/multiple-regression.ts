@@ -118,13 +118,20 @@ export async function runMultipleRegression(
     // heteroscedasticity (Prism's Residuals tab test). Each test guards
     // its own floor and returns NA rather than erroring on a constant or
     // tiny residual set (a perfect fit's 0/0 Durbin–Watson reads NA).
-    `er<-residuals(m);fv<-fitted(m)+my;rs<-rstandard(m);hv<-hatvalues(m);cd<-cooks.distance(m);` +
+    // The per-row vectors are unname()d: fitted()/residuals()/rstandard()/
+    // hatvalues()/cooks.distance() name their entries by row, and c()
+    // mangles a named element's name (c(ft0=fv[1]) comes back "ft0.1",
+    // not "ft0"), so the keys below would never match. The tryCatch
+    // bodies use fresh names (w/t/u), never `s` (summary(m)) or `k`
+    // (the parameter count) — overwriting those drops R² from the
+    // returned vector (c() drops NULLs) and corrupts the fit.
+    `er<-unname(residuals(m));fv<-unname(fitted(m)+my);rs<-unname(rstandard(m));hv<-unname(hatvalues(m));cd<-unname(cooks.distance(m));` +
     `dw<-if(nn>1)sum(diff(er)^2)/sum(er^2) else NA;` +
-    `sw<-tryCatch({s<-shapiro.test(er);c(unname(s$statistic),s$p.value)},error=function(e)c(NA,NA));` +
+    `sw<-tryCatch({w<-shapiro.test(er);c(unname(w$statistic),w$p.value)},error=function(e)c(NA,NA));` +
     `dpm<-if(nn>=20){d<-er-mean(er);c(nn,mean(d^2),mean(d^3),mean(d^4))}else c(NA,NA,NA,NA);` +
     `ad<-tryCatch({a<-nortest::ad.test(er);c(unname(a$statistic),a$p.value)},error=function(e)c(NA,NA));` +
-    `ks<-tryCatch({k<-suppressWarnings(ks.test(er,"pnorm",mean(er),sd(er)));c(unname(k$statistic),k$p.value)},error=function(e)c(NA,NA));` +
-    `sp<-tryCatch({s<-suppressWarnings(cor.test(abs(er),fv,method="spearman"));c(unname(s$estimate),s$p.value)},error=function(e)c(NA,NA));`;
+    `ks<-tryCatch({t<-suppressWarnings(ks.test(er,"pnorm",mean(er),sd(er)));c(unname(t$statistic),t$p.value)},error=function(e)c(NA,NA));` +
+    `sp<-tryCatch({u<-suppressWarnings(cor.test(abs(er),fv,method="spearman"));c(unname(u$estimate),u$p.value)},error=function(e)c(NA,NA));`;
   // One named key per per-row value (the flat-map rule — no vectors cross
   // the WebR boundary, only a named vector does): observed, fitted,
   // residual, standardized residual, leverage, Cook's distance.

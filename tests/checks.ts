@@ -23130,9 +23130,14 @@ check("seq 198 multiple-regression diagnostics remainder: residuals, normality, 
   // the OLS hat matrix, Durbin–Watson from the residual differences,
   // Shapiro–Wilk and D'Agostino–Pearson from scipy, Anderson–Darling's
   // statistic from Stephens' formula with nortest's piecewise P-value
-  // approximation, Kolmogorov–Smirnov's D with R's asymptotic P
-  // (scipy method="asymp"), and Spearman's rho between |residual| and
+  // approximation, Kolmogorov–Smirnov's D with the exact P (scipy
+  // method="exact" — R's ks.test uses the exact distribution for n < 100,
+  // not the asymptotic one), and Spearman's rho between |residual| and
   // fitted with its exact permutation P (n = 10, 10! permutations).
+  // Tolerances: the statistics agree to 1e-9 except Shapiro–Wilk's W and
+  // P (R's Royston implementation and scipy's differ at ~1e-7, so 1e-6)
+  // and Spearman's P (R uses the AS 89 approximation to the exact
+  // permutation distribution, so 5e-3 around the exact value).
   // Prism plots these residuals four ways (vs predicted, |residual| vs
   // predicted, QQ, vs row) and tests them for normality in four ways; the
   // per-row table + the four tests + Durbin–Watson + the Spearman
@@ -23183,16 +23188,22 @@ check("seq 198 multiple-regression diagnostics remainder: residuals, normality, 
   const d = out.residualDiagnostics;
   if (!d) throw new Error("residualDiagnostics missing");
   close(d.durbinWatson, 3.3665580316219383, 1e-9, "Durbin-Watson");
-  close(d.shapiroWilk.statistic, 0.8769248723983765, 1e-9, "Shapiro-Wilk W");
+  close(d.shapiroWilk.statistic, 0.8769248723983765, 1e-6, "Shapiro-Wilk W");
   close(d.shapiroWilk.p, 0.1202777698636055, 1e-6, "Shapiro-Wilk P");
   strictEqual(d.dagostinoPearson.statistic, null);
   strictEqual(d.dagostinoPearson.p, null);
   close(d.andersonDarling.statistic, 0.5534841033470936, 1e-9, "Anderson-Darling A2");
   close(d.andersonDarling.p, 0.1144792231753412, 1e-6, "Anderson-Darling P");
   close(d.kolmogorovSmirnov.statistic, 0.20535677842857203, 1e-9, "Kolmogorov-Smirnov D");
-  close(d.kolmogorovSmirnov.p, 0.7929491372192313, 1e-6, "Kolmogorov-Smirnov P");
+  close(d.kolmogorovSmirnov.p, 0.7208806502888627, 1e-9, "Kolmogorov-Smirnov P");
   close(d.heteroscedasticity.rho, -0.24848484848484845, 1e-9, "Spearman rho");
-  close(d.heteroscedasticity.p, 0.49176752645502647, 1e-6, "Spearman P");
+  close(d.heteroscedasticity.p, 0.49176752645502647, 5e-3, "Spearman P");
+  // R² and adjusted R² are pinned here (not in the seq 198 check above):
+  // they come from the same summary() the diagnostics read, so a
+  // diagnostics change that clobbers it shows up here.
+  const stat = (label: string) => out.stats.find((s) => s.label === label)?.value;
+  close(stat("R squared"), 0.9909388200027252, 1e-9, "R squared");
+  close(stat("Adjusted R squared"), 0.9864082300040877, 1e-9, "Adjusted R squared");
   // The notes name what the numbers flag: row 10's Cook's distance above
   // 1 and its leverage above 2p/n, and the high Durbin–Watson.
   ok(out.notes.includes("Row 10"), `notes should flag row 10, got: ${out.notes}`);
@@ -23258,16 +23269,19 @@ check("seq 198 multiple-regression diagnostics remainder: residuals, normality, 
   const bd = bigOut.residualDiagnostics;
   if (!bd) throw new Error("big residualDiagnostics missing");
   close(bd.durbinWatson, 2.5899965954016895, 1e-9, "big Durbin-Watson");
-  close(bd.shapiroWilk.statistic, 0.9759615659713745, 1e-9, "big Shapiro-Wilk W");
+  close(bd.shapiroWilk.statistic, 0.9759615659713745, 1e-6, "big Shapiro-Wilk W");
   close(bd.shapiroWilk.p, 0.8114697337150574, 1e-6, "big Shapiro-Wilk P");
   close(bd.dagostinoPearson.statistic, 0.13883463536186194, 1e-9, "big D'Agostino-Pearson K2");
   close(bd.dagostinoPearson.p, 0.9329372676125257, 1e-6, "big D'Agostino-Pearson P");
   close(bd.andersonDarling.statistic, 0.2576863226494446, 1e-9, "big Anderson-Darling A2");
   close(bd.andersonDarling.p, 0.6887430897469904, 1e-6, "big Anderson-Darling P");
   close(bd.kolmogorovSmirnov.statistic, 0.10613170562368993, 1e-9, "big Kolmogorov-Smirnov D");
-  close(bd.kolmogorovSmirnov.p, 0.9497437741922178, 1e-6, "big Kolmogorov-Smirnov P");
+  close(bd.kolmogorovSmirnov.p, 0.9235821625671725, 1e-9, "big Kolmogorov-Smirnov P");
   close(bd.heteroscedasticity.rho, 0.11304347826086956, 1e-9, "big Spearman rho");
-  close(bd.heteroscedasticity.p, 0.5989404349055967, 1e-6, "big Spearman P");
+  close(bd.heteroscedasticity.p, 0.5989404349055967, 5e-3, "big Spearman P");
+  const bigStat = (label: string) => bigOut.stats.find((s) => s.label === label)?.value;
+  close(bigStat("R squared"), 0.999242239486959, 1e-9, "big R squared");
+  close(bigStat("Adjusted R squared"), 0.9991285754100029, 1e-9, "big Adjusted R squared");
   strictEqual(bigOut.residuals?.length, 24);
   const first = bigOut.residuals?.[0];
   const last = bigOut.residuals?.[23];
