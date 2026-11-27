@@ -144,7 +144,8 @@ async function toImage(
   const drawn = el as HTMLElement & { data: unknown[]; layout: object };
   // EPS/PDF are drawn as SVG (Plotly has no EPS/PDF output); TIFF/BMP are
   // built from the PNG Plotly draws (it has no TIFF/BMP output).
-  const drawnFormat = format === "eps" || format === "pdf" ? "svg" : format === "tiff" || format === "bmp" ? "png" : format;
+  const drawnFormat =
+    format === "eps" || format === "pdf" ? "svg" : format === "tiff" || format === "bmp" ? "png" : format;
   const layout = exportLayout(drawn.layout, format);
   const figure =
     colorMode === "grayscale"
@@ -190,7 +191,10 @@ async function toImage(
       vector: false,
     };
   if (format === "bmp")
-    return { blob: new Blob([bmpEncode(decodePng(bytes), Number(dpi)) as BlobPart], { type: "image/bmp" }), vector: false };
+    return {
+      blob: new Blob([bmpEncode(decodePng(bytes), Number(dpi)) as BlobPart], { type: "image/bmp" }),
+      vector: false,
+    };
   return { blob: await withDpi(bytes, format as "png" | "jpeg", Number(dpi)), vector: false };
 }
 

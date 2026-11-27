@@ -158,9 +158,13 @@ export function validateExportColorMode(format: string, colorMode: ColorMode): v
   if (colorMode !== "color" && colorMode !== "grayscale" && colorMode !== "cmyk" && colorMode !== "monochrome")
     throw new Error(`Unknown colour mode “${colorMode}” — the colour modes are color, grayscale, cmyk, monochrome.`);
   if (colorMode === "cmyk" && format !== "eps" && format !== "pdf" && format !== "tiff")
-    throw new Error(`CMYK is supported for EPS, PDF and TIFF only — ${format} has no CMYK form. Choose color or grayscale.`);
+    throw new Error(
+      `CMYK is supported for EPS, PDF and TIFF only — ${format} has no CMYK form. Choose color or grayscale.`,
+    );
   if (colorMode === "monochrome" && format !== "tiff")
-    throw new Error(`Monochrome is supported for TIFF only — ${format} has no monochrome form. Choose color or grayscale.`);
+    throw new Error(
+      `Monochrome is supported for TIFF only — ${format} has no monochrome form. Choose color or grayscale.`,
+    );
 }
 
 export function grayscaleFigure<T extends { data: unknown[]; layout: object }>(figure: T): T {

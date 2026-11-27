@@ -348,7 +348,13 @@ export function tiffEncode(
   const photometric =
     colorMode === "cmyk" ? 5 : colorMode === "grayscale" || colorMode === "monochrome" ? 1 : indexed ? 3 : 2;
   const bits: number[] =
-    colorMode === "monochrome" ? [1] : colorMode === "cmyk" ? [8, 8, 8, 8] : colorMode === "grayscale" || indexed ? [8] : [8, 8, 8];
+    colorMode === "monochrome"
+      ? [1]
+      : colorMode === "cmyk"
+        ? [8, 8, 8, 8]
+        : colorMode === "grayscale" || indexed
+          ? [8]
+          : [8, 8, 8];
   const data =
     colorMode === "cmyk"
       ? rgbToCmykBytes(rgb)

@@ -21475,10 +21475,7 @@ check("seq 216: raster PDF in CMYK/Grayscale uses the matching colour space", ()
   const gray = pdfEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200, "grayscale");
   const gText = new TextDecoder().decode(gray);
   ok(gText.includes("/ColorSpace /DeviceGray"), "grayscale raster PDF");
-  deepStrictEqual(
-    new Uint8Array(pdfContentBytes(gray).slice(0, 4)),
-    new Uint8Array([76, 150, 29, 255]),
-  );
+  deepStrictEqual(new Uint8Array(pdfContentBytes(gray).slice(0, 4)), new Uint8Array([76, 150, 29, 255]));
 });
 
 // ── Seq 216 remainder: 8/24-bit, TIFF monochrome, transparent EPS ───────
@@ -21524,10 +21521,7 @@ check("seq 216 remainder: the 8-bit palette keeps ≤256 colours exactly, median
   const { palette, indices } = quantizeRgbToPalette(fixtureRgb);
   strictEqual(palette.length, 256 * 3, "the palette is always 256 entries");
   // First-seen order: red, green, blue, white, black — the rest is padding.
-  deepStrictEqual(
-    [...palette.subarray(0, 15)],
-    [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0],
-  );
+  deepStrictEqual([...palette.subarray(0, 15)], [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0]);
   deepStrictEqual([...palette.subarray(15, 18)], [0, 0, 0], "unused entries pad black");
   deepStrictEqual([...indices], [0, 1, 2, 3, 3, 2, 1, 0, 4, 0, 1, 2]);
   const expanded = new Uint8Array(fixtureRgb.length);
@@ -21547,7 +21541,10 @@ check("seq 216 remainder: the 8-bit palette keeps ≤256 colours exactly, median
   const cut = quantizeRgbToPalette(many);
   strictEqual(cut.palette.length, 256 * 3);
   strictEqual(cut.indices.length, 1024);
-  ok(cut.indices.every((v) => v < 256), "every index points at the palette");
+  ok(
+    cut.indices.every((v) => v < 256),
+    "every index points at the palette",
+  );
   const used = new Set(cut.indices);
   ok(used.size > 200, `median-cut uses most of the palette, not a handful (${used.size})`);
   deepStrictEqual(quantizeRgbToPalette(many), cut, "quantization is deterministic");
@@ -21631,7 +21628,15 @@ check("seq 216 remainder: script RGBlow writes a paletted TIFF instead of upgrad
   const low = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportTIF "g.tif", 600, RGBlow');
   strictEqual(low.stopped, false, scriptLog(low));
   deepStrictEqual(low.effects, [
-    { type: "export-graph", graphId: "g1", format: "tif", dpi: 600, clear: false, mode: "rgblow", path: "/tmp/out/g.tif" },
+    {
+      type: "export-graph",
+      graphId: "g1",
+      format: "tif",
+      dpi: 600,
+      clear: false,
+      mode: "rgblow",
+      path: "/tmp/out/g.tif",
+    },
   ]);
   ok(!scriptLog(low).includes("exports as RGBhi"), scriptLog(low));
   const tiff = encodeTiff(fixtureRgba, 4, 3, { mode: "rgblow", dpi: 300 });

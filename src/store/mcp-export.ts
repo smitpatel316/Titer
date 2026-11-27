@@ -369,7 +369,8 @@ export async function renderGraphImage(
     const drawn = el as unknown as { data: unknown[]; layout: object };
     // EPS/PDF are drawn as SVG (Plotly has no EPS/PDF output); TIFF/BMP
     // are built from the PNG Plotly draws (it has no TIFF/BMP output).
-    const drawnFormat = format === "eps" || format === "pdf" ? "svg" : format === "tiff" || format === "bmp" ? "png" : format;
+    const drawnFormat =
+      format === "eps" || format === "pdf" ? "svg" : format === "tiff" || format === "bmp" ? "png" : format;
     const layout = exportLayout(drawn.layout, format);
     const figure =
       colorMode === "grayscale"
@@ -491,8 +492,16 @@ export function exportFormatDpi(
     throw jobErr(job, `has no resolution “${dpiRaw}” — the resolutions are ${RESOLUTIONS.join(", ")} DPI.`);
   }
   const colorModeRaw = optStr(job, args, "color_mode") ?? "color";
-  if (colorModeRaw !== "color" && colorModeRaw !== "grayscale" && colorModeRaw !== "cmyk" && colorModeRaw !== "monochrome") {
-    throw jobErr(job, `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk, monochrome.`);
+  if (
+    colorModeRaw !== "color" &&
+    colorModeRaw !== "grayscale" &&
+    colorModeRaw !== "cmyk" &&
+    colorModeRaw !== "monochrome"
+  ) {
+    throw jobErr(
+      job,
+      `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk, monochrome.`,
+    );
   }
   try {
     validateExportColorMode(formatRaw, colorModeRaw as ColorMode);
@@ -993,8 +1002,16 @@ export async function executeCopyGraphImage(job: McpJob, deps: ExportJobDeps): P
   }
   const dpi = dpiRaw as Resolution;
   const colorModeRaw = optStr(job, args, "color_mode") ?? "color";
-  if (colorModeRaw !== "color" && colorModeRaw !== "grayscale" && colorModeRaw !== "cmyk" && colorModeRaw !== "monochrome") {
-    throw jobErr(job, `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk, monochrome.`);
+  if (
+    colorModeRaw !== "color" &&
+    colorModeRaw !== "grayscale" &&
+    colorModeRaw !== "cmyk" &&
+    colorModeRaw !== "monochrome"
+  ) {
+    throw jobErr(
+      job,
+      `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk, monochrome.`,
+    );
   }
   // CMYK and monochrome fall back to colour, as the UI copy does (the clipboard has neither form).
   const colorMode = (colorModeRaw === "cmyk" || colorModeRaw === "monochrome" ? "color" : colorModeRaw) as ColorMode;

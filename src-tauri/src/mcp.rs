@@ -10114,15 +10114,11 @@ fn validate_color_mode(format: &str, color_mode: &str) -> Result<(), String> {
     }
     if color_mode == "cmyk" && !matches!(format, "eps" | "pdf" | "tiff") {
         return Err(
-            "CMYK is only available for EPS, PDF and TIFF — PNG, JPEG, SVG and BMP have no CMYK form."
-                .to_string(),
+            "CMYK is only available for EPS, PDF and TIFF — PNG, JPEG, SVG and BMP have no CMYK form.".to_string()
         );
     }
     if color_mode == "monochrome" && format != "tiff" {
-        return Err(
-            "Monochrome is only available for TIFF — the other formats have no monochrome form."
-                .to_string(),
-        );
+        return Err("Monochrome is only available for TIFF — the other formats have no monochrome form.".to_string());
     }
     Ok(())
 }

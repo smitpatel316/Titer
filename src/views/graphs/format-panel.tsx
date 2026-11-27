@@ -175,7 +175,15 @@ function readExport(): ExportChoice {
       customUnit: saved.customUnit === "cm" ? "cm" : "in",
     };
   } catch {
-    return { format: "png", dpi: "300", colorMode: "color", depth: "24bit", preset: "custom", size: "graph", customUnit: "in" };
+    return {
+      format: "png",
+      dpi: "300",
+      colorMode: "color",
+      depth: "24bit",
+      preset: "custom",
+      size: "graph",
+      customUnit: "in",
+    };
   }
 }
 

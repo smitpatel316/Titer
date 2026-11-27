@@ -920,7 +920,16 @@ export function FigureView({ node }: { node: ProjectNode }) {
                                 e.stopPropagation();
                                 const el = plottedRef.current.get(panel.graphId);
                                 const options = { ...DEFAULT_GRAPH_OPTIONS, ...graph.graphOptions };
-                                if (el) void saveGraphImage(el, { width: options.width, height: options.height }, exportFormat, dpi, graph.name, colorMode, exportDepth);
+                                if (el)
+                                  void saveGraphImage(
+                                    el,
+                                    { width: options.width, height: options.height },
+                                    exportFormat,
+                                    dpi,
+                                    graph.name,
+                                    colorMode,
+                                    exportDepth,
+                                  );
                               }}
                             >
                               Export panel
