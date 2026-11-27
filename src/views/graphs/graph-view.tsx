@@ -46,6 +46,7 @@ import { addLogisticCurve as addAnalysisLogisticCurve } from "./fitted-curve";
 import { useStartAnalysis } from "../analyses/use-analysis-launcher";
 import { loadPlotly } from "./plotly";
 import { fitZoom } from "../../store/use-layout";
+import { GRAPH_ALERTS_CHANGED_EVENT, loadGraphAlerts } from "../../lib/preferences";
 import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
 import { DrawingObjectsLayer } from "../../components/drawing-objects";
 import { addRegression } from "./regression-overlay";
@@ -91,6 +92,14 @@ export function GraphView({ node }: { node: ProjectNode }) {
   const data = node.frozen && node.frozenData ? node.frozenData : parent?.data;
   // Merged over the defaults, so options added after a file was saved have a value.
   const options = { ...DEFAULT_GRAPH_OPTIONS, ...node.graphOptions };
+  // Whether the canvas warns when a graph has nothing to draw (seq 225
+  // remainder L6): re-reads when the Preferences dialog changes it.
+  const [graphAlerts, setGraphAlerts] = React.useState(loadGraphAlerts);
+  React.useEffect(() => {
+    const onChange = () => setGraphAlerts(loadGraphAlerts());
+    window.addEventListener(GRAPH_ALERTS_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(GRAPH_ALERTS_CHANGED_EVENT, onChange);
+  }, []);
   // The project's info sheets, for the live `{{Constant}}` hooks below.
   const sheets = React.useMemo(() => infoSheetsOf(nodes, rootOrder), [nodes, rootOrder]);
   // A setting chosen again (a choice already on) changes nothing, and leaves no Undo step.
@@ -753,8 +762,10 @@ export function GraphView({ node }: { node: ProjectNode }) {
       }
       fig.data = withCaps(fig.data, options);
       // A graph whose sibling analysis isn't linked draws only its axes or
-      // points: say so on the canvas (G-F7), instead of leaving bare axes.
+      // points: say so on the canvas (G-F7), instead of leaving bare axes —
+      // unless graph alerts are off in Preferences (seq 225 remainder L6).
       const unlinked = (t: GraphType) => {
+        if (!graphAlerts) return;
         const note = unlinkedAnalysisNote(t);
         if (note) addNote(fig, note, options);
       };
@@ -807,7 +818,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
         if (logisticFit) addLogisticCurve(fig, columns, logisticFit, paint);
         else {
           const note = logisticCurveNote(logisticOutcome);
-          if (note) addNote(fig, note, options);
+          if (graphAlerts && note) addNote(fig, note, options);
         }
       }
       if (type === "forest-plot") {
@@ -944,6 +955,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
     allSeries.join("\n"),
     selected,
     glRatio,
+    graphAlerts,
   ]);
 
   // Frees Plotly's resources when the chart disappears (no data, or leaving the view).

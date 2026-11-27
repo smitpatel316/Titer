@@ -8,12 +8,15 @@ import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from "@phosphor-icons
 import type { InfoConstant, InfoSheetData, ProjectNode } from "../../store/types";
 import { useProjectActions, useProjectStore } from "../../store/use-project-store";
 import { MAX_INFO_CONSTANTS, newConstantId, newInfoSheetData } from "../../lib/info-sheets";
+import { useNoteFont } from "../../lib/note-font";
 import { Button, Input, Select } from "../../ui/controls";
 import { Toolbar } from "../../ui/layout";
 import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
 
 export function InfoSheetView({ node }: { node: ProjectNode }) {
   const info = node.info ?? newInfoSheetData();
+  // The preferred note font (seq 225 remainder F16).
+  const noteFont = useNoteFont();
   const { updateInfoSheet } = useProjectActions();
   const { nodes, rootOrder } = useProjectStore();
   const tables = rootOrder.map((id) => nodes[id]).filter((n) => n?.type === "table");
@@ -137,6 +140,7 @@ export function InfoSheetView({ node }: { node: ProjectNode }) {
             <h2 className="mb-2 text-base font-semibold">Notes</h2>
             <textarea
               className="min-h-64 w-full rounded-md border border-edge bg-surface p-2 text-base outline-none focus:border-accent"
+              style={{ fontFamily: noteFont }}
               value={info.notes}
               aria-label="Info sheet notes"
               placeholder="Free notes about this experiment — dates, lot numbers, conditions…"

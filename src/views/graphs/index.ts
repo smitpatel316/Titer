@@ -15,6 +15,7 @@ import type { SelectorOption } from "../../components/universal-modal";
 import { readTable, seriesOfDataset, splitXY, type Column, type Dataset } from "../../lib/dataset";
 import type { SummaryFormat } from "../../lib/summary-format";
 import { paletteNamed, savedPalette } from "../../lib/palettes";
+import { loadNewGraphDefaults } from "../../lib/preferences";
 import { titleCase } from "../../lib/format";
 import { centerColumn, summaryMeanColumn, type Paint } from "./plot-helpers";
 import { individual } from "./individual";
@@ -362,10 +363,16 @@ export function graphSeriesDataset(
  *  SD-formatted table's graphs default to SD error bars. Omitted: SEM, as before. */
 export function newGraphOptions(type: GraphType, error?: TableErrorFormat): GraphOptions {
   const { palette, defaults } = GRAPHS[type];
+  // The preferred new-graph defaults (seq 225 remainder L11): points and
+  // error bars as the user set them in Preferences. The table's own error
+  // format still wins — it describes the data, not a preference.
+  const preferred = loadNewGraphDefaults();
   return {
     ...DEFAULT_GRAPH_OPTIONS,
-    palette: savedPalette(paletteNamed(palette ?? "okabe-ito")!),
     ...defaults,
+    showPoints: preferred.showPoints,
+    error: preferred.error,
+    palette: savedPalette(paletteNamed(palette ?? "okabe-ito")!),
     ...(error ? { error } : {}),
   };
 }

@@ -4,6 +4,7 @@
 // (SVG, staying vector). The figure is never rebuilt as a single Plotly
 // subplot figure — the per-graph renderers are not subplot-compatible.
 import { alert, handoffPngToKeynote, pickSavePath, writeFile } from "../../native";
+import { defaultSaveFolder } from "../../lib/preferences";
 import { loadPlotly } from "../graphs/plotly";
 import { withoutSelection } from "../graphs/selection";
 import { vectorTraces } from "../graphs/plot-helpers";
@@ -381,6 +382,7 @@ export async function saveFigureImage(
       lastFolder ? `${lastFolder}/${fileName}` : fileName,
       ext.toUpperCase(),
       ext,
+      defaultSaveFolder("exports", ""),
     );
     if (!path) return;
     lastFolder = path.slice(0, path.lastIndexOf("/"));
@@ -466,6 +468,7 @@ export async function sendFigureToOffice(
         lastFolder ? `${lastFolder}/${name}.key` : `${name}.key`,
         "Keynote Presentation",
         "key",
+        defaultSaveFolder("exports", ""),
       );
       if (!path) return;
       lastFolder = path.slice(0, path.lastIndexOf("/"));
@@ -485,6 +488,7 @@ export async function sendFigureToOffice(
         lastFolder ? `${lastFolder}/${fileName}` : fileName,
         target === "word" ? "Word Document" : "PowerPoint Presentation",
         ext,
+        defaultSaveFolder("exports", ""),
       );
       if (!path) return;
       lastFolder = path.slice(0, path.lastIndexOf("/"));

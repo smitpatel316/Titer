@@ -118,8 +118,20 @@ export const appVersion = getVersion;
  *  the Name field directly (it only does so via the location bar), and the
  *  shell refuses extensionless writes — so the extension is ensured here, for
  *  every caller, rather than trusting the dialog to return one. */
-export async function pickSavePath(title: string, defaultPath: string, name: string, ext: string) {
-  const path = await save({ title, defaultPath, filters: [{ name, extensions: [ext] }] });
+export async function pickSavePath(
+  title: string,
+  defaultPath: string,
+  name: string,
+  ext: string,
+  defaultFolder?: string,
+) {
+  // The preferred folder (seq 225 remainder L14): a bare file name starts
+  // there; a path that already names a folder is left alone.
+  const start =
+    defaultFolder && !defaultPath.includes("/") && !defaultPath.includes("\\")
+      ? `${defaultFolder.replace(/[/\\]+$/, "")}/${defaultPath}`
+      : defaultPath;
+  const path = await save({ title, defaultPath: start, filters: [{ name, extensions: [ext] }] });
   return path === null ? null : ensureSaveExtension(path, ext);
 }
 
@@ -141,7 +153,9 @@ const WRITABLE_EXTENSIONS = new Set([
  *  ("Fig 1.2", whose "2" is no extension) gains `.${ext}`. Dots in a
  *  folder name are not an extension, and the basename is split on both
  *  "/" and "\\", so a dot in a Windows parent directory is not mistaken
- *  for the file's extension. */
+ *  for the file's extension. `defaultFolder` (seq 225 remainder L14) is
+ *  the preferred folder from Preferences: a bare file name starts there,
+ *  while a path that already names a folder is left alone. */
 export function ensureSaveExtension(path: string, ext: string): string {
   const base = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
   const dot = base.lastIndexOf(".");

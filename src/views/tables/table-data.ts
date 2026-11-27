@@ -16,6 +16,7 @@ import { isXColumnFormat, sameConversion, type XColumnFormat, type XConversion }
 import { renameCalculatedReferences } from "../../lib/calcvars";
 import { normalizeDecimalInput, setDecimalPlaces, type DecimalSeparator } from "../../lib/decimal-format";
 import { parseCell } from "../../lib/numeric";
+import { loadClipboardOptions, type ClipboardOptions } from "../../lib/preferences";
 import { seriesKeyOf, groupRuns } from "../../lib/columns";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
 import {
@@ -1304,19 +1305,46 @@ export function convertCommaDecimals(data: TableData): TableData {
 
 /** Stored cells of `range` as tab-separated text, the format Excel and Numbers exchange.
  *  Values keep full precision — a decimal-places setting never rounds them — and
- *  numeric cells take the decimal separator. */
-export function toTSV(data: TableData, range: Range, separator: DecimalSeparator = "."): string {
+ *  numeric cells take the decimal separator. The clipboard options (seq 225
+ *  remainder L10) add a header line of column titles above the cells, and the
+ *  row titles beside them when the selection starts past column 0; both are
+ *  off by default, so a plain call copies exactly as before. */
+export function toTSV(
+  data: TableData,
+  range: Range,
+  separator: DecimalSeparator = ".",
+  options: ClipboardOptions = loadClipboardOptions(),
+): string {
   const lines: string[] = [];
+  const quote = (shown: string) => (/[\t\n"]/.test(shown) ? `"${shown.replace(/"/g, '""')}"` : shown);
+  if (options.includeColumnTitles) {
+    const head: string[] = [];
+    for (let c = range.c0; c <= Math.min(range.c1, data.columns.length - 1); c++) {
+      const name = data.columns[c] ?? "";
+      head.push(quote(columnTitleForCopy(data, c, name)));
+    }
+    if (options.includeRowTitles && range.c0 > 0) head.unshift("");
+    lines.push(head.join("\t"));
+  }
   for (let r = range.r0; r <= Math.min(range.r1, data.rows.length - 1); r++) {
     const cells: string[] = [];
+    if (options.includeRowTitles && range.c0 > 0) cells.push(quote(data.rows[r]?.[0] ?? ""));
     for (let c = range.c0; c <= Math.min(range.c1, data.columns.length - 1); c++) {
       const v = data.rows[r]?.[c] ?? "";
       const shown = v !== "" && separator === "," && parseCell(v) !== null ? v.replace(".", ",") : v;
-      cells.push(/[\t\n"]/.test(shown) ? `"${shown.replace(/"/g, '""')}"` : shown);
+      cells.push(quote(shown));
     }
     lines.push(cells.join("\t"));
   }
   return lines.join("\n");
+}
+
+/** The column name a copy header shows: a grouped sub-column shows only its
+ *  part after the group prefix, as the grid shows it. */
+function columnTitleForCopy(data: TableData, c: number, name: string): string {
+  const grouped = isGrouped(data) || isNested(data);
+  if (!grouped || c < leadOf(data)) return name;
+  return name.slice((isNested(data) ? name.lastIndexOf(":") : name.indexOf(":")) + 1);
 }
 
 /** The copied cells as a real HTML table (seq 430, Prism E3.5): Word, Excel
@@ -1326,14 +1354,24 @@ export function toTSV(data: TableData, range: Range, separator: DecimalSeparator
  *  cells match the TSV form — full precision, decimal separator applied —
  *  and names and values are HTML-escaped. The plain-text TSV form stays the
  *  primary copy; this rides alongside it on the clipboard. */
-export function toHTMLTable(data: TableData, range: Range, separator: DecimalSeparator = "."): string {
+export function toHTMLTable(
+  data: TableData,
+  range: Range,
+  separator: DecimalSeparator = ".",
+  options: ClipboardOptions = loadClipboardOptions(),
+): string {
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const shown = (v: string) => (v !== "" && separator === "," && parseCell(v) !== null ? v.replace(".", ",") : v);
   const c1 = Math.min(range.c1, data.columns.length - 1);
   const nested = isNested(data);
   const grouped = isGrouped(data) || nested;
   const lead = leadOf(data);
+  // The header row is the table's structure (seq 430): it always carries
+  // the copied columns' names. The row-titles option (seq 225 remainder
+  // L10) adds the row titles as a leading cell when the selection starts
+  // past column 0 — with an empty header cell above them.
   const head: string[] = [];
+  if (options.includeRowTitles && range.c0 > 0) head.push("<th></th>");
   for (let c = range.c0; c <= c1; c++) {
     const name = data.columns[c] ?? "";
     const shownName =
@@ -1343,6 +1381,7 @@ export function toHTMLTable(data: TableData, range: Range, separator: DecimalSep
   const rows: string[] = [];
   for (let r = range.r0; r <= Math.min(range.r1, data.rows.length - 1); r++) {
     const cells: string[] = [];
+    if (options.includeRowTitles && range.c0 > 0) cells.push(`<td>${esc(shown(data.rows[r]?.[0] ?? ""))}</td>`);
     for (let c = range.c0; c <= c1; c++) cells.push(`<td>${esc(shown(data.rows[r]?.[c] ?? ""))}</td>`);
     rows.push(`<tr>${cells.join("")}</tr>`);
   }

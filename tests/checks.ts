@@ -45197,6 +45197,156 @@ check("prefs-225-note-font: Preferences offers a Note Font choice, persisted", (
   );
 });
 
+// Seq 225 remainder (L1) — Prism's Preferences offers a Zoom reset: every
+// sheet back to its fit. Titer's zoom store (seq 239) has no reset-all, and
+// the dialog has no Reset zoom control. This pin fails until both exist.
+check("prefs-225-zoom-reset: Preferences offers a Zoom reset, persisted", () => {
+  const dialog = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(dialog.includes("Reset zoom"), "Preferences dialog has no Reset zoom control");
+  const zoom = readFileSync("src/store/use-zoom.tsx", "utf8");
+  ok(zoom.includes("resetAllZooms"), "zoom store has no resetAllZooms");
+});
+
+// Seq 225 remainder (L3) — Prism's Preferences offers a Default Font for
+// graphs. Titer's figure renderer hardcodes Arial and the dialog has no
+// default-font setting. This pin fails until both exist.
+check("prefs-225-default-font: Preferences offers a Default Font choice, persisted", () => {
+  const dialog = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(dialog.includes("Default font"), "Preferences dialog has no Default font control");
+  ok(
+    dialog.includes("loadDefaultFont") && dialog.includes("saveDefaultFont"),
+    "Preferences dialog has no default-font load/save pair",
+  );
+});
+
+// Seq 225 remainder (L4) — Prism's Preferences offers Inches / Centimeters
+// for sizes. Titer shows figure sizes in inches only, with no unit choice.
+// This pin fails until the dialog offers the choice with a load/save pair.
+check("prefs-225-units: Preferences offers an Inches/Centimeters choice, persisted", () => {
+  const dialog = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(dialog.includes("Inches") && dialog.includes("Centimeters"), "Preferences dialog has no Inches/Centimeters choice");
+  ok(
+    dialog.includes("loadMeasurementUnit") && dialog.includes("saveMeasurementUnit"),
+    "Preferences dialog has no measurement-unit load/save pair",
+  );
+});
+
+// Seq 225 remainder (L5) — Prism's Preferences offers Autocomplete Titles:
+// a new graph's title is suggested from its source table. Titer's graph
+// creation leaves the title blank with no such setting. This pin fails
+// until the dialog offers the toggle with a load/save pair.
+check("prefs-225-autocomplete-titles: Preferences offers Autocomplete Titles, persisted", () => {
+  const dialog = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(dialog.includes("Autocomplete titles"), "Preferences dialog has no Autocomplete titles control");
+  ok(
+    dialog.includes("loadAutocompleteTitles") && dialog.includes("saveAutocompleteTitles"),
+    "Preferences dialog has no autocomplete-titles load/save pair",
+  );
+});
+
+// Seq 225 remainder (L6) — Prism's Preferences offers Graph Alerts: a
+// warning when a graph has nothing to draw. Titer draws the empty axes
+// silently with no such setting. This pin fails until the dialog offers the
+// toggle with a load/save pair.
+check("prefs-225-graph-alerts: Preferences offers Graph Alerts, persisted", () => {
+  const dialog = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(dialog.includes("Graph alerts"), "Preferences dialog has no Graph alerts control");
+  ok(
+    dialog.includes("loadGraphAlerts") && dialog.includes("saveGraphAlerts"),
+    "Preferences dialog has no graph-alerts load/save pair",
+  );
+});
+
+// Seq 225 remainder (L11) — Prism's Preferences offers New Graph defaults
+// (points shown, error bars). Titer's newGraphOptions always starts from
+// the same hard defaults with no such setting. This pin fails until the
+// dialog offers the defaults with a load/save pair.
+check("prefs-225-new-graph-defaults: Preferences offers New Graph defaults, persisted", () => {
+  const dialog = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(dialog.includes("New graphs"), "Preferences dialog has no New graphs control");
+  ok(
+    dialog.includes("loadNewGraphDefaults") && dialog.includes("saveNewGraphDefaults"),
+    "Preferences dialog has no new-graph-defaults load/save pair",
+  );
+});
+
+// Seq 225 remainder (L12) — Prism's Preferences offers a P-value format
+// (the threshold below which p shows as "<"). Titer's format.ts hardcodes
+// 0.0001 with no such setting. This pin fails until the dialog offers the
+// choice with a load/save pair.
+check("prefs-225-pvalue-format: Preferences offers a P-value format, persisted", () => {
+  const dialog = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(dialog.includes("P-value format"), "Preferences dialog has no P-value format control");
+  ok(
+    dialog.includes("loadPValueFormat") && dialog.includes("savePValueFormat"),
+    "Preferences dialog has no p-value-format load/save pair",
+  );
+});
+
+// Seq 225 remainder (L14) — Prism's Preferences offers File Locations: the
+// default folders for projects and exports. Titer's save dialogs start
+// wherever the OS puts them, with no such setting. This pin fails until the
+// dialog offers the folders with a load/save pair.
+check("prefs-225-file-locations: Preferences offers File Locations, persisted", () => {
+  const dialog = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(dialog.includes("File locations"), "Preferences dialog has no File locations control");
+  ok(
+    dialog.includes("loadDefaultLocations") && dialog.includes("saveDefaultLocations"),
+    "Preferences dialog has no file-locations load/save pair",
+  );
+});
+
+// Seq 225 remainder (L10) — Prism's Preferences offers Clipboard options:
+// whether a table copy includes column and row titles. Titer's toTSV
+// always copies the same shape with no such setting. This pin fails until
+// the dialog offers the options with a load/save pair.
+check("prefs-225-clipboard: Preferences offers Clipboard options, persisted", () => {
+  const dialog = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(dialog.includes("Clipboard"), "Preferences dialog has no Clipboard control");
+  ok(
+    dialog.includes("loadClipboardOptions") && dialog.includes("saveClipboardOptions"),
+    "Preferences dialog has no clipboard-options load/save pair",
+  );
+});
+
+// Seq 225 remainder (L13) — Prism's Preferences offers auto-creating an
+// Info sheet with each new data table. Titer's createTableWithGraph makes
+// table + graph only, with no such setting. This pin fails until the dialog
+// offers the toggle with a load/save pair.
+check("prefs-225-info-autocreate: Preferences offers auto-creating Info sheets, persisted", () => {
+  const dialog = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(dialog.includes("Info sheet"), "Preferences dialog has no Info sheet control");
+  ok(
+    dialog.includes("loadAutoCreateInfo") && dialog.includes("saveAutoCreateInfo"),
+    "Preferences dialog has no info-auto-create load/save pair",
+  );
+});
+
+// Seq 225 remainder (L16) — Prism's Preferences offers an Extended Log
+// File: verbose diagnostics written to a log. Titer's error capture logs
+// the minimum with no such setting. This pin fails until the dialog offers
+// the toggle with a load/save pair.
+check("prefs-225-extended-log: Preferences offers an Extended Log File, persisted", () => {
+  const dialog = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(dialog.includes("Extended log"), "Preferences dialog has no Extended log control");
+  ok(
+    dialog.includes("loadExtendedLog") && dialog.includes("saveExtendedLog"),
+    "Preferences dialog has no extended-log load/save pair",
+  );
+});
+
+// Seq 225 remainder (L9) — Prism's Page Setup offers print options: grid
+// lines, column titles, and a header. Titer's print settings cover paper,
+// orientation, margins and scale only. This pin fails until the dialog
+// offers the print options with a load/save pair.
+check("prefs-225-print-options: Preferences offers Print options (grid lines, column titles, header), persisted", () => {
+  const dialog = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(dialog.includes("Grid lines"), "Preferences dialog has no Grid lines control");
+  const print = readFileSync("src/lib/print-settings.ts", "utf8");
+  ok(print.includes("gridLines"), "print settings have no gridLines");
+  ok(print.includes("columnTitles") && print.includes("headerText"), "print settings have no columnTitles/headerText");
+});
+
 let failed = 0;
 // CHECK=<substring> runs only the matching checks (e.g. CHECK=FL-rebrand
 // for the rebrand regression check alone, without the full suite).

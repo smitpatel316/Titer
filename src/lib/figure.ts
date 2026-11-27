@@ -6,6 +6,7 @@
 // these functions, and the tests drive them directly.
 
 import { largestAt, PX_PER_INCH } from "./image-dpi";
+import { defaultFontFamily, loadDefaultFont, loadMeasurementUnit } from "./preferences";
 import { graphSeries } from "../views/graphs";
 import { paintOf } from "../views/graphs/plot-helpers";
 import {
@@ -443,8 +444,13 @@ export function validateFigureSize(size: FigureSize): { size?: FigureSize; reaso
   const heightIn = Math.min(max, Math.max(min, size.heightIn || 0));
   if (widthIn / heightIn > 4 || heightIn / widthIn > 4)
     return { reason: "A figure's width and height must be within 4× of each other." };
-  if (widthIn !== size.widthIn || heightIn !== size.heightIn)
-    return { reason: `Figure size must be between ${min} and ${max} inches in each dimension.` };
+  if (widthIn !== size.widthIn || heightIn !== size.heightIn) {
+    // The bounds in the preferred unit (seq 225 remainder L4): inches by
+    // default, so this reads exactly as before until the user picks cm.
+    const unit = loadMeasurementUnit();
+    const shown = (inches: number) => (unit === "cm" ? `${Math.round(inches * 2.54 * 10) / 10}` : `${inches}`);
+    return { reason: `Figure size must be between ${shown(min)} and ${shown(max)} ${unit === "cm" ? "cm" : "inches"} in each dimension.` };
+  }
   return { size: { widthIn, heightIn } };
 }
 
@@ -612,7 +618,9 @@ export function composeFigureSvg(
   const rectOf = new Map(rects.map((r) => [r.panel, r]));
   const entryOf = new Map(panels.map((p) => [p.panel, p.svg]));
   const fontWeight = bold ? "bold" : "normal";
-  const fontFamily = "Arial, Helvetica, sans-serif";
+  // The figure's text face is the preferred default font (seq 225
+  // remainder L3): Arial until the user picks another.
+  const fontFamily = defaultFontFamily(loadDefaultFont());
   let missing = 0;
   const parts: string[] = [];
   if (figure.figureTitle)

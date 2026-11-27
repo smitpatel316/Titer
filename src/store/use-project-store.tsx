@@ -22,6 +22,7 @@ import { recomputeCalculated } from "../lib/calcvars";
 import { refreshLevelOrder, refreshVariableTypes } from "../lib/variable-types";
 import { remapQualifiedOptions, restoreForeignPoints } from "../lib/multi-table";
 import { MAX_INFO_SHEETS, newInfoSheetData } from "../lib/info-sheets";
+import { loadAutoCreateInfo, loadAutocompleteTitles } from "../lib/preferences";
 import type { AnalysisParams, AnalysisPickerValue, AnalysisResult, AnalysisType } from "../stats/types";
 import { resolveAnalysis, type PluginAnalysisResult, type PluginParamValues } from "../plugins";
 import { TABLES } from "../views/tables";
@@ -44,7 +45,7 @@ export type { ProjectNode } from "./types";
 
 /** What the universal selector is currently choosing. */
 /** The Preferences dialog's sections (seq 225). */
-export type PreferenceSection = "general" | "data-entry" | "appearance" | "ai" | "feedback" | "print";
+export type PreferenceSection = "general" | "data-entry" | "appearance" | "graphs" | "files" | "ai" | "feedback" | "print";
 
 type Selector =
   | { kind: "new-table" }
@@ -688,11 +689,26 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         graphOptions: newGraphOptions(graphType, table.data?.errorFormat),
       };
       const nodes = { ...state.nodes, [tableId]: table, [graphId]: graph };
+      // Info auto-create (seq 225 remainder L13): when the preference is
+      // on, the new table gets a linked Info sheet with it, as Prism does.
+      // Off by default — a fresh table starts bare, as before. The sheet is
+      // a root node, like one made from the sidebar, sitting after its table.
+      let infoId: string | null = null;
+      if (loadAutoCreateInfo()) {
+        infoId = genId("info");
+        nodes[infoId] = {
+          id: infoId,
+          type: "info",
+          name: "Info Sheet",
+          parentId: null,
+          info: { ...newInfoSheetData(), linkedTableId: tableId },
+        };
+      }
       const firstFigure = state.rootOrder.findIndex((id) => state.nodes[id]?.type === "figure");
       const rootOrder =
         firstFigure === -1
-          ? [...state.rootOrder, tableId]
-          : [...state.rootOrder.slice(0, firstFigure), tableId, ...state.rootOrder.slice(firstFigure)];
+          ? [...state.rootOrder, tableId, ...(infoId ? [infoId] : [])]
+          : [...state.rootOrder.slice(0, firstFigure), tableId, ...(infoId ? [infoId] : []), ...state.rootOrder.slice(firstFigure)];
       const childOrder = { ...state.childOrder, [tableId]: [graphId] };
       return { ...state, nodes, rootOrder, childOrder, activeNodeId: graphId, isDirty: true };
     }
@@ -1803,6 +1819,13 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         // table's graphs default to SD error bars (a table with no format
         // recorded reads as SEM, the default, as before).
         const parent = latest.current.nodes[parentId];
+        // Autocomplete titles (seq 225 remainder L5): a new graph's title
+        // is suggested from its source table, unless the caller set one.
+        const options =
+          graphOptions ??
+          (loadAutocompleteTitles() && parent
+            ? { ...newGraphOptions(graphType, parent?.data?.errorFormat), title: parent.name }
+            : newGraphOptions(graphType, parent?.data?.errorFormat));
         const id = genId("graph");
         dispatch({
           type: "create",
@@ -1812,7 +1835,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
             name: GRAPHS[graphType].label,
             parentId,
             graphType,
-            graphOptions: graphOptions ?? newGraphOptions(graphType, parent?.data?.errorFormat),
+            graphOptions: options,
             ...(sourceTableIds?.length ? { sourceTableIds: [...sourceTableIds] } : {}),
           },
         });
