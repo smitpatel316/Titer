@@ -14,6 +14,7 @@
 // bypass it), so the two implementations must stay in agreement.
 
 import { isNative, mcpFlushErrorLog, mcpLogError } from "../native";
+import { loadExtendedLog } from "./preferences";
 
 /** A path token ends at whitespace, a quote, a closing bracket, a comma,
  *  a semicolon, or a colon (the `:12:3` of a stack location survives —
@@ -148,7 +149,15 @@ export function installErrorCapture(): void {
 
 async function reportError(kind: ErrorKind, errorType: string, message: string, stack: string): Promise<void> {
   try {
-    await mcpLogError({ kind, error_type: errorType, message, stack, action: currentAction() });
+    // The extended log (seq 225 remainder L16): when the preference is on,
+    // the report carries the browser and location with it, so the local log
+    // file says where the error happened, not just what it was. The detail
+    // is scrubbed like everything else — no user paths leave the machine.
+    const extended =
+      loadExtendedLog() && typeof navigator !== "undefined" && typeof location !== "undefined"
+        ? `\n[extended] ${scrubErrorText(`${navigator.userAgent} | ${location.href}`)}`
+        : "";
+    await mcpLogError({ kind, error_type: errorType, message: message + extended, stack, action: currentAction() });
   } catch {
     // Reporting must never break the app: the local log is best-effort,
     // and a failed report is not itself reported (no infinite loop).

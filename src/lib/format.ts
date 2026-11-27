@@ -1,5 +1,6 @@
 // How numbers and P values are written everywhere (results, graph notes, brackets), and
 // names in menus and pickers.
+import { loadPValueFormat, pValueThreshold } from "./preferences";
 
 /** A number as Titer shows it: 4 significant figures, "—" when missing. */
 export function num(value: number | null | undefined): string {
@@ -9,14 +10,25 @@ export function num(value: number | null | undefined): string {
   return Number.isInteger(value) ? String(value) : Number(value.toPrecision(4)).toString();
 }
 
-/** A P value: like `num`, but "<0.0001" below 0.0001. */
-export const pValue = (p: number | null | undefined) => (p != null && p < 0.0001 ? "<0.0001" : num(p));
+/** A P value: like `num`, but "<0.0001" below the preferred threshold
+ *  (seq 225 remainder L12) — "<0.001", or the exact value when the format
+ *  is exact. The default threshold is 0.0001, as before. */
+export const pValue = (p: number | null | undefined) => {
+  const threshold = pValueThreshold(loadPValueFormat());
+  return p != null && threshold > 0 && p < threshold ? `<${threshold}` : num(p);
+};
 
 /** "P = 0.0123", or "P < 0.0001", for notes on a graph. */
-export const pText = (p: number | null | undefined) => (p != null && p < 0.0001 ? "P < 0.0001" : `P = ${num(p)}`);
+export const pText = (p: number | null | undefined) => {
+  const threshold = pValueThreshold(loadPValueFormat());
+  return p != null && threshold > 0 && p < threshold ? `P < ${threshold}` : `P = ${num(p)}`;
+};
 
 /** "p=0.0123", or "p<0.0001": the bracket label that names the P value plainly. */
-export const pEquals = (p: number | null | undefined) => (p != null && p < 0.0001 ? "p<0.0001" : `p=${num(p)}`);
+export const pEquals = (p: number | null | undefined) => {
+  const threshold = pValueThreshold(loadPValueFormat());
+  return p != null && threshold > 0 && p < threshold ? `p<${threshold}` : `p=${num(p)}`;
+};
 
 export const isSignificant = (p: number | null | undefined): p is number => p != null && !Number.isNaN(p) && p < 0.05;
 

@@ -11,6 +11,7 @@ import * as React from "react";
 import { PlusIcon, XIcon } from "@phosphor-icons/react";
 import { FLOATING_NOTE_COLORS, type FloatingNote, type FloatingNoteColor, type ProjectNode } from "../store/types";
 import { useProjectActions } from "../store/use-project-store";
+import { useNoteFont } from "../lib/note-font";
 import { Button, cn } from "../ui/controls";
 
 /** A note's sticky colors: pale fill, a darker edge, dark ink. */
@@ -60,6 +61,8 @@ export function AddFloatingNoteButton({ node }: { node: ProjectNode }) {
 export function FloatingNotesLayer({ node }: { node: ProjectNode }) {
   const { updateFloatingNotes } = useProjectActions();
   const notes = node.floatingNotes ?? [];
+  // The preferred note font (seq 225 remainder F16).
+  const noteFont = useNoteFont();
   const layerRef = React.useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState("");
@@ -105,6 +108,8 @@ export function FloatingNotesLayer({ node }: { node: ProjectNode }) {
               border: `1px solid ${style.border}`,
               color: "#1a1a1a",
               touchAction: "none",
+              // The preferred note font (seq 225 remainder F16).
+              fontFamily: noteFont,
             }}
             onPointerDown={(e) => {
               if ((e.target as HTMLElement).closest("textarea,button,input")) return;

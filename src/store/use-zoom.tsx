@@ -73,6 +73,15 @@ export const zoomActualSize = (id: string) => setZoomExplicit(id, 1);
 /** Back to the fit. */
 export const zoomFitNode = (id: string) => setZoomExplicit(id, null);
 
+/** Every sheet back to its fit (seq 225 remainder L1): the Preferences
+ *  dialog's Reset zoom. View-only, like every other zoom change. */
+export function resetAllZooms(): void {
+  for (const [id, state] of zooms) {
+    if (state.explicit !== null) zooms.set(id, { ...state, explicit: null });
+  }
+  emit();
+}
+
 /** A sheet's zoom, for its view: the zoom shown, the user's zoom (null
  *  while following the fit), the fit, and the setters. */
 export function useZoom(id: string) {

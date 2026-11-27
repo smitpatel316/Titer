@@ -1122,14 +1122,14 @@ export function Grid({
 
   return (
     <div
-      className="relative min-h-0 flex-1 overflow-hidden border-t border-separator text-regular"
+      className="titer-data-grid relative min-h-0 flex-1 overflow-hidden border-t border-separator text-regular"
       // Clicks must not take the focus away from the grid's input.
       onMouseDown={(e) => e.target instanceof HTMLInputElement || e.preventDefault()}
     >
       <div ref={scrollerRef} className="absolute inset-0 overflow-auto overscroll-none" onScroll={syncView}>
         <div style={{ width: GUTTER_W + totalW, height: headH + tableH }}>
           {/* Headers: stuck to the top. */}
-          <div className="sticky top-0 z-20 flex" style={{ height: headH }}>
+          <div className="titer-grid-header sticky top-0 z-20 flex" style={{ height: headH }}>
             <div
               className="sticky left-0 z-10 shrink-0 border-r border-b border-separator bg-surface"
               style={{ width: GUTTER_W }}
@@ -1381,7 +1381,7 @@ function Cells({
         <div
           key={`${r}:${c}`}
           className={cn(
-            "absolute truncate border-r border-b border-separator px-1.5 leading-[24px]",
+            "titer-grid-cell absolute truncate border-r border-b border-separator px-1.5 leading-[24px]",
             value && parseCell(value) !== null && "text-right tabular-nums",
             excluded.has(`${r},${c}`) && "text-excluded italic after:content-['*']",
             isHit && "bg-yellow-300/50",

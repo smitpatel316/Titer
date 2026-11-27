@@ -58,6 +58,7 @@ import {
 import type { SavePromptChoice } from "../components/save-prompt-dialog";
 import * as native from "../native";
 import { loadRecents, MAX_RECENTS, saveRecents, recentKey, type RecentEntry } from "./recents";
+import { defaultSaveFolder } from "../lib/preferences";
 import { consumeMcpCloseAllowance } from "./mcp-document";
 import { importWarnings } from "./mcp-document";
 import { publishMcpSnapshotNow } from "./mcp-publish";
@@ -332,7 +333,7 @@ export function useDocument() {
       );
       return false;
     }
-    const target = await native.pickSavePath("Save as Prism", `${title}.prism`, "GraphPad Prism File", "prism");
+    const target = await native.pickSavePath("Save as Prism", `${title}.prism`, "GraphPad Prism File", "prism", defaultSaveFolder("projects", ""));
     if (!target) return false;
     try {
       await native.writeFile(target, bytes);
@@ -383,7 +384,7 @@ export function useDocument() {
       );
       return false;
     }
-    const target = await native.pickSavePath("Save as .pzfx", `${title}.pzfx`, "GraphPad Prism File", "pzfx");
+    const target = await native.pickSavePath("Save as .pzfx", `${title}.pzfx`, "GraphPad Prism File", "pzfx", defaultSaveFolder("projects", ""));
     if (!target) return false;
     try {
       await native.writeFile(target, bytes);
@@ -843,6 +844,7 @@ export function useDocument() {
         filePath ?? `${untitled}.${PROJECT_FILE_EXTENSION}`,
         "Titer Project",
         PROJECT_FILE_EXTENSION,
+        defaultSaveFolder("projects", ""),
       ));
     if (!target) return false;
     // Read the project only now, after the dialog: edits made while it was open
@@ -894,6 +896,7 @@ export function useDocument() {
       filePath ? `${fileTitle(filePath)} copy.${PROJECT_FILE_EXTENSION}` : `${untitled} copy.${PROJECT_FILE_EXTENSION}`,
       "Titer Project",
       PROJECT_FILE_EXTENSION,
+      defaultSaveFolder("projects", ""),
     );
     if (!target) return false;
     const s = latest.current.get();
@@ -925,6 +928,7 @@ export function useDocument() {
       `${(table?.name ?? "Family").replaceAll("/", "-")}.${PROJECT_FILE_EXTENSION}`,
       "Titer Project",
       PROJECT_FILE_EXTENSION,
+      defaultSaveFolder("projects", ""),
     );
     if (!target) return false;
     try {
@@ -1457,6 +1461,7 @@ export function useDocument() {
         `${title}.${ext}`,
         `Titer ${label}`,
         ext,
+        defaultSaveFolder("projects", ""),
       );
       if (!target) return;
       try {
