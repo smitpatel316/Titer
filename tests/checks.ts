@@ -418,7 +418,7 @@ import { TABLES } from "../src/views/tables/index";
 import { UPDATE_CHECK_TIMEOUT_MS, fetchWithTimeout, isNewer, latestVersion } from "../src/lib/version";
 import { decideUpdate, type ChannelManifest } from "../src/lib/channel";
 import { checkForUpdatesDaily } from "../src/updates";
-import { titleCase } from "../src/lib/format";
+import { num, titleCase } from "../src/lib/format";
 import { loadRecents } from "../src/store/recents";
 import {
   MAX_RECENT_ANALYSES,
@@ -32773,6 +32773,49 @@ check("m9 deming jackknife SE is Efron's sqrt((k-1)/k * sum((θᵢ−θ̄)²))",
     expect("Intercept 95% CI lower", stat("Intercept 95% CI lower"), intercept - 1.96 * intSe);
     expect("Intercept 95% CI upper", stat("Intercept 95% CI upper"), intercept + 1.96 * intSe);
   }
+});
+
+check("br-115 deming notes OLS agrees with R at 1e13 scale; constant 0.1 data rejected", async () => {
+  // Issue 115: commit 67a1cbb3 double-centered Deming + jackknife and OLS in
+  // R, but the TS helpers stayed single-pass uncentered: olsFit (used by
+  // notes()) disagreed with the R OLS rows at 1e13 scale, and demingProblem
+  // let constant [0.1, 0.1, 0.1] through (sxx = 5.78e-34 !== 0) where R
+  // returns NaN. Both helpers now double-center against xs[0]/ys[0].
+  // Repro data from the report: x = 1e13+0.1..1e13+0.6, y = 1e13+5.12..1e13+5.61.
+  const xs = [1e13 + 0.1, 1e13 + 0.2, 1e13 + 0.3, 1e13 + 0.4, 1e13 + 0.5, 1e13 + 0.6];
+  const ys = [1e13 + 5.12, 1e13 + 5.218, 1e13 + 5.316, 1e13 + 5.414, 1e13 + 5.512, 1e13 + 5.61];
+  const table: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xs.map((x, i) => [null, String(x), String(ys[i])]),
+  };
+  const r = await runAnalysis("deming-regression", table, { y: "Y", lambda: 1 });
+  if ("error" in r) throw new Error(r.error);
+  const stat = (label: string) => r.stats.find((s) => s.label === label)?.value;
+  const olsSlope = stat("OLS slope");
+  const olsIntercept = stat("OLS Y-intercept");
+  if (olsSlope == null || olsIntercept == null || !Number.isFinite(olsIntercept))
+    throw new Error(`Deming OLS rows missing: slope=${olsSlope} intercept=${olsIntercept}`);
+  // notes() prints the OLS equation with num() (4 sig figs); the printed
+  // slope and intercept must be R's values — pre-fix the single-pass olsFit
+  // printed 212100000000 where R says 212000000000.
+  if (!r.notes.includes(`Y = ${num(olsSlope)}*X`))
+    throw new Error(`Deming notes OLS slope disagrees with R (${num(olsSlope)}): ${r.notes}`);
+  if (!r.notes.includes(num(olsIntercept)))
+    throw new Error(`Deming notes OLS intercept disagrees with R (${num(olsIntercept)}): ${r.notes}`);
+  // Constant data must be refused by the check, not run into R's NaN.
+  const constTable: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "0.1", "0.1"],
+      [null, "0.1", "0.1"],
+      [null, "0.1", "0.1"],
+    ],
+  };
+  const c = await runAnalysis("deming-regression", constTable, { y: "Y", lambda: 1 });
+  if (!("error" in c) || !/constant/i.test(c.error))
+    throw new Error(
+      `Deming on constant [0.1, 0.1, 0.1] should be rejected as constant, got ${"error" in c ? c.error : "a result"}`,
+    );
 });
 
 check("m19 spline df is range-checked against the distinct X values", async () => {
