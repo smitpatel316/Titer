@@ -30,17 +30,32 @@ import { moveTargetPath, renameTargetPath } from "../src/lib/paths";
 import { extractFamily } from "../src/lib/family";
 import { applyWand, wandExamples, wandReportMessage } from "../src/lib/wand";
 import {
+  NEW_PROJECT_WINDOW_KEY,
+  NEW_PROJECT_WINDOW_MS,
+  TEMPLATE_FOLDERS_KEY,
+  MAX_TEMPLATE_FOLDERS,
   TEMPLATES,
   WELCOME_KEY,
+  addTemplateFolder,
   blankTemplateFor,
   graphPortfolio,
+  isNewProjectWindow,
+  markNewProjectWindow,
+  parseTemplateFolders,
   parseWelcomeSetting,
   planTemplateApply,
   pristineBlankTableId,
+  removeTemplateFolder,
+  serializeTemplateFolders,
+  sharedTemplateId,
+  sharedTemplateName,
+  sharedTemplatesForFolder,
   shouldShowWelcome,
   templateById,
+  templateFolderLabel,
   templateForGraph,
   type BuiltInTemplate,
+  type TemplateFolder,
 } from "../src/lib/templates";
 import {
   GUIDE_STEPS,
@@ -377,7 +392,7 @@ import { yieldToPaint } from "../src/lib/yield-to-paint";
 import { fitWidths, fitZoom } from "../src/store/use-layout";
 import { clampZoom, zoomInStep, zoomOutStep, ZOOM_LIMITS } from "../src/store/use-zoom";
 import { isGoneReadError, prismDropSkippedMessage, prismFileOpenMessage, prismSaveReportLines } from "../src/store/use-document";
-import { cloneGraphPlan, DEFAULT_CLONE_OPTIONS, type CloneOptions } from "../src/lib/clone-graph";
+import { cloneGraphPlan, clonableGraphs, DEFAULT_CLONE_OPTIONS, type CloneOptions } from "../src/lib/clone-graph";
 import { computeGroupedDEG } from "../src/lib/deg";
 import { binCounts, binEdges } from "../src/lib/histogram";
 import { logisticCurveNote } from "../src/views/graphs/logistic-curve";
@@ -35428,6 +35443,132 @@ check("the Welcome setting defaults to show, and only an explicit off hides it",
   strictEqual(shouldShowWelcome("false", false), false);
   strictEqual(shouldShowWelcome(null, true), false);
   strictEqual(shouldShowWelcome("false", true), false);
+});
+
+// seq 167 remainder (B1): Cmd+N routes through Welcome — the menu marks the
+// new window, and the auto-show reads the mark while the show-on-startup
+// setting still gates it. The mark is a timestamp, so it only fires for a
+// window created by that keypress, and only for a short while after it.
+check("seq 167 remainder B1: a Cmd+N window is a new-project window for a short while only", () => {
+  strictEqual(NEW_PROJECT_WINDOW_KEY, "titer.new-project-window");
+  strictEqual(NEW_PROJECT_WINDOW_MS, 10_000);
+  strictEqual(isNewProjectWindow(markNewProjectWindow(1_000), 1_000), true);
+  strictEqual(isNewProjectWindow(markNewProjectWindow(1_000), 10_999), true);
+  strictEqual(isNewProjectWindow(markNewProjectWindow(1_000), 11_001), false, "the mark expires");
+  strictEqual(isNewProjectWindow(markNewProjectWindow(1_000), 999), false, "a mark from the future is not one");
+  strictEqual(isNewProjectWindow(null, 1_000), false);
+  strictEqual(isNewProjectWindow(undefined, 1_000), false);
+  strictEqual(isNewProjectWindow("banana", 1_000), false);
+  strictEqual(isNewProjectWindow("", 1_000), false);
+});
+
+// seq 167 remainder (M4): the Welcome dialog's Clone a Graph section lists
+// the project's graphs in sidebar order — nothing on a fresh project, and
+// analyses never list (only graphs clone).
+check("seq 167 remainder M4: clonable graphs list the project's graphs in sidebar order", () => {
+  const project = {
+    nodes: {
+      t1: { id: "t1", type: "table", name: "Table 1" },
+      g1: { id: "g1", type: "graph", name: "Dose–response" },
+      a1: { id: "a1", type: "analysis", name: "Fit" },
+      g2: { id: "g2", type: "graph", name: "Second graph" },
+      t2: { id: "t2", type: "table", name: "Table 2" },
+      g3: { id: "g3", type: "graph", name: "Table 2 graph" },
+    },
+    rootOrder: ["t1", "t2"],
+    childOrder: { t1: ["g1", "a1", "g2"], t2: ["g3"] },
+  };
+  deepStrictEqual(clonableGraphs(project), [
+    { id: "g1", name: "Dose–response" },
+    { id: "g2", name: "Second graph" },
+    { id: "g3", name: "Table 2 graph" },
+  ]);
+  deepStrictEqual(
+    clonableGraphs({ nodes: {}, rootOrder: [], childOrder: {} }),
+    [],
+    "a fresh project has nothing to clone",
+  );
+});
+
+// seq 167 remainder (M6): managed/shared template folders — a forgiving
+// registry: garbage never breaks the gallery, paths dedupe, shared folders
+// are the team ones, and the list caps so one bad value can't grow it.
+check("seq 167 remainder M6: template folders parse forgivingly, dedupe, and cap", () => {
+  strictEqual(TEMPLATE_FOLDERS_KEY, "titer.template-folders");
+  deepStrictEqual(parseTemplateFolders(null), []);
+  deepStrictEqual(parseTemplateFolders(""), []);
+  deepStrictEqual(parseTemplateFolders("banana"), []);
+  deepStrictEqual(parseTemplateFolders("[]"), []);
+  deepStrictEqual(parseTemplateFolders(JSON.stringify([{ path: "  /Shared/Templates/ ", shared: true }])), [
+    { path: "/Shared/Templates", shared: true },
+  ]);
+  // A missing shared flag is a managed (own) folder, not a shared one.
+  deepStrictEqual(parseTemplateFolders(JSON.stringify([{ path: "/Users/smit/Templates" }])), [
+    { path: "/Users/smit/Templates", shared: false },
+  ]);
+  // Duplicates (after trimming/trailing-slash/case) keep the first entry; garbage rows drop out.
+  deepStrictEqual(
+    parseTemplateFolders(
+      JSON.stringify([
+        { path: "/A", shared: true },
+        { path: "/A/", shared: false },
+        { path: "/a", shared: false },
+        { path: "", shared: true },
+        { shared: true },
+        "nope",
+        { path: "/B", shared: "yes" },
+      ]),
+    ),
+    [
+      { path: "/A", shared: true },
+      { path: "/B", shared: false },
+    ],
+  );
+  const many = Array.from({ length: 20 }, (_, i) => ({ path: `/F${i}`, shared: false }));
+  strictEqual(parseTemplateFolders(JSON.stringify(many)).length, MAX_TEMPLATE_FOLDERS);
+  // Round-trip, add, remove.
+  const folders = parseTemplateFolders(JSON.stringify([{ path: "/A", shared: true }]));
+  strictEqual(serializeTemplateFolders(folders), JSON.stringify(folders));
+  deepStrictEqual(addTemplateFolder(folders, { path: "/B", shared: false }), [
+    { path: "/A", shared: true },
+    { path: "/B", shared: false },
+  ]);
+  deepStrictEqual(
+    addTemplateFolder(folders, { path: "/A/", shared: false }),
+    folders,
+    "adding a folder twice is a no-op",
+  );
+  deepStrictEqual(removeTemplateFolder(addTemplateFolder(folders, { path: "/B", shared: false }), "/B"), folders);
+  deepStrictEqual(removeTemplateFolder(folders, "/nope"), folders);
+  strictEqual(templateFolderLabel("/Shared/Team Templates"), "Team Templates");
+  strictEqual(templateFolderLabel("/"), "/");
+  strictEqual(templateFolderLabel(""), "");
+  strictEqual(sharedTemplateId("/Shared/x.pzt"), "shared:/Shared/x.pzt");
+  strictEqual(sharedTemplateName("/Shared/My Template.pzt", { name: "Lab standard" }), "Lab standard");
+  strictEqual(sharedTemplateName("/Shared/My Template.pzt", undefined), "My Template");
+  strictEqual(sharedTemplateName("/Shared/My Template.pzt", {}), "My Template");
+});
+
+check("seq 167 remainder M6: a folder's .pzt files resolve to gallery entries in name order", () => {
+  const folder: TemplateFolder = { path: "/Shared", shared: true };
+  deepStrictEqual(
+    sharedTemplatesForFolder(folder, ["/Shared/b.pzt", "/Shared/a.pzt", "/Shared/not-a-template.txt"], {
+      "/Shared/a.pzt": { name: "Assay", description: "The assay template." },
+      "/Shared/b.pzt": undefined,
+    }),
+    [
+      {
+        id: "shared:/Shared/a.pzt",
+        name: "Assay",
+        description: "The assay template.",
+        path: "/Shared/a.pzt",
+        folderPath: "/Shared",
+        shared: true,
+      },
+      { id: "shared:/Shared/b.pzt", name: "b", path: "/Shared/b.pzt", folderPath: "/Shared", shared: true },
+    ],
+  );
+  deepStrictEqual(sharedTemplatesForFolder(folder, [], {}), []);
 });
 
 // seq 454 (first-run startup guide): the guide shows until it has been
