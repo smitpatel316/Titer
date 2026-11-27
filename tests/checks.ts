@@ -27602,6 +27602,45 @@ check("noncentral t CDF stays smooth at large df and large delta (bugs 63 + 80)"
   close(noncentralTCdf(448, 1, 448), 0.3173117134697949, "nct(448; 1, 448)");
 });
 
+check("noncentral t CDF stays finite and accurate at extreme t, delta and df (bug 107)", () => {
+  const close = (got: number, want: number, tol: number, label: string) => {
+    ok(Math.abs(got - want) < tol, `${label} = ${got} (want ${want} ± ${tol})`);
+  };
+  // Was 2.87e-7 (bogus): tt*tt overflowed to Infinity, x came back NaN,
+  // the series was skipped and only Φ(−δ) was returned. The x fix alone
+  // restores 1 (to the 1e-12 series tolerance).
+  close(noncentralTCdf(1e155, 10, 5), 1, 1e-9, "nct(1e155; 10, 5)");
+  // Was 3.66e-5: the mode-centred series was never reached (same NaN x
+  // after the sign flip), so Φ(−δ) leaked through for a true 0.
+  strictEqual(noncentralTCdf(-1e6, 100, 1e6), 0);
+  // Was 0.2276: at |δ| = 1e7 the m·log μ − lgamma(m+1) cancellation and
+  // the 5,000,000-step cap truncate the mode peak mid-sum. The
+  // chi-square limit Q(50, 50) = 0.48119168… (Gauss–Hermite ground truth
+  // 0.4811916845) is the true value.
+  close(noncentralTCdf(1e7, 100, 1e7), 0.4812, 1e-4, "nct(1e7; 100, 1e7)");
+  // Was 0: incompleteBetaCf's MAXIT = 200 never converged at
+  // a ≈ 5e9, b = 5e7 (it returned −0.018 for a beta factor). The limit
+  // is Q(5e7, 5e7) = 0.49998119… (ground truth 0.49998147).
+  close(noncentralTCdf(1e5, 1e8, 1e5), 0.5, 1e-3, "nct(1e5; 1e8, 1e5)");
+  // Was 0.50024389 (series error 3.1e-4): the min(μ, df/2) ≥ 7e5 route
+  // catches this corner; the limit is 0.49986702 (ground truth
+  // 0.49993603).
+  close(noncentralTCdf(1414, 2e6, 1414), 0.499936027333, 1e-4, "nct(1414; 2e6, 1414)");
+  // Was NaN: normalCdf squared its argument (z² = ∞) and the gamma
+  // functions returned NaN at x = ∞. The limit Q(5, 5) = 0.44049329…
+  // is the true value at δ = 1e200.
+  close(noncentralTCdf(1e200, 10, 1e200), 0.440493285065, 1e-9, "nct(1e200; 10, 1e200)");
+  strictEqual(noncentralTCdf(5, 10, 1e200), 0);
+  // Regression pins: just below the routing thresholds the series path
+  // must be untouched — these match Gauss–Hermite ground truth, so a
+  // routing change that shifts them is caught, not just a value change.
+  close(noncentralTCdf(1414, 100, 1414), 0.481193092939, 1e-9, "nct(1414; 100, 1414)");
+  close(noncentralTCdf(1414, 1e5, 1414), 0.499445866261, 1e-9, "nct(1414; 1e5, 1414)");
+  // Same, at df = 1e8 with |δ| = 1000 (series accurate to ~2e-5 here,
+  // so the implementation value itself is pinned to catch routing).
+  close(noncentralTCdf(1000, 1e8, 1000), 0.500019847433776, 1e-9, "nct(1000; 1e8, 1000)");
+});
+
 check("plot a function plots Prism's statistical distributions (seq 203)", async () => {
   const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
   const close = (got: (number | null)[], want: number[]) =>

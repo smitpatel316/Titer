@@ -169,7 +169,12 @@ function incompleteBetaCf(x: number, a: number, b: number): number {
  *  Numerical Recipes' series (x < a+1) and continued fraction (x ≥ a+1).
  *  NaN outside its domain; P(a, 0) = 0. */
 export function regularizedIncompleteGammaP(a: number, x: number): number {
-  if (!Number.isFinite(a) || !Number.isFinite(x) || a <= 0) return NaN;
+  if (!Number.isFinite(a) || a <= 0) return NaN;
+  if (Number.isNaN(x)) return NaN;
+  // Bug 107 sibling: P(a, ∞) = 1 — the old guard returned NaN, and the
+  // continued fraction below turns 0·∞ into NaN, so normalCdf (via
+  // z²) and the noncentral t tail both came back NaN past |x| ≈ 1e154.
+  if (x === Infinity) return 1;
   if (x <= 0) return 0;
   if (x < a + 1) {
     let ap = a;
@@ -190,7 +195,10 @@ export function regularizedIncompleteGammaP(a: number, x: number): number {
  *  Numerical Recipes' continued fraction. NaN outside its domain;
  *  Q(a, 0) = 1. */
 export function regularizedIncompleteGammaQ(a: number, x: number): number {
-  if (!Number.isFinite(a) || !Number.isFinite(x) || a <= 0) return NaN;
+  if (!Number.isFinite(a) || a <= 0) return NaN;
+  if (Number.isNaN(x)) return NaN;
+  // Bug 107 sibling: Q(a, ∞) = 0 (same NaN-through-the-fraction as P).
+  if (x === Infinity) return 0;
   if (x <= 0) return 1;
   if (x < a + 1) return 1 - regularizedIncompleteGammaP(a, x);
   const FPMIN = 1e-300;
@@ -315,7 +323,10 @@ export function centralChiSquareQuantile(p: number, df: number): number {
  *  increments from their log forms, so neither the weights nor the
  *  (1−x)^(df/2) factor can underflow (bugs 63 + 80: the old log-space
  *  path still returned a bogus 1.0 at large df and cliffed to 0 past
- *  |δ| > 447). NaN outside its domain; δ = 0 is the central t. */
+ *  |δ| > 447). Past |δ| ≈ 1414 (μ > 1e6), or min(μ, df/2) ≥ 7e5, the
+ *  series itself loses accuracy (bug 107) and the chi-square limit in
+ *  `noncentralTChiSquareLimit` takes over instead. NaN outside its
+ *  domain; δ = 0 is the central t. */
 export function noncentralTCdf(t: number, df: number, delta: number): number {
   if (!Number.isFinite(t) || !Number.isFinite(df) || !Number.isFinite(delta) || df <= 0) return NaN;
   if (delta === 0) return centralTCdf(t, df);
@@ -328,11 +339,36 @@ export function noncentralTCdf(t: number, df: number, delta: number): number {
     del = -del;
   }
   let tnc = 0;
-  const x = (tt * tt) / (tt * tt + df);
+  // Bug 107: x = t²/(t²+df) must not square t first — tt*tt overflows to
+  // Infinity for |t| ≥ 1.34e154, giving x = NaN and silently skipping the
+  // series (the CDF then came back as Φ(−δ) alone: 2.87e-7 for a true
+  // 1.0). 1/(1+df/t²) is the same ratio, computed from df/tt², which
+  // underflows gracefully to 0 (x = 1) instead of overflowing; tt = 0
+  // still gives x = 0 (df/0 = ∞).
+  const x = 1 / (1 + (df / tt) / tt);
   if (x > 0) {
-    const lambda = del * del;
-    const mu = 0.5 * lambda;
-    if (mu > 700) {
+    const absDel = Math.abs(del);
+    // Bug 107, extreme regime: the twin series cannot be trusted here.
+    // Three separate failures meet in this corner: (a) the mode-centred
+    // weights lose ~1e-16·m·ln m in the m·log μ − lgamma(m+1)
+    // cancellation (m = μ ≈ δ²/2) and the 5,000,000-step cap truncates
+    // the mode peak mid-sum past |δ| ≳ 8e5 — nct(1e7; 100, 1e7) came
+    // back 0.2276 for 0.4812; (b) incompleteBetaCf's MAXIT = 200 stops
+    // converging once both a ≈ μ and b = df/2 pass ~7e5 (it returned
+    // −0.018 for a beta factor at df = 1e8, δ = 1e5, so nct(1e5; 1e8,
+    // 1e5) came back 0 for 0.500). The thresholds sit far inside the
+    // safe region — the series is still accurate to ~1e-9 at |δ| = 500
+    // and ~1e-10 at |δ| = 1414 (df ≤ 1e5), and the limit is accurate to
+    // ~4e-5 at the boundary and ~3e-7 by |δ| = 1e5 — so the handoff has
+    // no cliff. The |δ| check comes first so δ² is only formed when
+    // |δ| ≤ 1414 (δ² ≤ 2e6 there; δ*δ itself overflows past
+    // |δ| ≈ 1.34e154). The limit returns the full CDF; subtract Φ(−δ)
+    // here because the shared tail below adds it back — in this regime
+    // Φ(−δ) is exactly 0 (δ > 0) or exactly 1 (δ < 0), so this is exact.
+    const mu = absDel > 1414.2135623730951 ? Infinity : 0.5 * del * del;
+    if (mu === Infinity || (mu >= 7e5 && df >= 1.4e6)) {
+      tnc = noncentralTChiSquareLimit(tt, df, del) - normalCdf(-del);
+    } else if (mu > 700) {
       // Bugs 63 (remainder) + 80: past μ ≈ 710 the twin series must be
       // summed outward from the Poisson mode — see
       // `noncentralTTwinSeriesModeCentered` below. Summing upward from
@@ -344,6 +380,7 @@ export function noncentralTCdf(t: number, df: number, delta: number): number {
       // gives exactly that.
       tnc = mu > 1e300 ? 0 : noncentralTTwinSeriesModeCentered(x, df, del, mu);
     } else {
+      const lambda = 2 * mu;
       // The original linear recurrence, unchanged: below the threshold
       // nothing underflows, so results stay bit-identical to the region
       // that already worked.
@@ -379,6 +416,40 @@ export function noncentralTCdf(t: number, df: number, delta: number): number {
   tnc += normalCdf(-del);
   if (negdel) tnc = 1 - tnc;
   return Math.min(1, Math.max(0, tnc));
+}
+
+/** The noncentral t CDF in the extreme regime (bug 107: |δ| > 1414, or
+ *  min(μ, df/2) ≥ 7e5), where the AS 243 twin series loses accuracy.
+ *  As |δ| → ∞ at fixed t/δ, T = (Z+δ)/S → δ/S, so for δ > 0
+ *  F(t; ν, δ) → P(S ≥ δ/t) = P(χ²_ν ≥ ν(δ/t)²) = Q(ν/2, νδ²/2t²),
+ *  and for δ < 0, F(t; ν, δ) = 1 − F(−t; ν, |δ|) with
+ *  F(−t; ν, |δ|) = E[Φ(−tS − |δ|)] ≤ Φ(−|δ|) = 0 in double precision,
+ *  so F = 1 exactly. The smoothing from Z is O(1/δ²): the limit is
+ *  already within ~4e-5 of the true CDF at |δ| = 1414 and ~3e-7 by
+ *  |δ| = 1e5 (Gauss–Hermite ground truth). The χ² tail itself is the
+ *  exact regularized incomplete gamma while ν ≤ 20000 (the TS series
+ *  is accurate to ~1e-12 there) and the Wilson–Hilferty normal
+ *  approximation above it (accurate to ~1e-8 at ν = 1e4 and improving
+ *  as 1/ν; the gamma series itself stops converging past a ≈ 1e5, so
+ *  it cannot carry the large-ν tail). tt > 0 here (the caller only
+ *  routes when x > 0). */
+function noncentralTChiSquareLimit(tt: number, df: number, del: number): number {
+  if (del < 0) return 1;
+  const r = del / tt;
+  if (df <= 20000) {
+    const xArg = (df / 2) * r * r;
+    if (!Number.isFinite(xArg)) return 0;
+    return regularizedIncompleteGammaQ(df / 2, xArg);
+  }
+  // Wilson–Hilferty: (χ²_ν/ν)^(1/3) ≈ N(1 − 2/9ν, 2/9ν), so
+  // P(χ²_ν > νr²) = 1 − Φ(((r²)^(1/3) − (1 − 2/9ν))/√(2/9ν)).
+  const mu = 1 - 2 / (9 * df);
+  const sd = Math.sqrt(2 / (9 * df));
+  const z = (Math.cbrt(r * r) - mu) / sd;
+  // df ≳ 1e307 underflows sd to 0 and z to NaN (r = 1, μ = 1); S → 1
+  // almost surely there, so the CDF is the 0/1 step at r = 1.
+  if (Number.isNaN(z)) return 0.5;
+  return normalCdf(-z);
 }
 
 /** The AS 243 twin series for the noncentral t CDF in the large-μ regime
