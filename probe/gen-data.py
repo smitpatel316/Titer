@@ -165,6 +165,38 @@ def welch_pairs_exact(groups):
     return pairs
 
 
+def tukey_exact(groups):
+    """Per-pair Tukey HSD p + CI (scipy studentized_range) on the POOLED
+    mse / residual df — the ordinary ANOVA's post-hoc, so unlike the
+    Games-Howell pairs above every pair shares one mse and one df.
+    q = |diff| / sqrt(mse*(1/ni+1/nj)/2); P = sf(q, k, dfw); the CI is
+    diff +/- qcrit * sqrt(mse*(1/ni+1/nj)/2) with qcrit = ppf(0.95, k, dfw)
+    — the same half-width Titer's centered Tukey CI builds (its cv is
+    qcrit/sqrt(2) times sqrt(mse*(1/ni+1/nj))). Keys "i_j" in pair order."""
+    gs = [mpf_list(v) for v in groups]
+    k = len(gs)
+    n = [len(v) for v in gs]
+    means = [sum(v) / len(v) for v in gs]
+    ssw = sum(sum((x - m) ** 2 for x in v) for v, m in zip(gs, means))
+    dfw = sum(n) - k
+    mse = ssw / dfw
+    pairs = {}
+    for i in range(k):
+        for j in range(i + 1, k):
+            diff = means[i] - means[j]
+            se = mp.sqrt(mse * (mp.mpf(1) / n[i] + mp.mpf(1) / n[j]) / 2)
+            q = abs(diff) / se
+            p = mp.mpf(float(stats.studentized_range.sf(float(q), k, float(dfw))))
+            qcrit = mp.mpf(float(stats.studentized_range.ppf(0.95, k, float(dfw))))
+            pairs[f"{i}_{j}"] = {
+                "diff": float(diff),
+                "tukey_p": float(p),
+                "tukey_lo": float(diff - qcrit * se),
+                "tukey_hi": float(diff + qcrit * se),
+            }
+    return pairs
+
+
 def anova_exact(groups):
     gs = [mpf_list(v) for v in groups]
     k = len(gs)
@@ -292,6 +324,8 @@ expected = {
                  "pairs": welch_pairs_exact(anova_big)},
     "welchSmall": {**welch_exact(anova_small), **bf_exact(anova_small),
                    "pairs": welch_pairs_exact(anova_small)},
+    "tukeyBig": tukey_exact(anova_big),
+    "tukeySmall": tukey_exact(anova_small),
     "linreg": linreg_exact(xs, ys),
     "linregWeighted1y": linreg_exact(xs, ys, weights=[1 / y for y in ys]),
     "linregOrigin": None,  # origin fit: slope-only; computed in the probe via R
