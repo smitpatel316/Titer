@@ -69,6 +69,33 @@ const FUNCTIONS: Record<
  *  case-insensitively, except `S`, which is exact. */
 const RESERVED = new Set(["x", "y", "pi"]);
 
+/** R's reserved words and special constants (?Reserved): a parameter of
+ *  one of these names emits invalid R — `start=list(Inf=100, Kd=5)` fails
+ *  to parse with `unexpected '='`, and a formula naming `TRUE` or `NA`
+ *  reads the constant, not the parameter. Compared exactly as written:
+ *  R's keywords are case-sensitive, so `true` or `for2` are fine names. */
+const R_RESERVED = new Set([
+  "if",
+  "else",
+  "repeat",
+  "while",
+  "function",
+  "for",
+  "in",
+  "next",
+  "break",
+  "TRUE",
+  "FALSE",
+  "NULL",
+  "Inf",
+  "NaN",
+  "NA",
+  "NA_integer_",
+  "NA_real_",
+  "NA_complex_",
+  "NA_character_",
+]);
+
 export type ExprNode =
   | { kind: "num"; value: number }
   | { kind: "var"; name: string }
@@ -383,6 +410,10 @@ export function parseUserEquation(equation: string): ParsedUserEquation | { erro
     if (RESERVED.has(p.toLowerCase()))
       return {
         error: `“${p}” cannot be a parameter name — it is already used by the fit itself. Rename it (for example, “${p}1”).`,
+      };
+    if (R_RESERVED.has(p))
+      return {
+        error: `“${p}” cannot be a parameter name — it is a reserved word in R. Rename it (for example, “${p}1”).`,
       };
     if (p === "S")
       return {

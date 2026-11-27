@@ -14446,6 +14446,68 @@ check("a global fit's coefficients split per series for the overlay", () => {
   );
 });
 
+// BUG-REPORT Issue 35: multi-Y and curve-comparison fits name per-series
+// terms with a "Set — " prefix ("Control — Top"), not the global fit's
+// " (Set)" suffix — coefficientsForSet only stripped the suffix, so the
+// overlay's evaluator found no matching terms and drew no curve (all NaN).
+check("a multi-Y / comparison fit's coefficients split per series for the overlay", async () => {
+  const row = (term: string, estimate: number): RegressionCoefficient => ({
+    term,
+    estimate,
+    stdError: null,
+    t: null,
+    p: null,
+    low: null,
+    high: null,
+  });
+  const coefs = [
+    row("Control — Bottom", 0),
+    row("Control — Top", 100),
+    row("Control — Hill slope", 1),
+    row("Treated — Bottom", 0),
+    row("Treated — Top", 90),
+    row("Treated — Hill slope", 1),
+  ];
+  deepStrictEqual(
+    coefficientsForSet(coefs, "Control", ["Control", "Treated"]).map((c) => c.term),
+    ["Bottom", "Top", "Hill slope"],
+  );
+  deepStrictEqual(
+    coefficientsForSet(coefs, "Treated", ["Control", "Treated"]).map((c) => c.term),
+    ["Bottom", "Top", "Hill slope"],
+  );
+  // End to end: the overlay's evaluator, per series, from the returned
+  // coefficients of a multi-Y fit and of a curve comparison.
+  const xs = [-9, -8.5, -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4];
+  const noise = [0, 0.4, -0.3, 0.5, -0.4, 0.3, -0.5, 0.4, -0.3, 0.2, -0.2];
+  const fourPl = (top: number) => (x: number) => 0 + (top - 0) / (1 + 10 ** (-6.5 - x));
+  const table: TableData = {
+    columns: ["Title", "X", "Control", "Treated"],
+    rows: xs.map((x, i) => ["", String(x), String(fourPl(100)(x) + noise[i]), String(fourPl(90)(x) - noise[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", table, {
+    ys: ["Control", "Treated"],
+    model: "sigmoidal-4pl-logx",
+  });
+  ok(!("error" in out), `multi-Y fit failed: ${"error" in out ? out.error : ""}`);
+  const sets = out.fit?.sets ?? ["Control", "Treated"];
+  for (const [name, top] of [["Control", 100], ["Treated", 90]] as const) {
+    const atMid = evaluateCurve("sigmoidal-4pl-logx", coefficientsForSet(out.coefficients ?? [], name, sets), -6.5);
+    ok(Number.isFinite(atMid) && Math.abs(atMid - top / 2) < 5, `${name} curve at X = -6.5 should be ~${top / 2}, got ${atMid}`);
+  }
+  const cmp = await runAnalysis("nonlinear-regression", table, {
+    y: "Control",
+    model: "sigmoidal-4pl-logx",
+    compareWith: "Treated",
+  });
+  ok(!("error" in cmp), `comparison fit failed: ${"error" in cmp ? cmp.error : ""}`);
+  const cSets = cmp.fit?.sets ?? ["Control", "Treated"];
+  for (const [name, top] of [["Control", 100], ["Treated", 90]] as const) {
+    const atMid = evaluateCurve("sigmoidal-4pl-logx", coefficientsForSet(cmp.coefficients ?? [], name, cSets), -6.5);
+    ok(Number.isFinite(atMid) && Math.abs(atMid - top / 2) < 5, `comparison ${name} curve at X = -6.5 should be ~${top / 2}, got ${atMid}`);
+  }
+});
+
 // R3-11: a global fit with a fixed parameter, and a global homologous fit.
 // Fixed parameters were filtered out of the global fit's coefficients, so
 // the per-series evaluator got NaN for them: every per-series R² was NaN,
@@ -15446,6 +15508,14 @@ check("a user equation parses to R and rejects what it cannot fit", () => {
   bad("Y = y*X", "cannot be a parameter");
   bad("Y = A*X + a*X", "capitalisation");
   bad("Y = S*X", "cannot be a parameter");
+  // BUG-REPORT Issue 40: R reserved words and constants are not valid
+  // parameter names — they emit invalid R (`start=list(Inf=100, Kd=5)`).
+  bad("Y = Inf*X/(Kd+X)", "reserved word in R");
+  bad("Y = NA*X", "reserved word in R");
+  bad("Y = NULL*X", "reserved word in R");
+  bad("Y = TRUE*X", "reserved word in R");
+  bad("Y = A*X + for", "reserved word in R");
+  bad("Y = A*X + in", "reserved word in R");
   bad("Y = A*X + ", "ends unexpectedly");
   bad("Y = A*(X", "not closed");
   // Starting values: every parameter needs one, and no value may name a parameter
@@ -15532,6 +15602,30 @@ check("the fitted curve overlay evaluates a user-defined equation", async () => 
   ok(!("error" in interp) && interp.interpolated?.length === 1, `interpolation failed: ${"error" in interp ? interp.error : ""}`);
   const ix = interp.interpolated![0].x;
   ok(ix != null && Math.abs(ix - 2) < 0.05, `interpolated X should be ~2, got ${ix}`);
+});
+
+// BUG-REPORT Issue 40: a user-defined parameter named "HillSlope" was
+// renamed "Hill slope" in the results (TERM_LABEL), so the overlay looked
+// up values["HillSlope"], found nothing, and drew no curve (all NaN).
+// User-defined parameters keep their own names now.
+check("a user-defined parameter named HillSlope keeps its name and draws its curve", async () => {
+  const xs = [0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000];
+  const ys = xs.map((x) => 100 / (1 + (1 / x) ** 1));
+  const table: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", table, {
+    y: "Y1",
+    model: "user-defined",
+    customEquation: "Y = Top / (1 + (EC50/X)^HillSlope)",
+    customParameters: { Top: 90, EC50: 2, HillSlope: 0.8 },
+  });
+  ok(!("error" in out) && out.coefficients, `fit failed: ${"error" in out ? out.error : ""}`);
+  const hill = out.coefficients?.find((c) => c.term === "HillSlope");
+  ok(hill?.estimate != null && Math.abs(hill.estimate - 1) < 0.1, `HillSlope should be fitted ~1, got ${hill?.estimate}`);
+  const at = (x: number) => evaluateCurve("user-defined", out.coefficients!, x, undefined, out.customEquation);
+  ok(Number.isFinite(at(1)) && Math.abs(at(1) - 50) < 2, `overlay at X = 1 should be ~50, got ${at(1)}`);
 });
 
 // v2 item 23: the equation and its starting values survive a project-file round trip.
