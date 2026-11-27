@@ -38328,6 +38328,38 @@ check(
   },
 );
 
+// Seq 567 (Round 2 Issue 95): the shared-strings parser must count every
+// <si> — a self-closing <si/> is an empty string at its own index (not a
+// skipped entry shifting every later string off by one), an <si> carrying
+// attributes still parses, and <rPh> phonetic-guide runs are not part of
+// the visible cell string.
+check("import-567: a self-closing <si/> keeps later shared strings aligned and <rPh> text stays out of the cell", async () => {
+  const xlsx = async (sheetXml: string, sharedStrings?: string): Promise<Uint8Array> => {
+    const zip = new JSZip();
+    zip.file(
+      "xl/workbook.xml",
+      `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    );
+    zip.file(
+      "xl/_rels/workbook.xml.rels",
+      `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+    );
+    zip.file(
+      "xl/styles.xml",
+      `<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs><xf numFmtId="0"/></cellXfs></styleSheet>`,
+    );
+    zip.file("xl/worksheets/sheet1.xml", sheetXml);
+    if (sharedStrings !== undefined) zip.file("xl/sharedStrings.xml", sharedStrings);
+    return zip.generateAsync({ type: "uint8array" });
+  };
+  const sheetXml = `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c><c r="D1" t="s"><v>3</v></c><c r="E1" t="s"><v>4</v></c></row></sheetData></worksheet>`;
+  // Index 2 is an empty <si/>; index 3 carries an attribute on <si>;
+  // index 4 has a furigana <rPh> run after the visible run.
+  const sharedStrings = `<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="5" uniqueCount="5"><si><t>Alpha</t></si><si><t>Beta</t></si><si/><si xml:space="preserve"><t>Gamma</t></si><si><r><t>東京</t></r><rPh sb="0" eb="2"><t>とうきょう</t></rPh></si></sst>`;
+  const parsed = await parseXlsx(await xlsx(sheetXml, sharedStrings));
+  deepStrictEqual(parsed.sheet.rows, [["Alpha", "Beta", "", "Gamma", "東京"]]);
+});
+
 check("import-155: the menu, picker, reader and drop route the new file types", () => {
   const menu = readFileSync("src/app-menu.ts", "utf8");
   ok(menu.includes("Import Data File…"), "File menu has no Import Data File… item");
