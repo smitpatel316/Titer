@@ -44917,13 +44917,13 @@ check("bugfix-br-69: manual Help ▸ What's New open is not auto-closed by the 2
   const src = readFileSync("src/components/whats-new-dialog.tsx", "utf8");
   ok(src.includes("autoOpened"), "the dialog tracks whether this open session was auto-shown");
   ok(
-    /onWhatsNewRequest\(\(\) => \{[^}]*setAutoShown\(false\)/.test(src),
+    /onWhatsNewRequest\(\(\) => \{[^}]*setAutoOpened\(false\)/.test(src),
     "a manual Help ▸ What's New open clears autoOpened",
   );
-  ok(src.includes("setAutoShown(true)"), "the first-launch auto-show sets autoOpened");
+  ok(src.includes("setAutoOpened(true)"), "the first-launch auto-show sets autoOpened");
   ok(/if \(!open \|\| !autoOpened\) return;/.test(src), "the re-check interval runs only while open && autoOpened");
   ok(/\}, \[open, autoOpened\]\)/.test(src), "the re-check effect re-runs when autoOpened changes");
-  ok(/setAutoShown\(false\)/.test(src), "closing clears autoOpened so a later manual open cannot inherit it");
+  ok(/setAutoOpened\(false\)/.test(src), "closing clears autoOpened so a later manual open cannot inherit it");
 });
 
 // ── BUG-REPORT Round 2 WebR claim issues #89 + #90 + #96 (seq 561/562/568) ──
