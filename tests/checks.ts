@@ -27796,6 +27796,218 @@ check("plot a function wizard offers the distributions with their parameters (se
   );
 });
 
+// ── Plot-a-function user-defined equation (seq 203 remainder) ─────────────
+// The distributions shipped; the user-defined equation stayed out —
+// PlotFunctionModel excluded it, so a typed equation had nowhere to go.
+// It plots now, through the same parser the fitter uses (user-defined.ts):
+// the wizard asks for the equation, then one value per parameter it names.
+check("plot a function plots a user-defined equation (seq 203 remainder)", async () => {
+  const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
+  const out = await runAnalysis("plot-function", empty, {
+    equation: "user-defined",
+    customEquation: "Y = A*exp(-k*X) + C",
+    xMin: 0,
+    xMax: 2,
+    segments: 10,
+    curves: [
+      { label: "Decay", params: { A: 2, k: 0.5, C: 1 } },
+      { label: "Steeper", params: { A: 4, k: 0.5, C: 1 } },
+    ],
+  });
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.testType, "plot-function");
+  strictEqual(out.subtitle, "User-defined equation");
+  ok(out.summary?.includes("from the user-defined equation “Y = A*exp(-k*X) + C”"));
+  ok(out.summary?.includes("No data was analysed"));
+  const { x, curves } = out.generatedCurves!;
+  strictEqual(x.length, 11);
+  strictEqual(x[0], 0);
+  strictEqual(x[10], 2);
+  const close = (got: (number | null)[], want: number[]) =>
+    got.length === want.length &&
+    got.every((g, i) => g != null && Math.abs(g - want[i]) < 1e-12);
+  ok(close(curves[0].y, x.map((v) => 2 * Math.exp(-0.5 * v) + 1)));
+  ok(close(curves[1].y, x.map((v) => 4 * Math.exp(-0.5 * v) + 1)));
+  strictEqual(curves[0].y[0], 3);
+  deepStrictEqual(out.parameterValues, [
+    {
+      label: "Decay",
+      values: [
+        { name: "A", value: 2 },
+        { name: "k", value: 0.5 },
+        { name: "C", value: 1 },
+      ],
+    },
+    {
+      label: "Steeper",
+      values: [
+        { name: "A", value: 4 },
+        { name: "k", value: 0.5 },
+        { name: "C", value: 1 },
+      ],
+    },
+  ]);
+});
+
+check("plot a function refuses a user-defined equation without an equation or parameters", async () => {
+  const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
+  const base = {
+    equation: "user-defined",
+    xMin: 0,
+    xMax: 2,
+    segments: 10,
+    curves: [{ label: "Decay", params: { A: 2, k: 0.5, C: 1 } }],
+  } as PlotFunctionParams;
+  deepStrictEqual(await runAnalysis("plot-function", empty, { ...base, customEquation: undefined }), {
+    error: "Enter a user-defined equation first — for example “Y = A*exp(-k*X) + C”.",
+  });
+  deepStrictEqual(await runAnalysis("plot-function", empty, { ...base, customEquation: "Y = A + " }), {
+    error: "The equation ends unexpectedly — check for a missing value or closing parenthesis.",
+  });
+  deepStrictEqual(await runAnalysis("plot-function", empty, { ...base, customEquation: "Y = 2*X + 1" }), {
+    error:
+      "The equation has no parameters to fit — it must name at least one parameter, for example A in “Y = A*X”.",
+  });
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      ...base,
+      customEquation: "Y = A*exp(-k*X) + C",
+      curves: [{ label: "Decay", params: { A: 2, k: 0.5 } }],
+    }),
+    { error: "“Decay” needs a number for C." },
+  );
+  // A stray equation on a built-in model is ignored — it plots as usual.
+  const gauss = await runAnalysis("plot-function", empty, {
+    equation: "gaussian",
+    customEquation: "Y = A*X",
+    xMin: -3,
+    xMax: 3,
+    segments: 10,
+    curves: [{ label: "G", params: { Amplitude: 100, Mean: 0, SD: 1 } }],
+  });
+  if ("error" in gauss) throw new Error(gauss.error);
+  strictEqual(gauss.generatedCurves!.curves[0].y[5], 100);
+});
+
+check("plot a function wizard asks for a user-defined equation and its parameters (seq 203 remainder)", () => {
+  const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
+  const table = readTable(empty);
+  const wizard = WIZARDS["plot-function"]!;
+  const first = wizard.questions({}, table).filter(Boolean)[0] as Question & {
+    options: { value: string; label: string }[];
+  };
+  const userDefined = first.options.find((o) => o.value === "user-defined");
+  strictEqual(userDefined?.label, "User-defined equation");
+  const asked = (a: Record<string, string | number> = {}) =>
+    wizard.questions(a, table).flatMap((q) => (q ? [q.id] : []));
+  // No per-curve questions until the equation is entered — its parameters
+  // are what the curves are asked for.
+  deepStrictEqual(asked({ equation: "user-defined" }), [
+    "equation",
+    "customEquation",
+    "xMin",
+    "xMax",
+    "segments",
+    "extra",
+    "curves",
+  ]);
+  deepStrictEqual(asked({ equation: "user-defined", customEquation: "Y = A*exp(-k*X) + C" }), [
+    "equation",
+    "customEquation",
+    "xMin",
+    "xMax",
+    "segments",
+    "extra",
+    "curves",
+    "curve1_label",
+    "curve1_A",
+    "curve1_k",
+    "curve1_C",
+  ]);
+  // A bad equation asks for nothing per curve, rather than guessing names.
+  deepStrictEqual(asked({ equation: "user-defined", customEquation: "Y = A + " }), [
+    "equation",
+    "customEquation",
+    "xMin",
+    "xMax",
+    "segments",
+    "extra",
+    "curves",
+  ]);
+  // Each parameter starts at 1, not 0 — a 0 start silences most equations
+  // (A = 0 flattens the curve, k = 0 kills the decay).
+  const questions = wizard
+    .questions({ equation: "user-defined", customEquation: "Y = A*exp(-k*X) + C" }, table)
+    .filter(Boolean) as Question[];
+  for (const id of ["curve1_A", "curve1_k", "curve1_C"]) {
+    const q = questions.find((qq) => qq.id === id);
+    ok(q && q.kind === "number" && q.initial === 1, `${id} should start at 1`);
+  }
+  deepStrictEqual(
+    wizard.finish(
+      {
+        equation: "user-defined",
+        customEquation: "Y = A*exp(-k*X) + C",
+        xMin: 0,
+        xMax: 2,
+        segments: 10,
+        extra: "none",
+        curves: 1,
+        curve1_label: "Decay",
+        curve1_A: 2,
+        curve1_k: 0.5,
+        curve1_C: 1,
+      },
+      table,
+    ),
+    {
+      type: "plot-function",
+      params: {
+        equation: "user-defined",
+        customEquation: "Y = A*exp(-k*X) + C",
+        xMin: 0,
+        xMax: 2,
+        segments: 10,
+        curves: [{ label: "Decay", params: { A: 2, k: 0.5, C: 1 } }],
+        extra: "none",
+      },
+    },
+  );
+});
+
+check("plot a function user-defined params survive a .hlx round-trip (seq 203 remainder)", () => {
+  const withAnalysis: ProjectFilePayload = {
+    ...payload,
+    nodes: {
+      ...payload.nodes,
+      a1: {
+        id: "a1",
+        type: "analysis",
+        name: "Curve",
+        parentId: "t1",
+        analysisType: "plot-function",
+        analysisParams: {
+          equation: "user-defined",
+          customEquation: "Y = A*X + B",
+          xMin: -10,
+          xMax: 10,
+          segments: 150,
+          curves: [{ label: "Line", params: { A: 2, B: 1 } }],
+        },
+      },
+    },
+    childOrder: { t1: ["a1"] },
+  };
+  deepStrictEqual(read(serializeProjectFile(withAnalysis)).project.nodes.a1.analysisParams, {
+    equation: "user-defined",
+    customEquation: "Y = A*X + B",
+    xMin: -10,
+    xMax: 10,
+    segments: 150,
+    curves: [{ label: "Line", params: { A: 2, B: 1 } }],
+  });
+});
+
 check("the generated-curves overlay draws each curve and its dashed extra series", () => {
   const result: AnalysisResult = {
     testType: "plot-function",
