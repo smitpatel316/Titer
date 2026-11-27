@@ -2775,6 +2775,10 @@ const demingConstY = table(
 const precisionFix = JSON.parse(
   readFileSync(new URL("./testdata/precision-1e13.json", import.meta.url), "utf8"),
 ) as Record<string, TableData>;
+// The mpmath 50-digit exact values for the fixtures above (probe/gen-data.py).
+const expectedPrecision = JSON.parse(
+  readFileSync(new URL("../probe/expected-precision.json", import.meta.url), "utf8"),
+) as Record<string, Record<string, number>>;
 const anovaBig = precisionFix.anovaBig;
 const anovaSmall = precisionFix.anovaSmall;
 const xyBig = precisionFix.xyBig;
@@ -2986,6 +2990,13 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["deming", deming, "deming-regression", { y: "Y", lambda: 1 }],
   ["deming", deming, "deming-regression", { y: "Y", lambda: 0.25 }],
   ["deming", deming, "deming-regression", { y: "Y", lambda: 0 }],
+  // 1e13-scale precision, Deming regression (Nov 2026 Deming lane): the
+  // xyBig fixture, λ = 1 and λ = 0.25. Pre-fix the slope was ~7e-8 off,
+  // the intercept ~3e-5 off, and the OLS slope null with the intercept
+  // just mean(y) (the uncentered lm's slope is NA at 1e13); post-fix all
+  // match the mpmath exact values to ~1e-12 (checked in disagreements()).
+  ["xyBig", xyBig, "deming-regression", { y: "Y", lambda: 1 }],
+  ["xyBig", xyBig, "deming-regression", { y: "Y", lambda: 0.25 }],
   ["demingNoCovary", demingNoCovary, "deming-regression", { y: "Y", lambda: 1 }],
   ["demingTooFew", demingTooFew, "deming-regression", { y: "Y", lambda: 1 }],
   ["demingConstX", demingConstX, "deming-regression", { y: "Y", lambda: 1 }],
@@ -4225,6 +4236,53 @@ async function disagreements(): Promise<string[]> {
       rel(oP, 2.2055762756384253e-133) > 0.25
     )
       out.push(`Origin fit at 1e13: slope ${oSlope}, CI [${oLo}, ${oHi}], R² ${oR2}, P ${oP}`);
+  }
+  // 1e13-scale precision, Deming regression (Nov 2026 Deming lane): the
+  // slope, intercept, jackknife CIs and the OLS comparison match the mpmath
+  // exact values (probe/expected-precision.json) to ~1e-12 — the
+  // two-stage-centered fit. Pre-fix the slope was ~7e-8 off, the intercept
+  // ~3e-5 off, and the OLS slope was null with the intercept just mean(y).
+  // The bound is 1e-9 relative: the reference pins round to 10 significant
+  // digits, so the check sits above that rounding (~5e-11) while still
+  // catching the pre-fix errors. (The jackknife SEs ride inside the CIs:
+  // CI = value ± 1.96·SE, so the CIs pin them to the same precision.)
+  for (const [lam, key] of [
+    [1, "deming"],
+    [0.25, "deming025"],
+  ] as const) {
+    const d = await runAnalysis("deming-regression", xyBig, { y: "Y", lambda: lam });
+    const dStat = (label: string) =>
+      "error" in d ? null : d.stats.find((s) => s.label === label)?.value;
+    const want = expectedPrecision[key];
+    const lin = expectedPrecision.linreg;
+    const rel = (got: number | null | undefined, wantV: number) =>
+      got == null ? Infinity : Math.abs(got - wantV) / Math.abs(wantV);
+    const [dSlope, dInt, dSlo, dShi, dIntLo, dIntHi, dOlsSlope, dOlsInt, dN] = [
+      dStat("Slope"),
+      dStat("Y-intercept"),
+      dStat("Slope 95% CI lower"),
+      dStat("Slope 95% CI upper"),
+      dStat("Intercept 95% CI lower"),
+      dStat("Intercept 95% CI upper"),
+      dStat("OLS slope"),
+      dStat("OLS Y-intercept"),
+      dStat("Complete pairs"),
+    ];
+    if (
+      rel(dSlope, want.slope) > 1e-9 ||
+      rel(dInt, want.intercept) > 1e-9 ||
+      rel(dSlo, want.slopeCiLo) > 1e-9 ||
+      rel(dShi, want.slopeCiHi) > 1e-9 ||
+      rel(dIntLo, want.interceptCiLo) > 1e-9 ||
+      rel(dIntHi, want.interceptCiHi) > 1e-9 ||
+      rel(dOlsSlope, lin.slope) > 1e-9 ||
+      rel(dOlsInt, lin.intercept) > 1e-9 ||
+      dN !== 10
+    )
+      out.push(
+        `Deming λ=${lam} at 1e13: slope ${dSlope}, intercept ${dInt}, CI [${dSlo}, ${dShi}], ` +
+          `intercept CI [${dIntLo}, ${dIntHi}], OLS ${dOlsSlope}/${dOlsInt}, n ${dN}`,
+      );
   }
   // Deming regression (plan 13): the TS closed form must match the R closed
   // form on the reference table, and λ must run the right way round. The

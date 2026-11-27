@@ -82,22 +82,35 @@ export const demingRegressionSpec: ColumnTestSpec<DemingRegressionParams> = {
   minGroups: 2,
   check: demingProblem,
   parseGroups: pickXY,
+  // Centered twice (Nov 2026 precision lane): the closed form already runs
+  // on centered sums, but a single mean subtraction leaves the mean's
+  // rounding error δ (~5e-4 at 1e13) in every deviation, and
+  // sxx = Σ(x − x̄)² picks up n·δ² — the slope comes out ~7e-8 off and the
+  // intercept (ȳ − b·x̄) amplifies the slope error by x̄ ~ 1e13 to ~3e-5
+  // relative. Re-centering the O(1) deviations kills δ to ~1e-16: the
+  // second mean is computed at O(1) scale, where it is exact to ~1e-16,
+  // and the intercept's remaining error is then x̄·δb ~ 0.02 absolute on
+  // ~4e10. The jackknife refits center the same way per subset; the OLS
+  // comparison is the centered lm of the linear-regression lane (its QR
+  // re-centers internally, so one centering suffices there) with the
+  // intercept taken back to X = 0 — the uncentered lm(y~x) returns an NA
+  // slope at 1e13 and an intercept of just mean(y).
   rCode: (groups, params) => {
     const lambda = (params ?? DEFAULTS).lambda;
     return (
       `x<-${rVec(groups[0].values)};y<-${rVec(groups[1].values)};lam<-${lambda};n<-length(x);` +
-      `xb<-mean(x);yb<-mean(y);sxx<-sum((x-xb)^2);syy<-sum((y-yb)^2);sxy<-sum((x-xb)*(y-yb));` +
+      `xb<-mean(x);yb<-mean(y);xc<-x-xb;yc<-y-yb;xc<-xc-mean(xc);yc<-yc-mean(yc);sxx<-sum(xc^2);syy<-sum(yc^2);sxy<-sum(xc*yc);` +
       `d<-syy-lam*sxx;b<-(d+sqrt(d^2+4*lam*sxy^2))/(2*sxy);a<-yb-b*xb;` +
       // Leave-one-out jackknife: refit on each n−1 subset, SE = √((k−1)/k·Σ(θᵢ − θ̄)²)
       // (Efron's jackknife SE) over the k usable replicates. A subset whose X and Y do not covary
       // (sxy2 = 0) has no defined Deming slope, so it contributes no replicate
       // instead of a NaN one; looDropped counts the skipped subsets.
-      `th<-sapply(1:n,function(i){xx<-x[-i];yy<-y[-i];xbm<-mean(xx);ybm<-mean(yy);sx<-sum((xx-xbm)^2);sy<-sum((yy-ybm)^2);sxy2<-sum((xx-xbm)*(yy-ybm));dd<-sy-lam*sx;bb<-if(is.na(sxy2)||sxy2==0)NA else (dd+sqrt(dd^2+4*lam*sxy2^2))/(2*sxy2);if(is.na(bb)||!is.finite(bb))bb<-NA;c(bb,ybm-bb*xbm)});` +
+      `th<-sapply(1:n,function(i){xx<-x[-i];yy<-y[-i];xbm<-mean(xx);ybm<-mean(yy);xcc<-xx-xbm;ycc<-yy-ybm;xcc<-xcc-mean(xcc);ycc<-ycc-mean(ycc);sx<-sum(xcc^2);sy<-sum(ycc^2);sxy2<-sum(xcc*ycc);dd<-sy-lam*sx;bb<-if(is.na(sxy2)||sxy2==0)NA else (dd+sqrt(dd^2+4*lam*sxy2^2))/(2*sxy2);if(is.na(bb)||!is.finite(bb))bb<-NA;c(bb,ybm-bb*xbm)});` +
       `k<-sum(!is.na(th[1,]));seb<-if(k<2)NA else sqrt((k-1)/k*sum((th[1,]-mean(th[1,],na.rm=TRUE))^2,na.rm=TRUE));sea<-if(k<2)NA else sqrt((k-1)/k*sum((th[2,]-mean(th[2,],na.rm=TRUE))^2,na.rm=TRUE));` +
-      `m<-lm(y~x);` +
+      `m<-lm(I(y-yb)~I(x-xb));co<-coef(m);olsB<-unname(co[2]);olsA<-unname(co[1]+yb-olsB*xb);` +
       `c(slope=b,intercept=a,slopeSe=seb,interceptSe=sea,` +
       `slopeCiLo=b-1.96*seb,slopeCiHi=b+1.96*seb,interceptCiLo=a-1.96*sea,interceptCiHi=a+1.96*sea,` +
-      `lambda=lam,olsSlope=unname(coef(m)[2]),olsIntercept=unname(coef(m)[1]),n=n,looDropped=n-k)`
+      `lambda=lam,olsSlope=olsB,olsIntercept=olsA,n=n,looDropped=n-k)`
     );
   },
   rows: (v, _groups, _params) => [
