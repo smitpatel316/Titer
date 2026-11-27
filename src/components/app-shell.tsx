@@ -100,7 +100,7 @@ export function AppShell() {
     return () => window.removeEventListener(PRINT_SETTINGS_CHANGED_EVENT, apply);
   }, []);
   const hidden = HIDDEN_SIDEBAR[fullscreen ? "fullscreen" : "window"];
-  const { nodes, rootOrder, childOrder, selector, closeSelector, openSelector, createTable, createGraph, setActiveNode, activeNode, isDirty } =
+  const { nodes, rootOrder, childOrder, selector, closeSelector, openSelector, createTable, createGraph, setActiveNode, isDirty } =
     useProjectStore();
   const startAnalysis = useStartAnalysis();
   // The New Analysis / New Graph pickers list what fits the target table's type.
