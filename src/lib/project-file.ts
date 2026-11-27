@@ -161,20 +161,39 @@ export interface ProjectFilePayload {
 // ── Writing ──────────────────────────────────────────────────────────────
 
 export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeId, template, projectName, scripts, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
-  // A sheet only carries the flags that belong to its kind (seq 165): a
-  // frozen flag on a graph is dropped here, not written and dropped again
-  // on load — otherwise every save/load round-trip would read as updated.
-  // An analysis's frozen/orphaned flags only ever mean anything as `true`
-  // (the reader drops anything else): a re-pointed analysis carries
-  // `orphaned: false` in state, and writing it would make the next open
-  // report the file as updated. Leave the flags off unless true.
+  // A sheet only carries the flags that belong to its kind (seq 165): the
+  // flags are written exactly as the reader would read them back — a flag
+  // the reader drops, or one the reader derives, would mark every save/load
+  // round-trip as updated. An analysis's frozen/orphaned flags only ever
+  // mean anything as `true` (the reader drops anything else): a re-pointed
+  // analysis carries `orphaned: false` in state, and writing it would make
+  // the next open report the file as updated. Leave the flags off unless
+  // true. A graph or figure's frozen flag is written as the state holds it —
+  // but only when the node carries its snapshot field (seq 237 vs seq 165).
+  // The flag is only ever set together with the snapshot (setGraphFrozen,
+  // or the reader itself), so a frozen node whose snapshot field is present
+  // but empty lost its data: the flag is written, and the reader repairs it
+  // visibly (updated, unfrozen on load). A frozen node with no snapshot
+  // field at all never went through the freeze machinery — its flag is stale
+  // dead weight (a hand edit, or a file from before graphs could freeze) —
+  // so the flag is dropped silently, as the old saver did, and the file still
+  // opens unedited. The serializer never derives the flag from the snapshot
+  // — only the reader does. An info sheet never carries the flag.
   const cleanNodes = Object.fromEntries(
     Object.entries(nodes).map(([id, node]) => {
       const next = { ...node };
       if (next.type === "analysis") {
         if (next.orphaned !== true) delete next.orphaned;
         if (next.frozen !== true) delete next.frozen;
-      } else if (next.type !== "table") delete next.frozen;
+      } else if (next.type === "table") {
+        if (next.frozen !== true) delete next.frozen;
+      } else if (next.type === "graph") {
+        if (next.frozen !== true || !("frozenData" in next)) delete next.frozen;
+      } else if (next.type === "figure") {
+        if (next.frozen !== true || !("frozenDataByGraph" in next)) delete next.frozen;
+      } else {
+        delete next.frozen;
+      }
       return [id, next];
     }),
   );
@@ -1755,8 +1774,12 @@ function readFloatingNotes(raw: unknown, label: string, issues: ProjectIssue[]):
  *  frozen. Read leniently — columns + rows are the payload, the rest is
  *  kept only when well-formed — because the snapshot is never edited, only
  *  drawn from: a hand edit that breaks a field loses that field, not the
- *  graph. `calculated` formulas and row-group bands are dropped: the rows
- *  already hold the computed values, and a frozen graph never recomputes. */
+ *  graph. Every field the table's data carries is preserved (validated the
+ *  way `readData` validates it): the saver writes the snapshot verbatim
+ *  and the reader compares filed vs known, so dropping a field here would
+ *  mark every frozen graph/figure as updated on reopen. The rows already
+ *  hold the computed values and a frozen graph never recomputes, but the
+ *  formulas, row groups and the rest still round-trip with the snapshot. */
 function readFrozenData(raw: unknown): TableData | undefined {
   if (!isObj(raw)) return undefined;
   const d = canonical(raw, DATA_KEYS);
@@ -1789,6 +1812,11 @@ function readFrozenData(raw: unknown): TableData | undefined {
         ),
       )
     : {};
+  // Cell background colors survive only as in-bounds "row,col" keys naming
+  // one of Prism's 8 colors, like the live table's (see `readData`).
+  const cellBackgrounds = isObj(d.cellBackgrounds)
+    ? Object.fromEntries(Object.entries(d.cellBackgrounds).filter(([k, v]) => onCell(k) && isCellBackgroundColor(v)))
+    : {};
   return defined({
     columns,
     rows,
@@ -1807,6 +1835,19 @@ function readFrozenData(raw: unknown): TableData | undefined {
     xFormat: d.xFormat === "date" || d.xFormat === "elapsed" ? d.xFormat : undefined,
     xConversion: readXConversion(d.xConversion),
     notes: typeof d.notes === "string" && d.notes ? d.notes : undefined,
+    rowGroups: readRowGroups(d.rowGroups).groups,
+    cellBackgrounds: Object.keys(cellBackgrounds).length
+      ? (cellBackgrounds as Record<string, CellBackgroundColor>)
+      : undefined,
+    calculated: readCalculated(d.calculated, columns),
+    linkedPaste: readLinkedPaste(d.linkedPaste),
+    variableTypes: readVariableTypes(d.variableTypes, columns),
+    labelVariable:
+      typeof d.labelVariable === "string" && columns.slice(1).includes(d.labelVariable)
+        ? d.labelVariable
+        : undefined,
+    levelOrder: readLevelOrder(d.levelOrder, columns),
+    simulation: readSimulationSpec(d.simulation),
   }) as TableData;
 }
 
@@ -2576,8 +2617,12 @@ export function parseProjectFile(
   for (const node of Object.values(nodes)) {
     if (node.type === "figure") {
       // A panel whose graph is gone stays as a placeholder naming the graph;
-      // the figure still opens, and export leaves that cell blank.
-      const missing = (node.panels ?? []).filter((p) => !nodeOf(p.graphId) || nodeOf(p.graphId)?.type !== "graph");
+      // the figure still opens, and export leaves that cell blank. Blank and
+      // image panels need no graph (their `graphId` is empty), so they never
+      // count as missing — only a graph panel naming a gone graph warns.
+      const missing = (node.panels ?? []).filter(
+        (p) => p.kind !== "blank" && p.kind !== "image" && (!nodeOf(p.graphId) || nodeOf(p.graphId)?.type !== "graph"),
+      );
       if (missing.length)
         issues.push({
           severity: "warning",
