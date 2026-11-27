@@ -20485,7 +20485,7 @@ check("seq 216: the export dialogs offer EPS/BMP and 100 DPI (formats + resoluti
   strictEqual(figureDpi("999"), "600");
   deepStrictEqual(
     COLOR_MODES.map((m) => m.value),
-    ["color", "grayscale", "cmyk"],
+    ["color", "grayscale", "cmyk", "monochrome"],
   );
 });
 
