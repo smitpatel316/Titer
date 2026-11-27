@@ -8,6 +8,9 @@ exactly, so the TS side sees the identical doubles):
 - linreg: 10 pts, x ~ 1e13, y = 2*x + 1000 + noise
 - linregOrigin: 10 pts, x ~ 1e13, y = 2*x + noise (through origin)
 - multireg: 12 rows, x1/x2 ~ 1e13, y = 1000 + 2*x1c - 1.5*x2c + noise
+- slopes: same X as linreg; A = linreg Y (slope 2, +1000), B = linregOrigin
+  Y (slope 2, +0) — parallel, distinct intercepts; C = 3*x + 1000 + noise
+  (slope 3) — slopes differ. The A-vs-B and A-vs-C pairs pin compare-slopes.
 
 Writes:
 - <worktree>/tests/testdata/precision-1e13.json  (tables for reference.ts)
@@ -19,7 +22,6 @@ import sys
 from pathlib import Path
 
 import mpmath as mp
-from scipy import stats
 
 mp.mp.dps = 50
 WT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
@@ -53,6 +55,10 @@ x1 = [BASE + g(0, 1.5) for _ in range(12)]
 x2 = [BASE + g(0, 1.2) for _ in range(12)]
 ym = [1000 + 2 * (a - BASE) - 1.5 * (b - BASE) + g(0, 0.2) for a, b in zip(x1, x2)]
 
+# --- Compare slopes: C = 3*x + 1000 + noise on the same X (slope 3).
+# Drawn AFTER every earlier dataset, so the existing tables are unchanged.
+ys_c = [3 * x + 1000 + g(0, 0.1) for x in xs]
+
 
 # --- exact helpers (mpmath, 50 digits; inputs are the exact doubles) ---
 # NOTE: mpf(float) is the DOUBLE's exact binary value. mpf(repr(v)) parses the
@@ -61,6 +67,20 @@ ym = [1000 + 2 * (a - BASE) - 1.5 * (b - BASE) + g(0, 0.2) for a, b in zip(x1, x
 # repr strings), so the exact values must be computed from the doubles.
 def mpf_list(vs):
     return [mp.mpf(v) for v in vs]
+
+
+def tcrit_exact(df):
+    """Two-sided 95% t critical value, mpmath-exact.
+
+    scipy's t.ppf is only accurate to ~2e-10 here (df=8: 2.3060041350333704
+    vs the true 2.3060041352041667 — R's qt agrees with mpmath to all
+    digits), and that error is visible on intercept CIs, whose SEs are
+    ~1e11 at 1e13 scale (1.7e-10 * 8e10 ≈ 14). Inverted from the
+    regularized incomplete beta: P(|T| > t) = 0.05.
+    """
+    f = lambda t: mp.betainc(mp.mpf(df) / 2, mp.mpf(1) / 2, 0,
+                             mp.mpf(df) / (df + t ** 2), regularized=True) - mp.mpf("0.05")
+    return mp.findroot(f, (mp.mpf(2), mp.mpf(2.5)))
 
 
 def anova_exact(groups):
@@ -113,7 +133,7 @@ def linreg_exact(x, y, weights=None):
     # two-sided p from t: P(|T|>|t|) = I_{df/(df+t^2)}(df/2, 1/2)
     z = mp.mpf(df) / (df + t ** 2)
     p = mp.betainc(mp.mpf(df) / 2, mp.mpf(1) / 2, 0, z, regularized=True)
-    tcrit = stats.t.ppf(0.975, df)
+    tcrit = tcrit_exact(df)
     # Pearson r (unweighted, as the spec reports it): from the unweighted sums
     umx = sum(X) / n
     umy = sum(Y) / n
@@ -183,6 +203,79 @@ def multireg_exact(x1v, x2v, yv):
     }
 
 
+def slopes_exact(x, ysets):
+    """Extra-sum-of-squares ANCOVA for compare-slopes (Prism's two F tests).
+
+    Per-set values come from linreg_exact; the stacked fits are computed
+    from within-group sums (translation-invariant, so the centered R fits
+    estimate the same quantities): full = separate lines, shared = one
+    slope + separate intercepts, one = a single line for all sets.
+    """
+    k = len(ysets)
+    n = len(x)
+    N = n * k
+    per = [linreg_exact(x, y) for y in ysets]
+    X = mpf_list(x)
+    mx = sum(X) / n
+    sxx_g, sxy_g, sse_g = [], [], []
+    for y in ysets:
+        Y = mpf_list(y)
+        my = sum(Y) / n
+        sxx = sum((xi - mx) ** 2 for xi in X)
+        sxy = sum((xi - mx) * (yi - my) for xi, yi in zip(X, Y))
+        slope = sxy / sxx
+        b0 = my - slope * mx
+        sse = sum((yi - (b0 + slope * xi)) ** 2 for xi, yi in zip(X, Y))
+        sxx_g.append(sxx)
+        sxy_g.append(sxy)
+        sse_g.append(sse)
+    ssF = sum(sse_g)
+    dfF = N - 2 * k
+    # shared slope: pooled within-group slope; each group's intercept is its
+    # own mean minus the shared slope times the shared X mean
+    bP = sum(sxy_g) / sum(sxx_g)
+    ssS = mp.mpf(0)
+    for y in ysets:
+        Y = mpf_list(y)
+        my = sum(Y) / n
+        b_g = my - bP * mx
+        ssS += sum((yi - (b_g + bP * xi)) ** 2 for xi, yi in zip(X, Y))
+    dfS = N - k - 1
+    # one line: pooled regression on all N points
+    Xall = mpf_list(x * k)
+    Yall = mpf_list([yi for y in ysets for yi in y])
+    mxa = sum(Xall) / N
+    mya = sum(Yall) / N
+    sxxa = sum((xi - mxa) ** 2 for xi in Xall)
+    sxya = sum((xi - mxa) * (yi - mya) for xi, yi in zip(Xall, Yall))
+    slope_a = sxya / sxxa
+    b_a = mya - slope_a * mxa
+    ssI = sum((yi - (b_a + slope_a * xi)) ** 2 for xi, yi in zip(Xall, Yall))
+    Fs = ((ssS - ssF) / (k - 1)) / (ssF / dfF)
+    z = mp.mpf(dfF) / (dfF + (k - 1) * Fs)
+    ps = mp.betainc(mp.mpf(dfF) / 2, mp.mpf(k - 1) / 2, 0, z, regularized=True)
+    Fi = ((ssI - ssS) / (k - 1)) / (ssS / dfS)
+    z2 = mp.mpf(dfS) / (dfS + (k - 1) * Fi)
+    pi = mp.betainc(mp.mpf(dfS) / 2, mp.mpf(k - 1) / 2, 0, z2, regularized=True)
+    # common slope SE + CI (shared-slope model, sigma^2 = ssS/dfS)
+    sig2_s = ssS / dfS
+    se_bP = mp.sqrt(sig2_s / sum(sxx_g))
+    tcrit_s = tcrit_exact(dfS)
+    out = {
+        "perSet": per,
+        "Fs": float(Fs), "ps": float(ps), "dfF": dfF,
+        "Fi": float(Fi), "pi": float(pi), "dfS": dfS,
+        "ssF": float(ssF), "ssS": float(ssS), "ssI": float(ssI),
+        "commonSlope": float(bP), "commonSlopeSe": float(se_bP),
+        "commonSlopeCiLo": float(bP - tcrit_s * se_bP),
+        "commonSlopeCiHi": float(bP + tcrit_s * se_bP),
+    }
+    if k == 2:
+        out["intersection"] = float(
+            (per[1]["intercept"] - per[0]["intercept"]) / (per[0]["slope"] - per[1]["slope"]))
+    return out
+
+
 expected = {
     "anovaBig": anova_exact(anova_big),
     "anovaSmall": anova_exact(anova_small),
@@ -190,6 +283,9 @@ expected = {
     "linregWeighted1y": linreg_exact(xs, ys, weights=[1 / y for y in ys]),
     "linregOrigin": None,  # origin fit: slope-only; computed in the probe via R
     "multireg": multireg_exact(x1, x2, ym),
+    "slopesParallel": slopes_exact(xs, [ys, ys_o]),
+    "slopesDiffer": slopes_exact(xs, [ys, ys_c]),
+    "slopesThree": slopes_exact(xs, [ys, ys_o, ys_c]),
 }
 
 # origin exact (slope-only): slope = sum(x*y)/sum(x^2), se from sigma^2/sum(x^2)
@@ -206,7 +302,7 @@ df_o = len(Xo) - 1
 z_o = mp.mpf(df_o) / (df_o + t_o ** 2)
 p_o = mp.betainc(mp.mpf(df_o) / 2, mp.mpf(1) / 2, 0, z_o, regularized=True)
 r2_o = 1 - sse_o / sum(yi * yi for yi in Yo)  # R^2 for through-origin uses uncentered SST
-tcrit_o = stats.t.ppf(0.975, df_o)
+tcrit_o = tcrit_exact(df_o)
 expected["linregOrigin"] = {
     "slope": float(slope_o), "slopeSe": float(se_o),
     "slopeCiLo": float(slope_o - tcrit_o * se_o),
@@ -236,6 +332,9 @@ tables = {
     "multiBig": {"columns": ["Title", "Y", "X1", "X2"],
                  "rows": [["", repr(y), repr(a), repr(b)]
                           for y, a, b in zip(ym, x1, x2)]},
+    "xyBigSlopes": {"columns": ["Title", "X", "A", "B", "C"],
+                    "rows": [["", repr(x), repr(a), repr(b), repr(c)]
+                             for x, a, b, c in zip(xs, ys, ys_o, ys_c)]},
 }
 
 (WT / "tests" / "testdata").mkdir(parents=True, exist_ok=True)

@@ -58,22 +58,45 @@ export async function runCompareSlopes(
   // and the two F tests between them. F is clamped at 0: two RSS values
   // that agree to float precision can differ by a hair either way, and a
   // negative F has no P value (pf of it is not a probability).
+  // Centered first (same fix as linear regression, 2db68ed1): X and Y are
+  // centered on their means before every lm — each set on its own means,
+  // the stacked fits per-group (see below) — so values far from 0 for their
+  // spread (1000000000000.4…) lose no precision in lm's QR; at 1e13 scale
+  // the uncentered fits error outright ("subscript out of bounds"). The
+  // slopes are unchanged by centering; each intercept comes back to X = 0
+  // with its exact SE (b = b0c + my − slope·mx, sb² = se(b0c)² +
+  // (mx·se(slope))², the centered intercept and slope uncorrelated), and
+  // Pearson's r is computed on the centered values (cor(x,y) itself is
+  // 3.7e-8 off at 1e13). The shared slope is the centered fit's "xc"
+  // coefficient, with its CI from confint on that fit.
+  // Two centerings for the stacked fits: the separate-lines and
+  // shared-slope fits have an intercept per group, so each group's cloud
+  // is centered on its OWN mean (xc, yc) — the sets can sit ~1e13 apart
+  // (slopes 2 vs 3 at x ~ 1e13), and grand-mean centering alone leaves
+  // O(5e12) values whose O(0.1) residuals lose ~0.5% of the slopes F.
+  // The single-line fit has one intercept, which absorbs only a common
+  // shift, so it is centered on the grand means (xg, yg) instead.
   const perSet = points
     .map(
       (p, i) =>
-        `x${i}<-${rVec(p.x)};y${i}<-${rVec(p.y)};m<-lm(y${i}~x${i});s<-summary(m);ci<-confint(m);` +
-        `v${i}<-c(slope=unname(coef(m)[2]),slo=ci[2,1],shi=ci[2,2],` +
-        `b=unname(coef(m)[1]),blo=ci[1,1],bhi=ci[1,2],` +
-        `r=cor(x${i},y${i}),r2=s$r.squared,p=s$coefficients[2,4],n=length(y${i}))`,
+        `x${i}<-${rVec(p.x)};y${i}<-${rVec(p.y)};mx${i}<-mean(x${i});my${i}<-mean(y${i});` +
+        `xc${i}<-x${i}-mx${i};yc${i}<-y${i}-my${i};` +
+        `m<-lm(I(y${i}-my${i})~I(x${i}-mx${i}));s<-summary(m);co<-s$coefficients;q<-qt(0.975,df.residual(m));` +
+        `b${i}<-co[1,1]+my${i}-co[2,1]*mx${i};sb${i}<-sqrt(co[1,2]^2+(mx${i}*co[2,2])^2);` +
+        `v${i}<-c(slope=unname(co[2,1]),slo=co[2,1]-q*co[2,2],shi=co[2,1]+q*co[2,2],` +
+        `b=unname(b${i}),blo=b${i}-q*sb${i},bhi=b${i}+q*sb${i},` +
+        `r=cor(x${i}-mean(x${i}),y${i}-mean(y${i})),r2=s$r.squared,p=co[2,4],n=length(y${i}))`,
     )
     .join(";");
   const stacked =
     `x<-c(${points.map((_, i) => `x${i}`).join(",")});y<-c(${points.map((_, i) => `y${i}`).join(",")});` +
     `g<-factor(c(${n.map((ni, i) => `rep(${i + 1},${ni})`).join(",")}));` +
-    `mf<-lm(y~g*x);ssF<-sum(residuals(mf)^2);dfF<-df.residual(mf);` +
-    `ms<-lm(y~g+x);ssS<-sum(residuals(ms)^2);dfS<-df.residual(ms);` +
-    `mi<-lm(y~x);ssI<-sum(residuals(mi)^2);` +
-    `cs<-confint(ms);bP<-unname(coef(ms)[["x"]]);bPlo<-unname(cs["x",1]);bPhi<-unname(cs["x",2]);` +
+    `mx<-mean(x);my<-mean(y);xg<-x-mx;yg<-y-my;` +
+    `xc<-c(${points.map((_, i) => `xc${i}`).join(",")});yc<-c(${points.map((_, i) => `yc${i}`).join(",")});` +
+    `mf<-lm(yc~g*xc);ssF<-sum(residuals(mf)^2);dfF<-df.residual(mf);` +
+    `ms<-lm(yc~g+xc);ssS<-sum(residuals(ms)^2);dfS<-df.residual(ms);` +
+    `mi<-lm(yg~xg);ssI<-sum(residuals(mi)^2);` +
+    `cs<-confint(ms);bP<-unname(coef(ms)[["xc"]]);bPlo<-unname(cs["xc",1]);bPhi<-unname(cs["xc",2]);` +
     `Fs<-max(0,((ssS-ssF)/${k - 1})/(ssF/dfF));ps<-pf(Fs,${k - 1},dfF,lower.tail=FALSE);` +
     `Fi<-max(0,((ssI-ssS)/${k - 1})/(ssS/dfS));pi<-pf(Fi,${k - 1},dfS,lower.tail=FALSE);`;
   const v = await evalNamedVector(
