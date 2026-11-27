@@ -2780,6 +2780,15 @@ const anovaSmall = precisionFix.anovaSmall;
 const xyBig = precisionFix.xyBig;
 const xyBigOrigin = precisionFix.xyBigOrigin;
 const multiBig = precisionFix.multiBig;
+// The two-/three-way fixtures (Nov 2026 precision lane): the grouped tables
+// for the 1e13-scale two-way (3 groups × 4 rows × 3 reps) and three-way
+// (2 × 2 × 2 × 3 reps) pins; the mpmath exact values live in
+// probe/expected-precision.json.
+const twoWayBig = precisionFix.twoWayBig;
+const threeWayBig = precisionFix.threeWayBig;
+const expectedPrecision = JSON.parse(
+  readFileSync(new URL("../probe/expected-precision.json", import.meta.url), "utf8"),
+) as Record<string, Record<string, number>>;
 // Multi-Y twin of xyBig: Y2 is the origin table's Y (a second 1e13 series),
 // so the per-set fit path is pinned too.
 const xyBigMulti: TableData = {
@@ -3454,6 +3463,13 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
     { design: "repeated-measures", posthoc: "bonferroni", posthocTarget: "rows", sphericity: false },
   ],
   ["grouped", grouped, "two-way-anova", { design: "nonparametric", posthoc: "none", posthocTarget: "groups" }],
+  // 1e13-scale precision (Nov 2026): pre-fix the ordinary F values were
+  // 1.4e-3–2.5e-3 off the mpmath exact values (P up to 2.7e-2 off) and the
+  // repeated-measures F 1.4e-3–2.5e-3 off (P up to 1.1e-2 off); post-fix all
+  // match to ~1e-12. The RM case runs uncorrected (no sphericity flag), so
+  // its F/P are the plain split-plot values.
+  ["twoWayBig", twoWayBig, "two-way-anova", { design: "ordinary", posthoc: "none", posthocTarget: "groups" }],
+  ["twoWayBig", twoWayBig, "two-way-anova", { design: "repeated-measures", posthoc: "none", posthocTarget: "groups" }],
   ["twoGroups", twoGroups, "multiple-t-tests", { paired: false, gaussian: true, pooledSd: false, correction: "holm" }],
   ["twoGroups", twoGroups, "multiple-t-tests", { paired: false, gaussian: true, pooledSd: true, correction: "fdr" }],
   ["twoGroups", twoGroups, "multiple-t-tests", { paired: true, gaussian: true, pooledSd: false, correction: "none" }],
@@ -3489,6 +3505,11 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
     { posthoc: "dunnett", posthocTerm: "A:B:C", posthocScope: "simple", control: "Placebo (Day 1)" },
   ],
   ["grouped3way", grouped3way, "two-way-anova", { design: "ordinary", posthoc: "none", posthocTarget: "groups" }],
+  // 1e13-scale precision (Nov 2026): pre-fix the three-way F values were
+  // 1.7e-3–1.6e-2 off the mpmath exact values (P up to 3.9e-2 off), and the
+  // uncentered drop1 warned "attempting model selection on an essentially
+  // perfect fit is nonsense"; post-fix all match to ~1e-12.
+  ["threeWayBig", threeWayBig, "three-way-anova", { posthoc: "none" }],
   ["grouped3wayEmpty", grouped3wayEmpty, "three-way-anova", { posthoc: "none" }],
   ["grouped3wayBadBands", grouped3wayBadBands, "three-way-anova", { posthoc: "none" }],
   ["grouped3wayN1", grouped3wayN1, "three-way-anova", { posthoc: "none" }],
@@ -4225,6 +4246,76 @@ async function disagreements(): Promise<string[]> {
       rel(oP, 2.2055762756384253e-133) > 0.25
     )
       out.push(`Origin fit at 1e13: slope ${oSlope}, CI [${oLo}, ${oHi}], R² ${oR2}, P ${oP}`);
+  }
+  // 1e13-scale precision, two-/three-way ANOVA (Nov 2026): every F and P of
+  // the ordinary two-way, the repeated-measures two-way (uncorrected — the
+  // Geisser-Greenhouse epsilon is a ratio of covariances R already computes
+  // centered, so it needs no pin here) and the three-way ANOVA matches the
+  // mpmath exact values (probe/expected-precision.json) — F to 1e-9 relative,
+  // P to 1e-6 relative. Pre-fix the F values were 1.4e-3–1.6e-2 off and the
+  // P values up to 3.9e-2 off.
+  {
+    const rel = (got: number | null | undefined, want: number) =>
+      got == null ? Infinity : Math.abs(got - want) / Math.abs(want);
+    const check = async (
+      key: string,
+      type: AnalysisType,
+      data: TableData,
+      params: AnalysisParams,
+      terms: [string, string, string][],
+    ) => {
+      const o = await runAnalysis(type, data, params);
+      if ("error" in o) {
+        out.push(`Precision ${key}: ${o.error}`);
+        return;
+      }
+      const stat = (label: string) => o.stats.find((s) => s.label === label)?.value;
+      for (const [term, fKey, pKey] of terms) {
+        const want = expectedPrecision[key];
+        if (rel(stat(`${term} F`), want[fKey]) > 1e-9 || rel(stat(`${term} P value`), want[pKey]) > 1e-6)
+          out.push(
+            `Precision ${key} ${term}: F ${stat(`${term} F`)} (exact ${want[fKey]}), ` +
+              `P ${stat(`${term} P value`)} (exact ${want[pKey]})`,
+          );
+      }
+    };
+    await check(
+      "twoWayBig",
+      "two-way-anova",
+      twoWayBig,
+      { design: "ordinary", posthoc: "none", posthocTarget: "groups" },
+      [
+        ["Group", "FA", "pA"],
+        ["Row", "FB", "pB"],
+        ["Interaction", "FAB", "pAB"],
+      ],
+    );
+    await check(
+      "twoWayBigRM",
+      "two-way-anova",
+      twoWayBig,
+      { design: "repeated-measures", posthoc: "none", posthocTarget: "groups" },
+      [
+        ["Group", "FG", "pG"],
+        ["Row", "FR", "pR"],
+        ["Interaction", "FI", "pI"],
+      ],
+    );
+    await check(
+      "threeWayBig",
+      "three-way-anova",
+      threeWayBig,
+      { posthoc: "none" },
+      [
+        ["A", "FA", "pA"],
+        ["B", "FB", "pB"],
+        ["C", "FC", "pC"],
+        ["A:B", "FAB", "pAB"],
+        ["A:C", "FAC", "pAC"],
+        ["B:C", "FBC", "pBC"],
+        ["A:B:C", "FABC", "pABC"],
+      ],
+    );
   }
   // Deming regression (plan 13): the TS closed form must match the R closed
   // form on the reference table, and λ must run the right way round. The
