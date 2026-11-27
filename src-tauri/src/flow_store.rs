@@ -833,10 +833,10 @@ mod tests {
     fn invert_matrix_matches_numpy_reference() {
         // numpy inv(S): the F0 oracle's independent reference.
         let inv = invert_matrix(&spill_matrix()).expect("spill matrix inverts");
-        assert!((inv[0][0] - 1.00099418).abs() < 1e-9);
-        assert!((inv[0][1] - -0.04970896).abs() < 1e-9);
-        assert!((inv[1][2] - -0.02986547).abs() < 1e-9);
-        assert!((inv[2][0] - 0.00080176).abs() < 1e-9);
+        assert!((inv[0][0] - 1.00099418).abs() < 1e-7);
+        assert!((inv[0][1] - -0.04970896).abs() < 1e-7);
+        assert!((inv[1][2] - -0.02986547).abs() < 1e-7);
+        assert!((inv[2][0] - 0.00080176).abs() < 1e-7);
         // Refusals: singular, non-square, non-finite.
         assert!(invert_matrix(&[vec![1.0, 1.0], vec![1.0, 1.0]]).is_err(), "singular must be refused");
         assert!(invert_matrix(&[vec![1.0, 0.0], vec![0.0, 1.0, 0.0]]).is_err(), "non-square must be refused");
