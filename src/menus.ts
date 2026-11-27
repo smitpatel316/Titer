@@ -118,8 +118,11 @@ export function projectItems(
 /** Sets the app's menu bar: the Titer menu, `menus`, then Window and Help.
  *  `extraHelpItems` (a project window's own Help entries, e.g. the startup
  *  guide — seq 454) land right after Titer Tips, with the rest of the
- *  in-app help; the engine window passes none. */
-export function setMenuBar(menus: MenuItems, extraHelpItems: MenuItems = []) {
+ *  in-app help; the engine window passes none. `hasProjectWindow` is false
+ *  for the windowless menu: Send Feedback and What's New open dialogs that
+ *  live in a project window's React tree, so with no project window open
+ *  they are disabled there instead of enabled dead no-ops. */
+export function setMenuBar(menus: MenuItems, extraHelpItems: MenuItems = [], hasProjectWindow = true) {
   const titer = {
     text: "Titer",
     items: [
@@ -166,12 +169,12 @@ export function setMenuBar(menus: MenuItems, extraHelpItems: MenuItems = []) {
       separator,
       { text: "How to Cite Titer", action: () => void showCitation() },
       separator,
-      { text: "Send Feedback", action: () => openSendFeedback() },
+      { text: "Send Feedback", enabled: hasProjectWindow, action: () => openSendFeedback() },
       { text: "Contact Support", action: () => void openSupportEmail() },
       { text: "Ask the Community", action: () => openLink("discussions") },
       { text: "Support Web Site", action: () => openLink("support") },
       { text: "Support Policies", action: () => openLink("support-policies") },
-      { text: "What's New", action: () => openWhatsNew() },
+      { text: "What's New", enabled: hasProjectWindow, action: () => openWhatsNew() },
       separator,
       { text: "Go to titer.smitpatel.net", action: () => openLink("site") },
       { text: "Buy Me a Coffee", action: () => openLink("coffee") },

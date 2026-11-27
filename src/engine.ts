@@ -34,8 +34,10 @@ function setWindowlessMenuBar() {
   const forgetRecent = (entry: RecentEntry) => keepRecents(recents.filter((e) => recentKey(e) !== recentKey(entry)));
   // Local files only: a remote file needs a project window to load into,
   // and there is none while this menu is showing. Remote recents open from
-  // a project window's File menu instead.
+  // a project window's File menu instead. No project window is open, so
+  // the dialog Help items (Send Feedback, What's New) are disabled —
+  // the engine window has no React tree to open them into.
   const local = recents.filter((e): e is Extract<RecentEntry, { kind: "local" }> => e.kind === "local");
-  void setMenuBar([{ text: "File", items: projectItems(local, forgetRecent, () => keepRecents([])) }]);
+  void setMenuBar([{ text: "File", items: projectItems(local, forgetRecent, () => keepRecents([])) }], [], false);
 }
 onNoWindows(setWindowlessMenuBar);

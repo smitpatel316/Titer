@@ -2733,19 +2733,37 @@ export function useDocument() {
   // 397), and a top-layer <dialog> open over it would hide it — so the
   // effect re-runs when Welcome closes: a 900 ms timer (past Welcome's own
   // 500 ms decision) opens the tour when Welcome never shows, and the same
-  // decision runs again once Welcome closes. A file window never sees it.
+  // decision runs again once Welcome closes. A file window never sees it:
+  // openedFile is marked synchronously when a file comes in, and a .pzt
+  // template, Sample Project, or slow/failed launch leaves filePath null
+  // and isDirty false, so those alone can't tell — the guard needs
+  // !openedFile.current. While a top-layer <dialog> (What's New, feedback
+  // consent) is open the decision waits and retries instead of popping
+  // over it.
   React.useEffect(() => {
     if (guideDecided.current || welcomeOpen) return;
-    const timer = setTimeout(() => {
-      if (guideDecided.current) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const decide = () => {
+      if (cancelled || guideDecided.current) return;
+      // A top-layer <dialog> owns the first-run moment while open — wait
+      // for it to close before deciding, so the guide never pops over it.
+      if (typeof document !== "undefined" && document.querySelector("dialog[open]")) {
+        timer = setTimeout(decide, 900);
+        return;
+      }
       guideDecided.current = true;
       const firstWindow = !native.isNative || native.windowLabel() === "project-1";
       const s = latest.current.get();
-      if (firstWindow && shouldShowGuide(readGuideSeen()) && !s.filePath && !s.isDirty) {
+      if (firstWindow && shouldShowGuide(readGuideSeen()) && !openedFile.current && !s.filePath && !s.isDirty) {
         setGuideOpen(true);
       }
-    }, 900);
-    return () => clearTimeout(timer);
+    };
+    timer = setTimeout(decide, 900);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [welcomeOpen]);
 
   return {
