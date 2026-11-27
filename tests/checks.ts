@@ -27100,7 +27100,7 @@ check("row means and totals pooled mode summarises the data-set means, not the p
     (got == null && want == null) || (got != null && want != null && Math.abs(got - want) < 1e-9);
   const closeCI = (got: number | null, want: number | null) =>
     (got == null && want == null) || (got != null && want != null && Math.abs(got - want) < 1e-6);
-  const expected: [number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null][] = [
+  const expected: [number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null][] = [
     // Row 1, data-set means [3, 5, 8]: SD, SEM, CI low, CI high, %CV,
     // geometric mean, min, max, q1, q3, p10, p90, geometric SD, geo CI.
     [2.516611478423583, 1.4529663145135578, -0.9182761462775506, 11.584942812944217, 47.18646522044219, 4.93242414866094, 3, 8, 3, 8, 3, 8, 1.6332243503480317, 1.4582271976010548, 16.683825416448943],
