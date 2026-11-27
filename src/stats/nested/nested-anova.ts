@@ -82,13 +82,19 @@ export async function runNestedAnova(
     code = `${setup};${ph.setup};c(${mainNames},${ph.assign})`;
   }
   const v = await evalNamedVector(code);
-  const described = (await describe(asGroups)).groups;
+  // The post-hoc diffs take the centered difference too: the raw
+  // `mean(A) - mean(B)` loses the difference past the 13th digit at 1e13
+  // scale (~6.5e-4 off on nestedBig), while describe()'s diff(i, j) —
+  // the difference of the grand-mean-centered means — is exact
+  // (BUG-REPORT #114).
+  const pairs = pairIndices(groups.length);
+  const { groups: described, diff } = await describe(asGroups, pairs);
   const label = posthocOf({ posthoc: method });
   const comparisons: ComparisonRow[] | undefined = label
-    ? pairIndices(groups.length).map(([i, j]) => ({
+    ? pairs.map(([i, j]) => ({
         group1: described[i].name,
         group2: described[j].name,
-        diff: described[i].mean != null && described[j].mean != null ? described[i].mean - described[j].mean : null,
+        diff: diff(i, j),
         p: v[`p_${i}_${j}`],
       }))
     : undefined;

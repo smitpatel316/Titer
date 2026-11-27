@@ -11514,6 +11514,34 @@ check("compare-slopes at 1e13 scale matches mpmath exact values (precision lane)
   rel(stat(three, "Common slope 95% CI upper"), 2.517107241858894);
 });
 
+check("nested ANOVA post-hoc diffs at 1e13 scale use the centered difference (BUG-REPORT #114)", async () => {
+  // At ~1e13 scale the subgroup means differ only past the 13th digit, so
+  // the raw `mean(A) - mean(B)` in the comparisons table loses the
+  // difference: pre-fix the 0_1 and 1_2 diffs came out -1.68359375 and
+  // -1.4375 against the exact -1.6829427083333333 and -1.4381510416666667
+  // (~6.5e-4 off each), while the p-values were already centered. The fix
+  // passes the pairs into describe() and takes diff(i, j) — the difference
+  // of the grand-mean-centered means, which is exact here. Exact values are
+  // mpmath 50-digit from the TS subgroup means (the doubles R receives);
+  // the 0_2 pair happens to be exact either way, the other two are the
+  // discriminating ones. Both post-hocs share the diff, so both are pinned.
+  const tables = JSON.parse(
+    readFileSync(new URL("./testdata/precision-1e13.json", import.meta.url), "utf8"),
+  ) as Record<string, TableData>;
+  const table = tables.nestedBig;
+  const want = [-1.6829427083333333, -3.12109375, -1.4381510416666667];
+  const rel = (got: number | null | undefined, want: number) => {
+    ok(got != null && Math.abs(got - want) <= Math.abs(want) * 1e-9, `got ${got}, want ${want} (rel 1e-9)`);
+  };
+  for (const posthoc of ["tukey", "bonferroni"] as const) {
+    const out = await runAnalysis("nested-anova", table, { posthoc });
+    if ("error" in out) throw new Error(out.error);
+    const diffs = (out.comparisons ?? []).map((c) => c.diff);
+    strictEqual(diffs.length, 3, `${posthoc}: expected 3 comparisons, got ${diffs.length}`);
+    diffs.forEach((d, i) => rel(d, want[i]));
+  }
+});
+
 check("linear-regression with compareSlopes runs the slope/intercept comparison (MCP audit seq 292)", async () => {
   // The audit's bar: the comparison is a param in the linear-regression
   // schema, reachable via titer_run_analysis — not UI-only. Same fixture
