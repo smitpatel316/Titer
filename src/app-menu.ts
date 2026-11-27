@@ -15,7 +15,7 @@ import { insertPictureObject, newDrawingObject } from "./components/drawing-obje
 import { removeWithConfirm, type DocumentActions } from "./store/use-document";
 import { NODE_NAMES, type DrawingObjectKind, type GraphType, type NodeType, type ProjectNode } from "./store/types";
 import { TABLE_TYPE_OPTIONS } from "./views/tables";
-import { TABLE_DATA_EXPORT_FORMATS, exportTableData } from "./views/tables/table-data-export";
+import { TABLE_DATA_EXPORT_FORMATS } from "./views/tables/table-data-export";
 import { analysisOptionsForTable, analysisOptionsKey } from "./views/analyses";
 import { pluginHasQuestions } from "./views/analyses/plugin-wizard";
 import { GRAPH_OPTIONS_BY_TABLE } from "./views/graphs";
@@ -363,7 +363,10 @@ export function useAppMenu(doc: DocumentActions) {
           },
           {
             // Seq 164: the active table as a file — the MCP-only
-            // `titer_export_table_data`, now in the menu. Same serializers,
+            // `titer_export_table_data`, now in the menu. The menu opens
+            // the Export dialog (seq 164 remainder: excluded-values
+            // format, decimal separator, column titles); the dialog
+            // calls the export with the chosen options. Same serializers,
             // same csv/xlsx/txt/xml formats; the save dialog picks the file.
             text: "Export Table Data",
             enabled: hasTable,
@@ -371,8 +374,7 @@ export function useAppMenu(doc: DocumentActions) {
               text: f.label,
               action: () => {
                 const id = latest.current.store.activeTableId;
-                const table = id ? latest.current.store.nodes[id] : undefined;
-                if (table) void exportTableData(table, f.value);
+                if (id) latest.current.store.openSelector({ kind: "export-table-data", tableId: id, format: f.value });
               },
             })),
           },

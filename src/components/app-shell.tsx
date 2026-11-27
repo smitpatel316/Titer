@@ -10,6 +10,7 @@ import { UniversalModal } from "./universal-modal";
 import { Dialog } from "../ui/dialog";
 import { ConverterDialog } from "./converter-dialog";
 import { ExportAllDialog } from "./export-all-dialog";
+import { TableDataExportDialog } from "./table-data-export-dialog";
 import { AiConnectionsDialog } from "./ai-connections-dialog";
 import { MarketplaceDialog } from "./marketplace-dialog";
 import { FeedbackConsentDialog } from "./feedback-consent-dialog";
@@ -404,6 +405,8 @@ export function AppShell() {
       <ConverterDialog onOpenRegenerate={() => documentActions.openRegenDialog()} />
 
       <ExportAllDialog />
+
+      <TableDataExportDialog />
 
       <AiConnectionsDialog />
 

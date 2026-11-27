@@ -25,6 +25,7 @@ import { MAX_INFO_SHEETS, newInfoSheetData } from "../lib/info-sheets";
 import type { AnalysisParams, AnalysisPickerValue, AnalysisResult, AnalysisType } from "../stats/types";
 import { resolveAnalysis, type PluginAnalysisResult, type PluginParamValues } from "../plugins";
 import { TABLES } from "../views/tables";
+import type { TableDataFormat } from "../views/tables/table-data-export";
 import { convertColumnToNested, type ConvertToNestedSpec } from "../views/tables/table-data";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions } from "../views/graphs";
 import type { TemplateKind } from "../lib/template";
@@ -72,7 +73,11 @@ type Selector =
   // Marketplace (M2, seq 434): the in-app plugin store.
   | { kind: "marketplace" }
   | { kind: "preferences"; section?: PreferenceSection }
-  | { kind: "export-all-graphs" };
+  | { kind: "export-all-graphs" }
+  // Table-data export (seq 164 remainder): the Export dialog for one
+  // table, opened from File ▸ Export Table Data with the format the
+  // menu item chose.
+  | { kind: "export-table-data"; tableId: string; format: TableDataFormat };
 
 /** An analysis made for a graph's stars: of the data sets it shows (its wizard's data set
  *  questions answered with them), then chosen for it, the graph staying in front. */

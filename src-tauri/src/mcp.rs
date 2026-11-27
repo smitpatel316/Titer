@@ -4715,8 +4715,10 @@ pub struct ExportOfficeArgs {
 }
 
 /// Export one table's data as a file: CSV (default), XLSX or TXT
-/// (tab-separated). Excluded cells are written empty, matching what
-/// analyses see. No render is involved.
+/// (tab-separated). Excluded cells are written empty by default, matching
+/// what analyses see; `excluded_values` can write the value instead, or
+/// the value with an asterisk (Prism's Export dialog choices). No render
+/// is involved.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ExportTableDataArgs {
     /// Window label of the project ("project-1"); omit for the front project.
@@ -4730,6 +4732,18 @@ pub struct ExportTableDataArgs {
     /// Where to write the file. Omit for the default path (see above).
     #[serde(default)]
     pub path: Option<String>,
+    /// How excluded values are written to CSV/TXT/XLSX: "blank" (default,
+    /// as if missing), "value", or "asterisk" (value followed by "*").
+    /// Prism XML always keeps the marker and ignores this.
+    #[serde(default)]
+    pub excluded_values: Option<String>,
+    /// Decimal separator for CSV/TXT/XLSX: "." (default) or ",".
+    #[serde(default)]
+    pub decimal_separator: Option<String>,
+    /// Whether the first row holds the column titles (default true).
+    /// CSV/TXT/XLSX only; Prism XML always includes the titles.
+    #[serde(default)]
+    pub include_column_titles: Option<bool>,
 }
 
 /// Export every graph and figure (layout) in the project, one image file
@@ -9715,12 +9729,16 @@ impl TiterMcpServer {
     }
 
     /// Export one table's data as CSV (default), XLSX, TXT or Prism XML. Excluded
-    /// cells are written empty, matching what analyses see. Prism XML keeps
-    /// subcolumns, excluded values and row titles; a Nested or Multiple-variables
+    /// cells are written empty by default, matching what analyses see; the
+    /// `excluded_values` option can write the value instead, or the value
+    /// with an asterisk (Prism's Export dialog choices), `decimal_separator`
+    /// picks "." or ",", and `include_column_titles` drops the header row
+    /// — all three for CSV/TXT/XLSX only. Prism XML keeps subcolumns,
+    /// excluded values and row titles; a Nested or Multiple-variables
     /// table has no Prism counterpart and the export fails naming the table.
     #[tool(
         name = "titer_export_table_data",
-        description = "Export one table's data as a file: format csv (default), xlsx, txt (tab-separated), or xml (Prism XML — keeps subcolumns, excluded values and row titles). Excluded cells are written empty, matching what analyses see. path omitted = beside the project file, else <Documents>/Titer Exports. Returns the written path and row count.",
+        description = "Export one table's data as a file: format csv (default), xlsx, txt (tab-separated), or xml (Prism XML — keeps subcolumns, excluded values and row titles). Excluded cells are written empty by default, matching what analyses see; excluded_values \"blank\" (default), \"value\" or \"asterisk\", decimal_separator \".\" (default) or \",\", and include_column_titles (default true) apply to csv/xlsx/txt. path omitted = beside the project file, else <Documents>/Titer Exports. Returns the written path and row count.",
         annotations(
             title = "Export table data",
             read_only_hint = false,
@@ -9733,13 +9751,27 @@ impl TiterMcpServer {
         &self,
         Parameters(args): Parameters<ExportTableDataArgs>,
     ) -> Result<Json<serde_json::Value>, String> {
-        let call_args = serde_json::json!({ "project_id": args.project_id, "table_id": args.table_id, "format": args.format, "path": args.path });
+        let call_args = serde_json::json!({ "project_id": args.project_id, "table_id": args.table_id, "format": args.format, "path": args.path, "excluded_values": args.excluded_values, "decimal_separator": args.decimal_separator, "include_column_titles": args.include_column_titles });
         let result: Result<serde_json::Value, String> = async {
             let format = args.format.as_deref().unwrap_or("csv");
             if !TABLE_DATA_FORMATS.contains(&format) {
                 return Err(format!(
                     "Unknown table format “{format}” — the formats are csv, xlsx, txt, xml."
                 ));
+            }
+            if let Some(excluded_values) = args.excluded_values.as_deref() {
+                if !["blank", "value", "asterisk"].contains(&excluded_values) {
+                    return Err(format!(
+                        "Unknown excluded_values “{excluded_values}” — the choices are blank, value, asterisk."
+                    ));
+                }
+            }
+            if let Some(decimal_separator) = args.decimal_separator.as_deref() {
+                if decimal_separator != "." && decimal_separator != "," {
+                    return Err(format!(
+                        "Unknown decimal_separator “{decimal_separator}” — the choices are \".\" and \",\"."
+                    ));
+                }
             }
             let project_id = self.state.resolve_project(args.project_id.as_deref())?;
             let path = match &args.path {
@@ -9749,7 +9781,7 @@ impl TiterMcpServer {
                     .to_string_lossy()
                     .into_owned(),
             };
-            let job_args = serde_json::json!({ "table_id": args.table_id, "format": format, "path": path });
+            let job_args = serde_json::json!({ "table_id": args.table_id, "format": format, "path": path, "excluded_values": args.excluded_values, "decimal_separator": args.decimal_separator, "include_column_titles": args.include_column_titles });
             self.run_export_job(&project_id, "export-table-data", job_args).await
         }
         .await;

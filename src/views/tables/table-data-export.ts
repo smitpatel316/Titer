@@ -6,19 +6,23 @@
 // menu is byte-identical to one written by the tool: excluded cells empty,
 // cell values kept as stored strings (an ID like "0123" never becomes 123).
 import { alert, pickSavePath, writeFile } from "../../native";
-import { loadDecimalSeparator } from "../../lib/decimal-format";
+import type { DecimalSeparator } from "../../lib/decimal-format";
 import {
+  resolveTableDataExportOptions,
   sanitizeFileStem,
   tableToCsv,
   tableToTxt,
   tableToXml,
   tableToXlsx,
   TABLE_DATA_FORMATS,
+  type ExcludedValuesExport,
+  type TableDataExportOptions,
   type TableDataFormat,
 } from "../../store/mcp-export";
 import type { ProjectNode, TableData } from "../../store/types";
 
 export { TABLE_DATA_FORMATS, type TableDataFormat };
+export type { ExcludedValuesExport, TableDataExportOptions } from "../../store/mcp-export";
 
 /** The formats the menu offers, in the order it offers them. */
 export const TABLE_DATA_EXPORT_FORMATS: { value: TableDataFormat; label: string; ext: string; filter: string }[] = [
@@ -26,6 +30,22 @@ export const TABLE_DATA_EXPORT_FORMATS: { value: TableDataFormat; label: string;
   { value: "xlsx", label: "Excel Workbook (.xlsx)", ext: "xlsx", filter: "Excel Workbook" },
   { value: "txt", label: "Tab-delimited Text (.txt)", ext: "txt", filter: "Tab-delimited Text" },
   { value: "xml", label: "Prism XML (.xml)", ext: "xml", filter: "Prism XML" },
+];
+
+/** The Export dialog's excluded-values choices (seq 164 remainder):
+ *  Prism's three — blank (as if missing), the value, the value with an
+ *  asterisk — for the plain-text formats. */
+export const EXCLUDED_VALUES_EXPORT_OPTIONS: { value: ExcludedValuesExport; label: string }[] = [
+  { value: "blank", label: "Blank (as if missing)" },
+  { value: "value", label: "Value (ignore the exclusion)" },
+  { value: "asterisk", label: "Value followed by an asterisk" },
+];
+
+/** The Export dialog's decimal-separator choices: the separator you
+ *  choose here is the one the export uses (Prism's rule). */
+export const DECIMAL_SEPARATOR_OPTIONS: { value: DecimalSeparator; label: string }[] = [
+  { value: ".", label: "Period (1.5)" },
+  { value: ",", label: "Comma (1,5)" },
 ];
 
 const FORMAT_OF: Record<TableDataFormat, (typeof TABLE_DATA_EXPORT_FORMATS)[number]> = {
@@ -54,16 +74,20 @@ export const defaultTableDataExportIo: TableDataExportIo = { pickSavePath, write
 /** One table's data as file bytes in `format` — the MCP export's
  *  serializers, nothing else. An unknown format is a plain error, not a
  *  silently wrong file. Prism XML needs the table type (it decides the
- *  Prism `TableType` written); anything else defaults to Column. */
+ *  Prism `TableType` written); anything else defaults to Column. The
+ *  dialog's `options` apply to CSV, TXT and XLSX; Prism XML ignores
+ *  them (it always keeps the excluded marker and the titles). */
 export async function serializeTableData(
   data: TableData,
   name: string,
   format: TableDataFormat,
   tableType: ProjectNode["tableType"] = "column",
+  options: TableDataExportOptions = {},
 ): Promise<string | Uint8Array> {
-  if (format === "csv") return tableToCsv(data, loadDecimalSeparator());
-  if (format === "txt") return tableToTxt(data, loadDecimalSeparator());
-  if (format === "xlsx") return tableToXlsx(data, name, loadDecimalSeparator());
+  const resolved = resolveTableDataExportOptions(options);
+  if (format === "csv") return tableToCsv(data, resolved.decimalSeparator, resolved);
+  if (format === "txt") return tableToTxt(data, resolved.decimalSeparator, resolved);
+  if (format === "xlsx") return tableToXlsx(data, name, resolved.decimalSeparator, resolved);
   if (format === "xml") return tableToXml(data, name, tableType);
   throw new Error(`has no table format “${String(format)}” — the formats are csv, xlsx, txt, xml.`);
 }
@@ -76,12 +100,13 @@ export async function exportTableData(
   table: ProjectNode,
   format: TableDataFormat,
   io: TableDataExportIo = defaultTableDataExportIo,
+  options: TableDataExportOptions = {},
 ): Promise<void> {
   const spec = FORMAT_OF[format];
   if (!spec) throw new Error(`has no table format “${String(format)}” — the formats are csv, xlsx, txt, xml.`);
   try {
     const data = table.data ?? { columns: ["Title"], rows: [] };
-    const bytes = await serializeTableData(data, table.name, format, table.tableType ?? "column");
+    const bytes = await serializeTableData(data, table.name, format, table.tableType ?? "column", options);
     const fileName = `${sanitizeFileStem(table.name, "Table")}.${spec.ext}`;
     const path = await io.pickSavePath(
       "Export Table Data",

@@ -1056,24 +1056,67 @@ export async function executeCopyGraphImage(job: McpJob, deps: ExportJobDeps): P
 
 // ── Table data (CSV / XLSX / TXT / Prism XML) ─────────────────────────
 // No UI CSV writer exists to reuse: the serializers below are new, but
-// they follow the snapshot's rule — excluded cells are written empty,
-// matching what analyses see. Cell values are the grid's stored
+// they follow the snapshot's rule — excluded cells are written blank by
+// default, matching what analyses see. Cell values are the grid's stored
 // strings; nothing is coerced to a number (an XLSX cell stays text, so
-// an ID like "0123" never becomes 123).
+// an ID like "0123" never becomes 123). The Export dialog (seq 164
+// remainder) can change that default: see `TableDataExportOptions`.
+
+/** How an excluded value is written to a plain-text export (seq 164
+ *  remainder, Prism's Export dialog — the same three choices as the
+ *  copy preference): blank (as if missing), the stored value, or the
+ *  value followed by an asterisk. Prism XML always keeps the marker
+ *  (`Excluded="1"`), whatever this says. */
+export type ExcludedValuesExport = "blank" | "value" | "asterisk";
+export const EXCLUDED_VALUES_EXPORTS = ["blank", "value", "asterisk"] as const;
+
+/** The table-data Export dialog's options (seq 164 remainder): how
+ *  excluded values are written, which decimal separator the numbers
+ *  take, and whether the column titles are written as a first row.
+ *  They apply to CSV, TXT and XLSX; Prism XML ignores them (a machine
+ *  format — it always keeps the excluded marker and the titles). */
+export interface TableDataExportOptions {
+  excludedValues?: ExcludedValuesExport;
+  decimalSeparator?: DecimalSeparator;
+  includeColumnTitles?: boolean;
+}
+
+/** The dialog's options with every field filled: excluded values blank,
+ *  titles on, the stored separator — the pre-dialog behaviour. */
+export function resolveTableDataExportOptions(
+  options: TableDataExportOptions = {},
+): Required<TableDataExportOptions> {
+  return {
+    excludedValues: options.excludedValues ?? "blank",
+    decimalSeparator: options.decimalSeparator ?? loadDecimalSeparator(),
+    includeColumnTitles: options.includeColumnTitles ?? true,
+  };
+}
 
 /** The table's grid as text rows: every column (column 0 is the row
- *  titles), every stored row (short rows padded), excluded cells empty.
- *  Values keep full precision — a decimal-places setting never rounds
- *  them — and numeric cells take the decimal separator. */
-export function tableTextRows(data: TableData, separator: DecimalSeparator = "."): string[][] {
+ *  titles), every stored row (short rows padded). Values keep full
+ *  precision — a decimal-places setting never rounds them — and numeric
+ *  cells take the decimal separator. Excluded cells (data columns only)
+ *  follow `excludedValues`: blank, the stored value, or the value with
+ *  an asterisk. */
+export function tableTextRows(
+  data: TableData,
+  separator: DecimalSeparator = ".",
+  excludedValues: ExcludedValuesExport = "blank",
+): string[][] {
   const columns = data.columns.length ? data.columns : ["Title"];
   const excluded = new Set(data.excluded ?? []);
   return data.rows.map((row, r) =>
     columns.map((_, c) => {
-      if (c >= 1 && excluded.has(`${r},${c}`)) return "";
       const cell = row[c];
       if (cell === null || cell === undefined) return "";
-      return separator === "," && parseCell(cell) !== null ? cell.replace(".", ",") : cell;
+      const text = separator === "," && parseCell(cell) !== null ? cell.replace(".", ",") : cell;
+      if (c >= 1 && excluded.has(`${r},${c}`)) {
+        if (excludedValues === "blank") return "";
+        if (excludedValues === "asterisk") return `${text}*`;
+        return text;
+      }
+      return text;
     }),
   );
 }
@@ -1091,16 +1134,29 @@ export function txtField(cell: string): string {
 }
 
 /** The table as CSV text (one row per line, CRLF-free). Numeric cells take
- *  the decimal separator; values keep full precision. */
-export function tableToCsv(data: TableData, separator: DecimalSeparator = "."): string {
-  const rows = [data.columns.length ? data.columns : ["Title"], ...tableTextRows(data, separator)];
-  return rows.map((row) => row.map(csvField).join(",")).join("\n");
+ *  the decimal separator; values keep full precision. With
+ *  `includeColumnTitles: false` the header row is omitted. */
+export function tableToCsv(
+  data: TableData,
+  separator: DecimalSeparator = ".",
+  options: TableDataExportOptions = {},
+): string {
+  const header = data.columns.length ? data.columns : ["Title"];
+  const rows = tableTextRows(data, separator, options.excludedValues ?? "blank");
+  const out = options.includeColumnTitles === false ? rows : [header, ...rows];
+  return out.map((row) => row.map(csvField).join(",")).join("\n");
 }
 
 /** The table as TXT text (tab-separated, same grid as CSV). */
-export function tableToTxt(data: TableData, separator: DecimalSeparator = "."): string {
-  const rows = [data.columns.length ? data.columns : ["Title"], ...tableTextRows(data, separator)];
-  return rows.map((row) => row.map(txtField).join("\t")).join("\n");
+export function tableToTxt(
+  data: TableData,
+  separator: DecimalSeparator = ".",
+  options: TableDataExportOptions = {},
+): string {
+  const header = data.columns.length ? data.columns : ["Title"];
+  const rows = tableTextRows(data, separator, options.excludedValues ?? "blank");
+  const out = options.includeColumnTitles === false ? rows : [header, ...rows];
+  return out.map((row) => row.map(txtField).join("\t")).join("\n");
 }
 
 const escapeXml = (text: string) =>
@@ -1128,9 +1184,16 @@ export function sheetName(name: string): string {
  *  same hand-built pattern as `office-export.ts`): one sheet, every
  *  cell an inline string, empty cells omitted (sparse). Opens in
  *  Excel, LibreOffice and Sheets. */
-export async function tableToXlsx(data: TableData, name: string, separator: DecimalSeparator = "."): Promise<Uint8Array> {
-  const rows = [data.columns.length ? data.columns : ["Title"], ...tableTextRows(data, separator)];
-  const sheetRows = rows
+export async function tableToXlsx(
+  data: TableData,
+  name: string,
+  separator: DecimalSeparator = ".",
+  options: TableDataExportOptions = {},
+): Promise<Uint8Array> {
+  const header = data.columns.length ? data.columns : ["Title"];
+  const rows = tableTextRows(data, separator, options.excludedValues ?? "blank");
+  const out = options.includeColumnTitles === false ? rows : [header, ...rows];
+  const sheetRows = out
     .map((row, r) => {
       const cells = row
         .map((cell, c) => {
@@ -1230,16 +1293,31 @@ export async function executeExportTableData(job: McpJob, deps: ExportJobDeps): 
   }
   const format = formatRaw as TableDataFormat;
   const path = reqStr(job, args, "path");
+  // The Export dialog's options (seq 164 remainder): same three, same
+  // defaults as the UI — a bad value is a plain error, not a silent
+  // default. Prism XML ignores them (see tableToXml).
+  const excludedRaw = optStr(job, args, "excluded_values");
+  if (excludedRaw !== undefined && !(EXCLUDED_VALUES_EXPORTS as readonly string[]).includes(excludedRaw)) {
+    throw jobErr(job, `has no excluded_values “${excludedRaw}” — the choices are blank, value, asterisk.`);
+  }
+  const separatorRaw = optStr(job, args, "decimal_separator");
+  if (separatorRaw !== undefined && separatorRaw !== "." && separatorRaw !== ",") {
+    throw jobErr(job, `has no decimal_separator “${separatorRaw}” — the choices are "." and ",".`);
+  }
+  const options = resolveTableDataExportOptions({
+    excludedValues: excludedRaw as ExcludedValuesExport | undefined,
+    decimalSeparator: separatorRaw as DecimalSeparator | undefined,
+    includeColumnTitles: optBool(job, args, "include_column_titles"),
+  });
   const state = deps.getState();
   const table = tableNode(job, state, tableId);
   const data = table.data ?? { columns: ["Title"], rows: [] };
   // Text exports render the decimal separator; Prism XML keeps the period
   // (a machine format for Prism — see tableToXml).
-  const separator = loadDecimalSeparator();
   let bytes: string | Uint8Array;
-  if (format === "csv") bytes = tableToCsv(data, separator);
-  else if (format === "txt") bytes = tableToTxt(data, separator);
-  else if (format === "xlsx") bytes = await tableToXlsx(data, table.name, separator);
+  if (format === "csv") bytes = tableToCsv(data, options.decimalSeparator, options);
+  else if (format === "txt") bytes = tableToTxt(data, options.decimalSeparator, options);
+  else if (format === "xlsx") bytes = await tableToXlsx(data, table.name, options.decimalSeparator, options);
   else bytes = tableToXml(data, table.name, table.tableType ?? "column");
   const io = deps.io ?? defaultExportIo;
   await io.writeFile(ensureSaveExtension(path, format), bytes);
@@ -1250,6 +1328,9 @@ export async function executeExportTableData(job: McpJob, deps: ExportJobDeps): 
       format,
       path,
       rows: data.rows.length,
+      excluded_values: options.excludedValues,
+      decimal_separator: options.decimalSeparator,
+      include_column_titles: options.includeColumnTitles,
     },
   };
 }
