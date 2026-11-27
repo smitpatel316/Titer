@@ -1613,13 +1613,37 @@ fn error_feedback_entry(entry: &ErrorLogEntry) -> serde_json::Value {
     })
 }
 
-/// Attempt to send one entry through the feedback channel; true when
-/// the server took it. Sharing off — or an identical error already sent
-/// within the hour — means no POST at all. The entry still stays in the
-/// local log either way: the server is a courtesy copy, never the record.
-async fn try_send_error_entry(dir: &std::path::Path, entry: &ErrorLogEntry) -> bool {
+/// What one error entry's send attempt came to. The caller (log or
+/// flush) decides what stays unsent from this, so a failed POST and a
+/// duplicate must not look alike: only a genuine failure leaves an
+/// entry `sent: false` for the next retry.
+#[derive(Debug, PartialEq)]
+enum ErrorSendOutcome {
+    /// The server took this entry.
+    Sent,
+    /// An identical error already reached the team within the dedup
+    /// window — nothing more to send for this entry.
+    Duplicate,
+    /// Sharing is off, or the POST failed: still unsent, retry later.
+    Unsent,
+}
+
+/// Attempt to send one entry through the feedback channel. Gated ONLY
+/// on error-report sharing (`error-log-consent.json`): error reports
+/// are independent of feedback sharing, so this posts directly with
+/// `post_feedback_entry` and never consults `feedback_share_result`
+/// (which refuses unless feedback sharing is on too — the old path
+/// silently sent nothing with feedback sharing off). Sharing off — or
+/// an identical error already sent within the hour — means no POST at
+/// all. The entry still stays in the local log either way: the server
+/// is a courtesy copy, never the record.
+async fn try_send_error_entry(
+    dir: &std::path::Path,
+    url: &str,
+    entry: &ErrorLogEntry,
+) -> ErrorSendOutcome {
     if !error_log_sharing_enabled(dir) {
-        return false;
+        return ErrorSendOutcome::Unsent;
     }
     let already_sent = error_log_entries(dir).iter().any(|e| {
         e.sent
@@ -1628,11 +1652,13 @@ async fn try_send_error_entry(dir: &std::path::Path, entry: &ErrorLogEntry) -> b
             && entry.ts.saturating_sub(e.ts) < ERROR_LOG_DEDUP_WINDOW_SECS
     });
     if already_sent {
-        return false;
+        return ErrorSendOutcome::Duplicate;
     }
     let error_entry = error_feedback_entry(entry);
-    let out = feedback_share_result(dir, &feedback_server_url(), &error_entry).await;
-    out.get("sent").and_then(|v| v.as_bool()).unwrap_or(false)
+    match post_feedback_entry(url, &error_entry).await {
+        Ok(_) => ErrorSendOutcome::Sent,
+        Err(_) => ErrorSendOutcome::Unsent,
+    }
 }
 
 /// Report one captured error: scrubbed, appended to the local rotating
@@ -1664,7 +1690,10 @@ pub async fn mcp_log_error(
         sent: false,
     };
     let mut entry = entry;
-    entry.sent = try_send_error_entry(&dir, &entry).await;
+    entry.sent = matches!(
+        try_send_error_entry(&dir, &feedback_server_url(), &entry).await,
+        ErrorSendOutcome::Sent
+    );
     append_error_log_entry(&dir, &entry)?;
     Ok(serde_json::json!({
         "error_id": entry.error_id,
@@ -1674,32 +1703,73 @@ pub async fn mcp_log_error(
     }))
 }
 
-/// Send unsent error-log entries (e.g. from a previous run's crash) now
-/// that the app is up — only when error-report sharing is on, a few at a
-/// time. Returns how many were considered and sent.
-#[tauri::command]
-pub async fn mcp_flush_error_log(app: AppHandle, state: State<'_, McpState>) -> Result<serde_json::Value, String> {
-    let dir = state.ensure_dir(&app)?;
-    if !error_log_sharing_enabled(&dir) {
-        return Ok(serde_json::json!({ "flushed": 0, "sent": 0, "sharing": "disabled" }));
+/// One error-log flush at a time, ever: the startup flush, the crash
+/// dialog, and Settings → AI Connections all flush the same file, and
+/// without this lock their POSTs and `sent` writes interleave. The lock
+/// is process-wide — there is one app-data dir — and it is held across
+/// the POSTs, so a second flush waits instead of racing the first.
+static ERROR_LOG_FLUSH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Send unsent error-log entries (e.g. from a previous run's crash) —
+/// only when error-report sharing is on, a few at a time. Entries that
+/// turn out to be duplicates (an identical error already sent within
+/// the hour, or sent earlier in this flush) are marked handled (`sent`)
+/// too: they reached the team already, so leaving them `sent: false`
+/// would re-trigger the crash dialog on every launch forever. Only a
+/// genuinely failed POST leaves an entry unsent. Returns how many were
+/// considered, sent, deduplicated, and left failed.
+async fn flush_error_log_entries(dir: &std::path::Path, url: &str) -> Result<serde_json::Value, String> {
+    let _guard = ERROR_LOG_FLUSH_LOCK.lock().await;
+    if !error_log_sharing_enabled(dir) {
+        return Ok(serde_json::json!({ "flushed": 0, "sent": 0, "duplicates": 0, "failed": 0, "sharing": "disabled" }));
     }
-    let mut entries = error_log_entries(&dir);
+    let mut entries = error_log_entries(dir);
     let mut sent_this_flush: Vec<(String, String)> = Vec::new();
     let mut sent_count = 0;
+    let mut duplicate_count = 0;
+    let mut failed_count = 0;
     let mut flushed_count = 0;
     for entry in entries.iter_mut().filter(|e| !e.sent).take(ERROR_LOG_FLUSH_BATCH) {
         flushed_count += 1;
         if sent_this_flush.iter().any(|(t, m)| *t == entry.error_type && *m == entry.message) {
+            entry.sent = true;
+            duplicate_count += 1;
             continue;
         }
-        if try_send_error_entry(&dir, entry).await {
-            entry.sent = true;
-            sent_count += 1;
-            sent_this_flush.push((entry.error_type.clone(), entry.message.clone()));
+        match try_send_error_entry(dir, url, entry).await {
+            ErrorSendOutcome::Sent => {
+                entry.sent = true;
+                sent_count += 1;
+                sent_this_flush.push((entry.error_type.clone(), entry.message.clone()));
+            }
+            ErrorSendOutcome::Duplicate => {
+                entry.sent = true;
+                duplicate_count += 1;
+            }
+            ErrorSendOutcome::Unsent => {
+                failed_count += 1;
+            }
         }
     }
-    write_error_log_entries(&dir, &entries)?;
-    Ok(serde_json::json!({ "flushed": flushed_count, "sent": sent_count, "sharing": "enabled" }))
+    write_error_log_entries(dir, &entries)?;
+    Ok(serde_json::json!({
+        "flushed": flushed_count,
+        "sent": sent_count,
+        "duplicates": duplicate_count,
+        "failed": failed_count,
+        "sharing": "enabled",
+    }))
+}
+
+/// Send unsent error-log entries (e.g. from a previous run's crash) now
+/// that the app is up — only when error-report sharing is on, a few at a
+/// time. Serialized on the flush lock, so the startup flush and the
+/// crash dialog can never race each other. Returns how many were
+/// considered, sent, deduplicated, and left failed.
+#[tauri::command]
+pub async fn mcp_flush_error_log(app: AppHandle, state: State<'_, McpState>) -> Result<serde_json::Value, String> {
+    let dir = state.ensure_dir(&app)?;
+    flush_error_log_entries(&dir, &feedback_server_url()).await
 }
 
 /// Append a Rust panic to the local error log (seq 452). Called from the
@@ -1755,6 +1825,26 @@ fn append_feedback_entry(dir: &std::path::Path, entry: &serde_json::Value) -> Re
     Ok(())
 }
 
+/// One UI-submitted feedback entry (Help ▸ Send Feedback): exactly what
+/// the dialog promises — the text the user typed, plus the app version
+/// and OS for triage. No project file name, no recent activity: the
+/// dialog says "Only the text below is ever shared", and the UI send
+/// must keep that promise. (`titer_send_feedback`, the AI tool, attaches
+/// its own context separately — this is the UI path only.)
+fn new_ui_feedback_entry(kind: &str, summary: &str, details: &str) -> serde_json::Value {
+    serde_json::json!({
+        "feedback_id": new_feedback_id(),
+        "ts": now_ts(),
+        "kind": kind,
+        "summary": summary,
+        "details": details,
+        "context": {
+            "app_version": env!("CARGO_PKG_VERSION"),
+            "os": std::env::consts::OS,
+        },
+    })
+}
+
 /// Send feedback straight from the UI (seq 453) — the Help ▸ Send
 /// Feedback dialog, no AI needed. Same validation, same local-first save
 /// and same context (kind + app version + OS, so the Scout/PM pipeline
@@ -1797,23 +1887,7 @@ pub async fn mcp_send_feedback(
         ));
     }
     let dir = state.ensure_dir(&app)?;
-    let mut context = serde_json::json!({
-        "app_version": env!("CARGO_PKG_VERSION"),
-        "os": std::env::consts::OS,
-    });
-    if let Some(file) = state.front_project_file_name() {
-        context["project_file"] = serde_json::Value::String(file);
-    }
-    context["recent_activity"] = serde_json::Value::Array(recent_activity_context(&dir));
-    let feedback_id = new_feedback_id();
-    let entry = serde_json::json!({
-        "feedback_id": feedback_id,
-        "ts": now_ts(),
-        "kind": kind,
-        "summary": summary,
-        "details": details,
-        "context": context,
-    });
+    let entry = new_ui_feedback_entry(kind, summary, details);
     append_feedback_entry(&dir, &entry)?;
     Ok(feedback_share_result(&dir, &feedback_server_url(), &entry).await)
 }
@@ -14188,6 +14262,165 @@ mod tests {
         );
         assert_eq!(seen.lock().expect("seen lock").len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Writes an error-log consent record the way the app does
+    /// (`{"sharing": …, "ts": …}`).
+    fn write_error_consent_record(dir: &std::path::Path, sharing: bool) {
+        std::fs::write(
+            dir.join(ERROR_LOG_CONSENT_FILE),
+            serde_json::to_string(&json!({ "sharing": sharing, "ts": 1 })).expect("error consent json"),
+        )
+        .expect("error consent record");
+    }
+
+    /// One unsent error-log entry, as the shell stores it.
+    fn error_entry(id: &str, error_type: &str, message: &str, ts: u64) -> ErrorLogEntry {
+        ErrorLogEntry {
+            error_id: id.to_string(),
+            ts,
+            kind: "uncaught-exception".to_string(),
+            error_type: error_type.to_string(),
+            message: message.to_string(),
+            stack: String::new(),
+            action: "test".to_string(),
+            app_version: "1.0.0".to_string(),
+            os: "linux".to_string(),
+            sent: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn error_report_sends_without_feedback_sharing() {
+        // #70: error-report sharing is independent — with error sharing
+        // on and feedback sharing OFF (no record at all), the entry
+        // still POSTs. Pre-fix, try_send_error_entry delegated to
+        // feedback_share_result, which refused and sent nothing.
+        let (url, seen) = start_mock_feedback_server(
+            201,
+            r#"{"feedback_id":"err-test-1","issue_id":"iss-1","issue_url":"https://plane.example/issues/1"}"#,
+        );
+        let dir = feedback_test_dir("error-no-feedback-sharing");
+        write_error_consent_record(&dir, true);
+        assert!(!feedback_sharing_enabled(&dir), "no feedback consent record");
+        let entry = error_entry("err-test-1", "TypeError", "x is not a function", now_ts());
+        let outcome = try_send_error_entry(&dir, &url, &entry).await;
+        assert_eq!(outcome, ErrorSendOutcome::Sent, "error report sends");
+        let seen = seen.lock().expect("seen lock");
+        assert_eq!(seen.len(), 1, "exactly one POST");
+        assert_eq!(seen[0].0, "POST /api/v1/feedback");
+        drop(seen);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn error_report_stays_local_when_error_sharing_off() {
+        // #70, the other direction: feedback sharing ON must not send
+        // an error report when error-report sharing is off.
+        let (url, seen) = start_mock_feedback_server(
+            201,
+            r#"{"feedback_id":"err-test-1","issue_id":"iss-1","issue_url":"https://plane.example/issues/1"}"#,
+        );
+        let dir = feedback_test_dir("error-sharing-off");
+        write_error_consent_record(&dir, false);
+        write_consent_record(&dir, true);
+        let entry = error_entry("err-off-1", "TypeError", "x is not a function", now_ts());
+        let outcome = try_send_error_entry(&dir, &url, &entry).await;
+        assert_eq!(outcome, ErrorSendOutcome::Unsent);
+        assert!(seen.lock().expect("seen lock").is_empty(), "no POST when error sharing is off");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn error_report_flush_marks_duplicates_handled() {
+        // #72: two identical unsent entries, then a third identical one
+        // appended after the first flush — all three end up sent: true
+        // with only one POST per distinct error, and the late duplicate
+        // needs no POST either. Pre-fix, the duplicates stayed
+        // sent: false forever and re-triggered the crash dialog on
+        // every launch.
+        let (url, seen) = start_mock_feedback_server(
+            201,
+            r#"{"feedback_id":"err-test-1","issue_id":"iss-1","issue_url":"https://plane.example/issues/1"}"#,
+        );
+        let dir = feedback_test_dir("error-duplicates");
+        write_error_consent_record(&dir, true);
+        let ts = now_ts();
+        write_error_log_entries(
+            &dir,
+            &[
+                error_entry("err-dup-1", "TypeError", "x is not a function", ts),
+                error_entry("err-dup-2", "TypeError", "x is not a function", ts),
+                error_entry("err-other-1", "RangeError", "out of range", ts),
+            ],
+        )
+        .expect("write error log");
+        let out = flush_error_log_entries(&dir, &url).await.expect("flush");
+        assert_eq!(out["flushed"], 3);
+        assert_eq!(out["sent"], 2);
+        assert_eq!(out["duplicates"], 1);
+        assert_eq!(out["failed"], 0);
+        assert_eq!(out["sharing"], "enabled");
+        assert_eq!(seen.lock().expect("seen lock").len(), 2, "one POST per distinct error");
+        assert!(
+            error_log_entries(&dir).iter().all(|e| e.sent),
+            "every entry handled after the flush"
+        );
+        // A third identical entry, appended later, is a duplicate of the
+        // one already sent within the hour — handled, no second POST.
+        let mut entries = error_log_entries(&dir);
+        entries.push(error_entry("err-dup-3", "TypeError", "x is not a function", ts));
+        write_error_log_entries(&dir, &entries).expect("append duplicate");
+        let out = flush_error_log_entries(&dir, &url).await.expect("second flush");
+        assert_eq!(out["flushed"], 1);
+        assert_eq!(out["sent"], 0);
+        assert_eq!(out["duplicates"], 1);
+        assert_eq!(out["failed"], 0);
+        assert_eq!(seen.lock().expect("seen lock").len(), 2, "no POST for the duplicate");
+        assert!(
+            error_log_entries(&dir).iter().all(|e| e.sent),
+            "the late duplicate is handled too"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn error_report_flush_keeps_failed_entries_unsent() {
+        // #72: a failed POST must NOT be marked handled — only sent and
+        // deduplicated entries are; the entry stays sent: false so the
+        // next launch retries it.
+        let dir = feedback_test_dir("error-failed");
+        write_error_consent_record(&dir, true);
+        write_error_log_entries(&dir, &[error_entry("err-fail-1", "TypeError", "boom", now_ts())])
+            .expect("write error log");
+        let url = format!("http://127.0.0.1:{}/api/v1/feedback", dead_port());
+        let out = flush_error_log_entries(&dir, &url).await.expect("flush");
+        assert_eq!(out["flushed"], 1);
+        assert_eq!(out["sent"], 0);
+        assert_eq!(out["duplicates"], 0);
+        assert_eq!(out["failed"], 1);
+        let entries = error_log_entries(&dir);
+        assert_eq!(entries.len(), 1);
+        assert!(!entries[0].sent, "a failed send stays unsent for the next retry");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ui_feedback_entry_shares_text_only() {
+        // #76: the UI send keeps the dialog's promise — "Only the text
+        // below is ever shared": app version + OS for triage, and
+        // nothing else. No project file, no recent activity.
+        let entry = new_ui_feedback_entry("bug", "Crash on save", "Clicked Save and it crashed.");
+        let context = entry.get("context").expect("context");
+        assert!(context.get("app_version").and_then(|v| v.as_str()).is_some());
+        assert!(context.get("os").and_then(|v| v.as_str()).is_some());
+        assert!(context.get("project_file").is_none(), "no project file in a UI-submitted entry");
+        assert!(context.get("recent_activity").is_none(), "no recent activity in a UI-submitted entry");
+        assert_eq!(
+            context.as_object().map(|o| o.len()),
+            Some(2),
+            "context is exactly app_version + os"
+        );
     }
 
     #[test]

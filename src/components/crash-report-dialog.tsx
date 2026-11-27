@@ -8,9 +8,12 @@
 // trace, so the copy says so plainly. main.tsx already flushes at
 // startup when sharing is on, so with sharing on this dialog normally
 // never opens (only a backlog past the flush batch, or a failed send,
-// reaches it). With sharing off, Send flushes nothing — the dialog
-// says so and offers to turn sharing on, an explicit opt-in, then
-// flushes again.
+// reaches it). The dialog awaits that shared startup flush before
+// reading the log — otherwise it pops up spuriously while the flush's
+// POSTs are still in flight. With sharing off, Send flushes nothing —
+// the dialog says so and offers to turn sharing on, an explicit opt-in,
+// then flushes again. A flush that sends nothing because every entry
+// was a duplicate says so, instead of claiming the send failed.
 //
 // Don't send leaves the entries unsent, so the offer reappears on the
 // next launch — there is no dismissed-ids record to remember the
@@ -25,6 +28,7 @@ import {
   mcpFlushErrorLog,
   mcpSetErrorLogConsent,
 } from "../native";
+import { awaitStartupErrorFlush } from "../lib/error-log";
 
 export function CrashReportDialog() {
   const [open, setOpen] = React.useState(false);
@@ -33,16 +37,21 @@ export function CrashReportDialog() {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
   const [sent, setSent] = React.useState<number | null>(null);
+  const [duplicates, setDuplicates] = React.useState(0);
+  const [failed, setFailed] = React.useState(0);
   const [sharingOff, setSharingOff] = React.useState(false);
 
-  // Ask once on mount: unsent entries are the offer. The startup flush
-  // in main.tsx already ran, so this is the backlog / failed-send /
-  // sharing-off remainder.
+  // Ask once on mount: unsent entries are the offer. Await the shared
+  // startup flush first — it is still in flight when this mounts, and
+  // reading before it settles pops the dialog up over entries it was
+  // about to send. What remains after it is the backlog / failed-send
+  // / sharing-off remainder.
   React.useEffect(() => {
     if (!isNative) return;
     let cancelled = false;
     void (async () => {
       try {
+        await awaitStartupErrorFlush();
         const [entries, consent] = await Promise.all([mcpErrorLog(), mcpErrorLogConsent()]);
         const unsent = entries.filter((e) => !e.sent).length;
         if (!cancelled && unsent > 0) {
@@ -68,6 +77,8 @@ export function CrashReportDialog() {
         setSharingOff(true);
       } else {
         setSent(out.sent);
+        setDuplicates(out.duplicates);
+        setFailed(out.failed);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -85,6 +96,8 @@ export function CrashReportDialog() {
       setSharingOff(false);
       const out = await mcpFlushErrorLog();
       setSent(out.sent);
+      setDuplicates(out.duplicates);
+      setFailed(out.failed);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -150,7 +163,11 @@ export function CrashReportDialog() {
           <p className="text-regular text-primary">
             {sent > 0
               ? `Sent ${sent} report${sent === 1 ? "" : "s"} — thank you. The reports are with the Titer team.`
-              : "The reports couldn't be sent, but they are saved on this Mac — you can send them later from Settings → AI Connections."}
+              : failed > 0
+                ? "The reports couldn't be sent, but they are saved on this Mac — you can send them later from Settings → AI Connections."
+                : duplicates > 0
+                  ? "These reports match ones already sent to the Titer team, so there's nothing new to send."
+                  : "There's nothing left to send — these reports are already with the Titer team."}
           </p>
         )}
         {error && <p className="text-regular text-red-600">{error}</p>}

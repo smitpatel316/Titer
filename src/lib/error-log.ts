@@ -13,7 +13,7 @@
 // the shell scrubs again (defense in depth — a hand-edited caller can't
 // bypass it), so the two implementations must stay in agreement.
 
-import { isNative, mcpLogError } from "../native";
+import { isNative, mcpFlushErrorLog, mcpLogError } from "../native";
 
 /** A path token ends at whitespace, a quote, a closing bracket, a comma,
  *  a semicolon, or a colon (the `:12:3` of a stack location survives —
@@ -106,6 +106,26 @@ function currentAction(): string {
 export type ErrorKind = "uncaught-exception" | "unhandled-rejection";
 
 let installed = false;
+
+/** The one startup flush, shared with the crash-report dialog: main.tsx
+ *  starts it at launch, and the dialog awaits it before reading the log
+ *  — otherwise the dialog mounts while POSTs are still in flight, sees
+ *  `sent: false`, and pops up spuriously over a flush that was about to
+ *  succeed. Never rejects: a failed flush is not itself an error to
+ *  report. */
+let startupFlush: Promise<unknown> | null = null;
+
+/** Start the startup flush (main.tsx, once). Idempotent. */
+export function startStartupErrorFlush(): void {
+  if (startupFlush !== null || !isNative) return;
+  startupFlush = mcpFlushErrorLog().catch(() => undefined);
+}
+
+/** Await the startup flush, if one started; resolves at once when none
+ *  did (web preview, tests, or a dialog mounted before main ran). */
+export function awaitStartupErrorFlush(): Promise<void> {
+  return startupFlush ? startupFlush.then(() => undefined) : Promise.resolve();
+}
 
 /** Install the global capture. Idempotent; a no-op outside the native
  *  shell (web preview, tests). Call once from main.tsx, before render. */

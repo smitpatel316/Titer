@@ -38,7 +38,12 @@ export function SendFeedbackDialog() {
   const [details, setDetails] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
-  const [result, setResult] = React.useState<{ sent: boolean; note?: string } | null>(null);
+  const [result, setResult] = React.useState<{
+    sent: boolean;
+    note?: string;
+    sharing?: string;
+    error?: string;
+  } | null>(null);
 
   React.useEffect(() => onSendFeedbackRequest(() => setOpen(true)), []);
 
@@ -61,7 +66,10 @@ export function SendFeedbackDialog() {
     setError("");
     try {
       const out = await mcpSendFeedback(kind, summary, details);
-      setResult({ sent: out.sent, note: out.note });
+      // Keep the sharing state and the delivery error: a failed send
+      // with sharing ON is a network/server error, not sharing being
+      // off — the result copy must say so.
+      setResult({ sent: out.sent, note: out.note, sharing: out.sharing, error: out.error });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -92,7 +100,11 @@ export function SendFeedbackDialog() {
           <p className="text-regular text-primary">
             {result.sent
               ? "Sent — thank you. Your report is with the Titer team."
-              : "Saved on this Mac. Sharing is off, so nothing left the machine — turn sharing on in Settings → AI Connections to send reports to the team."}
+              : result.sharing === "disabled"
+                ? "Saved on this Mac. Sharing is off, so nothing left the machine — turn sharing on in Settings → AI Connections to send reports to the team."
+                : result.error
+                  ? `Couldn't be sent — ${result.error}`
+                  : "Saved on this Mac — the report couldn't be sent, but you can send it later from Settings → AI Connections."}
           </p>
           {result.note && <p className="text-small text-secondary">{result.note}</p>}
         </div>

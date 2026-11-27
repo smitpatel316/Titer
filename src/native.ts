@@ -400,9 +400,10 @@ export const mcpLogError = (entry: {
 
 /** Send unsent error-log entries (e.g. from a previous run's crash) now
  *  that the app is up — only when error-report sharing is on, a few at a
- *  time. Returns how many were considered and sent. */
+ *  time. Returns how many were considered, sent, deduplicated (an
+ *  identical error already reached the team), and left failed. */
 export const mcpFlushErrorLog = () =>
-  invoke<{ flushed: number; sent: number; sharing: string }>("mcp_flush_error_log");
+  invoke<{ flushed: number; sent: number; duplicates: number; failed: number; sharing: string }>("mcp_flush_error_log");
 
 /** This window's project, for the MCP server to serve. Published on every
  *  revision change (debounced, see store/mcp-publish.ts). A no-op where

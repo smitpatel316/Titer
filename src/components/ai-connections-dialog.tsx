@@ -15,6 +15,7 @@ import {
   mcpErrorLogConsent,
   mcpFeedback,
   mcpFeedbackConsent,
+  mcpFlushErrorLog,
   mcpOpenAntigravity,
   mcpRegenerateToken,
   mcpSendSavedFeedback,
@@ -94,6 +95,7 @@ export function AiConnectionsDialog() {
   const [allowlist, setAllowlist] = React.useState<McpAllowlistGroup[] | null>(null);
   const [copiedFeedback, setCopiedFeedback] = React.useState<string | null>(null);
   const [sentFeedback, setSentFeedback] = React.useState<string[]>([]);
+  const [flushMessage, setFlushMessage] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
   const [copied, setCopied] = React.useState<"token" | "command" | "antigravity" | "prompt" | null>(null);
@@ -131,6 +133,7 @@ export function AiConnectionsDialog() {
     setConfirmRegen(false);
     setCopied(null);
     setCopiedFeedback(null);
+    setFlushMessage("");
     setAntigravityConsent(false);
     setAntigravityMessage("");
     void refresh();
@@ -152,14 +155,42 @@ export function AiConnectionsDialog() {
    *  send that replaces the old pre-filled GitHub issue — Issues are off
    *  on the repo. The server copy is consent-gated, like every other
    *  send; when sharing is off the report stays on this Mac and the
-   *  button says so. */
+   *  button says so. When sharing is ON and the send fails, the
+   *  delivery error is what the user sees — not the sharing-off copy. */
   const sendSavedFeedback = async (entry: FeedbackEntry) => {
     try {
       const out = await mcpSendSavedFeedback(entry.feedback_id);
       if (out.sent) setSentFeedback((sent) => [...sent, entry.feedback_id]);
-      else setError(out.note ?? "Sharing is off, so the report stays on this Mac.");
+      else setError(out.error ?? out.note ?? "Sharing is off, so the report stays on this Mac.");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  /** Sends the unsent error reports (seq 453's crash path, and the
+   *  fallback the crash dialog points at): with error sharing on, the
+   *  backlog goes through the flush; with it off, nothing is sent and
+   *  the message says to turn sharing on first. */
+  const sendUnsentErrorReports = async () => {
+    setBusy(true);
+    setFlushMessage("");
+    setError("");
+    try {
+      const out = await mcpFlushErrorLog();
+      if (out.sharing === "disabled") {
+        setFlushMessage("Error sharing is off, so nothing was sent — turn it on above to send these reports.");
+      } else if (out.sent > 0) {
+        setFlushMessage(`Sent ${out.sent} report${out.sent === 1 ? "" : "s"} — thank you.`);
+      } else if (out.failed > 0) {
+        setFlushMessage("The reports couldn't be sent — they are saved on this Mac; try again later.");
+      } else {
+        setFlushMessage("Nothing new to send — these reports match ones already sent to the Titer team.");
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -503,8 +534,8 @@ export function AiConnectionsDialog() {
             )}
             <p className="mt-1 text-small text-secondary">
               Reports are always saved on this Mac first. With sharing on, a report is also sent to the Titer team
-              when your AI sends one; with sharing off, nothing leaves this Mac — use “Send to the Titer team” to
-              share one yourself.
+              when your AI sends one; with sharing off, nothing leaves this Mac — turn sharing on above, then use
+              “Send to the Titer team” to share one yourself.
             </p>
           </Section>
 
@@ -537,6 +568,14 @@ export function AiConnectionsDialog() {
                 ))}
               </div>
             )}
+            {errorLog.some((e) => !e.sent) && (
+              <div className="flex gap-2">
+                <Button disabled={busy} onClick={() => void sendUnsentErrorReports()}>
+                  Send unsent reports
+                </Button>
+              </div>
+            )}
+            {flushMessage && <p className="text-small text-secondary">{flushMessage}</p>}
           </Section>
 
           <p className="text-small text-secondary">
