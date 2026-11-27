@@ -9,7 +9,6 @@
 import type {
   AnalysisOutcome,
   GeneratedCurve,
-  NonlinearModel,
   PlotFunctionDistribution,
   PlotFunctionExtra,
   PlotFunctionModel,
