@@ -21,6 +21,7 @@ import {
   buildFlowPseudocolorPlot,
   type FlowFigure,
 } from "../../flow/viewer";
+import { XY_AXES } from "./plot-helpers";
 
 const axesOnly = (xName: string, yName: string): GraphFigure => ({
   data: [],
@@ -32,6 +33,7 @@ const asFigure = (fig: FlowFigure): GraphFigure => ({ data: fig.data, layout: fi
 const dotPlot: GraphModule = {
   label: "Flow dot plot",
   family: "xy",
+  axes: XY_AXES,
   defaults: { pointSize: 4 },
   points: () => true,
   build: (_columns: Column[], options: GraphOptions) => {
@@ -53,6 +55,7 @@ const dotPlot: GraphModule = {
 const densityPlot: GraphModule = {
   label: "Flow density plot",
   family: "heatmap",
+  axes: XY_AXES,
   palette: "viridis",
   build: (_columns: Column[], options: GraphOptions) => {
     if (!options.flowSampleId || !options.flowXParam || !options.flowYParam) {
@@ -72,6 +75,7 @@ const densityPlot: GraphModule = {
 const contourPlot: GraphModule = {
   label: "Flow contour plot",
   family: "heatmap",
+  axes: XY_AXES,
   palette: "viridis",
   build: (_columns: Column[], options: GraphOptions) => {
     if (!options.flowSampleId || !options.flowXParam || !options.flowYParam) {
@@ -91,6 +95,7 @@ const contourPlot: GraphModule = {
 const pseudocolorPlot: GraphModule = {
   label: "Flow pseudocolor plot",
   family: "xy",
+  axes: XY_AXES,
   defaults: { pointSize: 4 },
   points: () => true,
   build: (_columns: Column[], options: GraphOptions) => {
@@ -112,6 +117,7 @@ const pseudocolorPlot: GraphModule = {
 const flowHistogram: GraphModule = {
   label: "Flow histogram",
   family: "histogram",
+  axes: XY_AXES,
   defaults: { fill: 0.7 },
   patterns: () => true,
   build: (_columns: Column[], options: GraphOptions) => {

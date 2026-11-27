@@ -126,7 +126,6 @@ function build(_columns: Column[], options: GraphOptions, _paint: Paint): GraphF
       { yName: "Distance", zeroBase: true },
     ),
   };
-  };
 }
 
 export const dendrogram: GraphModule = {

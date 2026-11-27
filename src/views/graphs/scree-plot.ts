@@ -87,7 +87,6 @@ function build(_columns: Column[], options: GraphOptions, _paint: Paint): GraphF
       { yName: "Variance explained (%)" },
     ),
   };
-  };
 }
 
 export const screePlot: GraphModule = {
