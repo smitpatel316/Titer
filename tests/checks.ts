@@ -28775,7 +28775,8 @@ check("bugfix-br-105: a release outranks its own pre-release, and the seen recor
   ok(isNewer("2.0.2-rc.2", "2.0.2-rc.1"));
   ok(!isNewer("2.0.2-rc.1", "2.0.2-rc.2"));
   ok(isNewer("2.0.2-rc.1", "2.0.2-alpha"));
-  ok(!isNewer("2.0.2-alpha.1", "2.0.2-alpha"));
+  ok(isNewer("2.0.2-alpha.1", "2.0.2-alpha"));
+  ok(!isNewer("2.0.2-alpha", "2.0.2-alpha.1"));
   ok(isNewer("2.0.2-beta.11", "2.0.2-beta.2"));
   ok(isNewer("2.0.2-alpha", "2.0.2-1"));
   ok(isNewer("2.0.2-rc.1", "2.0.1"));
