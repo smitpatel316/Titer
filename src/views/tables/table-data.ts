@@ -1234,7 +1234,7 @@ export function dataEdge(data: TableData, r: number, c: number, dr: number, dc: 
 
 // A number written with a decimal comma ("1,23", including scientific
 // notation: "1,5e-3"): R only understands ".".
-const COMMA_DECIMAL = /^-?\d+,\d+([eE][+-]?\d+)?$/;
+const COMMA_DECIMAL = /^[+-]?\d+,\d+([eE][+-]?\d+)?$/;
 
 export const hasCommaDecimals = (data: TableData) =>
   data.rows.some((row) => row.some((cell) => cell !== null && COMMA_DECIMAL.test(cell)));
@@ -1358,6 +1358,15 @@ export interface PasteSpecialOptions {
   manyDigits: boolean;
 }
 
+// An out-of-range code point (above U+10FFFF, or a lone surrogate) must not
+// fail the whole paste: String.fromCodePoint throws on it, so it becomes the
+// replacement character instead (same guard decodeEntities in src/lib/pzfx.ts
+// uses, Issue 55).
+const safeCodePoint = (code: number): string =>
+  !Number.isFinite(code) || code < 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)
+    ? "\uFFFD"
+    : String.fromCodePoint(code);
+
 /** The entities an HTML clipboard table can carry, decoded in an order that
  *  keeps `&amp;lt;` as the literal "&lt;" rather than "<". */
 function decodeHtmlEntities(s: string): string {
@@ -1367,8 +1376,8 @@ function decodeHtmlEntities(s: string): string {
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
     .replace(/&apos;|&#39;/gi, "'")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (_, n) => safeCodePoint(Number(n)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => safeCodePoint(parseInt(n, 16)))
     .replace(/&amp;/gi, "&");
 }
 

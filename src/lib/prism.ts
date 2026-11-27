@@ -650,9 +650,9 @@ export function daysBetween(start: string | null, end: string | null): string | 
 const normalizeNumber = (value: string | null, thousandsMode = false): string | null => {
   if (value === null) return null;
   if (thousandsMode) {
-    return /^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(value) ? value.replace(/,/g, "") : value;
+    return /^[+-]?\d{1,3}(,\d{3})+(\.\d+)?([eE][+-]?\d+)?$/.test(value) ? value.replace(/,/g, "") : value;
   }
-  return /^-?\d+,\d+([eE][+-]?\d+)?$/.test(value) ? value.replace(",", ".") : value;
+  return /^[+-]?\d+,\d+([eE][+-]?\d+)?$/.test(value) ? value.replace(",", ".") : value;
 };
 
 export function subcolumnNames(title: string, dataFormat: string, count: number): string[] {
