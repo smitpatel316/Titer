@@ -248,7 +248,7 @@ import {
   withoutColors,
 } from "../src/lib/palettes";
 import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-palettes";
-import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, graphSeriesDataset, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
+import { axisControls, GRAPHS, GRAPH_OPTIONS_BY_TABLE, graphSeriesDataset, newGraphOptions, plotColumns, valueScale, type GraphFigure } from "../src/views/graphs";
 import { datasetColumns, isGrouped, isNested, levelsOf, nestedGroupsOf, readTable, seriesOf, setColumns, splitXY, xyPoints, type Column, type Dataset } from "../src/lib/dataset";
 import {
   convertXCell,
@@ -308,7 +308,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, applyDateAxis, applyNumberFormats, axesRangeInputs, baseLayout, centers, curveXs, errorOf, errors, fitLabels, groupedBarLayout, groupedScatterLayout, hasTableXAxis, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowStats, perRowSummaryStats, rowValues, scatterOffsets, summaryErrorAt, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, applyDateAxis, applyNumberFormats, baseLayout, centers, curveXs, errorOf, errors, fitLabels, groupedBarLayout, groupedScatterLayout, hasTableXAxis, heatmapLayout, jitter, legendRightMargin, legendWidthPx, movedText, numberTickformat, paintOf, perRowStats, perRowSummaryStats, refLineParts, rowValues, scatterOffsets, summaryErrorAt, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -27679,13 +27679,31 @@ check("an ROC curve stays linear even when a log scale is set (#151)", () => {
     deepStrictEqual((fig.layout.yaxis as { range?: number[] }).range, [0, 1]);
     ok(fig.data.length > 0, "the ROC curve must still draw");
   }
-  // The panel offers no Scale rows for ROC, but does for other xy graphs.
-  deepStrictEqual(logScaleOffered("roc-curve"), { x: false, y: false });
-  deepStrictEqual(logScaleOffered("xy-scatter"), { x: true, y: true });
-  deepStrictEqual(logScaleOffered("logistic-curve"), { x: true, y: true });
+  // The panel offers no Scale rows for ROC, but does for other xy graphs
+  // (seq 572: the offer now reads `axisKind` via `axisControls`, so a
+  // range-only axis never gets a Scale row).
+  deepStrictEqual(axisControls("roc-curve", newGraphOptions("roc-curve"), "x"), {
+    scale: false,
+    range: true,
+    numberFormat: true,
+  });
+  deepStrictEqual(axisControls("roc-curve", newGraphOptions("roc-curve"), "y"), {
+    scale: false,
+    range: true,
+    numberFormat: true,
+  });
+  deepStrictEqual(axisControls("xy-scatter", newGraphOptions("xy-scatter"), "x"), {
+    scale: true,
+    range: true,
+    numberFormat: true,
+  });
+  deepStrictEqual(axisControls("logistic-curve", newGraphOptions("logistic-curve"), "y"), {
+    scale: true,
+    range: true,
+    numberFormat: true,
+  });
   const panel = readFileSync("src/views/graphs/format-panel.tsx", "utf8");
-  ok(panel.includes("logScaleOffered(graphType).y"), "the panel must gate the Y scale row on logScaleOffered");
-  ok(panel.includes("logScaleOffered(graphType).x"), "the panel must gate the X scale row on logScaleOffered");
+  ok(panel.includes("axisControls(graphType"), "the panel must gate its Axes rows on axisControls");
 });
 
 check("a logistic curve honours a set Y range, defaulting to the fixed 0–1 axis (G-F8)", () => {
@@ -27851,17 +27869,185 @@ check("regression toggles explain a fit that cannot be drawn (G-F8)", () => {
 // the range row for it (G-F8): the scree plot's X is its components, the
 // forest plot's Y its covariates. Every other graph offers both rows.
 check("categorical axes offer no Axes min/max inputs (G-F8)", () => {
-  deepStrictEqual(axesRangeInputs("scree-plot"), { x: false, y: true });
-  deepStrictEqual(axesRangeInputs("forest-plot"), { x: true, y: false });
-  deepStrictEqual(axesRangeInputs("roc-curve"), { x: true, y: true });
-  deepStrictEqual(axesRangeInputs("logistic-curve"), { x: true, y: true });
-  deepStrictEqual(axesRangeInputs("xy-scatter"), { x: true, y: true });
-  // And the panel actually gates its range rows on the helper (source-level
+  // (seq 572: the offer now reads `axisKind` via `axisControls` — a labels
+  // axis offers no range row, no number format and no Scale row.)
+  deepStrictEqual(axisControls("scree-plot", newGraphOptions("scree-plot"), "x"), {
+    scale: false,
+    range: false,
+    numberFormat: false,
+  });
+  deepStrictEqual(axisControls("scree-plot", newGraphOptions("scree-plot"), "y"), {
+    scale: true,
+    range: true,
+    numberFormat: true,
+  });
+  deepStrictEqual(axisControls("forest-plot", newGraphOptions("forest-plot"), "x"), {
+    scale: true,
+    range: true,
+    numberFormat: true,
+  });
+  deepStrictEqual(axisControls("forest-plot", newGraphOptions("forest-plot"), "y"), {
+    scale: false,
+    range: false,
+    numberFormat: false,
+  });
+  deepStrictEqual(axisControls("roc-curve", newGraphOptions("roc-curve"), "x"), {
+    scale: false,
+    range: true,
+    numberFormat: true,
+  });
+  deepStrictEqual(axisControls("logistic-curve", newGraphOptions("logistic-curve"), "y"), {
+    scale: true,
+    range: true,
+    numberFormat: true,
+  });
+  deepStrictEqual(axisControls("xy-scatter", newGraphOptions("xy-scatter"), "x"), {
+    scale: true,
+    range: true,
+    numberFormat: true,
+  });
+  // And the panel actually gates its Axes rows on the helper (source-level
   // pin — the harness can't drive the React panel; same pattern as the
   // estimation-plot redraw check).
   const panel = readFileSync("src/views/graphs/format-panel.tsx", "utf8");
-  ok(panel.includes("axesRangeInputs(graphType).x"), "the panel must gate the X range row on axesRangeInputs");
-  ok(panel.includes("axesRangeInputs(graphType).y"), "the panel must gate the Y range row on axesRangeInputs");
+  ok(panel.includes("axisControls(graphType"), "the panel must gate its Axes rows on axisControls");
+  ok(!panel.includes("axesRangeInputs"), "the panel must no longer gate on axesRangeInputs");
+});
+
+// #100 (seq 572): upstream 1.1.1 `axisKind` was not wired into the Format
+// panel — it gated its Axes rows on the graph's family instead, so a grouped
+// line's X at its rows' values never got Scale / Range / NumberFormat, a
+// histogram's X never got a Scale row, and graphs that force linear axes
+// still offered Log selectors. The panel now reads `axisKind` per settings
+// axis via `axisControls`, and reference lines are placed on the effective
+// (linear-forced) value scale.
+check("Format panel axis controls follow axisKind, and linear-forced graphs offer no Log scale (seq 572, #100)", () => {
+  const panel = readFileSync("src/views/graphs/format-panel.tsx", "utf8");
+  ok(panel.includes("axisControls(graphType"), "the panel must gate its Axes rows on axisControls");
+  ok(!panel.includes("logScaleOffered"), "the panel must no longer gate on logScaleOffered");
+  ok(!panel.includes("axesRangeInputs"), "the panel must no longer gate on axesRangeInputs");
+
+  // (1) Grouped lines at its rows' values: a scale X axis — Scale, Range
+  // and NumberFormat are all offered; at its categories, none of them.
+  const linesAtValues = { ...newGraphOptions("grouped-lines"), rowsAt: "values" as const };
+  deepStrictEqual(axisControls("grouped-lines", linesAtValues, "x", true), {
+    scale: true,
+    range: true,
+    numberFormat: true,
+  });
+  deepStrictEqual(axisControls("grouped-lines", { ...newGraphOptions("grouped-lines"), rowsAt: "order" as const }, "x", true), {
+    scale: false,
+    range: false,
+    numberFormat: false,
+  });
+  deepStrictEqual(axisControls("grouped-lines", linesAtValues, "x", false), {
+    scale: false,
+    range: false,
+    numberFormat: false,
+  });
+  deepStrictEqual(axisControls("grouped-lines", linesAtValues, "y", true), {
+    scale: true,
+    range: true,
+    numberFormat: true,
+  });
+
+  // (3) Histograms, QQ plots and numeric Multiple plots lost their X
+  // controls to the family gate: a histogram's X is a scale axis, a QQ
+  // plot's X takes a range, and the PCA / K-means / observed-fitted X axes
+  // are scales.
+  deepStrictEqual(axisControls("histogram", newGraphOptions("histogram"), "x"), {
+    scale: true,
+    range: true,
+    numberFormat: true,
+  });
+  deepStrictEqual(axisControls("monte-carlo-histogram", newGraphOptions("monte-carlo-histogram"), "x"), {
+    scale: true,
+    range: true,
+    numberFormat: true,
+  });
+  deepStrictEqual(axisControls("qq-plot", newGraphOptions("qq-plot"), "x"), {
+    scale: false,
+    range: true,
+    numberFormat: true,
+  });
+  for (const type of ["pca-biplot", "kmeans-scatter", "observed-fitted"] as const) {
+    deepStrictEqual(axisControls(type, newGraphOptions(type), "x"), {
+      scale: true,
+      range: true,
+      numberFormat: true,
+    });
+  }
+  // (4) Horizontal bars keep their value axis in the y keys, shown as X.
+  deepStrictEqual(axisControls("grouped-hbars", newGraphOptions("grouped-hbars"), "y"), {
+    scale: true,
+    range: true,
+    numberFormat: true,
+  });
+  deepStrictEqual(axisControls("grouped-hbars", newGraphOptions("grouped-hbars"), "x"), {
+    scale: false,
+    range: false,
+    numberFormat: false,
+  });
+
+  // (2) Stacked bars and residual plots force linear axes, so no Log
+  // selector is offered for them — and reference lines are placed on the
+  // effective (linear) scale, never the saved log one.
+  deepStrictEqual(axisControls("grouped-stacked", newGraphOptions("grouped-stacked"), "y"), {
+    scale: false,
+    range: true,
+    numberFormat: true,
+  });
+  const qqResiduals = { ...newGraphOptions("residuals"), residualsAs: "qq" as const };
+  deepStrictEqual(axisControls("residuals", qqResiduals, "x"), {
+    scale: false,
+    range: true,
+    numberFormat: true,
+  });
+  deepStrictEqual(axisControls("residuals", qqResiduals, "y"), {
+    scale: false,
+    range: true,
+    numberFormat: true,
+  });
+  deepStrictEqual(axisControls("residuals", newGraphOptions("residuals"), "x"), {
+    scale: true,
+    range: true,
+    numberFormat: true,
+  });
+  strictEqual(
+    valueScale("grouped-stacked", { ...newGraphOptions("grouped-stacked"), yScale: "log10" as const }),
+    "linear",
+  );
+  strictEqual(valueScale("residuals", { ...qqResiduals, yScale: "log10" as const }), "linear");
+  strictEqual(
+    valueScale("xy-scatter", { ...newGraphOptions("xy-scatter"), yScale: "log10" as const }),
+    "log10",
+  );
+  const refOpts = {
+    ...newGraphOptions("xy-scatter"),
+    yScale: "log10" as const,
+    refLines: [{ value: 0, dash: "dash" as const, width: 1 }],
+  };
+  strictEqual(
+    refLineParts(refOpts, false, valueScale("grouped-stacked", refOpts)).shapes.length,
+    1,
+    "a 0 reference line draws on a linear-forced axis",
+  );
+  strictEqual(refLineParts(refOpts, false).shapes.length, 0, "the same line is left out on a real log axis");
+
+  // (5) A scree plot's X is its components and a dendrogram's X its
+  // leaves — labels axes, not scales — and a stale saved log X scale still
+  // draws a linear X, never a log one.
+  deepStrictEqual(GRAPHS["scree-plot"].axes(newGraphOptions("scree-plot"), true), { x: "labels", y: "scale" });
+  deepStrictEqual(GRAPHS["dendrogram"].axes(newGraphOptions("dendrogram"), true), { x: "labels", y: "scale" });
+  for (const type of ["scree-plot", "dendrogram"] as const) {
+    const opts = { ...newGraphOptions(type), xScale: "log10" as const };
+    const fig = GRAPHS[type].build([], opts, paintOf(opts, 1));
+    strictEqual(
+      (fig.layout.xaxis as { type?: string }).type,
+      "linear",
+      `${type} must draw a linear X even with a saved log X scale`,
+    );
+  }
 });
 
 check("the poisson regression wizard asks for the dependent, predictors, and quasi-Poisson", () => {

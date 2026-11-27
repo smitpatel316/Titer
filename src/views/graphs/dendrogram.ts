@@ -9,7 +9,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult, HclustDendrogram } from "../../stats/types";
 import type { Column } from "../../lib/dataset";
-import { GUIDE, type Paint, XY_AXES, xyLayout } from "./plot-helpers";
+import { GUIDE, type Paint, xyLayout } from "./plot-helpers";
 import type { GraphFigure, GraphModule } from ".";
 
 /** The one series this graph draws, as the Series section names it. */
@@ -112,16 +112,18 @@ export function addDendrogram(
 }
 
 function build(_columns: Column[], options: GraphOptions, _paint: Paint): GraphFigure {
+  // X is the leaves (labels), never a log scale: a stale saved log X must
+  // not turn the leaf axis logarithmic (seq 572, #100).
   return {
     data: [],
-    layout: xyLayout(options, "Row", 1, { yName: "Distance", zeroBase: true }),
+    layout: xyLayout({ ...options, xScale: "linear" }, "Row", 1, { yName: "Distance", zeroBase: true }),
   };
 }
 
 export const dendrogram: GraphModule = {
   label: "Dendrogram",
   family: "multiple",
-  axes: XY_AXES,
+  axes: () => ({ x: "labels", y: "scale" }),
   points: () => false,
   build,
 };

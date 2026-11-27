@@ -6,7 +6,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult } from "../../stats/types";
 import type { Column } from "../../lib/dataset";
-import { INK, type Paint, XY_AXES, xyLayout } from "./plot-helpers";
+import { INK, type Paint, xyLayout } from "./plot-helpers";
 import type { GraphFigure, GraphModule } from ".";
 
 /** The one series this graph draws, as the Series section names it. */
@@ -73,16 +73,18 @@ export function addScreePlot(fig: GraphFigure, outcome: AnalysisResult, paint: P
 }
 
 function build(_columns: Column[], options: GraphOptions, _paint: Paint): GraphFigure {
+  // X is the components (labels), never a log scale: a stale saved log X
+  // must not turn the category axis logarithmic (seq 572, #100).
   return {
     data: [],
-    layout: xyLayout(options, "Component", 1, { yName: "Variance explained (%)" }),
+    layout: xyLayout({ ...options, xScale: "linear" }, "Component", 1, { yName: "Variance explained (%)" }),
   };
 }
 
 export const screePlot: GraphModule = {
   label: "Scree plot",
   family: "multiple",
-  axes: XY_AXES,
+  axes: () => ({ x: "labels", y: "scale" }),
   points: () => false,
   build,
 };

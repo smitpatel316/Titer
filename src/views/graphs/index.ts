@@ -143,6 +143,39 @@ export function axisKind(type: GraphType, options: GraphOptions, key: "x" | "y",
   return (key === "x") !== !!horizontal ? x : y;
 }
 
+/** What the Format panel's Axes section offers for the axis whose settings live in
+ *  `key` (xMin… or yMin…): a Scale row only where the axis is a scale axis (a log
+ *  scale means something there); Min/Max/Step and a number format wherever the axis
+ *  holds values at all. A labels axis offers nothing — its ticks are names, not
+ *  numbers. This is the panel's single source of truth (seq 572, #100): the old
+ *  `logScaleOffered` / `axesRangeInputs` helpers in plot-helpers gated on the
+ *  graph's family instead, so graphs whose `axes()` declared a scale axis never
+ *  saw its controls (a histogram's X, a grouped line's X at its rows' values)
+ *  while graphs that force linear axes still offered Log selectors. */
+export interface AxisControls {
+  scale: boolean;
+  range: boolean;
+  numberFormat: boolean;
+}
+export function axisControls(type: GraphType, options: GraphOptions, key: "x" | "y", rowValues = true): AxisControls {
+  const kind = axisKind(type, options, key, rowValues);
+  return {
+    scale: kind === "scale",
+    range: kind === "scale" || kind === "range",
+    numberFormat: kind === "scale" || kind === "range",
+  };
+}
+
+/** The scale the value axis is actually drawn with: the saved scale where the value
+ *  axis is a scale axis, linear where it only takes a range (a stacked bar's slices,
+ *  a residual plot's residuals) — those builders force linear, so reference lines
+ *  and their labels must be placed on a linear axis too, never on the saved log
+ *  scale (seq 572, #100). The value axis's settings always live in the y keys
+ *  (see `axisKind`), so this is the "y" key's kind. */
+export function valueScale(type: GraphType, options: GraphOptions, rowValues = true): GraphOptions["xScale"] {
+  return axisKind(type, options, "y", rowValues) === "scale" ? options.yScale : "linear";
+}
+
 export const GRAPHS: Record<GraphType, GraphModule> = {
   individual,
   "before-after": beforeAfter,
