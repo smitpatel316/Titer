@@ -13,7 +13,7 @@ import type { LinkedPaste, RowGroup, TableData, TableErrorFormat, TableType } fr
 import type { CellBackgroundColor } from "../../lib/cell-colors";
 import { tableErrorFormat } from "../../store/types";
 import { isXColumnFormat, sameConversion, type XColumnFormat, type XConversion } from "../../lib/date-time";
-import { renameCalculatedReferences } from "../../lib/calcvars";
+import { renameCalculatedReferences, renameCalculatedReferencesMany } from "../../lib/calcvars";
 import { normalizeDecimalInput, setDecimalPlaces, type DecimalSeparator } from "../../lib/decimal-format";
 import { parseCell } from "../../lib/numeric";
 import { seriesKeyOf, groupRuns } from "../../lib/columns";
@@ -514,7 +514,10 @@ export function pasteNames(
   const block = parseTSV(text);
   const names = block.length === 1 ? block[0] : block.map((row) => row[0] ?? null);
   // What each name goes to: a column, or a grouped table's group (its key, as "A").
-  const grouped = isGrouped(data);
+  // A nested table pastes onto its groups too (its menu offers "Paste Group
+  // Names" there) — isGrouped alone is false for one, so its sub-columns
+  // would take the bare names and lose their Group:Subgroup:Replicate shape.
+  const grouped = isGrouped(data) || isNested(data);
   const lead = grouped ? leadOf(data) : data.columns.length;
   const slots = [...data.columns.slice(0, lead), ...new Set(data.columns.slice(lead).map(seriesKeyOf))];
   const start = from < lead ? from : slots.indexOf(seriesKeyOf(data.columns[from]), lead);
@@ -530,25 +533,45 @@ export function pasteNames(
   }
   const colon = grouped && final.slice(lead).find((name) => name.includes(":"));
   if (colon) return { problem: `A group's name can't hold “:”, as “${colon}” does.` };
-  const renamed = Object.fromEntries(slots.flatMap((old, i) => (final[i] === old ? [] : [[old, final[i]]])));
+  // Lead and group renames stay apart: one map would merge a lead "X" and a
+  // group "X" into a single entry, cross-renaming whichever it didn't name.
+  const leadRenamed = Object.fromEntries(
+    slots.slice(0, lead).flatMap((old, i) => (final[i] === old ? [] : [[old, final[i]]])),
+  );
+  const groupRenamed = Object.fromEntries(
+    slots.slice(lead).flatMap((old, i) => (final[lead + i] === old ? [] : [[old, final[lead + i]]])),
+  );
+  const renamed = { ...leadRenamed, ...groupRenamed };
   const unplaced = Math.max(0, names.length - room);
   if (!Object.keys(renamed).length && final.length === slots.length) return { data, renamed, unplaced };
-  const to = (name: string) => renamed[name] ?? name;
+  const toLead = (name: string) => leadRenamed[name] ?? name;
+  const toGroup = (name: string) => groupRenamed[name] ?? name;
   const columns = [
-    ...data.columns.map((n, c) => (c < lead ? to(n) : to(seriesKeyOf(n)) + n.slice(n.indexOf(":")))),
+    ...data.columns.map((n, c) => (c < lead ? toLead(n) : toGroup(seriesKeyOf(n)) + n.slice(n.indexOf(":")))),
     ...final.slice(slots.length),
   ];
   const newName = new Map(data.columns.map((n, c) => [n, columns[c]]));
+  // The per-column metadata rides the rename, keyed by the new full name —
+  // widths alone used to, leaving decimals, types, labels, level orders and
+  // calculated formulas pointing at names the table no longer has.
+  const remapKeys = <T>(map: Record<string, T> | undefined) =>
+    map && Object.fromEntries(Object.entries(map).map(([n, v]) => [newName.get(n) ?? n, v]));
+  const withCalculated = renameCalculatedReferencesMany(data, newName);
   return {
     data: {
-      ...data,
+      ...withCalculated,
       columns,
       // Added columns start empty.
       rows:
         columns.length > data.columns.length
           ? data.rows.map((row) => [...row, ...Array<Cell>(Math.max(0, columns.length - row.length)).fill(null)])
           : data.rows,
-      widths: data.widths && Object.fromEntries(Object.entries(data.widths).map(([n, w]) => [newName.get(n) ?? n, w])),
+      widths: remapKeys(data.widths),
+      decimals: remapKeys(data.decimals),
+      variableTypes: remapKeys(data.variableTypes),
+      labelVariable:
+        data.labelVariable === undefined ? undefined : (newName.get(data.labelVariable) ?? data.labelVariable),
+      levelOrder: remapKeys(data.levelOrder),
     },
     renamed,
     unplaced,
