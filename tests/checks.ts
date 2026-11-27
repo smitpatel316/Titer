@@ -45184,6 +45184,19 @@ if (existsSync(`${REPO_DIR}MANIFEST.json`)) {
 }
 await startR(fileURLToPath(new URL("../node_modules/webr/dist/", import.meta.url)));
 
+// Seq 225 remainder (F16) — Prism's Preferences offers a Note Font
+// choice for Info/Notes sheets. Titer's Preferences dialog has no font
+// setting at all: no Note Font control and no persisted note-font
+// load/save pair. This pin fails until both exist.
+check("prefs-225-note-font: Preferences offers a Note Font choice, persisted", () => {
+  const dialog = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(dialog.includes("Note Font"), "Preferences dialog has no Note Font control");
+  ok(
+    dialog.includes("loadNoteFont") && dialog.includes("saveNoteFont"),
+    "Preferences dialog has no note-font load/save pair",
+  );
+});
+
 let failed = 0;
 // CHECK=<substring> runs only the matching checks (e.g. CHECK=FL-rebrand
 // for the rebrand regression check alone, without the full suite).
