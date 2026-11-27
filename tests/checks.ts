@@ -23135,9 +23135,10 @@ check("seq 198 multiple-regression diagnostics remainder: residuals, normality, 
   // not the asymptotic one), and Spearman's rho between |residual| and
   // fitted with its exact permutation P (n = 10, 10! permutations).
   // Tolerances: the statistics agree to 1e-9 except Shapiro–Wilk's W and
-  // P (R's Royston implementation and scipy's differ at ~1e-7, so 1e-6)
-  // and Spearman's P (R uses the AS 89 approximation to the exact
-  // permutation distribution, so 5e-3 around the exact value).
+  // P (R's Royston implementation and scipy's differ at ~1e-7 at n = 10
+  // and ~5e-6 at n = 24, so 1e-6 for W and 1e-5 for P) and Spearman's P
+  // (R uses the AS 89 approximation to the exact permutation distribution,
+  // so 5e-3 around the exact value).
   // Prism plots these residuals four ways (vs predicted, |residual| vs
   // predicted, QQ, vs row) and tests them for normality in four ways; the
   // per-row table + the four tests + Durbin–Watson + the Spearman
@@ -23189,7 +23190,7 @@ check("seq 198 multiple-regression diagnostics remainder: residuals, normality, 
   if (!d) throw new Error("residualDiagnostics missing");
   close(d.durbinWatson, 3.3665580316219383, 1e-9, "Durbin-Watson");
   close(d.shapiroWilk.statistic, 0.8769248723983765, 1e-6, "Shapiro-Wilk W");
-  close(d.shapiroWilk.p, 0.1202777698636055, 1e-6, "Shapiro-Wilk P");
+  close(d.shapiroWilk.p, 0.1202777698636055, 1e-5, "Shapiro-Wilk P");
   strictEqual(d.dagostinoPearson.statistic, null);
   strictEqual(d.dagostinoPearson.p, null);
   close(d.andersonDarling.statistic, 0.5534841033470936, 1e-9, "Anderson-Darling A2");
@@ -23270,7 +23271,7 @@ check("seq 198 multiple-regression diagnostics remainder: residuals, normality, 
   if (!bd) throw new Error("big residualDiagnostics missing");
   close(bd.durbinWatson, 2.5899965954016895, 1e-9, "big Durbin-Watson");
   close(bd.shapiroWilk.statistic, 0.9759615659713745, 1e-6, "big Shapiro-Wilk W");
-  close(bd.shapiroWilk.p, 0.8114697337150574, 1e-6, "big Shapiro-Wilk P");
+  close(bd.shapiroWilk.p, 0.8114697337150574, 1e-5, "big Shapiro-Wilk P");
   close(bd.dagostinoPearson.statistic, 0.13883463536186194, 1e-9, "big D'Agostino-Pearson K2");
   close(bd.dagostinoPearson.p, 0.9329372676125257, 1e-6, "big D'Agostino-Pearson P");
   close(bd.andersonDarling.statistic, 0.2576863226494446, 1e-9, "big Anderson-Darling A2");
