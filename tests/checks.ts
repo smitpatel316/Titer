@@ -865,11 +865,20 @@ check("the gallery lists every graph in sidebar order, with its chart and table"
 // ── Preferences (seq 225) + Print / Page Setup (seq 227) ─────────────────
 
 check("print settings default to Letter portrait, and the @page rule carries them", () => {
-  deepStrictEqual(loadPrintSettings(), { paperSize: "letter", orientation: "portrait", marginMm: 12, scale: 1 });
+  deepStrictEqual(loadPrintSettings(), { paperSize: "letter", orientation: "portrait", marginMm: 12, scale: 1, gridLines: false, columnTitles: true, headerText: "" });
   strictEqual(
-    printPageCss({ paperSize: "a4", orientation: "landscape", marginMm: 10, scale: 0.8 }),
+    printPageCss({ paperSize: "a4", orientation: "landscape", marginMm: 10, scale: 0.8, gridLines: false, columnTitles: true, headerText: "" }),
     "@page { size: a4 landscape; margin: 10mm; }\n@media print { body { zoom: 0.8; } }",
   );
+  // The print options (seq 225 remainder L9): grid lines draw the cell
+  // borders, column titles off hides the header row, and a header prints
+  // at the top of every page — while the defaults print neither extra rule.
+  const printBase = { paperSize: "letter" as const, orientation: "portrait" as const, marginMm: 12, scale: 1, columnTitles: true, headerText: "" };
+  ok(printPageCss({ ...printBase, gridLines: true }).includes(".titer-grid-cell { border: 1px solid #999 !important; }"));
+  ok(!printPageCss({ ...printBase, gridLines: false }).includes("titer-grid-cell"));
+  ok(printPageCss({ ...printBase, gridLines: false, columnTitles: false }).includes(".titer-grid-header { display: none !important; }"));
+  ok(printPageCss({ ...printBase, gridLines: false, headerText: "Weekly report" }).includes('content: "Weekly report"'));
+  ok(!printPageCss({ ...printBase, gridLines: false }).includes("body::before"));
   // A stored record with a bad paper size or an out-of-range margin/scale
   // falls back (or clamps) instead of breaking the print.
   const store = new Map<string, string>();
@@ -878,12 +887,12 @@ check("print settings default to Letter portrait, and the @page rule carries the
     setItem: (k: string, v: string) => void store.set(k, v),
   };
   try {
-    savePrintSettings({ paperSize: "a4", orientation: "portrait", marginMm: 0, scale: 2 });
-    deepStrictEqual(loadPrintSettings(), { paperSize: "a4", orientation: "portrait", marginMm: 0, scale: 2 });
+    savePrintSettings({ paperSize: "a4", orientation: "portrait", marginMm: 0, scale: 2, gridLines: false, columnTitles: true, headerText: "" });
+    deepStrictEqual(loadPrintSettings(), { paperSize: "a4", orientation: "portrait", marginMm: 0, scale: 2, gridLines: false, columnTitles: true, headerText: "" });
     store.set("titer.print", JSON.stringify({ paperSize: "tabloid", marginMm: 99, scale: 9 }));
-    deepStrictEqual(loadPrintSettings(), { paperSize: "letter", orientation: "portrait", marginMm: 25, scale: 2 });
+    deepStrictEqual(loadPrintSettings(), { paperSize: "letter", orientation: "portrait", marginMm: 25, scale: 2, gridLines: false, columnTitles: true, headerText: "" });
     store.set("titer.print", "not json");
-    deepStrictEqual(loadPrintSettings(), { paperSize: "letter", orientation: "portrait", marginMm: 12, scale: 1 });
+    deepStrictEqual(loadPrintSettings(), { paperSize: "letter", orientation: "portrait", marginMm: 12, scale: 1, gridLines: false, columnTitles: true, headerText: "" });
   } finally {
     delete (globalThis as { localStorage?: unknown }).localStorage;
   }
