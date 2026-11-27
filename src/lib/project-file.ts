@@ -345,11 +345,19 @@ const PARAMS = {
   mode: CORRELATION_MODES, design: TWO_WAY_DESIGNS, posthocTarget: POSTHOC_TARGETS, correction: [...CORRECTIONS, ...MULTIPLE_T_TEST_CORRECTIONS], curveTest: CURVE_TESTS, compare: CURVE_COMPARISONS,
   // Nonlinear regression framework (plan 26): weighting, model comparison,
   // global fitting, fixed parameters and bounds.
-  weights: ["none", "1/y", "1/y2", "1/x", "1/x2", "1/sd2"],
+  weights: ["none", "1/y", "1/y2", "1/x", "1/x2", "1/sd2", "1/yk"],
   // Seq 201: centered polynomials (fit powers of X − mean X).
   centered: "yes/no",
   // Seq 200: the nonlinear fitting method (least squares / robust / Poisson).
   fitMethod: ["least-squares", "robust", "poisson"],
+  // Seq 200: general 1/Y^K weighting, convergence criteria, max iterations,
+  // fitting replicate means, the cleaned-data table, and don't-fit.
+  weightExponent: "number",
+  maxIterations: { min: 1, max: 100000 },
+  convergence: ["quick", "medium", "strict"],
+  replicates: ["each", "means"],
+  cleanedData: "yes/no",
+  dontFit: "yes/no",
   // Seq 323: difficult-fit handling (identify unstable parameters / neither).
   // Seq 387: a third mode, identify ambiguous fits — and the Diagnostics
   // option that reports each parameter's dependency.

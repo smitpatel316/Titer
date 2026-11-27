@@ -45281,6 +45281,12 @@ check("seq 200: general 1/Y^K weighting (K=2 equals 1/Y², K=1 equals 1/Y)", asy
     await runAnalysis("nonlinear-regression", table, { model: "sigmoidal-4pl-logx", weights: "1/y3" as never }),
     { error: "Choose a weighting scheme: none, 1/Y, 1/Y², 1/X, 1/X², 1/SD², or 1/Y^K." },
   );
+  // 1/Y^K is nonlinear-only: linear regression refuses it cleanly instead
+  // of emitting R code for an exponent it never fits.
+  deepStrictEqual(await runAnalysis("linear-regression", table, { weights: "1/yk" as never }), {
+    error:
+      "Weighting by 1/Y^K needs the exponent K, which linear regression doesn't fit — use nonlinear regression with the same weighting.",
+  });
 });
 
 // Seq 200 (c): fit the means vs fit the replicates — Prism's Method-tab
@@ -45429,9 +45435,9 @@ check("seq 200: don't fit plots the curve from the initial values", async () => 
     "Hill slope": 1,
   };
   for (const [term, value] of Object.entries(expected)) {
-    const c = out.coefficients?.find((cc) => cc.term === term);
-    ok(c != null && c.estimate != null && Math.abs(c.estimate - value) < 1e-9, `don't-fit ${term} should be its start ${value}, got ${c?.estimate}`);
-    strictEqual(c?.stdError, null, `don't-fit ${term} has no standard error (it was not fitted)`);
+    const found: RegressionCoefficient | undefined = out.coefficients?.find((c) => c.term === term);
+    ok(found != null && found.estimate != null && Math.abs(found.estimate - value) < 1e-9, `don't-fit ${term} should be its start ${value}, got ${found?.estimate}`);
+    strictEqual(found?.stdError, null, `don't-fit ${term} has no standard error (it was not fitted)`);
   }
   // The initial-values curve's R² is below the fitted 1 — it is the starts'
   // curve, not the fit — and the notes say so. It is 0.7484 here, not near

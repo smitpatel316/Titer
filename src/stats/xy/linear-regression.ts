@@ -26,13 +26,13 @@ export function lineProblem(x: Group, y: Group, origin: boolean): string | undef
 }
 
 /** The R expression for a weighting scheme, over the `x`/`y` vectors. */
-const WEIGHT_R: Record<Exclude<NonlinearWeightScheme, "none" | "1/sd2">, string> = {
+const WEIGHT_R: Record<Exclude<NonlinearWeightScheme, "none" | "1/sd2" | "1/yk">, string> = {
   "1/y": "1/y",
   "1/y2": "1/y^2",
   "1/x": "1/x",
   "1/x2": "1/x^2",
 };
-const WEIGHT_LABEL: Record<Exclude<NonlinearWeightScheme, "none" | "1/sd2">, string> = {
+const WEIGHT_LABEL: Record<Exclude<NonlinearWeightScheme, "none" | "1/sd2" | "1/yk">, string> = {
   "1/y": "1/Y",
   "1/y2": "1/Y²",
   "1/x": "1/X",
@@ -75,12 +75,16 @@ export const linearRegressionSpec: ColumnTestSpec<LinearRegressionParams> = {
     const problem = xyProblem(columns, params?.y);
     if (problem) return problem;
     // Plan 26: weighting, the same schemes as nonlinear regression except
-    // 1/SD², which needs the replicate columns this runner never sees.
+    // 1/SD² and 1/Y^K: 1/SD² needs the replicate columns this runner never
+    // sees, 1/Y^K needs the exponent K this runner never fits.
     const weights = params?.weights ?? "none";
     // `1/sd2` is not in this runner's weights type — it can still arrive
     // from a saved file or a direct runAnalysis call, so check by string.
     if ((weights as string) === "1/sd2")
       return "Weighting by 1/SD² needs replicate SDs, which linear regression doesn't see — use nonlinear regression with the same weighting.";
+    // Same for `1/yk` (seq 200): the exponent K is a nonlinear-only param.
+    if ((weights as string) === "1/yk")
+      return "Weighting by 1/Y^K needs the exponent K, which linear regression doesn't fit — use nonlinear regression with the same weighting.";
     if (weights === "none") return undefined;
     const pairs = pickXY(columns, params);
     if (pairs.length < 2) return undefined;
@@ -202,6 +206,11 @@ export async function runLinearRegressions(
     return {
       error:
         "Weighting by 1/SD² needs replicate SDs, which linear regression doesn't see — use nonlinear regression with the same weighting.",
+    };
+  if ((weights as string) === "1/yk")
+    return {
+      error:
+        "Weighting by 1/Y^K needs the exponent K, which linear regression doesn't fit — use nonlinear regression with the same weighting.",
     };
   if (weights !== "none") {
     for (let i = 0; i < sets.length; i++) {

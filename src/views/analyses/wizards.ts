@@ -3659,7 +3659,8 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ]
         : []),
       // Plan 26: weighting (1/SD² needs the replicate columns this runner
-      // never sees, so it is not offered here). Only an XY table's regression
+      // never sees, and 1/Y^K needs the exponent K this runner never fits,
+      // so neither is offered here). Only an XY table's regression
       // on X is weighted — a Multiple Variables table regresses two named
       // columns, and asks no weighting question. No weighting with the
       // comparison: its F tests pool one residual variance, so the runner

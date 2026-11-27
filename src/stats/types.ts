@@ -620,9 +620,10 @@ export interface LinearRegressionParams {
   /** Compare the slopes and intercepts of the Y data sets' lines (≥ 2 sets)
    *  instead of fitting each on its own. */
   compareSlopes?: boolean;
-  /** Weighting (plan 26, same schemes as nonlinear regression except 1/SD²,
-   *  which needs the replicate columns this runner never sees). */
-  weights?: Exclude<NonlinearWeightScheme, "1/sd2">;
+  /** Weighting (plan 26, same schemes as nonlinear regression except 1/SD²
+   *  and 1/Y^K: 1/SD² needs the replicate columns this runner never sees,
+   *  1/Y^K needs the exponent K this runner never fits). */
+  weights?: Exclude<NonlinearWeightScheme, "1/sd2" | "1/yk">;
 }
 
 /** Params for "compare-slopes" (XY table, #46): which Y data sets' lines to
