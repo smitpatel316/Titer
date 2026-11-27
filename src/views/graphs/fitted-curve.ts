@@ -55,11 +55,30 @@ export function evaluate(
   // wrong-signed Inf under a fractional Hill slope in R. Return the limit
   // explicitly, exactly the R x == 0 guard (Round 2 Issue 36): Top on a
   // falling curve, Bottom on a rising one (100/0 for the normalized model).
+  // The guard is unconditional for all 8 raw-X ratio models, matching R
+  // (Round 2 Issue 111): the other 4 models (agonist-3pl-x,
+  // agonist-3pl-normalized-x, biphasic-x, bell-shaped-x) had no guard at
+  // all, and asymmetric-5pl-x underflows (2^(1/S)-1)^(1/HillSlope) to 0 at
+  // tiny positive HillSlope, so even EC50 > 0 is 0/0 = NaN at x == 0.
   if (x === 0) {
     if (model === "sigmoidal-4pl-x" || model === "absolute-ic50-x" || model === "asymmetric-5pl-x") {
-      if (c("EC50") <= 0) return hill < 0 ? top : bottom;
-    } else if (model === "agonist-4pl-normalized-x") {
-      if (c("EC50") <= 0) return hill < 0 ? 100 : 0;
+      return hill < 0 ? top : bottom;
+    }
+    if (model === "agonist-4pl-normalized-x") return hill < 0 ? 100 : 0;
+    if (model === "agonist-3pl-x") return bottom;
+    if (model === "agonist-3pl-normalized-x") return 0;
+    if (model === "biphasic-x") {
+      return (
+        bottom +
+        rise * (c("Frac") * (c("nH1") < 0 ? 1 : 0) + (1 - c("Frac")) * (c("nH2") < 0 ? 1 : 0))
+      );
+    }
+    if (model === "bell-shaped-x") {
+      return (
+        c("Dip") +
+        (c("Plateau1") - c("Dip")) * (c("nH1") < 0 ? 1 : 0) +
+        (c("Plateau2") - c("Dip")) * (c("nH2") > 0 ? 1 : 0)
+      );
     }
   }
   // A centered polynomial's terms are powers of (X − centeredX), not of X.
