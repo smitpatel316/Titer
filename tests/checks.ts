@@ -30877,6 +30877,418 @@ check(".pzfx import keeps untitled, colon-titled and ragged TwoWay replicate gro
   strictEqual(reloaded.data!.replicates, 2);
 });
 
+// ── R2-25 / R2-26 / R2-60 pins (Cycle 44) ──────────────────────────────────
+// .prism grouped-summary import, native XY colon-group exports, and
+// malformed-document guards. Each pin fails on the 139ddb5 code and passes
+// on the fix.
+
+/** Build a minimal one-table .prism ZIP in memory (R2-25 / R2-60 pins).
+ *  Default: a grouped y_sd_n table, datasets "1:10" (3 subcolumns) and
+ *  "1:100" (ragged: 2 of 3). Overrides swap in a column table, a different
+ *  content.json, an info sheet, or a malformed document.json. */
+const minimalPrismZip = async (overrides: {
+  documentJson?: unknown;
+  table?: Record<string, unknown>;
+  content?: Record<string, unknown>;
+  csv?: string;
+  sets?: Record<string, unknown>;
+  info?: unknown;
+}): Promise<Uint8Array> => {
+  const z = new JSZip();
+  const sheetUid = "11111111-1111-1111-1111-111111111111";
+  const tableUid = "22222222-2222-2222-2222-222222222222";
+  const d1Uid = "33333333-3333-3333-3333-333333333333";
+  const d2Uid = "44444444-4444-4444-4444-444444444444";
+  const infoUid = "55555555-5555-5555-5555-555555555555";
+  const doc = {
+    "@class": "Document",
+    createdBy: { name: "Prism", version: "10.3.0" },
+    formatVersion: "1-4-1",
+    sheets: {
+      graphs: [],
+      layouts: [],
+      analyses: [],
+      info: overrides.info === undefined ? [] : [infoUid],
+      data: [sheetUid],
+    },
+    sheetAttributesMap: {
+      [sheetUid]: { title: "Data 1" },
+      ...(overrides.info === undefined ? {} : { [infoUid]: { title: "Project info" } }),
+    },
+  };
+  z.file(
+    "document.json",
+    overrides.documentJson === undefined
+      ? JSON.stringify(doc)
+      : typeof overrides.documentJson === "string"
+        ? overrides.documentJson
+        : JSON.stringify(overrides.documentJson),
+  );
+  z.file(
+    `data/sheets/${sheetUid}/sheet.json`,
+    JSON.stringify({
+      "@class": "DataSheet",
+      title: "Data 1",
+      table: {
+        uid: tableUid,
+        format: "grouped",
+        dataFormat: "y_sd_n",
+        dataSets: [d1Uid, d2Uid],
+        ...(overrides.table ?? {}),
+      },
+    }),
+  );
+  z.file(
+    `data/tables/${tableUid}/content.json`,
+    JSON.stringify(overrides.content ?? { numberOfColumns: 5, numberOfRows: 2, version: 1 }),
+  );
+  z.file(`data/tables/${tableUid}/data.csv`, overrides.csv ?? "1,2,3,4,5\n6,7,8,9,10\n");
+  const sets = overrides.sets ?? {
+    [d1Uid]: {
+      "@class": "DataSet",
+      uid: d1Uid,
+      format: "y_sd_n",
+      title: "1:10",
+      attributes: ["DS_ATTR_Y"],
+      replicates: [{}, {}, {}],
+    },
+    [d2Uid]: {
+      "@class": "DataSet",
+      uid: d2Uid,
+      format: "y_sd_n",
+      title: "1:100",
+      attributes: ["DS_ATTR_Y"],
+      replicates: [{}, {}],
+    },
+  };
+  for (const [uid, json] of Object.entries(sets)) {
+    z.file(`data/sets/${uid}.json`, JSON.stringify(json));
+  }
+  if (overrides.info !== undefined) {
+    z.file(`info/${infoUid}/sheet.json`, JSON.stringify(overrides.info));
+  }
+  return z.generateAsync({ type: "uint8array" });
+};
+
+/** Read a written .prism back structurally (R2-26 pins): each data table's
+ *  dataFormat + its Y datasets (title + format, in order), and every
+ *  analysis sheet's inputDataSets (title + idx, in order). */
+const writtenPrismTables = async (bytes: Uint8Array) => {
+  const zip = await JSZip.loadAsync(bytes);
+  const json = async (p: string): Promise<Record<string, any>> =>
+    JSON.parse(await zip.file(p)!.async("string")) as Record<string, any>;
+  const tables: { dataFormat: string; sets: { title: string; format: string }[] }[] = [];
+  const analyses: { title: string; inputs: { title: string; idx: string }[] }[] = [];
+  for (const name of Object.keys(zip.files)) {
+    if (/^data\/sheets\/[^/]+\/sheet\.json$/.test(name)) {
+      const sheet = await json(name);
+      const table = sheet.table as { dataFormat?: string; dataSets?: string[] } | undefined;
+      if (table && Array.isArray(table.dataSets)) {
+        const sets: { title: string; format: string }[] = [];
+        for (const uid of table.dataSets) {
+          const set = await json(`data/sets/${uid}.json`);
+          sets.push({ title: set.title as string, format: set.format as string });
+        }
+        tables.push({ dataFormat: table.dataFormat ?? "", sets });
+      }
+      continue;
+    }
+    if (/^analyses\/[^/]+\/sheet\.json$/.test(name)) {
+      const sheet = await json(name);
+      analyses.push({
+        title: sheet.title as string,
+        inputs: ((sheet.inputDataSets ?? []) as { title: string; idx: string }[]).map((d) => ({
+          title: d.title,
+          idx: d.idx,
+        })),
+      });
+    }
+  }
+  return { tables, analyses };
+};
+
+check("R2-25: .prism import keeps summaryFormat on grouped summary tables, sanitizes ':' in group titles, and pads ragged groups", async () => {
+  // Grouped y_sd_n, datasets "1:10" (Mean/SD/N) and "1:100" (ragged: 2 of
+  // 3). Before the fix every subcolumn imported as "Group:Y1…Yn" with no
+  // summaryFormat, "1:10" and "1:100" collided at seriesKeyOf's first ":",
+  // and the ragged group stayed short a subcolumn.
+  const bytes = await minimalPrismZip({});
+  const { project } = await convertPrism(bytes, "r2-25-grouped.prism");
+  const node = Object.values(project.nodes).find((n) => n.type === "table");
+  if (!node || node.type !== "table") throw new Error("no table node");
+  strictEqual(node.tableType, "grouped");
+  strictEqual(node.data!.summaryFormat, "mean-sd-n");
+  strictEqual(node.data!.groups, 2);
+  strictEqual(node.data!.replicates, 3);
+  deepStrictEqual(node.data!.columns, [
+    "Title",
+    "1-10:Mean",
+    "1-10:SD",
+    "1-10:N",
+    "1-100:Mean",
+    "1-100:SD",
+    "1-100:N",
+  ]);
+  deepStrictEqual(node.data!.rows, [
+    [null, "1", "2", "3", "4", "5", null],
+    [null, "6", "7", "8", "9", "10", null],
+  ]);
+});
+
+check("R2-26: .prism export groups native XY colon subcolumns (replicates + summaries) instead of emitting y_single datasets", async () => {
+  const xyTable = (id: string, name: string, columns: string[], rows: (string | null)[][], extra: Record<string, unknown>): ProjectNode => ({
+    id,
+    type: "table",
+    name,
+    parentId: null,
+    tableType: "xy",
+    data: { columns, rows, ...extra },
+  });
+  const reps = xyTable(
+    "t_rep",
+    "XY reps",
+    ["Title", "X", "A:Y1", "A:Y2"],
+    [
+      [null, "0", "10", "11"],
+      [null, "1", "20", "21"],
+    ],
+    { groups: 1, replicates: 2 },
+  );
+  const summary = xyTable(
+    "t_sum",
+    "XY summary",
+    ["Title", "X", "A:Mean", "A:SD", "A:N"],
+    [
+      [null, "0", "10", "1", "3"],
+      [null, "1", "20", "2", "3"],
+    ],
+    { groups: 1, replicates: 3, summaryFormat: "mean-sd-n" },
+  );
+  const project: ProjectFilePayload = {
+    nodes: { t_rep: reps, t_sum: summary },
+    rootOrder: ["t_rep", "t_sum"],
+    childOrder: { t_rep: [], t_sum: [] },
+    activeNodeId: "t_rep",
+  };
+  const { tables } = await writtenPrismTables((await writePrism(project, "1.9.0")).bytes);
+  strictEqual(tables.length, 2);
+  deepStrictEqual(tables[0], { dataFormat: "y_replicates", sets: [{ title: "A", format: "y_replicates" }] });
+  deepStrictEqual(tables[1], { dataFormat: "y_sd_n", sets: [{ title: "A", format: "y_sd_n" }] });
+  // The round-trip keeps the grouping: one dataset re-imports with the
+  // importer's own summary/replicate names, not three singles.
+  const back = await convertPrism((await writePrism(project, "1.9.0")).bytes, "r2-26-roundtrip.prism");
+  const backTables = back.project.rootOrder
+    .map((id) => back.project.nodes[id])
+    .filter((n) => n?.type === "table");
+  deepStrictEqual(backTables[0]?.data?.columns, ["Title", "X", "A_1", "A_2"]);
+  deepStrictEqual(backTables[1]?.data?.columns, ["Title", "X", "A_MEAN", "A_SD", "A_N"]);
+});
+
+check("R2-26: .pzfx export groups native XY colon subcolumns into one YColumn per dataset", async () => {
+  const xyTable = (id: string, name: string, columns: string[], rows: (string | null)[][], extra: Record<string, unknown>): ProjectNode => ({
+    id,
+    type: "table",
+    name,
+    parentId: null,
+    tableType: "xy",
+    data: { columns, rows, ...extra },
+  });
+  const project: ProjectFilePayload = {
+    nodes: {
+      t_rep: xyTable(
+        "t_rep",
+        "XY reps",
+        ["Title", "X", "A:Y1", "A:Y2"],
+        [
+          [null, "0", "10", "11"],
+          [null, "1", "20", "21"],
+        ],
+        { groups: 1, replicates: 2 },
+      ),
+      t_sum: xyTable(
+        "t_sum",
+        "XY summary",
+        ["Title", "X", "A:Mean", "A:SD", "A:N"],
+        [
+          [null, "0", "10", "1", "3"],
+          [null, "1", "20", "2", "3"],
+        ],
+        { groups: 1, replicates: 3, summaryFormat: "mean-sd-n" },
+      ),
+    },
+    rootOrder: ["t_rep", "t_sum"],
+    childOrder: { t_rep: [], t_sum: [] },
+    activeNodeId: "t_rep",
+  };
+  const xml = Buffer.from((await writePzfx(project, "1.9.0")).bytes).toString("utf8");
+  ok(xml.includes('<Title>A</Title>'), "no YColumn titled A (grouped dataset)");
+  ok(xml.includes('Subcolumns="2"'), "replicate group is not one YColumn with 2 subcolumns");
+  ok(xml.includes('YFormat="SDN"'), "summary group is not written as SDN");
+  ok(xml.includes('Subcolumns="3"'), "summary group is not one YColumn with 3 subcolumns");
+  ok(!xml.includes("A:Y1") && !xml.includes("A:Mean"), "colon subcolumns leaked as single datasets");
+});
+
+check("R2-26: .prism nonlinear-regression link resolves params.y against colon datasets and letters datasets past Z as AA…", async () => {
+  const xyTable: ProjectNode = {
+    id: "t_xy",
+    type: "table",
+    name: "XY reps",
+    parentId: null,
+    tableType: "xy",
+    data: {
+      columns: ["Title", "X", "A:Y1", "A:Y2"],
+      rows: [
+        [null, "0", "10", "11"],
+        [null, "1", "20", "21"],
+      ],
+      groups: 1,
+      replicates: 2,
+    },
+  };
+  const fit: ProjectNode = {
+    id: "a_fit",
+    type: "analysis",
+    name: "Nonlinear fit of A",
+    parentId: "t_xy",
+    analysisType: "nonlinear-regression",
+    analysisParams: { model: "sigmoidal-4pl-x", y: "A" },
+  };
+  const project: ProjectFilePayload = {
+    nodes: { t_xy: xyTable, a_fit: fit },
+    rootOrder: ["t_xy"],
+    childOrder: { t_xy: ["a_fit"] },
+    activeNodeId: "t_xy",
+  };
+  const { analyses } = await writtenPrismTables((await writePrism(project, "1.9.0")).bytes);
+  strictEqual(analyses.length, 1);
+  // params.y = "A" links the ONE grouped dataset, with its positional
+  // letter — before the fix yPos was -1 and every column was attached.
+  deepStrictEqual(analyses[0].inputs, [{ title: "A", idx: "A" }]);
+  // Past Z the letters roll over (AA, AB…) instead of charCode overflow.
+  const wideColumns = ["Title", ...Array.from({ length: 27 }, (_, i) => `D${i + 1}`)];
+  const wideRows = [[null, ...Array.from({ length: 27 }, () => "1")]];
+  const wideTable: ProjectNode = {
+    id: "t_wide",
+    type: "table",
+    name: "Wide",
+    parentId: null,
+    tableType: "column",
+    data: { columns: wideColumns, rows: wideRows },
+  };
+  const wideFit: ProjectNode = {
+    id: "a_wide",
+    type: "analysis",
+    name: "Wide fit",
+    parentId: "t_wide",
+    analysisType: "nonlinear-regression",
+    analysisParams: { model: "sigmoidal-4pl-x" },
+  };
+  const wideProject: ProjectFilePayload = {
+    nodes: { t_wide: wideTable, a_wide: wideFit },
+    rootOrder: ["t_wide"],
+    childOrder: { t_wide: ["a_wide"] },
+    activeNodeId: "t_wide",
+  };
+  const wide = await writtenPrismTables((await writePrism(wideProject, "1.9.0")).bytes);
+  strictEqual(wide.analyses.length, 1);
+  strictEqual(wide.analyses[0].inputs.length, 27);
+  strictEqual(wide.analyses[0].inputs[25].idx, "Z");
+  strictEqual(wide.analyses[0].inputs[26].idx, "AA");
+});
+
+check("R2-60: .prism import preserves line breaks in Info Sheet notes", async () => {
+  const bytes = await minimalPrismZip({
+    info: { title: "Project info", notesText: "line one\r\nline two\nline three", constants: [] },
+  });
+  const { project } = await convertPrism(bytes, "r2-60-notes.prism");
+  const node = Object.values(project.nodes).find((n) => n.type === "info");
+  if (!node || node.type !== "info") throw new Error("no info node");
+  strictEqual(node.info!.notes, "line one\nline two\nline three");
+});
+
+check("R2-60: .prism import bounds content.json numberOfRows — huge declarations clamp, negative ones are ignored", async () => {
+  const singleSet = {
+    "33333333-3333-3333-3333-333333333333": {
+      "@class": "DataSet",
+      uid: "33333333-3333-3333-3333-333333333333",
+      format: "y_single",
+      title: "A",
+      attributes: ["DS_ATTR_Y"],
+      replicates: [{}],
+    },
+  };
+  // 60,000 declared rows over a 2-row CSV: the declaration is clamped to
+  // the 50,000 import ceiling (before the fix the file padded all 60,000
+  // rows with no ceiling).
+  const huge = await minimalPrismZip({
+    table: { format: "column", dataFormat: "y_single", dataSets: ["33333333-3333-3333-3333-333333333333"] },
+    content: { numberOfColumns: 1, numberOfRows: 60000, version: 1 },
+    csv: "1\n2\n",
+    sets: singleSet,
+  });
+  const hugeResult = await convertPrism(huge, "r2-60-huge.prism");
+  const hugeNode = Object.values(hugeResult.project.nodes).find((n) => n.type === "table");
+  if (!hugeNode || hugeNode.type !== "table") throw new Error("no table node");
+  strictEqual(hugeNode.data!.rows.length, 50000);
+  ok(
+    hugeResult.report.issues.some((i) => i.message.includes("import ceiling")),
+    "no import-ceiling warning for the clamped declaration",
+  );
+  // A negative declaration is ignored: the CSV's own rows import.
+  const negative = await minimalPrismZip({
+    table: { format: "column", dataFormat: "y_single", dataSets: ["33333333-3333-3333-3333-333333333333"] },
+    content: { numberOfColumns: 1, numberOfRows: -3, version: 1 },
+    csv: "1\n2\n",
+    sets: singleSet,
+  });
+  const negativeResult = await convertPrism(negative, "r2-60-negative.prism");
+  const negativeNode = Object.values(negativeResult.project.nodes).find((n) => n.type === "table");
+  if (!negativeNode || negativeNode.type !== "table") throw new Error("no table node");
+  strictEqual(negativeNode.data!.rows.length, 2);
+  ok(
+    negativeResult.report.issues.some((i) => i.message.includes("not a usable count")),
+    "no ignored-declaration warning for the negative count",
+  );
+});
+
+check("R2-60: .prism import refuses a malformed document.json with a plain error, never an uncaught TypeError", async () => {
+  // document.json holding null: before the fix `doc.sheets` threw
+  // "Cannot read properties of null".
+  const nullDoc = new JSZip();
+  nullDoc.file("document.json", "null");
+  let nullErr: unknown;
+  try {
+    await convertPrism(await nullDoc.generateAsync({ type: "uint8array" }), "r2-60-null-doc.prism");
+  } catch (err) {
+    nullErr = err;
+  }
+  ok(nullErr instanceof Error, "null document.json did not throw");
+  ok(!(nullErr instanceof TypeError), "null document.json threw a TypeError");
+  ok(/isn't a Prism document/.test((nullErr as Error).message), "null document.json error is not the plain-language refusal");
+  // sheets.data holding a number (not a list): before the fix `for...of`
+  // threw "not iterable"; now it warns and refuses cleanly.
+  const badList = new JSZip();
+  badList.file(
+    "document.json",
+    JSON.stringify({
+      "@class": "Document",
+      createdBy: { name: "Prism", version: "10.3.0" },
+      formatVersion: "1-4-1",
+      sheets: { graphs: [], layouts: [], analyses: [], info: [], data: 7 },
+      sheetAttributesMap: {},
+    }),
+  );
+  let listErr: unknown;
+  try {
+    await convertPrism(await badList.generateAsync({ type: "uint8array" }), "r2-60-bad-list.prism");
+  } catch (err) {
+    listErr = err;
+  }
+  ok(listErr instanceof Error, "non-array sheets.data did not throw");
+  ok(!(listErr instanceof TypeError), "non-array sheets.data threw a TypeError");
+  ok(/no data tables/.test((listErr as Error).message), "non-array sheets.data error is not the plain-language refusal");
+});
+
 check(".pzfx import reads a HugeTable as a Grouped table with all 53 replicates (BUG-8)", () => {
   // pypzfx-column_hugetable.pzfx is the pypzfx fixture: one table, TwoWay,
   // YFormat replicates, 53 subcolumns — past Prism's 52-subcolumn line, so
