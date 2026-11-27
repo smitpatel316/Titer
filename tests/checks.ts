@@ -12580,6 +12580,70 @@ check("two-way ANOVA: FDR post-hoc adjusts the LSD P values; cells and marginal 
   ok(rmFdr.comparisons!.every((c) => c.low == null && c.high == null), "RM FDR comparisons carry no CI");
 });
 
+// BUG-REPORT #112 (seq 584): two-way ANOVA `runPosthoc` computed the
+// difference of uncentered cell means in R (`mean(a) - mean(b)`), losing
+// 12+ digits at ~1e13 scale — the main ANOVA had been centered (commit
+// 989f7c0b) but the post-hoc paths had not. On Cell A = 1e13 + [0.01,
+// 0.02, 0.03] vs Cell B = 1e13 + [0.05, 0.06, 0.07] the uncentered diff
+// is -0.0390625; the exact diff of the stored doubles is -0.041015625
+// (cell-mean offsets 10 vs 31 ULP of 1e13). Post-fix each pair is shifted
+// by a common origin (a[1]) before the means are subtracted, in both the
+// ordinary path and the RM sphericity-assumed path (both go through
+// runPosthoc).
+check("two-way ANOVA post-hoc diff is exact at 1e13 scale (BUG-REPORT #112, seq 584)", async () => {
+  const data: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3"],
+    rows: [
+      [
+        "Row 1",
+        "10000000000000.01",
+        "10000000000000.02",
+        "10000000000000.03",
+        "10000000000000.05",
+        "10000000000000.06",
+        "10000000000000.07",
+      ],
+      [
+        "Row 2",
+        "10000000000000.11",
+        "10000000000000.12",
+        "10000000000000.13",
+        "10000000000000.15",
+        "10000000000000.16",
+        "10000000000000.17",
+      ],
+    ],
+    groups: 2,
+    replicates: 3,
+  };
+  const run = async (params: AnalysisParams) => {
+    const out = await runAnalysis("two-way-anova", data, params);
+    if ("error" in out) throw new Error(`two-way ANOVA failed: ${out.error}`);
+    return out;
+  };
+  // The A-vs-B comparison at Row 1 is the bug's repro.
+  const diffAtRow1 = (out: Awaited<ReturnType<typeof run>>) => {
+    const c = out.comparisons!.find((c) => c.group1 === "A (Row 1)" && c.group2 === "B (Row 1)");
+    if (!c) throw new Error(`no A-vs-B Row 1 comparison in ${JSON.stringify(out.comparisons)}`);
+    return c.diff;
+  };
+  const close = (got: number | null | undefined, label: string) =>
+    ok(got != null && Math.abs(got - -0.041015625) < 1e-12, `${label}: got ${got}, want -0.041015625`);
+  // Every ordinary post-hoc method shares runPosthoc's `d`.
+  for (const method of ["tukey", "sidak", "bonferroni", "holm-sidak", "lsd", "games-howell"] as const) {
+    const out = await run({ design: "ordinary", posthoc: method, posthocTarget: "groups" } as AnalysisParams);
+    close(diffAtRow1(out), `ordinary ${method}`);
+  }
+  // The repeated-measures sphericity-assumed path goes through runPosthoc too.
+  const rm = await run({
+    design: "repeated-measures",
+    posthoc: "tukey",
+    posthocTarget: "groups",
+    sphericity: true,
+  } as AnalysisParams);
+  close(diffAtRow1(rm), "RM sphericity-assumed tukey");
+});
+
 // Seq 314 — Scheirer-Ray-Hare: the H statistics are the Type I sequential sums of
 // squares on the ranks (Group first — the rcompanion reference), over var(ranks).
 // The Type III sums the code used to compute give Group H 23.0225 / Row H 16.9112 on
