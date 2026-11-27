@@ -4370,7 +4370,17 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         // or polynomial has no initial values to plot, so it is not
         // offered there (the runner refuses it too).
         a.model !== undefined &&
-          modelSpec(a.model as NonlinearModel).kind !== "lm" &&
+          (() => {
+            // modelSpec throws for a user-defined equation with no
+            // equation/starts yet — the wizard asks for those next, so
+            // treat an unbuildable spec as fittable and let the runner
+            // refuse don't-fit for line models.
+            try {
+              return modelSpec(a.model as NonlinearModel).kind !== "lm";
+            } catch {
+              return true;
+            }
+          })() &&
           choice("dontFit", "Don't fit the curve — plot the initial-values curve instead?", [
             ["no", "No — fit the curve"],
             ["yes", "Yes — plot the curve defined by the initial values (not fitted)"],

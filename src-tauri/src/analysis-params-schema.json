@@ -1738,10 +1738,56 @@
           "1/y2",
           "1/x",
           "1/x2",
-          "1/sd2"
+          "1/sd2",
+          "1/yk"
         ],
         "required": false,
-        "description": "Weighting (plan 26): \"none\" (default) or a scheme — 1/Y, 1/Y², 1/X, 1/X², or 1/SD² (replicate SDs across the table's Y columns, per row)."
+        "description": "Weighting (plan 26): \"none\" (default) or a scheme — 1/Y, 1/Y², 1/X, 1/X², 1/SD² (replicate SDs across the table's Y columns, per row), or 1/Y^K (general weighting, seq 200 — needs `weightExponent`)."
+      },
+      {
+        "name": "weightExponent",
+        "type": "number",
+        "required": false,
+        "description": "The exponent K for 1/Y^K weighting (seq 200): weights are 1/Y^K. Required with weights \"1/yk\" (greater than 0); refused with any other scheme."
+      },
+      {
+        "name": "maxIterations",
+        "type": "number",
+        "required": false,
+        "description": "Maximum iterations (seq 200): the nls cap, default 200. Must be a whole number of at least 1."
+      },
+      {
+        "name": "convergence",
+        "type": "string",
+        "enum": [
+          "quick",
+          "medium",
+          "strict"
+        ],
+        "required": false,
+        "description": "Convergence criteria (seq 200, Prism's Quick/Medium/Strict): quick stops when the sum of squares changes by < 0.01% twice running, medium (default) < 0.0001% five times running, strict < 0.00000001% five times running."
+      },
+      {
+        "name": "replicates",
+        "type": "string",
+        "enum": [
+          "each",
+          "means"
+        ],
+        "required": false,
+        "description": "How replicates are fitted (seq 200): each replicate as its own point (default), or the mean of the replicates (the weighting factor is multiplied by the replicate count, as Prism does)."
+      },
+      {
+        "name": "cleanedData",
+        "type": "boolean",
+        "required": false,
+        "description": "Also create a table of the cleaned data (seq 200, Prism 8+ Method tab → Outliers): the fitted data with ROUT's outliers removed. Needs ROUT."
+      },
+      {
+        "name": "dontFit",
+        "type": "boolean",
+        "required": false,
+        "description": "Don't fit the curve (seq 200, Prism's Diagnostics tab): plot the curve defined by the initial values of the parameters instead. Line models have no initial values, so they refuse it."
       },
       {
         "name": "fitXMin",
