@@ -282,6 +282,7 @@ import { analysisTitle, titleAfterApply } from "../src/stats/index";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
 import { hclustAvgSilhouette, hclustClusterWithinSs, hclustDistanceMatrix, hclustSuggestedK, hclustWithinSs } from "../src/stats/multiple/hierarchical-clustering";
 import { dendrogramSegments } from "../src/views/graphs/dendrogram";
+import { covarianceHeatmapFigure } from "../src/views/graphs/covariance-heatmap";
 import { compareTwoGroupsSpec } from "../src/stats/column/compare-two-groups";
 import { kruskalWallisSpec } from "../src/stats/column/kruskal-wallis";
 import { anovaSpec } from "../src/stats/column/anova";
@@ -23119,6 +23120,163 @@ check("seq 198 multiple-regression diagnostics: VIF, ANOVA table, AICc, covarian
   want.forEach((row, i) =>
     row.forEach((value, j) => close(out.covariance?.values[i]?.[j], value, 1e-9, `cov[${i}][${j}]`)),
   );
+});
+
+check("seq 198 multiple-regression diagnostics remainder: residuals, normality, Durbin-Watson, heteroscedasticity, covariance heatmap", async () => {
+  // Same 10-row table as the seq 198 check above (Y = 3 + 2·X1 − X2 +
+  // 0.5·X3 + fixed noise). Every expected value below was computed in
+  // Python (numpy/scipy) before the check was written, not read off the
+  // runner: residuals/standardized residuals/leverage/Cook's distance from
+  // the OLS hat matrix, Durbin–Watson from the residual differences,
+  // Shapiro–Wilk and D'Agostino–Pearson from scipy, Anderson–Darling's
+  // statistic from Stephens' formula with nortest's piecewise P-value
+  // approximation, Kolmogorov–Smirnov's D with R's asymptotic P
+  // (scipy method="asymp"), and Spearman's rho between |residual| and
+  // fitted with its exact permutation P (n = 10, 10! permutations).
+  // Prism plots these residuals four ways (vs predicted, |residual| vs
+  // predicted, QQ, vs row) and tests them for normality in four ways; the
+  // per-row table + the four tests + Durbin–Watson + the Spearman
+  // heteroscedasticity test are the numeric half of that, and the
+  // covariance heatmap is the visual half of the covariance matrix.
+  const table: TableData = {
+    columns: ["Title", "Y", "X1", "X2", "X3"],
+    rows: [
+      ["", "5.8", "1", "2", "5"],
+      ["", "7.3", "2", "1", "3"],
+      ["", "8.5", "3", "4", "6"],
+      ["", "8.6", "4", "3", "2"],
+      ["", "10.6", "5", "6", "7"],
+      ["", "12.6", "6", "5", "4"],
+      ["", "13.2", "7", "8", "9"],
+      ["", "12.7", "8", "7", "1"],
+      ["", "14.5", "9", "10", "8"],
+      ["", "19.4", "10", "9", "10"],
+    ],
+  };
+  const params = { dependent: "Y", predictors: ["X1", "X2", "X3"] };
+  const out = await runAnalysis("multiple-regression", table, params);
+  if ("error" in out) throw new Error(out.error);
+  const close = (got: number | null | undefined, want: number, tol: number, what: string) => {
+    if (got == null || Math.abs(got - want) > tol)
+      throw new Error(`${what}: got ${got}, expected ${want} (±${tol})`);
+  };
+  // Per-row residuals: table row number, observed, fitted, residual,
+  // standardized residual (rstandard), leverage (hat diagonal), Cook's D.
+  const fitted = [5.587039106145253, 7.722234636871511, 8.053519553072627, 9.118324022346373, 10.52, 12.120000000000005, 13.521675977653633, 12.445698324022352, 14.917765363128494, 19.193743016759775];
+  const resid = [0.21296089385474648, -0.4222346368715115, 0.44648044692737265, -0.5183240223463734, 0.08000000000000007, 0.4799999999999951, -0.32167597765363354, 0.2543016759776471, -0.41776536312849366, 0.20625698324022324];
+  const rstd = [0.5881175964383063, -1.206095511367696, 1.102015978825143, -1.2988456686698011, 0.1911525884760859, 1.1469155308565024, -0.8060738693900295, 1.0262639397306577, -1.1933292185773512, 0.9940289547010039];
+  const lev = [0.40111731843575404, 0.44022346368715093, 0.2502793296089387, 0.27262569832402284, 0.20000000000000076, 0.2000000000000004, 0.2726256983240219, 0.7195530726256986, 0.44022346368715226, 0.8033519553072641];
+  const cooks = [0.05791592737840155, 0.285997282795047, 0.10135409267483246, 0.1580752754721363, 0.0022837070050692513, 0.082213452182491, 0.06088334878297723, 0.6755699024407579, 0.2799748711680206, 1.0091466926728434];
+  strictEqual(out.residuals?.length, 10);
+  out.residuals?.forEach((r, i) => {
+    strictEqual(r.row, i + 1);
+    close(r.observed, [5.8, 7.3, 8.5, 8.6, 10.6, 12.6, 13.2, 12.7, 14.5, 19.4][i], 1e-9, `resid[${i}].observed`);
+    close(r.fitted, fitted[i], 1e-9, `resid[${i}].fitted`);
+    close(r.residual, resid[i], 1e-9, `resid[${i}].residual`);
+    close(r.standardized, rstd[i], 1e-9, `resid[${i}].standardized`);
+    close(r.leverage, lev[i], 1e-9, `resid[${i}].leverage`);
+    close(r.cooks, cooks[i], 1e-9, `resid[${i}].cooks`);
+  });
+  // Diagnostics on these residuals: DW 3.37 (negative autocorrelation in
+  // row order), SW/AD/KS all non-significant, Spearman non-significant —
+  // and D'Agostino–Pearson untestable: Prism/Titer need n ≥ 20 for it.
+  const d = out.residualDiagnostics;
+  if (!d) throw new Error("residualDiagnostics missing");
+  close(d.durbinWatson, 3.3665580316219383, 1e-9, "Durbin-Watson");
+  close(d.shapiroWilk.statistic, 0.8769248723983765, 1e-9, "Shapiro-Wilk W");
+  close(d.shapiroWilk.p, 0.1202777698636055, 1e-6, "Shapiro-Wilk P");
+  strictEqual(d.dagostinoPearson.statistic, null);
+  strictEqual(d.dagostinoPearson.p, null);
+  close(d.andersonDarling.statistic, 0.5534841033470936, 1e-9, "Anderson-Darling A2");
+  close(d.andersonDarling.p, 0.1144792231753412, 1e-6, "Anderson-Darling P");
+  close(d.kolmogorovSmirnov.statistic, 0.20535677842857203, 1e-9, "Kolmogorov-Smirnov D");
+  close(d.kolmogorovSmirnov.p, 0.7929491372192313, 1e-6, "Kolmogorov-Smirnov P");
+  close(d.heteroscedasticity.rho, -0.24848484848484845, 1e-9, "Spearman rho");
+  close(d.heteroscedasticity.p, 0.49176752645502647, 1e-6, "Spearman P");
+  // The notes name what the numbers flag: row 10's Cook's distance above
+  // 1 and its leverage above 2p/n, and the high Durbin–Watson.
+  ok(out.notes.includes("Row 10"), `notes should flag row 10, got: ${out.notes}`);
+  ok(out.notes.includes("Cook"), `notes should flag Cook's distance, got: ${out.notes}`);
+  ok(out.notes.includes("leverage"), `notes should flag leverage, got: ${out.notes}`);
+  ok(out.notes.includes("Durbin"), `notes should flag Durbin-Watson, got: ${out.notes}`);
+  // Covariance heatmap: the figure is the covariance matrix itself, on a
+  // diverging scale centred at 0 (zmin/zmax = ∓ the largest |covariance|,
+  // the intercept's variance here).
+  if (!out.covariance) throw new Error("covariance missing");
+  const fig = covarianceHeatmapFigure(out.covariance);
+  deepStrictEqual(fig.x, ["Intercept", "X1", "X2", "X3"]);
+  deepStrictEqual(fig.y, ["Intercept", "X1", "X2", "X3"]);
+  out.covariance.values.forEach((row, i) =>
+    row.forEach((value, j) => close(fig.z[i]?.[j], value, 1e-9, `heatmap z[${i}][${j}]`)),
+  );
+  close(fig.zmax, 0.142144294809775, 1e-9, "heatmap zmax");
+  close(fig.zmin, -0.142144294809775, 1e-9, "heatmap zmin");
+
+  // A second, 24-row fit (seeded noise, Y rounded to 4 dp): n ≥ 20, so
+  // D'Agostino–Pearson runs — pin its K2/P from scipy's normaltest, plus
+  // the other diagnostics and the first/last residual rows.
+  const big: TableData = {
+    columns: ["Title", "Y", "X1", "X2", "X3"],
+    rows: [
+      ["", "-0.9216", "1", "10", "8"],
+      ["", "1.4065", "2", "7", "3"],
+      ["", "5.7416", "3", "7", "10"],
+      ["", "4.2307", "4", "9", "5"],
+      ["", "9.4757", "5", "6", "5"],
+      ["", "10.0567", "6", "8", "6"],
+      ["", "10.2349", "7", "9", "6"],
+      ["", "18.7611", "8", "3", "6"],
+      ["", "22.5107", "9", "1", "6"],
+      ["", "23.5956", "10", "4", "10"],
+      ["", "27.0304", "11", "3", "9"],
+      ["", "21.5962", "12", "9", "8"],
+      ["", "22.9837", "13", "10", "8"],
+      ["", "33.9422", "14", "1", "7"],
+      ["", "29.7082", "15", "5", "4"],
+      ["", "30.9441", "16", "9", "10"],
+      ["", "37.5552", "17", "2", "5"],
+      ["", "32.5319", "18", "8", "3"],
+      ["", "42.8875", "19", "2", "9"],
+      ["", "39.0381", "20", "5", "2"],
+      ["", "41.1794", "21", "9", "9"],
+      ["", "45.7264", "22", "4", "7"],
+      ["", "46.4297", "23", "4", "2"],
+      ["", "48.5597", "24", "3", "1"],
+    ],
+  };
+  const bigOut = await runAnalysis("multiple-regression", big, params);
+  if ("error" in bigOut) throw new Error(bigOut.error);
+  const bd = bigOut.residualDiagnostics;
+  if (!bd) throw new Error("big residualDiagnostics missing");
+  close(bd.durbinWatson, 2.5899965954016895, 1e-9, "big Durbin-Watson");
+  close(bd.shapiroWilk.statistic, 0.9759615659713745, 1e-9, "big Shapiro-Wilk W");
+  close(bd.shapiroWilk.p, 0.8114697337150574, 1e-6, "big Shapiro-Wilk P");
+  close(bd.dagostinoPearson.statistic, 0.13883463536186194, 1e-9, "big D'Agostino-Pearson K2");
+  close(bd.dagostinoPearson.p, 0.9329372676125257, 1e-6, "big D'Agostino-Pearson P");
+  close(bd.andersonDarling.statistic, 0.2576863226494446, 1e-9, "big Anderson-Darling A2");
+  close(bd.andersonDarling.p, 0.6887430897469904, 1e-6, "big Anderson-Darling P");
+  close(bd.kolmogorovSmirnov.statistic, 0.10613170562368993, 1e-9, "big Kolmogorov-Smirnov D");
+  close(bd.kolmogorovSmirnov.p, 0.9497437741922178, 1e-6, "big Kolmogorov-Smirnov P");
+  close(bd.heteroscedasticity.rho, 0.11304347826086956, 1e-9, "big Spearman rho");
+  close(bd.heteroscedasticity.p, 0.5989404349055967, 1e-6, "big Spearman P");
+  strictEqual(bigOut.residuals?.length, 24);
+  const first = bigOut.residuals?.[0];
+  const last = bigOut.residuals?.[23];
+  if (!first || !last) throw new Error("big residuals missing rows");
+  close(first.fitted, -1.33626381624096, 1e-9, "big resid[0].fitted");
+  close(first.residual, 0.41466381624095994, 1e-9, "big resid[0].residual");
+  close(first.standardized, 1.0252481219275704, 1e-9, "big resid[0].standardized");
+  close(first.leverage, 0.1935015029166414, 1e-9, "big resid[0].leverage");
+  close(first.cooks, 0.06304907996737177, 1e-9, "big resid[0].cooks");
+  close(last.fitted, 48.683810701227024, 1e-9, "big resid[23].fitted");
+  close(last.residual, -0.12411070122702483, 1e-9, "big resid[23].residual");
+  close(last.standardized, -0.32108969574243984, 1e-9, "big resid[23].standardized");
+  close(last.leverage, 0.26339448141900756, 1e-9, "big resid[23].leverage");
+  close(last.cooks, 0.009216466506629096, 1e-9, "big resid[23].cooks");
+  // Nothing flags on the big fit (no |standardized| above 3, no leverage
+  // above 2p/n, no Cook's distance above 1), so the notes stay quiet
+  // about individual rows.
+  ok(!bigOut.notes.includes("Row "), `big notes should flag no row, got: ${bigOut.notes}`);
 });
 
 check("a constant or collinear predictor is named, not a crash, in multiple logistic regression (R3-23)", async () => {
