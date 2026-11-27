@@ -32,7 +32,7 @@ import {
   type RefLine,
   type SeriesStyle,
 } from "../../store/types";
-import { GRAPHS, hasValueAxis, newGraphOptions } from ".";
+import { axisControls, GRAPHS, hasValueAxis, newGraphOptions } from ".";
 import {
   EXPORT_FORMATS,
   EXPORT_PRESETS,
@@ -66,7 +66,7 @@ import {
   ThicknessRow,
   Toggle,
 } from "./panel-controls";
-import { axesRangeInputs, hasTableXAxis, logScaleOffered, rightYDataset } from "./plot-helpers";
+import { hasTableXAxis, rightYDataset } from "./plot-helpers";
 import { dataControls, statisticsControls, styleControls, type SectionContext } from "./format-sections";
 import {
   DATE_DISPLAY_FORMAT_LABELS,
@@ -259,6 +259,15 @@ export function FormatPanel(props: Props) {
   const statistics = statisticsControls(props);
   const data = dataControls(props);
   const style = styleControls(props);
+  // What the Axes section offers for each settings axis, from `axisKind`
+  // (seq 572): a Scale row only where the axis is a scale axis, Min/Max/Step
+  // and a number format wherever it holds values. The axis as drawn for a
+  // settings key: horizontal bars keep their value axis's settings in y,
+  // though it lies across as X — so the value-axis rows are labelled X
+  // there, not Y.
+  const xControls = axisControls(graphType, options, "x", props.atValues);
+  const yControls = axisControls(graphType, options, "y", props.atValues);
+  const shownOf = (key: "x" | "y") => ((key === "x") === !horizontal ? "X" : "Y");
 
   return (
     <>
@@ -450,21 +459,21 @@ export function FormatPanel(props: Props) {
             "tickLength",
           ])}
         >
-          {family !== "heatmap" && family !== "volcano" && logScaleOffered(graphType).y && (
+          {yControls.scale && (
             <Scale
-              axis="Y"
+              axis={shownOf("y")}
               value={options.yScale}
               leftOut={props.logLeftOut.y}
               onChange={(yScale) => set({ yScale })}
             />
           )}
-          {family !== "heatmap" && axesRangeInputs(graphType).y && (
+          {yControls.range && (
             <AxisRange
-              axis="Y"
+              axis={shownOf("y")}
               min={options.yMin}
               max={options.yMax}
               step={options.yStep}
-              log={family !== "volcano" && options.yScale !== "linear"}
+              log={yControls.scale && options.yScale !== "linear"}
               minHook={options.yMinConstant}
               maxHook={options.yMaxConstant}
               constants={constantItems}
@@ -472,9 +481,9 @@ export function FormatPanel(props: Props) {
               onHookChange={(yMinConstant, yMaxConstant) => set({ yMinConstant, yMaxConstant })}
             />
           )}
-          {family !== "heatmap" && axesRangeInputs(graphType).y && (
+          {yControls.numberFormat && (
             <NumberFormat
-              axis="Y"
+              axis={shownOf("y")}
               value={options.yNumberFormat}
               onChange={(yNumberFormat) => set({ yNumberFormat })}
             />
@@ -490,36 +499,35 @@ export function FormatPanel(props: Props) {
               ]}
             />
           )}
-          {family === "xy" && !isDateX && logScaleOffered(graphType).x && (
+          {xControls.scale && !isDateX && (
             <Scale
-              axis="X"
+              axis={shownOf("x")}
               value={options.xScale}
               leftOut={props.logLeftOut.x}
               onChange={(xScale) => set({ xScale })}
             />
           )}
-          {(family === "xy" || family === "volcano" || family === "histogram" || family === "multiple") &&
-            axesRangeInputs(graphType).x && (
-              <>
-                <AxisRange
-                  axis="X"
-                  min={options.xMin}
-                  max={options.xMax}
-                  step={options.xStep}
-                  log={family === "xy" && options.xScale !== "linear"}
-                  minHook={options.xMinConstant}
-                  maxHook={options.xMaxConstant}
-                  constants={constantItems}
-                  onChange={(xMin, xMax, xStep) => set({ xMin, xMax, xStep })}
-                  onHookChange={(xMinConstant, xMaxConstant) => set({ xMinConstant, xMaxConstant })}
+          {xControls.range && (
+            <>
+              <AxisRange
+                axis={shownOf("x")}
+                min={options.xMin}
+                max={options.xMax}
+                step={options.xStep}
+                log={xControls.scale && options.xScale !== "linear"}
+                minHook={options.xMinConstant}
+                maxHook={options.xMaxConstant}
+                constants={constantItems}
+                onChange={(xMin, xMax, xStep) => set({ xMin, xMax, xStep })}
+                onHookChange={(xMinConstant, xMaxConstant) => set({ xMinConstant, xMaxConstant })}
+              />
+              {!isDateX && (
+                <NumberFormat
+                  axis={shownOf("x")}
+                  value={options.xNumberFormat}
+                  onChange={(xNumberFormat) => set({ xNumberFormat })}
                 />
-                {!isDateX && (
-                  <NumberFormat
-                    axis="X"
-                    value={options.xNumberFormat}
-                    onChange={(xNumberFormat) => set({ xNumberFormat })}
-                  />
-                )}
+              )}
                 {hasTableXAxis(graphType, options) && xFormat === "date" && (
                   <>
                     <Choice
