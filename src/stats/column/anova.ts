@@ -69,7 +69,11 @@ function comparisons(groups: Group[], p: AnovaParams): { setup: string; values: 
   const diff = (i: number, j: number) => `m[${at(i)}]-m[${at(j)}]`;
   const pooledSetup = `${R_CRIT};mse<-a$"Mean Sq"[2];dfe<-a$Df[2]`;
   if (p.posthoc === "tukey") {
-    const ph = tukeyPosthocStatements(k);
+    // TukeyHSD on the centered response (v0, defined in the setup): on the
+    // raw values its P values disagreed with the centered CIs — the same
+    // 13-digit loss the main aov was centered for. The shift cancels in
+    // every pairwise contrast, so the P values are unchanged, only precise.
+    const ph = tukeyPosthocStatements(k, "aov(v0~gr)");
     return {
       // `ptk` is defined here, not left to an earlier eval in the session:
       // upstream's branch reads it without defining it.
@@ -222,8 +226,10 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
       // and the post-hoc P values read up to 48% off, some Games-Howell P
       // values exactly 0). The shift cancels in every contrast (and in var),
       // so the statistics are unchanged — only precise. The lognormal
-      // geometric means below add the shift back (m + mean(v)).
-      `gm<-mean(v);G<-lapply(G,function(x)x-gm);` +
+      // geometric means below add the shift back (m + mean(v)). v0 is the
+      // centered response itself, for TukeyHSD below: its QR on the raw
+      // values loses the group differences exactly as aov's did.
+      `gm<-mean(v);v0<-v-gm;G<-lapply(G,function(x)x-gm);` +
       `n<-lengths(G);m<-sapply(G,mean);s2<-sapply(G,var);a<-summary(aov(I(v-mean(v))~gr))[[1]]`;
     // Brown-Forsythe's F* (Brown and Forsythe, 1974): the between-group sum of squares
     // over Σ(1 − n_i/N)·s_i², its denominator df from the weights c_i =
