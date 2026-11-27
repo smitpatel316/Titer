@@ -44172,6 +44172,28 @@ check("feedback-loop-453: feedback reachable for every user, Discussions + suppo
 });
 
 
+// BR-69: WhatsNewDialog auto-closed itself 2 seconds after a manual
+// Help ▸ What's New open. The dialog shared one `open` boolean between
+// the first-launch auto-show and the manual on-demand open, and the
+// 2-second re-check interval ran while open — closing the dialog
+// whenever shouldShowWhatsNew() was false, which is always, once the
+// user has dismissed the auto-shown dialog. The fix tracks whether the
+// current open session was auto-shown (autoShown) and runs the re-check
+// only while open && autoShown; a manual open clears the flag.
+check("bugfix-br-69: manual Help ▸ What's New open is not auto-closed by the 2-second re-check", () => {
+  const src = readFileSync("src/components/whats-new-dialog.tsx", "utf8");
+  ok(src.includes("autoShown"), "the dialog tracks whether this open session was auto-shown");
+  ok(
+    /onWhatsNewRequest\(\(\) => \{[^}]*setAutoShown\(false\)/.test(src),
+    "a manual Help ▸ What's New open clears autoShown",
+  );
+  ok(src.includes("setAutoShown(true)"), "the first-launch auto-show sets autoShown");
+  ok(/if \(!open \|\| !autoShown\) return;/.test(src), "the re-check interval runs only while open && autoShown");
+  ok(/\}, \[open, autoShown\]\)/.test(src), "the re-check effect re-runs when autoShown changes");
+  ok(/setAutoShown\(false\)/.test(src), "closing clears autoShown so a later manual open cannot inherit it");
+});
+
+
 // ── Run ──────────────────────────────────────────────────────────────────
 
 // Descriptives are computed by R since the v1.0.7 rebase, so checks that run
