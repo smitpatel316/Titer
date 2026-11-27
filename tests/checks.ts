@@ -19337,11 +19337,16 @@ check("a multi-graph Word export holds every graph under its own title (Office)"
   ok(doc.includes('r:embed="rId1"') && doc.includes('r:embed="rId2"'), doc);
   deepStrictEqual(new Uint8Array(await zip.file("word/media/image2.png")!.async("uint8array")), png);
   // One image through the multi builder is the document the single builder wrote.
+  const one = await buildOfficeDocumentMulti("word", [{ png, title: "Dose response", widthPx: 600, heightPx: 300, dpi: 150 }]);
+  const oneZip = await JSZip.loadAsync(one);
   const single = await buildOfficeDocument("word", { png, title: "Dose response", widthPx: 600, heightPx: 300, dpi: 150 });
   const singleZip = await JSZip.loadAsync(single);
-  strictEqual(doc, await singleZip.file("word/document.xml")!.async("text"));
   strictEqual(
-    await zip.file("[Content_Types].xml")!.async("text"),
+    await oneZip.file("word/document.xml")!.async("text"),
+    await singleZip.file("word/document.xml")!.async("text"),
+  );
+  strictEqual(
+    await oneZip.file("[Content_Types].xml")!.async("text"),
     await singleZip.file("[Content_Types].xml")!.async("text"),
   );
 });
