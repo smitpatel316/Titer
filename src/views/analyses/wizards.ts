@@ -4065,7 +4065,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           placeholder: "e.g. 1",
           parse: (text: string) => parseRequiredPositive(text, "radioligand concentration [L]"),
         },
-        ...(paramNames.length
+        ...(model && paramNames.length
           ? Array.from({ length: count }, (_, i) => i).flatMap((i): Question[] => [
               {
                 id: `curve${i + 1}_label`,
