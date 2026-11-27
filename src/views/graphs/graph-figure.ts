@@ -90,6 +90,7 @@ import { addLogisticCurve, logisticCurveNote } from "./logistic-curve";
 import { addForestPlot } from "./forest-plot";
 import { addEstimationPlot } from "./estimation-plot";
 import { addObservedFitted } from "./observed-fitted";
+import { addCovarianceHeatmap } from "./covariance-heatmap";
 import { addScreePlot } from "./scree-plot";
 import { addMonteCarloHistogram } from "./monte-carlo-histogram";
 import { addPcaBiplot } from "./pca-biplot";
@@ -393,6 +394,7 @@ export async function buildGraphFigure(
   const coxParams = (coxAnalysis?.analysisParams ?? undefined) as CoxPHParams | undefined;
   const poissonAnalysis = options.poissonAnalysisId ? nodes[options.poissonAnalysisId] : undefined;
   const poissonParams = (poissonAnalysis?.analysisParams ?? undefined) as PoissonRegressionParams | undefined;
+  const mlrAnalysis = options.mlrAnalysisId ? nodes[options.mlrAnalysisId] : undefined;
   const logisticY = columns[1]?.name;
 
   const needSig = stars && sigAnalysis !== undefined;
@@ -414,6 +416,7 @@ export async function buildGraphFigure(
     coxResolved,
     ttestResolved,
     poissonResolved,
+    mlrResolved,
     pcaResolved,
     kmeansResolved,
     hclustResolved,
@@ -441,6 +444,9 @@ export async function buildGraphFigure(
       : Promise.resolve(noOutcome),
     type === "observed-fitted"
       ? resolveOutcome(poissonAnalysis, "poisson-regression", data, sheets, run)
+      : Promise.resolve(noOutcome),
+    type === "covariance-heatmap"
+      ? resolveOutcome(mlrAnalysis, "multiple-regression", data, sheets, run)
       : Promise.resolve(noOutcome),
     needPca
       ? resolveOutcome(linked("pcaAnalysisId"), "principal-component-analysis", data, sheets, run)
@@ -477,6 +483,7 @@ export async function buildGraphFigure(
   const coxResult = resultOf(coxResolved);
   const ttestResult = resultOf(ttestResolved);
   const poissonResult = resultOf(poissonResolved);
+  const mlrResult = resultOf(mlrResolved);
   const pcaResult = resultOf(pcaResolved);
   const kmeansResult = resultOf(kmeansResolved);
   const hclustResult = resultOf(hclustResolved);
@@ -692,6 +699,19 @@ export async function buildGraphFigure(
       record("observed-fitted", "error", poissonResolved.error);
     } else {
       unlinked("observed-fitted");
+    }
+  }
+  if (type === "covariance-heatmap") {
+    if (mlrResult) {
+      apply(
+        "covariance-heatmap",
+        () => addCovarianceHeatmap(fig, mlrResult, buildOptions),
+        "The Multiple regression has no covariance matrix to draw.",
+      );
+    } else if (mlrResolved.error) {
+      record("covariance-heatmap", "error", mlrResolved.error);
+    } else {
+      unlinked("covariance-heatmap");
     }
   }
   if (type === "scree-plot") {

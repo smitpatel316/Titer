@@ -48,6 +48,7 @@ import { volcano, VOLCANO_SERIES } from "./volcano";
 import { blandAltmanGraph } from "./bland-altman";
 import { rocCurveGraph } from "./roc-curve";
 import { observedFitted, OBSERVED_FITTED_SERIES } from "./observed-fitted";
+import { covarianceHeatmap } from "./covariance-heatmap";
 import { screePlot, SCREE_SERIES } from "./scree-plot";
 import { pcaBiplot, PCA_BIPLOT_SERIES } from "./pca-biplot";
 import { kmeansScatter } from "./kmeans-scatter";
@@ -177,6 +178,7 @@ export const GRAPHS: Record<GraphType, GraphModule> = {
   "bland-altman": blandAltmanGraph,
   "roc-curve": rocCurveGraph,
   "observed-fitted": observedFitted,
+  "covariance-heatmap": covarianceHeatmap,
   "scree-plot": screePlot,
   "pca-biplot": pcaBiplot,
   "kmeans-scatter": kmeansScatter,
@@ -317,6 +319,9 @@ export function graphSeriesDataset(
 ): string[] {
   const { family } = GRAPHS[type];
   if (type === "observed-fitted") return [OBSERVED_FITTED_SERIES];
+  // The covariance heatmap's cells follow its fixed diverging scale, not a
+  // series' colour — like a heatmap, it has no series to style.
+  if (type === "covariance-heatmap") return [];
   if (type === "monte-carlo-histogram") return [MONTE_CARLO_HISTOGRAM_SERIES];
   // The PCA graphs draw one series each (the scree bars, the score points),
   // not the table's variables — the Series section styles that series.
@@ -446,7 +451,7 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
   // columns of a nested summary table; see mean-error.ts).
   // Seq 212: floating bars — one bar per row × group × subgroup cell.
   nested: optionsFor(["grouped-bars", "grouped-bars-scatter", "grouped-scatter", "grouped-lines", "mean-error", "floating-bars"]),
-  multiple: optionsFor(["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "mv-strip-plot", "mv-summary-symbol", "mv-bar-strip", "mv-before-after-bar-strip", "mv-before-after-strip", "mv-box-whisker", "mv-violin", "mv-bar-chart", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "dendrogram", "elbow-plot", "silhouette-plot", "gap-plot", "survival"]),
+  multiple: optionsFor(["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "mv-strip-plot", "mv-summary-symbol", "mv-bar-strip", "mv-before-after-bar-strip", "mv-before-after-strip", "mv-box-whisker", "mv-violin", "mv-bar-chart", "volcano", "forest-plot", "observed-fitted", "covariance-heatmap", "scree-plot", "pca-biplot", "kmeans-scatter", "dendrogram", "elbow-plot", "silhouette-plot", "gap-plot", "survival"]),
   // Outcomes as series across the row categories, as Prism graphs contingency tables.
   // Seq 210: scatter and box-and-violin too (one value per cell: a box from a
   // single value is degenerate, a line — but that is what Prism offers).

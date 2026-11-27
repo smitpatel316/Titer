@@ -7,9 +7,12 @@ import type {
   Column,
   CovarianceMatrix,
   MultipleRegressionParams,
+  MultipleRegressionResidualRow,
   RegressionCoefficient,
+  ResidualDiagnostics,
   VifRow,
 } from "../types";
+import { dagostinoPearson } from "../column/shapiro-wilk";
 import { describe, pRow, rVec } from "../column/base";
 import {
   categoricalPredictorsNote,
@@ -100,7 +103,34 @@ export async function runMultipleRegression(
     // fitted ~0 against mean(y) ~1e13.
     `nn<-length(y);k<-length(coef(m))+1;ssr<-sum(fitted(m)^2);sse<-sum(residuals(m)^2);` +
     `aic<-AIC(m);aicc<-if(nn-k-1>0)aic+2*k*(k+1)/(nn-k-1) else NA;` +
-    `Vcf<-vcov(m);J<-rbind(c(1,-mx),cbind(0,diag(${p})));V0<-J%*%Vcf%*%t(J);`;
+    `Vcf<-vcov(m);J<-rbind(c(1,-mx),cbind(0,diag(${p})));V0<-J%*%Vcf%*%t(J);` +
+    // Residual diagnostics (seq 198 remainder): the per-row fitted values
+    // on the uncentered scale (fitted(m)+my — the centered fit's sit
+    // about 0), the residuals (identical on either scale), standardized
+    // residuals, leverage and Cook's distance (all invariant to
+    // centering), plus the assumption tests on the residuals:
+    // Durbin–Watson for autocorrelation in row order, Prism's four
+    // normality tests — Shapiro–Wilk, D'Agostino–Pearson (its moments
+    // only, the K2/P computed by the shared TS implementation; n ≥ 20
+    // like the standalone normality analysis), Anderson–Darling via
+    // nortest, Kolmogorov–Smirnov against a fitted normal — and
+    // Spearman's rank correlation between |residual| and fitted for
+    // heteroscedasticity (Prism's Residuals tab test). Each test guards
+    // its own floor and returns NA rather than erroring on a constant or
+    // tiny residual set (a perfect fit's 0/0 Durbin–Watson reads NA).
+    `er<-residuals(m);fv<-fitted(m)+my;rs<-rstandard(m);hv<-hatvalues(m);cd<-cooks.distance(m);` +
+    `dw<-if(nn>1)sum(diff(er)^2)/sum(er^2) else NA;` +
+    `sw<-tryCatch({s<-shapiro.test(er);c(unname(s$statistic),s$p.value)},error=function(e)c(NA,NA));` +
+    `dpm<-if(nn>=20){d<-er-mean(er);c(nn,mean(d^2),mean(d^3),mean(d^4))}else c(NA,NA,NA,NA);` +
+    `ad<-tryCatch({a<-nortest::ad.test(er);c(unname(a$statistic),a$p.value)},error=function(e)c(NA,NA));` +
+    `ks<-tryCatch({k<-suppressWarnings(ks.test(er,"pnorm",mean(er),sd(er)));c(unname(k$statistic),k$p.value)},error=function(e)c(NA,NA));` +
+    `sp<-tryCatch({s<-suppressWarnings(cor.test(abs(er),fv,method="spearman"));c(unname(s$estimate),s$p.value)},error=function(e)c(NA,NA));`;
+  // One named key per per-row value (the flat-map rule — no vectors cross
+  // the WebR boundary, only a named vector does): observed, fitted,
+  // residual, standardized residual, leverage, Cook's distance.
+  const residAssigns = Array.from({ length: n }, (_, i) =>
+    `ob${i}=y[${i + 1}],ft${i}=fv[${i + 1}],re${i}=er[${i + 1}],rs${i}=rs[${i + 1}],hv${i}=hv[${i + 1}],cd${i}=cd[${i + 1}]`,
+  ).join(",");
   // The predictors and Y centered (upstream 1.1.1: the same fit, more precise in
   // lm's QR for values far from 0 for their spread); the intercept is taken back
   // to 0 with its exact SE (the centered intercept is uncorrelated with the
@@ -119,6 +149,8 @@ export async function runMultipleRegression(
     `${vifAssigns},${cvAssigns},` +
     `fstat=if(is.null(f)) NA else unname(f[1]),n=length(y),` +
     `fp=if(is.null(f)) NA else unname(pf(f[1],f[2],f[3],lower.tail=FALSE)),` +
+    `dw=dw,sw0=sw[1],sw1=sw[2],dpn=dpm[1],dpm2=dpm[2],dpm3=dpm[3],dpm4=dpm[4],` +
+    `ad0=ad[1],ad1=ad[2],ks0=ks[1],ks1=ks[2],sp0=sp[1],sp1=sp[2],${residAssigns},` +
     `aliased=as.numeric(nal),${aliasAssigns.join(",")},${coefAssigns.join(",")})`;
 
   const v = await evalNamedVector(code);
@@ -157,7 +189,73 @@ export async function runMultipleRegression(
     variables: terms,
     values: terms.map((_, i) => terms.map((_, j) => v[`cv${i}_${j}`] ?? null)),
   };
+  // Per-row residuals, in complete-case order, keyed to their table rows
+  // (sel.rows) so a flagged row can be found in the table.
+  const residuals: MultipleRegressionResidualRow[] = sel.rows.map((tableRow, i) => ({
+    row: tableRow + 1,
+    observed: v[`ob${i}`] ?? null,
+    fitted: v[`ft${i}`] ?? null,
+    residual: v[`re${i}`] ?? null,
+    standardized: v[`rs${i}`] ?? null,
+    leverage: v[`hv${i}`] ?? null,
+    cooks: v[`cd${i}`] ?? null,
+  }));
+  const dp =
+    v.dpn != null && v.dpm2 != null && v.dpm3 != null && v.dpm4 != null
+      ? dagostinoPearson(v.dpn, v.dpm2, v.dpm3, v.dpm4)
+      : null;
+  const residualDiagnostics: ResidualDiagnostics = {
+    durbinWatson: v.dw ?? null,
+    shapiroWilk: { statistic: v.sw0 ?? null, p: v.sw1 ?? null },
+    dagostinoPearson: { statistic: dp?.k2 ?? null, p: dp?.p ?? null },
+    andersonDarling: { statistic: v.ad0 ?? null, p: v.ad1 ?? null },
+    kolmogorovSmirnov: { statistic: v.ks0 ?? null, p: v.ks1 ?? null },
+    heteroscedasticity: { rho: v.sp0 ?? null, p: v.sp1 ?? null },
+  };
   const highVif = vif.filter((row) => (row.vif ?? 0) > 10).map((row) => `“${row.term}”`);
+  // What the diagnostics flag, in the notes: rows with a large
+  // standardized residual (|r| > 3), high leverage (above 2p/n, p =
+  // parameters including the intercept), or a Cook's distance above 1;
+  // a Durbin–Watson far from 2 (autocorrelation in row order — only
+  // meaningful when the row order is); a normality test that rejects;
+  // a Spearman test that says the residuals' size varies with fitted.
+  const levThreshold = (2 * (p + 1)) / n;
+  const rowFlags = residuals.flatMap((r) => {
+    const flags: string[] = [];
+    if (r.standardized != null && Math.abs(r.standardized) > 3)
+      flags.push(`a standardized residual of ${r.standardized.toPrecision(3)} (above 3 in magnitude)`);
+    if (r.leverage != null && r.leverage > levThreshold)
+      flags.push(`high leverage (${r.leverage.toPrecision(3)}, above 2p/n = ${levThreshold.toPrecision(3)})`);
+    if (r.cooks != null && r.cooks > 1) flags.push(`a Cook's distance of ${r.cooks.toPrecision(3)} (above 1)`);
+    return flags.length ? [`Row ${r.row} has ${flags.join(" and ")}.`] : [];
+  });
+  const dwNote =
+    residualDiagnostics.durbinWatson == null
+      ? ""
+      : residualDiagnostics.durbinWatson < 1.5
+        ? ` Durbin–Watson ${residualDiagnostics.durbinWatson.toPrecision(3)} — below 1.5, so the residuals may be positively autocorrelated in row order.`
+        : residualDiagnostics.durbinWatson > 2.5
+          ? ` Durbin–Watson ${residualDiagnostics.durbinWatson.toPrecision(3)} — above 2.5, so the residuals may be negatively autocorrelated in row order.`
+          : "";
+  const failedNormality = (
+    [
+      ["Shapiro–Wilk", residualDiagnostics.shapiroWilk.p],
+      ["D'Agostino–Pearson", residualDiagnostics.dagostinoPearson.p],
+      ["Anderson–Darling", residualDiagnostics.andersonDarling.p],
+      ["Kolmogorov–Smirnov", residualDiagnostics.kolmogorovSmirnov.p],
+    ] as const
+  )
+    .filter(([, testP]) => testP != null && testP < 0.05)
+    .map(([name]) => name);
+  const normalityNote = failedNormality.length
+    ? ` The residuals depart from a normal distribution (${failedNormality.join(", ")} P < 0.05).`
+    : "";
+  const heteroNote =
+    residualDiagnostics.heteroscedasticity.p != null && residualDiagnostics.heteroscedasticity.p < 0.05
+      ? " The residuals' size varies with the fitted values (Spearman P < 0.05) — the scatter may not be constant."
+      : "";
+  const diagnosticsNote =
+    (rowFlags.length ? ` ${rowFlags.join(" ")}` : "") + dwNote + normalityNote + heteroNote;
   const { groups: described } = await describe([dep, ...predictors]);
   return {
     testType: "multiple-regression",
@@ -180,11 +278,14 @@ export async function runMultipleRegression(
       (highVif.length
         ? ` ${highVif.join(" and ")} ${highVif.length > 1 ? "are" : "is"} strongly collinear with the other predictor(s) (VIF above 10) — ${highVif.length > 1 ? "their" : "its"} coefficient is imprecise.`
         : "") +
+      diagnosticsNote +
       droppedPredictorsNote(dropped) +
       droppedNoCompleteNote(sel.droppedNoComplete),
     coefficients,
     vif,
     anovaTable,
     covariance,
+    residuals,
+    residualDiagnostics,
   };
 }

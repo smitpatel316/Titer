@@ -2135,6 +2135,47 @@ export interface CovarianceMatrix {
   values: (number | null)[][];
 }
 
+/** One complete case of a multiple regression (seq 198 remainder): the
+ *  row's observed and fitted dependent values, its residual, its
+ *  standardized residual (`rstandard` — the residual scaled by its own
+ *  standard error), its leverage (the hat matrix's diagonal — how far the
+ *  row's predictors sit from their centre), and its Cook's distance (how
+ *  much the fit moves when the row is deleted). `row` is the table row
+ *  (1-based), so a flagged row can be found in the table. */
+export interface MultipleRegressionResidualRow {
+  row: number;
+  observed: number | null;
+  fitted: number | null;
+  residual: number | null;
+  standardized: number | null;
+  leverage: number | null;
+  cooks: number | null;
+}
+
+/** One normality test on the residuals: its statistic and P value — nulls
+ *  where the test can't take the residuals (too few rows for the test, or
+ *  residuals with no variation). */
+export interface ResidualNormalityTest {
+  statistic: number | null;
+  p: number | null;
+}
+
+/** Residual diagnostics of a multiple regression (seq 198 remainder):
+ *  Durbin–Watson for autocorrelation in row order, Prism's four normality
+ *  tests on the residuals, and Spearman's rank correlation between
+ *  |residual| and fitted for heteroscedasticity (Prism's Residuals tab
+ *  test: a rising |residual| with fitted means the scatter isn't
+ *  constant). D'Agostino–Pearson needs n ≥ 20, like the standalone
+ *  normality analysis; the other tests carry their own floors in R. */
+export interface ResidualDiagnostics {
+  durbinWatson: number | null;
+  shapiroWilk: ResidualNormalityTest;
+  dagostinoPearson: ResidualNormalityTest;
+  andersonDarling: ResidualNormalityTest;
+  kolmogorovSmirnov: ResidualNormalityTest;
+  heteroscedasticity: { rho: number | null; p: number | null };
+}
+
 /** One row of an ANOVA's effect-size table (seq 161): one effect's eta
  *  squared (SS_effect / SS_total), partial eta squared (SS_effect /
  *  (SS_effect + SS_error)), Cohen's f from the partial eta squared, and
@@ -2772,6 +2813,13 @@ export interface AnalysisResult {
   vif?: VifRow[];
   anovaTable?: AnovaRow[];
   covariance?: CovarianceMatrix;
+  /** Optional multiple-regression residual diagnostics (seq 198
+   *  remainder): one row per complete case (observed, fitted, residual,
+   *  standardized residual, leverage, Cook's distance) and the assumption
+   *  tests on the residuals (Durbin–Watson, four normality tests,
+   *  heteroscedasticity). */
+  residuals?: MultipleRegressionResidualRow[];
+  residualDiagnostics?: ResidualDiagnostics;
   /** A curve fit's best-fit values, one column per data set (two when curves are compared). */
   fit?: { sets: string[]; rows: FitRow[] };
   /** Seq 387: the results sheet shows a Dependency column for the

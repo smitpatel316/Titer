@@ -352,6 +352,11 @@ export interface GraphOptions {
   // fitted counts from (see observed-fitted.ts) — the graph runs the same
   // cached runAnalysis result.
   poissonAnalysisId?: string;
+  // Multiple linear regression (Multiple Variables only): the sibling
+  // "Multiple regression" analysis a covariance heatmap draws its
+  // coefficients' covariance matrix from (see covariance-heatmap.ts) —
+  // the graph runs the same cached runAnalysis result.
+  mlrAnalysisId?: string;
   // Principal component analysis (Multiple Variables only): the sibling
   // "Principal component analysis" a scree plot or scores biplot draws from
   // (see scree-plot.ts and pca-biplot.ts) — the graph runs the same cached

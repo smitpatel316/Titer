@@ -295,6 +295,17 @@ export function statisticsControls(c: SectionContext): React.ReactNode {
     }
     return <PoissonControls analyses={sources} options={options} set={set} />;
   }
+  if (graphType === "covariance-heatmap") {
+    const sources = c.analyses.filter((a) => a.analysisType === "multiple-regression");
+    if (!sources.length) {
+      return (
+        <NoAnalysis test="multiple-regression" onNewAnalysis={c.onNewAnalysis}>
+          Draw the coefficients' covariance matrix of a Multiple regression of this table as a heatmap.
+        </NoAnalysis>
+      );
+    }
+    return <MlrControls analyses={sources} options={options} set={set} />;
+  }
   if (graphType === "scree-plot" || graphType === "pca-biplot") {
     const sources = c.analyses.filter((a) => a.analysisType === "principal-component-analysis");
     if (!sources.length) {
@@ -508,6 +519,26 @@ function PoissonControls({
       analyses={analyses}
       value={options.poissonAnalysisId}
       onChange={(poissonAnalysisId) => set({ poissonAnalysisId })}
+    />
+  );
+}
+
+/** Pick a Multiple linear regression: the covariance heatmap draws its
+ *  coefficients' covariance matrix. */
+function MlrControls({
+  analyses,
+  options,
+  set,
+}: {
+  analyses: ProjectNode[];
+  options: GraphOptions;
+  set: SetOptions;
+}) {
+  return (
+    <AnalysisRow
+      analyses={analyses}
+      value={options.mlrAnalysisId}
+      onChange={(mlrAnalysisId) => set({ mlrAnalysisId })}
     />
   );
 }

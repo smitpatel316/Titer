@@ -51,6 +51,7 @@ import { DrawingObjectsLayer } from "../../components/drawing-objects";
 import { addRegression } from "./regression-overlay";
 import { addDeming } from "./deming-overlay";
 import { addObservedFitted } from "./observed-fitted";
+import { addCovarianceHeatmap } from "./covariance-heatmap";
 import { addScreePlot } from "./scree-plot";
 import { addPcaBiplot } from "./pca-biplot";
 import { addKmeansScatter } from "./kmeans-scatter";
@@ -560,6 +561,19 @@ export function GraphView({ node }: { node: ProjectNode }) {
   );
   const poissonResult = poissonOutcome && !("error" in poissonOutcome) ? poissonOutcome : null;
   const poissonParams = (poissonAnalysis?.analysisParams ?? undefined) as PoissonRegressionParams | undefined;
+  // A covariance heatmap draws a sibling Multiple regression's
+  // coefficients' covariance matrix — the same cached runAnalysis result
+  // (no extra R call). Without one it draws only its axes, and the Format
+  // panel says to run the analysis first — exactly like the forest plot.
+  const mlrAnalysis = options.mlrAnalysisId ? nodes[options.mlrAnalysisId] : undefined;
+  const mlrOutcome = useAnalysis(
+    type === "covariance-heatmap" && mlrAnalysis?.analysisType === "multiple-regression"
+      ? "multiple-regression"
+      : undefined,
+    data,
+    mlrAnalysis?.analysisParams,
+  );
+  const mlrResult = mlrOutcome && !("error" in mlrOutcome) ? mlrOutcome : null;
   // A scree plot or scores biplot draws a sibling Principal component
   // analysis's variance/loadings/scores — the same cached runAnalysis result
   // (no extra R call). Without one it draws only its axes, and the Format
@@ -821,6 +835,10 @@ export function GraphView({ node }: { node: ProjectNode }) {
       if (type === "observed-fitted") {
         if (poissonResult) addObservedFitted(fig, columns, poissonResult, poissonParams, paint, options);
         else unlinked("observed-fitted");
+      }
+      if (type === "covariance-heatmap") {
+        if (mlrResult) addCovarianceHeatmap(fig, mlrResult, options);
+        else unlinked("covariance-heatmap");
       }
       if (type === "scree-plot") {
         if (pcaResult) addScreePlot(fig, pcaResult, paint, options);

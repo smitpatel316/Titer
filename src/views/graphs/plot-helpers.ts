@@ -411,6 +411,8 @@ export function unlinkedAnalysisNote(graphType: GraphType): string | null {
       return "Run a Compare two groups analysis on this table to draw the difference between means with its 95% CI.";
     case "observed-fitted":
       return "Run a Poisson regression on this table to draw the observed-vs-fitted plot.";
+    case "covariance-heatmap":
+      return "Run a Multiple regression on this table to draw the covariance heatmap.";
     case "scree-plot":
       return "Run a Principal component analysis on this table to draw the scree plot.";
     case "monte-carlo-histogram":

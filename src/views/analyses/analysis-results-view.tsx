@@ -943,6 +943,69 @@ export function AnalysisResultsView({
         />
       )}
 
+      {result.residualDiagnostics && (
+        <Table
+          title="Residual diagnostics"
+          columns={[
+            { label: "Test" },
+            { label: "Statistic", numeric: true },
+            { label: "P value", numeric: true },
+          ]}
+          rows={[
+            ["Durbin–Watson", num(result.residualDiagnostics.durbinWatson), "—"],
+            [
+              "Shapiro–Wilk",
+              num(result.residualDiagnostics.shapiroWilk.statistic),
+              <P p={result.residualDiagnostics.shapiroWilk.p} />,
+            ],
+            [
+              "D'Agostino–Pearson",
+              num(result.residualDiagnostics.dagostinoPearson.statistic),
+              <P p={result.residualDiagnostics.dagostinoPearson.p} />,
+            ],
+            [
+              "Anderson–Darling",
+              num(result.residualDiagnostics.andersonDarling.statistic),
+              <P p={result.residualDiagnostics.andersonDarling.p} />,
+            ],
+            [
+              "Kolmogorov–Smirnov",
+              num(result.residualDiagnostics.kolmogorovSmirnov.statistic),
+              <P p={result.residualDiagnostics.kolmogorovSmirnov.p} />,
+            ],
+            [
+              "Spearman (|residual| vs fitted)",
+              num(result.residualDiagnostics.heteroscedasticity.rho),
+              <P p={result.residualDiagnostics.heteroscedasticity.p} />,
+            ],
+          ]}
+        />
+      )}
+
+      {result.residuals && result.residuals.length > 0 && (
+        <Table
+          title="Residuals"
+          columns={[
+            { label: "Row", numeric: true },
+            { label: "Observed", numeric: true },
+            { label: "Fitted", numeric: true },
+            { label: "Residual", numeric: true },
+            { label: "Standardized residual", numeric: true },
+            { label: "Leverage", numeric: true },
+            { label: "Cook's distance", numeric: true },
+          ]}
+          rows={result.residuals.map((r) => [
+            r.row,
+            num(r.observed),
+            num(r.fitted),
+            num(r.residual),
+            num(r.standardized),
+            num(r.leverage),
+            num(r.cooks),
+          ])}
+        />
+      )}
+
       {result.varianceComponents && result.varianceComponents.length > 0 && (
         <Table
           title="Variance components"

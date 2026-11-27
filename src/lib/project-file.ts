@@ -281,6 +281,7 @@ const GRAPH_ANALYSIS_LINKS = [
   "coxAnalysisId",
   "ttestAnalysisId",
   "poissonAnalysisId",
+  "mlrAnalysisId",
   "pcaAnalysisId",
   "smoothAnalysisId",
   "kmeansAnalysisId",

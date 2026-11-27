@@ -368,6 +368,9 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
   "multiple-regression": {
     label: "Multiple regression",
     minColumns: 2,
+    // The residual diagnostics' Anderson–Darling test needs `nortest`
+    // (the other three normality tests are base R or TypeScript).
+    requiredPackages: ["nortest"],
     run: (c, p) => runMultipleRegression(c, p as MultipleRegressionParams),
   },
   "multifactor-anova": {

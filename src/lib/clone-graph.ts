@@ -37,6 +37,7 @@ export const GRAPH_ANALYSIS_LINKS = [
   "demingAnalysisId",
   "coxAnalysisId",
   "poissonAnalysisId",
+  "mlrAnalysisId",
   "pcaAnalysisId",
   "kmeansAnalysisId",
   "hclustAnalysisId",

@@ -3841,6 +3841,7 @@ const GRAPH_CASES: [string, TableData, GraphType, Partial<GraphOptions>?, TableT
   ["multiple", multiple, "heatmap"],
   ["multiple", multiple, "xy-scatter", { xVariable: "Height", yVariable: "Weight" }],
   ["poissonCounts", poissonCounts, "observed-fitted"],
+  ["multiple", multiple, "covariance-heatmap"],
   ["pca", pca, "scree-plot"],
   ["pca", pca, "pca-biplot"],
   ["kmeans", kmeans, "kmeans-scatter"],
