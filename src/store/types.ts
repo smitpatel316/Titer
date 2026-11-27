@@ -52,6 +52,7 @@ export type GraphType =
   | "bland-altman"
   | "roc-curve"
   | "observed-fitted"
+  | "covariance-heatmap"
   | "smooth-curve"
   | "estimation-plot"
   | "scree-plot"

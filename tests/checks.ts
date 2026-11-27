@@ -23206,7 +23206,16 @@ check("seq 198 multiple-regression diagnostics remainder: residuals, normality, 
   const fig = covarianceHeatmapFigure(out.covariance);
   deepStrictEqual(fig.x, ["Intercept", "X1", "X2", "X3"]);
   deepStrictEqual(fig.y, ["Intercept", "X1", "X2", "X3"]);
-  out.covariance.values.forEach((row, i) =>
+  // The cells are the covariance matrix itself (same literals as the
+  // seq 198 check above — the figure pins them independently of the
+  // runner's covariance output).
+  const covWant: number[][] = [
+    [0.142144294809775, -0.026068196477429972, 0.019340919967125503, -0.015136372148185164],
+    [-0.026068196477429965, 0.031755802981596505, -0.0345078706449029, 0.007491739750111839],
+    [0.019340919967125458, -0.0345078706449029, 0.041846717747053265, -0.01085537800526409],
+    [-0.01513637214818514, 0.007491739750111842, -0.010855378005264097, 0.006115705918458643],
+  ];
+  covWant.forEach((row, i) =>
     row.forEach((value, j) => close(fig.z[i]?.[j], value, 1e-9, `heatmap z[${i}][${j}]`)),
   );
   close(fig.zmax, 0.142144294809775, 1e-9, "heatmap zmax");
