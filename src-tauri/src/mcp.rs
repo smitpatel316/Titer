@@ -9223,6 +9223,11 @@ impl TiterMcpServer {
                 record.name.clone(),
                 base64,
                 Some(expected),
+                // Conditional upload, never a silent overwrite: a version
+                // mismatch is an error (see the tool description). The
+                // `force` parameter was added to cloud_upload by the
+                // cloud-box fix (a999dbfd) without updating this call site.
+                false,
             )
             .await
             .map_err(|e| cloud_error_message(&e))?;
