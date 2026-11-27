@@ -2880,7 +2880,11 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   // from the ANOVA's own R code). The pins are the centered values,
   // cross-checked against the mpmath exact values in
   // probe/expected-precision.json (welchBig/welchSmall) — see
-  // disagreements() below. Three values are NOT exact-anchored there:
+  // disagreements() below. F/BF/diffs/FDR agree to ~1e-9; the Games-Howell
+  // P values agree only to ~3e-4 worst case (anovaSmall A–C) and the CIs
+  // to ~1e-8 — R's ptukey/qtukey vs scipy's studentized_range in the far
+  // tail, routine noise, not a data error (the t/df/diff inputs agree to
+  // 1e-9). Three values are NOT exact-anchored there:
   // anovaBig's T3 P values sit on R's smm() integration floor (~2e-12,
   // ~0.5% quadrature noise), three Games-Howell P values underflow R's
   // ptukey to 0 (exact ~1e-14), and one FDR P value is a denormal at the
