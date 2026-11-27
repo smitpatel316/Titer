@@ -9492,7 +9492,7 @@
   "checks": [
    {
     "ok": true,
-    "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the residuals P = 0.9242)."
+    "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the residuals P = 0.7888)."
    }
   ]
  },
@@ -9569,7 +9569,7 @@
   "checks": [
    {
     "ok": true,
-    "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the weighted residuals P = 0.9226)."
+    "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the weighted residuals P = 0.7888)."
    }
   ]
  },
