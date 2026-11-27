@@ -112,9 +112,20 @@ export function addDendrogram(
 }
 
 function build(_columns: Column[], options: GraphOptions, _paint: Paint): GraphFigure {
+  // X is the leaves (labels), never a log scale or a range: a stale saved
+  // log X must not turn the leaf axis logarithmic, and a stale saved
+  // range/step must not move it either (seq 572, #100) — the panel offers
+  // none of them for a labels axis, so the builder must not apply them;
+  // xyLayout would otherwise apply xScale/xMin/xMax/xStep.
   return {
     data: [],
-    layout: xyLayout(options, "Row", 1, { yName: "Distance", zeroBase: true }),
+    layout: xyLayout(
+      { ...options, xScale: "linear", xMin: undefined, xMax: undefined, xStep: undefined },
+      "Row",
+      1,
+      { yName: "Distance", zeroBase: true },
+    ),
+  };
   };
 }
 
