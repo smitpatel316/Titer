@@ -132,7 +132,16 @@ async function runPosthoc(
     for (const [i, j] of familyPairs(members.length, controlAt)) {
       const vi = members[i].values;
       const vj = members[j].values;
-      const diff = mean(vi) - mean(vj);
+      // Center the difference on a common point (BUG-REPORT #113): the
+      // main aov centers v, but this diff ran on the raw ~1e13 cell values,
+      // where each mean's summation rounds at the 1e13 ULP and the two
+      // roundings no longer cancel (diff -0.0390625 for an exact
+      // -0.041015625). vi[0] is exact by Sterbenz, and every shifted value
+      // is exact too (all values within a factor of 2 of each other), so
+      // the shifted means differ exactly. The same centered diff serves
+      // every method, not just Games-Howell.
+      const m0 = vi[0];
+      const diff = mean(vi.map((v) => v - m0)) - mean(vj.map((v) => v - m0));
       if (method === "games-howell") {
         if (vi.length < 2 || vj.length < 2 || identical(vi) || identical(vj))
           return {
@@ -255,10 +264,16 @@ async function runPosthoc(
   return rows;
 }
 
-/** A sample variance (n − 1), for Games-Howell's per-pair Welch statistics. */
+/** A sample variance (n − 1), for Games-Howell's per-pair Welch statistics.
+ *  Double-centered (BUG-REPORT #113): the shift by values[0] is exact by
+ *  Sterbenz, so the mean's rounding is relative to the spread, not the
+ *  ~1e13 offset — the single-pass form otherwise picks up n·δ²/(n−1) from
+ *  mean(values)'s ULP error (variance 1.0109e-4 for an exact 9.5367e-5).
+ *  Module-local, used only by the Games-Howell branch above. */
 const variance = (values: number[]) => {
-  const m = mean(values);
-  return values.reduce((s, v) => s + (v - m) ** 2, 0) / (values.length - 1);
+  const centered = values.map((v) => v - values[0]);
+  const m = mean(centered);
+  return centered.reduce((s, v) => s + (v - m) ** 2, 0) / (values.length - 1);
 };
 
 export async function runThreeWayAnova(
