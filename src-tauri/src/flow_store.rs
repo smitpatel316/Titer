@@ -894,6 +894,8 @@ mod tests {
         let sample = inner.samples.get("spill").unwrap();
         assert_eq!(sample.readable_column(1), &[200.0, 400.0, 600.0, 800.0]);
         assert_eq!(sample.info.bytes, 4 * 3 * 4, "clear frees the compensated bytes");
+        // Drop the guard before the re-locking call below (same shape as F2b).
+        drop(inner);
         assert!(!store.clear_compensation("missing").expect("clear of unknown is false"));
     }
 
