@@ -39,3 +39,21 @@ export type {
   FcsImportSummary,
 } from "./fcs";
 export { buildFlowSampleRef, importFcs } from "./fcs";
+// FlowJo track, seq 448 (F2b): the display transforms.
+export type {
+  FlowTransformKind,
+  FlowTransformParams,
+  FlowTransformResult,
+  ResolvedFlowTransform,
+} from "./transforms";
+export {
+  FLOW_TRANSFORM_DEFAULTS,
+  applyFlowTransform,
+  applyTransformToColumn,
+  applyTransformValue,
+  flowAxisTicks,
+  formatFlowTick,
+  invertTransformValue,
+  resolveTransform,
+  transformFromRef,
+} from "./transforms";

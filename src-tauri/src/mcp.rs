@@ -2,9 +2,9 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 83 tools: 22 read-only (list/read/job/
+// Settings → AI connections. 84 tools: 22 read-only (list/read/job/
 // activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list + refresh-linked-data + the plugin list + the 2.0 error-log read)
-// and 61 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool + the 1.9 cell-background tool + the plugin run tool + the seq 450 convert-to-nested tool + the FlowJo import-fcs tool + the FlowJo apply-flow-compensation tool + the FlowJo population-stats tool), via the L0 Rust→frontend dispatch + job queue —
+// and 62 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool + the 1.9 cell-background tool + the plugin run tool + the seq 450 convert-to-nested tool + the FlowJo import-fcs tool + the FlowJo apply-flow-compensation tool + the FlowJo transform-flow-parameter tool + the FlowJo population-stats tool), via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 //
 // Why rmcp, not tauri-plugin-mcp-commands — see the lane log
@@ -43,7 +43,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 83 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 84 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -2231,8 +2231,8 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "flow",
         label: "Flow cytometry (FlowJo)",
-        description: "Import FCS files as flow samples, apply spillover compensation and compute per-population statistics (FlowJo module, seq 443 + 447 + 449). The module is opt-in — off by default — so these tools only run when the flow toggle is on, even when this group is enabled.",
-        tools: &["titer_import_fcs", "titer_apply_flow_compensation", "titer_flow_population_stats"],
+        description: "Import FCS files as flow samples, apply spillover compensation, compute per-population statistics, and apply display transforms to their parameters (FlowJo module, seq 443 + 447 + 448 + 449). The module is opt-in — off by default — so these tools only run when the flow toggle is on, even when this group is enabled.",
+        tools: &["titer_import_fcs", "titer_apply_flow_compensation", "titer_transform_flow_parameter", "titer_flow_population_stats"],
     },
 ];
 
@@ -3098,7 +3098,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 83 tools. Returns the new header value, or `None` when the type is
+/// 84 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -3750,6 +3750,31 @@ pub struct ApplyFlowCompensationArgs {
     /// fluorochrome (csv only).
     #[serde(default)]
     pub matrix_csv: Option<String>,
+}
+
+/// Apply a display transform to one parameter of a loaded flow sample
+/// (FlowJo module, seq 448). The Rust store rewrites the column in place
+/// (the data transform) and the sample node records it; the result is the
+/// before/after stats — never event arrays. A parameter that already
+/// carries a transform is refused (reload the sample to start from raw
+/// values). Kinds: log, logicle (= FlowJo biexponential, Parks et al.
+/// 2006), arcsinh, hyperlog, linear. Params are the GatingML numbers
+/// (T, W, M, A, base, floor) — omit for the FlowJo defaults
+/// (T=262144, M=4.5, W=0.5, A=0).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct TransformFlowParameterArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The sample's id (= its sample node's id).
+    pub sample_id: String,
+    /// The parameter to transform, by name (e.g. "FL1-A").
+    pub parameter: String,
+    /// The transform kind: log, logicle, arcsinh, hyperlog or linear.
+    pub kind: String,
+    /// Kind-specific numbers (T, W, M, A, base, floor); omit for defaults.
+    #[serde(default)]
+    pub params: Option<serde_json::Value>,
 }
 
 /// Per-population statistics for one flow sample, as an ordinary table
@@ -7114,6 +7139,71 @@ impl TiterMcpServer {
             }
             Err(e) => {
                 self.state.log_call("titer_apply_flow_compensation", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Apply a display transform to one parameter of a loaded flow sample
+    /// (FlowJo module, seq 448) — the Rust store rewrites the column in
+    /// place and the frontend records the transform on the sample node.
+    /// The result is the before/after stats of the parameter — never event
+    /// arrays. Opt-in: the frontend refuses while the flow toggle is off,
+    /// and a parameter that already carries a transform is refused (the
+    /// store keeps no raw copy); this tool is not in the default read set
+    /// (it lives in the `flow` allowlist group). Kinds: log, logicle (=
+    /// FlowJo biexponential, Parks et al. 2006), arcsinh, hyperlog,
+    /// linear; params are the GatingML numbers (T, W, M, A, base, floor),
+    /// omitted for the FlowJo defaults (T=262144, M=4.5, W=0.5, A=0).
+    #[tool(
+        name = "titer_transform_flow_parameter",
+        description = "Apply a display transform to one parameter of a loaded flow sample (FlowJo module, opt-in — off by default): log, logicle (= FlowJo biexponential, Parks et al. 2006), arcsinh, hyperlog or linear. The store rewrites the column in place and the sample node records the transform; the result is the before/after stats — never event arrays. A parameter that already carries a transform is refused. Params are the GatingML numbers (T, W, M, A, base, floor); omit for the FlowJo defaults (T=262144, M=4.5, W=0.5, A=0).",
+        annotations(
+            title = "Transform flow parameter",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn transform_flow_parameter(
+        &self,
+        Parameters(args): Parameters<TransformFlowParameterArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({ "project_id": args.project_id, "sample_id": args.sample_id, "parameter": args.parameter, "kind": args.kind, "params": args.params });
+        let outcome: Result<serde_json::Value, String> = async {
+            if args.sample_id.trim().is_empty() {
+                return Err("The sample id must not be empty.".into());
+            }
+            if args.parameter.trim().is_empty() {
+                return Err("The parameter must not be empty.".into());
+            }
+            if args.kind.trim().is_empty() {
+                return Err("The transform kind must not be empty.".into());
+            }
+            if let Some(params) = &args.params {
+                if !params.is_object() {
+                    return Err("Transform params must be an object of numbers.".into());
+                }
+            }
+            let (id, _snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            self.run_table_job(
+                &id,
+                "transform-flow-parameter",
+                serde_json::json!({ "sample_id": args.sample_id, "parameter": args.parameter, "kind": args.kind, "params": args.params }),
+            )
+            .await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_transform_flow_parameter", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_transform_flow_parameter", log_args, false, Some(&e));
                 Err(e)
             }
         }
@@ -10661,10 +10751,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 83 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 84 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 6 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                22 of the 83 are read-only and 61 change the open project. \
+                22 of the 84 are read-only and 62 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -13252,7 +13342,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 83 tools, so it enables every group first.
+        // this test drives all 84 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -13305,8 +13395,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            83,
-            "seven read tools + five read-more tools + three discovery tools + seven project tools + eleven table tools + fourteen analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools + three flow tools: {names:?}"
+            84,
+            "seven read tools + five read-more tools + three discovery tools + seven project tools + eleven table tools + fourteen analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools + four flow tools: {names:?}"
         );
         for name in ["titer_list_backups"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -13328,6 +13418,7 @@ mod tests {
             "titer_import_data_file",
             "titer_import_fcs",
             "titer_apply_flow_compensation",
+            "titer_transform_flow_parameter",
             "titer_flow_population_stats",
             "titer_merge_project",
             "titer_close_project",
@@ -13739,6 +13830,55 @@ mod tests {
         assert_eq!(call_text(&applied)["sample_id"], "spill");
         assert_eq!(call_text(&applied)["applied"], true);
         assert_eq!(call_text(&applied)["parameters_compensated"], 3);
+        // transform-flow-parameter (seq 448): a missing sample_id fails
+        // in the schema (before anything is enqueued); params that are
+        // not an object are refused; the round trip, with the frontend
+        // simulated in-test, returns the before/after stats.
+        let (transform_missing_id, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(114, "titer_transform_flow_parameter", json!({ "parameter": "FL1-A", "kind": "logicle" })),
+        )
+        .await;
+        assert_eq!(transform_missing_id["result"]["isError"], true);
+        assert!(
+            call_raw_text(&transform_missing_id).contains("sample_id"),
+            "transform missing sample_id: {}",
+            call_raw_text(&transform_missing_id)
+        );
+        let (transform_bad_params, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                115,
+                "titer_transform_flow_parameter",
+                json!({ "sample_id": "fcs-f1c-f32-3-2", "parameter": "FL1-A", "kind": "logicle", "params": "logicle" }),
+            ),
+        )
+        .await;
+        assert_eq!(transform_bad_params["result"]["isError"], true);
+        assert!(
+            call_raw_text(&transform_bad_params).contains("must be an object"),
+            "transform bad params: {}",
+            call_raw_text(&transform_bad_params)
+        );
+        let transformer = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in transformer.take_jobs("project-1") {
+                assert_eq!(job.action, "transform-flow-parameter");
+                let _ = transformer.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "project_id": "project-1", "sample_id": "fcs-f1c-f32-3-2", "parameter": "FL1-A", "kind": "logicle", "params": { "T": 262144, "W": 0.5, "M": 4.5, "A": 0, "base": 10, "floor": 0 }, "event_count": 4, "before": { "name": "FL1-A", "count": 4, "min": 20.0, "max": 80.0, "mean": 50.0 }, "after": { "name": "FL1-A", "count": 4, "min": 0.13342976362744202, "max": 0.1953420268655396, "mean": 0.16498544569922063 } })),
+                    None,
+                    None,
+                );
+            }
+        });
         // flow-population-stats (seq 449): a blank sample id and a blank
         // name are refused; the round trip, with the frontend simulated
         // in-test, returns the stats table id and per-population counts.
@@ -13783,6 +13923,23 @@ mod tests {
                 );
             }
         });
+        let (transformed, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                116,
+                "titer_transform_flow_parameter",
+                json!({ "sample_id": "fcs-f1c-f32-3-2", "parameter": "FL1-A", "kind": "logicle" }),
+            ),
+        )
+        .await;
+        assert_eq!(call_text(&transformed)["sample_id"], "fcs-f1c-f32-3-2");
+        assert_eq!(call_text(&transformed)["parameter"], "FL1-A");
+        assert_eq!(call_text(&transformed)["kind"], "logicle");
+        assert_eq!(call_text(&transformed)["event_count"], 4);
+        assert_eq!(call_text(&transformed)["before"]["max"], 80.0);
+        assert_eq!(call_text(&transformed)["after"]["max"], 0.1953420268655396);
         let (pop_stats, _) = mcp_post(
             &client,
             &url,
@@ -14763,7 +14920,7 @@ mod tests {
 
     #[test]
     fn allowlist_groups_cover_all_tools_once() {
-        // The inventory pin: every tool in exactly one group, 80 total.
+        // The inventory pin: every tool in exactly one group, 84 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
         // The count alone did not catch that (four tools shipped ungrouped
@@ -14771,7 +14928,7 @@ mod tests {
         // the part that actually catches it.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 83, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 84, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -14897,7 +15054,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 83, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 84, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema
@@ -15401,7 +15558,7 @@ mod tests {
         assert!(tools.contains(&"titer_send_feedback"), "feedback is in the entry: {tools:?}");
         assert_eq!(tools.len(), 12, "seven read + five read-more: {tools:?}");
         // All groups on: Antigravity gets everything the server offers —
-        // all 83 tools, including the destructive ones (seq 540: the
+        // all 84 tools, including the destructive ones (seq 540: the
         // allowlist is the only gate; the entry must not narrow it).
         let all_groups: Vec<&str> = ALLOWLIST_GROUPS.iter().map(|g| g.id).collect();
         let entry = expected_antigravity_entry(bridge, &allowed_for(&all_groups));
@@ -15411,7 +15568,7 @@ mod tests {
             .iter()
             .filter_map(|v| v.as_str())
             .collect();
-        assert_eq!(tools.len(), 83, "all tools on by default: {tools:?}");
+        assert_eq!(tools.len(), 84, "all tools on by default: {tools:?}");
         assert!(tools.contains(&"titer_delete_node"), "destructive tools included: {tools:?}");
         assert!(tools.contains(&"titer_run_script"), "destructive tools included: {tools:?}");
         assert!(tools.contains(&"titer_send_feedback"), "feedback included: {tools:?}");

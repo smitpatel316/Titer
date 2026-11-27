@@ -16,6 +16,8 @@ mod flow;
 mod backup;
 // FlowJo track (seq 441, F1a): the columnar event store — see flow_store.rs.
 mod flow_store;
+// FlowJo track (seq 448, F2b): the display transforms — see flow_transform.rs.
+mod flow_transform;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 #[cfg(target_os = "macos")]
 use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
@@ -2343,7 +2345,8 @@ fn main() {
             flow_store::flow_apply_compensation,
             flow_store::flow_get_compensation,
             flow_store::flow_clear_compensation,
-            flow::flow_import_fcs
+            flow::flow_import_fcs,
+            flow_transform::flow_apply_transform
         ])
         .build(tauri::generate_context!())
         .expect("failed to start Titer")

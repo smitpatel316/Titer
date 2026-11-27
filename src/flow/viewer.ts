@@ -11,6 +11,8 @@
 // are capped/downsampled to FLOW_SCATTER_CAP.
 
 import { getColumn, sampleStats } from "./store";
+import type { FlowTransformRef } from "./sample";
+import { applyTransformValue, flowAxisTicks, transformFromRef } from "./transforms";
 import {
   bin2D,
   binCenters,
@@ -34,6 +36,12 @@ export interface FlowPlotOptions {
   bins?: number;
   /** Most dots drawn (dot/pseudocolor). Default FLOW_SCATTER_CAP. */
   downsampleCap?: number;
+  /** Display transforms (seq 448, F2b): the plotted values are
+   *  transformed COPIES and the axes get the transform's tickvals /
+   *  ticktext — the store is never rewritten (the data transform is the
+   *  store's `applyTransform`, not this). */
+  xTransform?: FlowTransformRef;
+  yTransform?: FlowTransformRef;
 }
 
 /** A rectangular population gate on two parameters (the per-population
@@ -53,6 +61,11 @@ export interface FlowHistogramOptions {
   bins?: number;
   /** Populations to overlay, each a rect gate; omitted, the whole sample. */
   populations?: { name: string; gate: FlowGateRect }[];
+  /** Display transform (seq 448, F2b): the histogram bins the transformed
+   *  copy and the x-axis gets the transform's ticks. Gates are still
+   *  evaluated on RAW values in this lane — transformed-space gating is
+   *  the gating lane's (F3) job. */
+  transform?: FlowTransformRef;
 }
 
 const layoutFor = (
@@ -60,15 +73,44 @@ const layoutFor = (
   xName: string,
   yName: string,
   extra: Record<string, unknown> = {},
+  xAxisExtra: Record<string, unknown> = {},
+  yAxisExtra: Record<string, unknown> = {},
 ): Record<string, unknown> => ({
   title,
-  xaxis: { title: xName },
-  yaxis: { title: yName },
+  xaxis: { title: xName, ...xAxisExtra },
+  yaxis: { title: yName, ...yAxisExtra },
   ...extra,
 });
 
-function columnsFor(sampleId: string, xParam: string, yParam: string): [Float32Array, Float32Array] {
-  return [getColumn(sampleId, xParam), getColumn(sampleId, yParam)];
+/** A transformed copy of a column (or the column itself when no
+ *  transform) — the viewer never writes the store's arrays. */
+function transformedCopy(values: Float32Array, ref?: FlowTransformRef): Float32Array {
+  if (!ref) return values;
+  const t = transformFromRef(ref);
+  const out = new Float32Array(values.length);
+  for (let i = 0; i < values.length; i++) out[i] = applyTransformValue(t, values[i]);
+  return out;
+}
+
+/** The Plotly tickvals/ticktext for a display transform (none when the
+ *  axis is untransformed — Plotly's defaults stand). */
+function axisTicks(ref?: FlowTransformRef): Record<string, unknown> {
+  if (!ref) return {};
+  const { tickvals, ticktext } = flowAxisTicks(transformFromRef(ref));
+  return { tickvals, ticktext };
+}
+
+function columnsFor(
+  sampleId: string,
+  xParam: string,
+  yParam: string,
+  xTransform?: FlowTransformRef,
+  yTransform?: FlowTransformRef,
+): [Float32Array, Float32Array] {
+  return [
+    transformedCopy(getColumn(sampleId, xParam), xTransform),
+    transformedCopy(getColumn(sampleId, yParam), yTransform),
+  ];
 }
 
 /** The capped, evenly spread event indices a scatter overlay draws. */
@@ -85,7 +127,7 @@ const pick = <T>(values: Float32Array, idx: Uint32Array): T[] => {
 /** Dot plot: WebGL scattergl, density-aware by construction — the capped
  *  overlay sits on the full-data computation underneath, never 1:1. */
 export function buildFlowDotPlot(opts: FlowPlotOptions): FlowFigure {
-  const [x, y] = columnsFor(opts.sampleId, opts.xParam, opts.yParam);
+  const [x, y] = columnsFor(opts.sampleId, opts.xParam, opts.yParam, opts.xTransform, opts.yTransform);
   const idx = plottedIndices(opts.sampleId, opts.downsampleCap ?? FLOW_SCATTER_CAP);
   return {
     data: [
@@ -98,7 +140,14 @@ export function buildFlowDotPlot(opts: FlowPlotOptions): FlowFigure {
         showlegend: false,
       },
     ],
-    layout: layoutFor(`Dot plot: ${opts.yParam} vs ${opts.xParam}`, opts.xParam, opts.yParam),
+    layout: layoutFor(
+      `Dot plot: ${opts.yParam} vs ${opts.xParam}`,
+      opts.xParam,
+      opts.yParam,
+      {},
+      axisTicks(opts.xTransform),
+      axisTicks(opts.yTransform),
+    ),
   };
 }
 
@@ -106,7 +155,7 @@ export function buildFlowDotPlot(opts: FlowPlotOptions): FlowFigure {
  *  share — binned + Gaussian-smoothed over the FULL sample. */
 function densityGrid(opts: FlowPlotOptions) {
   const bins = opts.bins ?? 64;
-  const [x, y] = columnsFor(opts.sampleId, opts.xParam, opts.yParam);
+  const [x, y] = columnsFor(opts.sampleId, opts.xParam, opts.yParam, opts.xTransform, opts.yTransform);
   const grid = bin2D(x, y, bins, bins);
   return { grid, smoothed: smoothGrid(grid.counts, 1.5), x, y };
 }
@@ -126,7 +175,14 @@ export function buildFlowDensityPlot(opts: FlowPlotOptions): FlowFigure {
         hoverongaps: false,
       },
     ],
-    layout: layoutFor(`Density: ${opts.yParam} vs ${opts.xParam}`, opts.xParam, opts.yParam),
+    layout: layoutFor(
+      `Density: ${opts.yParam} vs ${opts.xParam}`,
+      opts.xParam,
+      opts.yParam,
+      {},
+      axisTicks(opts.xTransform),
+      axisTicks(opts.yTransform),
+    ),
   };
 }
 
@@ -145,7 +201,14 @@ export function buildFlowContourPlot(opts: FlowPlotOptions): FlowFigure {
         contours: { coloring: "heatmap", showlines: true },
       },
     ],
-    layout: layoutFor(`Contour: ${opts.yParam} vs ${opts.xParam}`, opts.xParam, opts.yParam),
+    layout: layoutFor(
+      `Contour: ${opts.yParam} vs ${opts.xParam}`,
+      opts.xParam,
+      opts.yParam,
+      {},
+      axisTicks(opts.xTransform),
+      axisTicks(opts.yTransform),
+    ),
   };
 }
 
@@ -173,7 +236,14 @@ export function buildFlowPseudocolorPlot(opts: FlowPlotOptions): FlowFigure {
         showlegend: false,
       },
     ],
-    layout: layoutFor(`Pseudocolor: ${opts.yParam} vs ${opts.xParam}`, opts.xParam, opts.yParam),
+    layout: layoutFor(
+      `Pseudocolor: ${opts.yParam} vs ${opts.xParam}`,
+      opts.xParam,
+      opts.yParam,
+      {},
+      axisTicks(opts.xTransform),
+      axisTicks(opts.yTransform),
+    ),
   };
 }
 
@@ -194,7 +264,8 @@ function gatedValues(sampleId: string, param: string, gate: FlowGateRect): Float
 /** Per-population histogram: one overlaid bar trace per population, all
  *  binned on the whole sample's range so the overlays compare directly. */
 export function buildFlowHistogram(opts: FlowHistogramOptions): FlowFigure {
-  const values = getColumn(opts.sampleId, opts.param);
+  const raw = getColumn(opts.sampleId, opts.param);
+  const values = transformedCopy(raw, opts.transform);
   const bins = opts.bins ?? 32;
   let lo = Infinity;
   let hi = -Infinity;
@@ -210,7 +281,7 @@ export function buildFlowHistogram(opts: FlowHistogramOptions): FlowFigure {
     { name: opts.param, gate: null },
   ];
   const data = populations.map(({ name, gate }) => {
-    const subset = gate ? gatedValues(opts.sampleId, opts.param, gate) : values;
+    const subset = gate ? transformedCopy(gatedValues(opts.sampleId, opts.param, gate), opts.transform) : values;
     const { edges, counts } = histogram1D(subset, bins, range);
     return {
       type: "bar",
@@ -223,6 +294,12 @@ export function buildFlowHistogram(opts: FlowHistogramOptions): FlowFigure {
   });
   return {
     data,
-    layout: layoutFor(`Histogram: ${opts.param}`, opts.param, "Count", { bargap: 0, barmode: "overlay" }),
+    layout: layoutFor(
+      `Histogram: ${opts.param}`,
+      opts.param,
+      "Count",
+      { bargap: 0, barmode: "overlay" },
+      axisTicks(opts.transform),
+    ),
   };
 }

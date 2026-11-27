@@ -90,7 +90,7 @@ import {
   type ExportIo,
   type ExportJobDeps,
 } from "./mcp-export";
-import { executeImportFcs, executeApplyFlowCompensation, executePopulationStats, type FlowJobDeps } from "./mcp-flow";
+import { executeImportFcs, executeApplyFlowCompensation, executeTransformFlowParameter, executePopulationStats, type FlowJobDeps } from "./mcp-flow";
 import {
   cancelR,
   isNative,
@@ -107,7 +107,7 @@ import { useProjectActions, useProjectStore } from "./use-project-store";
 import type { ProjectNode, RowGroup, TableData, TableType } from "./types";
 import type { TableMove } from "./references";
 import { groupsOf, isGrouped, isNested, leadOf, readTable, setColumns } from "../lib/dataset";
-import type { FlowCompensationRef, FlowSampleRef } from "../flow/sample";
+import type { FlowCompensationRef, FlowSampleRef, FlowTransformRef } from "../flow/sample";
 import {
   addCalculatedVariable,
   isCalculatedColumn,
@@ -205,6 +205,9 @@ export interface JobDeps {
   /** Create a flow population-stats table node (seq 449; default: the
    *  real store action). */
   createFlowStatsTable?: (table: TableData, name: string, sampleIds: readonly string[]) => string;
+  /** Record a transform on a flow sample node (seq 448; default: the
+   *  real store action). */
+  updateFlowSampleTransforms?: (sampleId: string, transform: FlowTransformRef) => void;
   /** Create a plugin analysis node on a table (default: the real store action). */
   createPluginAnalysis?: (parentId: string, pluginId: string, params?: PluginParamValues) => string;
   /** Rename any node (default: the real store action). */
@@ -376,13 +379,15 @@ function toMergeDeps(deps: JobDeps): MergeDeps {
 }
 
 /** The flow jobs' deps, from the job deps (seq 443) — the import job
- *  needs the store's sample action plus the settle wait. */
+ *  needs the store's sample action plus the settle wait; the transform
+ *  job (seq 448) needs the record action too. */
 function toFlowDeps(deps: JobDeps): FlowJobDeps {
   return {
     getState: deps.getState,
     createFlowSample: deps.createFlowSample,
     updateFlowSampleCompensation: deps.updateFlowSampleCompensation,
     createFlowStatsTable: deps.createFlowStatsTable,
+    updateFlowSampleTransforms: deps.updateFlowSampleTransforms,
     flushUntilRevision: deps.flushUntilRevision,
     flush: deps.flush,
   };
@@ -1591,6 +1596,21 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         matrix_csv?: unknown;
       };
       return executeApplyFlowCompensation(toFlowDeps(deps), args, job.project_id);
+    }
+    case "transform-flow-parameter": {
+      // FlowJo (seq 448, F2b): apply one display transform to one
+      // parameter of a loaded sample. The Rust store rewrites the column
+      // in place; the executor records the transform on the sample node
+      // and returns the before/after stats (never event arrays).
+      // Opt-in: the executor refuses while the flow toggle is off, and a
+      // parameter that already carries a transform is refused too.
+      const args = (job.args ?? {}) as {
+        sample_id?: unknown;
+        parameter?: unknown;
+        kind?: unknown;
+        params?: unknown;
+      };
+      return executeTransformFlowParameter(toFlowDeps(deps), args, job.project_id);
     }
     case "flow-population-stats": {
       // FlowJo (seq 449, F2c): per-population statistics for a sample as
@@ -2947,6 +2967,7 @@ export function useMcpJobDispatcher() {
   const createFlowSample = actions.createFlowSample;
   const updateFlowSampleCompensation = actions.updateFlowSampleCompensation;
   const createFlowStatsTable = actions.createFlowStatsTable;
+  const updateFlowSampleTransforms = actions.updateFlowSampleTransforms;
   const createPluginAnalysis = actions.createPluginAnalysis;
   const renameNode = actions.renameNode;
   const setAnalysisFrozen = actions.setAnalysisFrozen;
@@ -3029,6 +3050,7 @@ export function useMcpJobDispatcher() {
                 createFlowSample,
                 updateFlowSampleCompensation,
                 createFlowStatsTable,
+                updateFlowSampleTransforms,
                 createPluginAnalysis,
                 renameNode,
                 setAnalysisFrozen,

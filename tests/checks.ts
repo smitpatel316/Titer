@@ -48268,12 +48268,12 @@ check("flow-f2a: spillover-matrix compensation per sample (seq 447) — inverse 
   ok(mainRs.includes("flow_store::flow_clear_compensation"), "main.rs must register flow_clear_compensation");
 
   // 8. The MCP slice: titer_apply_flow_compensation + the flow group,
-  //    the TS executor + dispatch branch + node update, 83 tools.
+  //    the TS executor + dispatch branch + node update, 84 tools.
   const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
   ok(mcp.includes("titer_apply_flow_compensation"), "mcp.rs must define the titer_apply_flow_compensation tool");
   ok(mcp.includes("ApplyFlowCompensationArgs"), "mcp.rs must define the ApplyFlowCompensationArgs schema");
   ok(mcp.includes("apply-flow-compensation"), "mcp.rs must dispatch the apply-flow-compensation job action");
-  ok(mcp.includes("83 tools"), "mcp.rs header must count 83 tools after F2a+F2c");
+  ok(mcp.includes("84 tools"), "mcp.rs header must count 84 tools after F2a+F2b+F2c");
   const mcpFlow = readFileSync("src/store/mcp-flow.ts", "utf8");
   ok(mcpFlow.includes("executeApplyFlowCompensation"), "src/store/mcp-flow.ts must execute the apply-flow-compensation job");
   const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
@@ -48284,8 +48284,8 @@ check("flow-f2a: spillover-matrix compensation per sample (seq 447) — inverse 
     "the store must provide an updateFlowSampleCompensation action",
   );
   ok(
-    readFileSync("tests/mcp-coverage-180.ts", "utf8").includes("EXPECTED_TOOL_COUNT = 83"),
-    "mcp-coverage-180.ts must expect 83 tools after F2a+F2c",
+    readFileSync("tests/mcp-coverage-180.ts", "utf8").includes("EXPECTED_TOOL_COUNT = 84"),
+    "mcp-coverage-180.ts must expect 84 tools after F2a+F2b+F2c",
   );
 });
 
@@ -48972,6 +48972,174 @@ check(
     );
   },
 );
+// ── FlowJo track, seq 448 (F2b) ────────────────────────────────────────────
+
+check("flow-f2b: real Parks logicle/biex + arcsinh + Hyperlog transforms, on the event store + titer_transform_flow_parameter", async () => {
+  // Seq 448: the real display transforms, implemented from the published
+  // math (GatingML 2.0 logicle + Hyperlog, Parks et al. 2006; the Stanford
+  // arcsinh identity; the normalized GatingML log form) — never from
+  // decompiled FlowJo code, and never the flow-fcs crate's biexponential,
+  // which F0 proved is arcsinh with the width ignored (diverges up to 0.25
+  // of display scale from true W=0.5 logicle near zero). Pre-fix this
+  // fails: no transform module, no goldens, no tool, no dispatch branch.
+  // The runtime behaviour is covered by the Rust unit tests in
+  // src-tauri/src/flow_transform.rs (golden differential, store apply);
+  // this pin re-derives the ground truth from the committed fixture and
+  // pins the wiring surface on both sides of the bridge.
+
+  // 1. The pieces exist.
+  ok(existsSync("src/flow/transforms.ts"), "src/flow/transforms.ts must hold the transform math");
+  ok(existsSync("src-tauri/src/flow_transform.rs"), "src-tauri/src/flow_transform.rs must hold the Rust math + command");
+  ok(existsSync("tests/testdata/flow/transform-goldens.json"), "the golden fixture must be committed under tests/testdata/flow/");
+  ok(readFileSync("src-tauri/src/main.rs", "utf8").includes("flow_transform::flow_apply_transform"), "main.rs must register flow_apply_transform");
+  ok(readFileSync("src/flow/store.ts", "utf8").includes("applyTransform"), "src/flow/store.ts must expose applyTransform on the store");
+  ok(readFileSync("src/flow/viewer.ts", "utf8").includes("xTransform"), "src/flow/viewer.ts must take a display transform per axis");
+  ok(readFileSync("src/store/mcp-flow.ts", "utf8").includes("executeTransformFlowParameter"), "src/store/mcp-flow.ts must execute the transform-flow-parameter job");
+  ok(readFileSync("src/store/mcp-dispatch.ts", "utf8").includes('case "transform-flow-parameter"'), "mcp-dispatch.ts must have the transform-flow-parameter branch");
+  ok(readFileSync("src/store/use-project-store.tsx", "utf8").includes("updateFlowSampleTransforms"), "the store must provide an updateFlowSampleTransforms action");
+
+  // 2. Differential vs the goldens: the TS math against the Python
+  // reference (GatingML logicle + Hyperlog, Stanford arcsinh, normalized
+  // log, linear). Root-found kinds (logicle, Hyperlog) at 1e-9, closed
+  // forms at 1e-12 — the Python bisection is exact to ~1e-60, so any
+  // gap here is the implementation's, not the reference's.
+  const { resolveTransform, applyTransformValue, invertTransformValue, flowAxisTicks } = await import(
+    "../src/flow/transforms"
+  );
+  const goldens = JSON.parse(readFileSync("tests/testdata/flow/transform-goldens.json", "utf8")) as {
+    param_sets: Record<string, { T: number; W: number; M: number; A: number }>;
+    x_grid: number[];
+    x_sweep: number[];
+    values: Record<string, Record<string, number[]>>;
+  };
+  const xs = [...goldens.x_grid, ...goldens.x_sweep];
+  const maxDiff: Record<string, number> = {};
+  for (const [kind, bySet] of Object.entries(goldens.values)) {
+    for (const [setName, want] of Object.entries(bySet)) {
+      const p = goldens.param_sets[setName];
+      const t = resolveTransform(kind as "log" | "logicle" | "arcsinh" | "hyperlog" | "linear", { T: p.T, W: p.W, M: p.M, A: p.A });
+      const tol = kind === "logicle" || kind === "hyperlog" ? 1e-9 : 1e-12;
+      let worst = 0;
+      for (let i = 0; i < xs.length; i++) {
+        const got = applyTransformValue(t, xs[i]);
+        const d = Math.abs(got - want[i]);
+        if (d > worst) worst = d;
+        ok(d <= tol, `${kind}/${setName} at x=${xs[i]}: got ${got}, want ${want[i]} (diff ${d})`);
+      }
+      maxDiff[`${kind}/${setName}`] = worst;
+    }
+  }
+
+  // 3. The W=0 identity: logicle at W=0 IS arcsinh (F0: 5.6e-17) — and
+  // logicle(0) is exactly x1 = (A+W)/(M+A) (B(x1) = 0 by construction).
+  const arc = resolveTransform("arcsinh", { T: 262144, M: 4.5, A: 0 });
+  const log0 = resolveTransform("logicle", { T: 262144, W: 0, M: 4.5, A: 0 });
+  let w0worst = 0;
+  for (const x of xs) w0worst = Math.max(w0worst, Math.abs(applyTransformValue(log0, x) - applyTransformValue(arc, x)));
+  ok(w0worst <= 1e-12, `logicle W=0 vs arcsinh worst diff ${w0worst}`);
+  const logDefault = resolveTransform("logicle", { T: 262144, W: 0.5, M: 4.5, A: 0 });
+  ok(Math.abs(applyTransformValue(logDefault, 0) - 0.5 / 4.5) < 1e-9, `logicle(0) must be x1 = (A+W)/(M+A) = ${0.5 / 4.5}`);
+
+  // 4. Inverse round-trip: invert(forward(x)) recovers x (1e-9 relative),
+  // for every kind and param set — except log at/below the pile-up
+  // threshold (forward(x) ≤ floor: every non-positive value, plus every
+  // positive value below the bottom decade, piles at the floor — the
+  // inverse of the floor is 0 by definition) and except the display
+  // clamp: an x outside the forward range (Hyperlog's linear negative
+  // tail puts EH(−2) near −1593 on the default set, so the grid's
+  // −100000 and −10000 clamp) pins at ±2, and the inverse of the edge
+  // is the edge's data value, not the out-of-range x.
+  for (const [kind, bySet] of Object.entries(goldens.values)) {
+    for (const setName of Object.keys(bySet)) {
+      const p = goldens.param_sets[setName];
+      const t = resolveTransform(kind as "log" | "logicle" | "arcsinh" | "hyperlog" | "linear", { T: p.T, W: p.W, M: p.M, A: p.A });
+      for (const x of xs) {
+        const y = applyTransformValue(t, x);
+        if (kind === "log" && y <= t.floor) continue;
+        const back = invertTransformValue(t, y);
+        const d = Math.abs(back - x);
+        if (d <= 1e-9 * Math.max(1, Math.abs(x))) continue;
+        ok(
+          Math.abs(Math.abs(y) - 2) < 1e-9,
+          `${kind}/${setName} round-trip at x=${x}: got ${back} (diff ${d}) — y=${y} is not the ±2 display clamp`,
+        );
+      }
+    }
+  }
+
+  // 5. Store application, at event scale, through the synchronous facade:
+  // load the golden x-grid as one column, transform it in place, and the
+  // stored f32 column must match the goldens at f32 tolerance (1e-6
+  // relative). Unknown sample / parameter throw, like the rest of the
+  // facade — there is no silent no-op.
+  const storeMod = await import("../src/flow/store");
+  const backend = new storeMod.InMemoryFlowStore();
+  storeMod.setFlowStoreBackend(backend);
+  storeMod.loadSample("f2b", [Float32Array.from(xs)], ["FL1-A"], { fileName: "f2b.fcs" });
+  const before = storeMod.sampleStats("f2b").params[0];
+  ok(before.min === -100000 && before.max === 500000, `pre-transform range must be the x grid: ${JSON.stringify(before)}`);
+  storeMod.applyTransform("f2b", "FL1-A", { parameter: "FL1-A", kind: "logicle", params: { T: 262144, W: 0.5, M: 4.5, A: 0 } });
+  const got = storeMod.getColumn("f2b", "FL1-A");
+  const want = goldens.values.logicle.default;
+  for (let i = 0; i < xs.length; i++) {
+    const d = Math.abs(got[i] - want[i]);
+    ok(d <= 1e-6 * Math.max(1, Math.abs(want[i])), `stored logicle at x=${xs[i]}: got ${got[i]}, want ${want[i]} (diff ${d})`);
+  }
+  ok(
+    (() => {
+      try {
+        storeMod.applyTransform("no-such-sample", "FL1-A", { parameter: "FL1-A", kind: "logicle", params: {} });
+        return false;
+      } catch {
+        return true;
+      }
+    })(),
+    "applyTransform on an unknown sample must throw",
+  );
+  ok(
+    (() => {
+      try {
+        storeMod.applyTransform("f2b", "no-such-param", { parameter: "no-such-param", kind: "logicle", params: {} });
+        return false;
+      } catch {
+        return true;
+      }
+    })(),
+    "applyTransform on an unknown parameter must throw",
+  );
+  storeMod.setFlowStoreBackend(new storeMod.InMemoryFlowStore());
+
+  // 6. Axis ticks (display, kept separate from the data transform): the
+  // standard data ticks land on their forward-transformed positions, with
+  // FlowJo-style labels.
+  const ticks = flowAxisTicks(logDefault);
+  deepStrictEqual(ticks.ticktext, ["0", "10", "100", "1k", "10k", "100k", "262144"], `logicle axis labels: ${JSON.stringify(ticks.ticktext)}`);
+  for (const [i, v] of [0, 10, 100, 1000, 10000, 100000, 262144].entries()) {
+    ok(Math.abs(ticks.tickvals[i] - applyTransformValue(logDefault, v)) < 1e-9, `tick ${v} must sit at its forward value`);
+  }
+
+  // 7. The MCP slice: titer_transform_flow_parameter + the flow allowlist
+  // group, off by default (not in the default read set); the tool count
+  // moves 82 → 84 in the coverage pin.
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes("titer_transform_flow_parameter"), "mcp.rs must define the titer_transform_flow_parameter tool");
+  ok(mcp.includes("TransformFlowParameterArgs"), "mcp.rs must define the TransformFlowParameterArgs schema");
+  ok(mcp.includes('"transform-flow-parameter"'), "mcp.rs must dispatch the transform-flow-parameter job action");
+  ok(
+    mcp.includes('"titer_import_fcs", "titer_apply_flow_compensation", "titer_transform_flow_parameter", "titer_flow_population_stats"'),
+    "the flow allowlist group must hold all four flow tools",
+  );
+  ok(!/ALLOWLIST_DEFAULT_GROUPS: &\[[^]]*"flow"/.test(mcp), "the flow group must not be in the default allowlist");
+  ok(
+    readFileSync("tests/mcp-coverage-180.ts", "utf8").includes("const EXPECTED_TOOL_COUNT = 84;"),
+    "the MCP coverage pin must expect 84 tools",
+  );
+  ok(
+    readFileSync("src-tauri/src/flow_transform.rs", "utf8").includes("transform-goldens.json"),
+    "the Rust tests must differential-test against the golden fixture",
+  );
+});
+
 
 
 // ── FlowJo track, seq 449 (F2c) ────────────────────────────────────────────
@@ -49184,7 +49352,7 @@ check("flow-f2c: per-population stats match the independent Python reference on 
   ok(mcp.includes("PopulationStatsArgs"), "mcp.rs must define the PopulationStatsArgs schema");
   ok(mcp.includes("flow-population-stats"), "mcp.rs must dispatch the flow-population-stats job action");
   ok(mcp.includes('"titer_flow_population_stats"'), "mcp.rs must list the tool in the flow allowlist group");
-  ok(/two flow tools/.test(mcp), "the tools/list count comment must say two flow tools");
+  ok(/four flow tools/.test(mcp), "the tools/list count comment must say four flow tools");
 
   // 6. The lane doc records the FlowJo differential-testing decision.
   const docPath = "docs/flow-population-stats.md";

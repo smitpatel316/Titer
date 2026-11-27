@@ -281,6 +281,39 @@ impl FlowStore {
         Ok(info)
     }
 
+    /// Rewrite one parameter's column in place through `f` (seq 448,
+    /// F2b): the data transform. `pub(crate)`: the transform lane
+    /// (`flow_transform.rs`) resolves the transform into `f` and calls
+    /// this. Non-finite values are left alone (the transform is undefined
+    /// there, and a NaN must not become a display value). Returns the
+    /// event count plus the before/after stats of the parameter.
+    pub(crate) fn apply_transform(
+        &self,
+        sample_id: &str,
+        param: &str,
+        f: &dyn Fn(f64) -> f64,
+    ) -> Result<(usize, FlowParamStats, FlowParamStats), String> {
+        let mut inner = self.samples.lock().map_err(|_| "Flow store lock is poisoned.".to_string())?;
+        let Some(sample) = inner.samples.get_mut(sample_id) else {
+            return Err(format!("flow store: sample “{sample_id}” is not loaded"));
+        };
+        let Some(index) = sample.param_names.iter().position(|n| n == param) else {
+            return Err(format!(
+                "flow store: sample “{sample_id}” has no parameter “{param}” (unknown parameter)"
+            ));
+        };
+        let before = param_stats(param, &sample.columns[index]);
+        for v in sample.columns[index].iter_mut() {
+            if v.is_finite() {
+                *v = f(*v as f64) as f32;
+            }
+        }
+        let after = param_stats(param, &sample.columns[index]);
+        let event_count = sample.info.event_count;
+        sample.last_used = Instant::now();
+        Ok((event_count, before, after))
+    }
+
     fn touch(&self, sample_id: &str) {
         if let Ok(mut inner) = self.samples.lock() {
             if let Some(sample) = inner.samples.get_mut(sample_id) {
@@ -732,6 +765,31 @@ mod tests {
         assert_eq!(param_stats("CD4", &sample.columns[2]).mean, Some(2.5));
         assert_eq!(param_stats("FSC-A", &sample.columns[0]).min, Some(100.0));
         assert_eq!(param_stats("FSC-A", &sample.columns[0]).max, Some(500.0));
+    }
+
+    #[test]
+    fn apply_transform_rewrites_one_column_in_place() {
+        // Seq 448 (F2b): the store-level transform — only the named
+        // column changes, non-finite values are left alone, and the
+        // before/after stats describe the rewrite.
+        let store = FlowStore::with_budget(1024 * 1024);
+        load_test_sample(&store);
+        let (events, before, after) = store
+            .apply_transform("s1", "CD4", &|x| x * 2.0)
+            .expect("transform applies");
+        assert_eq!(events, 5);
+        assert_eq!(before.mean, Some(2.5));
+        assert_eq!(after.mean, Some(5.0));
+        let inner = store.samples.lock().unwrap();
+        let sample = inner.samples.get("s1").unwrap();
+        assert_eq!(sample.columns[2], vec![1.0, 3.0, 5.0, 7.0, 9.0]);
+        assert_eq!(sample.columns[0], vec![100.0, 200.0, 300.0, 400.0, 500.0]);
+        // The guard stays alive past the last `sample` use (no early drop),
+        // and apply_transform re-locks this same non-reentrant Mutex — drop
+        // it explicitly first, or the error-path calls deadlock (gate hang).
+        drop(inner);
+        assert!(store.apply_transform("no-such", "CD4", &|x| x).is_err());
+        assert!(store.apply_transform("s1", "no-such", &|x| x).is_err());
     }
 
     #[test]

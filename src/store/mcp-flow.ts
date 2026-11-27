@@ -1,5 +1,5 @@
-// Headless flow work for the MCP dispatcher (seq 443, F1c; seq 447, F2a; seq 449, F2c):
-// the `import-fcs` job, the `apply-flow-compensation` job and the `flow-population-stats` job — the same
+// Headless flow work for the MCP dispatcher (seq 443, F1c; seq 447, F2a; seq 448, F2b; seq 449, F2c):
+// the `import-fcs` job, the `apply-flow-compensation` job, the `transform-flow-parameter` job and the `flow-population-stats` job — the same
 // shape as `mcp-document.ts`'s import jobs, minus everything a human
 // does: no path picker, no prompts, no dialog. The Rust reader
 // (`flow_import_fcs`) parses the FCS file into the event store; the
@@ -15,9 +15,15 @@
 import { parseSpilloverCsv, type ApplyCompensationInput, type FlowCompensationState } from "../flow/compensation";
 import { isFlowEnabled } from "../flow/feature-flag";
 import { buildFlowSampleRef, importFcs, type FcsImportSummary } from "../flow/fcs";
-import { isSampleNode, type FlowCompensationRef, type FlowPopulationPredicate, type FlowPopulationRef, type FlowSampleRef } from "../flow/sample";
+import { isSampleNode, readFlowSample, type FlowCompensationRef, type FlowPopulationPredicate, type FlowPopulationRef, type FlowSampleRef, type FlowTransformRef } from "../flow/sample";
 import { buildPopulationStatsTable, computePopulationStats, resolvePopulationIndices } from "../flow/stats";
 import { createFlowStore, type FlowEventStore } from "../flow/store";
+import {
+  applyFlowTransform,
+  resolveTransform,
+  type FlowTransformKind,
+  type FlowTransformResult,
+} from "../flow/transforms";
 import type { TableData } from "../store/types";
 import type { DocumentState } from "./mcp-document";
 
@@ -39,6 +45,16 @@ export interface FlowJobDeps {
   /** Apply a spillover matrix in the event store (seq 447; default: the
    *  real store — the Rust store in the app, in-memory in a harness). */
   applyCompensation?: (sampleId: string, input: ApplyCompensationInput) => Promise<FlowCompensationState>;
+  /** The store's `updateFlowSampleTransforms` action (default: the real
+   *  one) — records the transform on the sample node after it applies. */
+  updateFlowSampleTransforms?: (sampleId: string, transform: FlowTransformRef) => void;
+  /** The transform applier (default: the real `flow_apply_transform`
+   *  Tauri command). */
+  applyFlowTransform?: (
+    sampleId: string,
+    parameter: string,
+    transform: FlowTransformRef,
+  ) => Promise<FlowTransformResult>;
   /** Wait for the store to settle after a dispatch (see mcp-dispatch.ts). */
   flushUntilRevision?: (before: number) => Promise<void>;
   flush?: () => Promise<void>;
@@ -368,5 +384,103 @@ export async function executePopulationStats(
       rows: table.rows.length,
     },
     created: { table_id: tableId },
+  };
+}
+
+/** The `transform-flow-parameter` job's args, as Rust sends them
+ *  (snake_case, nulls for absent `Option`s). */
+export interface TransformFlowParameterJobArgs {
+  sample_id?: unknown;
+  parameter?: unknown;
+  kind?: unknown;
+  params?: unknown;
+}
+
+/** Apply one display transform to one parameter of a loaded sample (seq
+ *  448, F2b): the Rust store rewrites the column in place (the data
+ *  transform) and the sample node records it, so the `.hlx` file knows
+ *  what was applied. A parameter that already carries a transform is
+ *  refused — the store keeps no raw copy, so a second application would
+ *  compose silently; reload the sample to start from raw values. Returns
+ *  the before/after stats of the parameter — never event arrays. */
+export async function executeTransformFlowParameter(
+  deps: FlowJobDeps,
+  args: TransformFlowParameterJobArgs,
+  projectId: string,
+): Promise<{ result: unknown; created?: Record<string, unknown> }> {
+  if (!isFlowEnabled()) {
+    throw new Error(
+      "The FlowJo module is off — turn it on in Settings before transforming a flow parameter.",
+    );
+  }
+  const sampleId = reqString(args.sample_id, "sample_id");
+  const parameter = reqString(args.parameter, "parameter");
+  const kind = reqString(args.kind, "kind");
+  const rawParams: Record<string, number> = {};
+  if (args.params !== undefined && args.params !== null) {
+    if (typeof args.params !== "object" || Array.isArray(args.params)) {
+      throw new Error("Job argument “params” must be an object of numbers.");
+    }
+    for (const [k, v] of Object.entries(args.params as Record<string, unknown>)) {
+      if (typeof v !== "number" || !Number.isFinite(v)) {
+        throw new Error(`Transform parameter “${k}” must be a finite number.`);
+      }
+      rawParams[k] = v;
+    }
+  }
+  // Resolve + validate first (unknown kind / out-of-range W, A, T …):
+  // nothing is applied when the parameters are wrong.
+  const resolved = resolveTransform(kind as FlowTransformKind, rawParams);
+  const ref: FlowTransformRef = {
+    parameter,
+    kind: resolved.kind,
+    params: {
+      T: resolved.T,
+      W: resolved.W,
+      M: resolved.M,
+      A: resolved.A,
+      base: resolved.base,
+      floor: resolved.floor,
+    },
+  };
+  const node = deps.getState().nodes[sampleId];
+  if (!node || node.type !== "sample" || !node.flowSample) {
+    throw new Error(`No flow sample “${sampleId}” in this project — import it first (titer_import_fcs).`);
+  }
+  const sample = readFlowSample(node.flowSample);
+  if (!sample) {
+    throw new Error(`Sample “${sampleId}” in this project is not a readable flow sample.`);
+  }
+  if (!sample.parameters.some((p) => p.name === parameter)) {
+    throw new Error(`Sample “${sampleId}” has no parameter “${parameter}”.`);
+  }
+  const existing = sample.transforms?.find((t) => t.parameter === parameter);
+  if (existing) {
+    throw new Error(
+      `Parameter “${parameter}” of sample “${sampleId}” already has a ${existing.kind} transform — reload the sample to start from raw values.`,
+    );
+  }
+  const apply = deps.applyFlowTransform ?? applyFlowTransform;
+  const result = await apply(sampleId, parameter, ref);
+  const record =
+    deps.updateFlowSampleTransforms ??
+    (() => {
+      throw new Error("This window can't record a flow transform (no updateFlowSampleTransforms).");
+    });
+  const beforeRevision = deps.getState().revision;
+  record(sampleId, ref);
+  if (deps.flushUntilRevision) await deps.flushUntilRevision(beforeRevision);
+  else await deps.flush?.();
+  return {
+    result: {
+      project_id: projectId,
+      sample_id: sampleId,
+      parameter,
+      kind: resolved.kind,
+      params: ref.params,
+      event_count: result.eventCount,
+      before: result.before,
+      after: result.after,
+    },
   };
 }
