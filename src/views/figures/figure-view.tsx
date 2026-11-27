@@ -79,7 +79,7 @@ const readAsDataUrl = (file: File): Promise<string> =>
   });
 
 export function FigureView({ node }: { node: ProjectNode }) {
-  const { nodes, updateFigure, setActiveNode } = useProjectStore();
+  const { nodes, rootOrder, updateFigure, setActiveNode } = useProjectStore();
   const panels = node.panels ?? [];
   const grid = node.grid ?? { rows: 1, cols: 1 };
   const figureSize = node.figureSize ?? { ...DEFAULT_FIGURE_SIZE };
@@ -393,7 +393,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
   const onExport = async () => {
     setExporting(true);
     try {
-      await saveFigureImage(node, nodes, exportFormat, dpi, node.name, colorMode);
+      await saveFigureImage(node, nodes, exportFormat, dpi, node.name, colorMode, { rootOrder });
     } finally {
       setExporting(false);
     }
@@ -403,7 +403,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
   const onSendToOffice = async (target: OfficeTarget) => {
     setExporting(true);
     try {
-      await sendFigureToOffice(node, nodes, target, dpi, node.name);
+      await sendFigureToOffice(node, nodes, target, dpi, node.name, { rootOrder });
     } finally {
       setExporting(false);
     }
@@ -714,7 +714,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
           <Button
             variant="ghost"
             disabled={!panels.length || exporting}
-            onClick={() => copyFigureImage(node, nodes, dpi, colorMode)}
+            onClick={() => copyFigureImage(node, nodes, dpi, colorMode, { rootOrder })}
           >
             Copy Figure (PNG)
           </Button>

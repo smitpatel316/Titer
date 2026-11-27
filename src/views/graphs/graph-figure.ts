@@ -44,8 +44,10 @@ import {
   type ProjectNode,
   type TableData,
 } from "../../store/types";
-import { groupsOf, readTable, splitXY, type Column } from "../../lib/dataset";
+import { groupsOf, readTable, splitXY, type Column, type Dataset } from "../../lib/dataset";
 import { computeGroupedDEG } from "../../lib/deg";
+import { mergedGraphData } from "../../lib/multi-table";
+import { xZeroMs } from "../../lib/date-time";
 import {
   infoSheetsOf,
   resolveAnalysisParams,
@@ -72,7 +74,7 @@ import type {
 import {
   choosableSets,
   GRAPHS,
-  graphSeries,
+  graphSeriesDataset,
   hasValueAxis,
   plotColumns,
   type GraphFigure,
@@ -102,6 +104,7 @@ import {
   addSignificance,
   deriveComparisons,
   GROUPED_STARS,
+  sigAnalysisIdsOf,
   starsFit,
 } from "./significance-overlay";
 import { coxSurvivalColumns } from "./survival";
@@ -110,6 +113,9 @@ import { labelPlotGeometry, pointLabels } from "./selection";
 import { formatFigureLabels } from "../../lib/label-format";
 import {
   addNote,
+  applyDateAxis,
+  applyNumberFormats,
+  hasTableXAxis,
   onAxis,
   paintOf,
   refLineParts,
@@ -168,8 +174,17 @@ interface FigureInputs {
   parent: ProjectNode;
   dataset: ReturnType<typeof readTable>;
   columns: Column[];
+  /** The merged dataset — the primary table plus `sourceTableIds` — and
+   *  its columns: what the base chart builds from, as the graph view
+   *  builds it. `dataset`/`columns` stay the primary table's, for the
+   *  overlays (analyses run on one table). */
+  drawDataset: Dataset;
+  drawColumns: Column[];
+  /** The primary table's data (frozen snapshot for a frozen graph): the
+   *  date axis reads its xFormat, and the DEG/volcano math its rows. */
+  primaryData: TableData;
   /** The columns the graph's build actually receives: the Cox survival
-   *  columns, else a grouped volcano's DEG columns, else `columns`. */
+   *  columns, else a grouped volcano's DEG columns, else `drawColumns`. */
   buildColumns: Column[];
   options: GraphOptions;
   buildOptions: GraphOptions;
@@ -198,9 +213,16 @@ function figureInputs(
   const options = { ...DEFAULT_GRAPH_OPTIONS, ...graph.graphOptions };
   const dataset = readTable(data);
   const columns = plotColumns(dataset, type, options, parent.tableType);
-  const choosable = choosableSets(type, dataset, parent.tableType);
+  // The merged dataset, as the graph view reads it: the primary table
+  // plus `sourceTableIds`. A merge problem (a secondary table that can't
+  // join) means the graph has nothing to draw, as in the view.
+  const merged = mergedGraphData(graph, nodes);
+  if (!merged || merged.problem) return null;
+  const drawDataset = merged.dataset;
+  const drawColumns = plotColumns(drawDataset, type, options, parent.tableType);
+  const choosable = choosableSets(type, drawDataset, parent.tableType);
   const shownSets = choosable.length ? options.sets : undefined;
-  const allSeries = graphSeries(type, data, parent.tableType, options);
+  const allSeries = graphSeriesDataset(type, drawDataset, parent.tableType, options);
   const seriesNames = shownSets ? allSeries.filter((n) => shownSets.includes(n)) : allSeries;
   // A grouped volcano plots the DEGs Titer computes (per-row Welch t test +
   // BH FDR), not the table's own columns — the same columns the graph view
@@ -209,7 +231,7 @@ function figureInputs(
     family === "volcano" && parent.tableType === "grouped" && dataset.summary === "replicates"
       ? groupsOf(dataset.numeric).map((g) => g.name)
       : undefined;
-  let volcanoColumns = columns;
+  let volcanoColumns = drawColumns;
   let buildOptions = options;
   if (volcanoGroups) {
     const [a, b] = volcanoPair(volcanoGroups, options);
@@ -225,7 +247,7 @@ function figureInputs(
       volcanoYIsPValue: true,
     };
   } else if (family === "volcano" && parent.tableType === "xy") {
-    buildOptions = { ...options, volcanoX: dataset.columns[0]?.name };
+    buildOptions = { ...options, volcanoX: drawDataset.columns[0]?.name };
   }
   buildOptions = resolveGraphOptions(buildOptions, sheets);
   const plotFunctionAnalysis =
@@ -238,6 +260,9 @@ function figureInputs(
     parent,
     dataset,
     columns,
+    drawDataset,
+    drawColumns,
+    primaryData: data,
     buildColumns: columnsOverride ?? volcanoColumns,
     options,
     buildOptions,
@@ -263,16 +288,32 @@ export function buildBaseFigure(
 ): GraphFigure | null {
   const inputs = figureInputs(graph, nodes, opts.rootOrder ?? Object.keys(nodes), opts.columns);
   if (!inputs) return null;
-  const { dataset, columns, buildColumns, buildOptions, allSeries, plotFunctionAnalysis } = inputs;
-  if (!columns.some((c) => c.values.length > 0) && !plotFunctionAnalysis) return null;
+  const { dataset, drawDataset, drawColumns, primaryData, buildColumns, buildOptions, allSeries, plotFunctionAnalysis } =
+    inputs;
+  const type = graph.graphType as GraphType;
+  if (!drawColumns.some((c) => c.values.length > 0) && !plotFunctionAnalysis) return null;
   const paint = opts.paint ?? paintOf(buildOptions, allSeries.length);
-  const fig = GRAPHS[graph.graphType as GraphType].build(
+  const fig = GRAPHS[type].build(
     buildColumns,
     buildOptions,
     paint,
-    dataset.titles,
-    dataset.summary,
+    drawDataset.titles,
+    drawDataset.summary,
+    inputs.parent.tableType,
   );
+  applyNumberFormats(fig, buildOptions);
+  // A date/elapsed X column (seq 332 part D): the X axis draws date
+  // labels (or elapsed labels) instead of plain numbers — on the graphs
+  // whose X is the table's X column, from the primary table's format
+  // (an extra source table's own format does not move the shared axis).
+  if (hasTableXAxis(type, buildOptions) && (primaryData.xFormat === "date" || primaryData.xFormat === "elapsed")) {
+    const conversion = primaryData.xConversion ?? { units: "days" };
+    applyDateAxis(fig, buildOptions, {
+      format: primaryData.xFormat,
+      conversion,
+      zeroMs: primaryData.xFormat === "date" ? xZeroMs(dataset.columns[0]?.cells ?? [], conversion) : null,
+    });
+  }
   fig.data = withCaps(fig.data, buildOptions);
   // Labels render with super/subscripts (seq 548): the base chart is
   // formatted here, and the full figure again after its overlays (the
@@ -377,7 +418,12 @@ export async function buildGraphFigure(
   // ── Resolve the overlays' runs first (in parallel — `runAnalysis`
   // shares one result per table version, so runs the view already did are
   // not repeated), gated exactly as the graph view gates its hooks. ──
-  const sigAnalysis = options.sigAnalysisId ? nodes[options.sigAnalysisId] : undefined;
+  // The significance analyses, in order: the `sigAnalysisIds` list when
+  // set, else the legacy single `sigAnalysisId` — the same resolution the
+  // graph view uses, so a figure's stars match its view's.
+  const sigAnalyses = sigAnalysisIdsOf(options)
+    .map((id) => nodes[id])
+    .filter((n): n is ProjectNode => n !== undefined && n.type === "analysis");
   const stars = family === "column" || GROUPED_STARS.has(type);
   const regNode = options.regAnalysisId ? nodes[options.regAnalysisId] : undefined;
   const regParams = regNode?.analysisParams as LinearRegressionParams | undefined;
@@ -395,7 +441,7 @@ export async function buildGraphFigure(
   const poissonParams = (poissonAnalysis?.analysisParams ?? undefined) as PoissonRegressionParams | undefined;
   const logisticY = columns[1]?.name;
 
-  const needSig = stars && sigAnalysis !== undefined;
+  const needSig = stars && sigAnalyses.length > 0;
   const needCurve = type === "xy-scatter" && (curveParams !== undefined || logistic);
   const needCox = type === "forest-plot" || (type === "survival" && parent.tableType === "multiple");
   const needPca = type === "scree-plot" || type === "pca-biplot";
@@ -405,7 +451,6 @@ export async function buildGraphFigure(
   const needLogisticOwn = type === "logistic-curve" && logisticY !== undefined;
 
   const [
-    sigResolved,
     curveResolved,
     bindingResolved,
     inhibitionResolved,
@@ -421,7 +466,6 @@ export async function buildGraphFigure(
     mcResolved,
     logisticOwnResolved,
   ] = await Promise.all([
-    needSig ? resolveOutcome(sigAnalysis, undefined, data, sheets, run) : Promise.resolve(noOutcome),
     needCurve ? resolveOutcome(regNode, regNode!.analysisType, data, sheets, run) : Promise.resolve(noOutcome),
     type === "xy-scatter"
       ? resolveOutcome(sibling("binding-saturation") ?? sibling("binding-kinetics"), undefined, data, sheets, run)
@@ -460,9 +504,24 @@ export async function buildGraphFigure(
       : Promise.resolve(noOutcome),
   ]);
 
-  const sigOutcome = sigResolved.outcome;
-  const sigFits = needSig && sigAnalysis !== undefined && starsFit(sigAnalysis, choosable, shownSets ?? choosable);
-  const comparisons = sigFits ? deriveComparisons(sigOutcome) : [];
+  // The significance analyses resolve separately: each runs on its own
+  // parent table's data, as the graph view runs them — not the graph's
+  // primary table, which is another analysis's table.
+  const sigResolved: ResolvedOutcome[] = needSig
+    ? await Promise.all(
+        sigAnalyses.map((a) =>
+          resolveOutcome(a, undefined, (a.parentId ? nodes[a.parentId]?.data : undefined) ?? data, sheets, run),
+        ),
+      )
+    : [];
+
+  // Only the analyses whose sets fit the shown series contribute
+  // brackets; each comparison is tagged with its source analysis, so two
+  // analyses' same pair stay ticked apart.
+  const fittingSig = sigAnalyses.filter((a) => starsFit(a, choosable, shownSets ?? choosable));
+  const comparisons = fittingSig.flatMap((a) =>
+    deriveComparisons(resultOf(sigResolved[sigAnalyses.indexOf(a)]), a.id),
+  );
   const curveFit = resultOf(curveResolved);
   const bindingFit = resultOf(bindingResolved);
   const bindingParams = (sibling("binding-saturation") ?? sibling("binding-kinetics"))?.analysisParams as
@@ -539,15 +598,18 @@ export async function buildGraphFigure(
     record(overlay, "missing", note ?? "Run the linked analysis first.");
   };
 
-  if (stars && options.sigAnalysisId) {
-    if (!sigFits) {
+  if (stars && sigAnalyses.length > 0) {
+    const firstError = fittingSig
+      .map((a) => sigResolved[sigAnalyses.indexOf(a)].error)
+      .find((e) => e !== undefined);
+    if (fittingSig.length === 0) {
       record(
         "significance",
         "missing",
         "The linked analysis ran on different data sets than this graph shows, so its brackets don't apply here.",
       );
-    } else if (sigResolved.error) {
-      record("significance", "error", sigResolved.error);
+    } else if (firstError !== undefined) {
+      record("significance", "error", firstError);
     } else {
       apply(
         "significance",

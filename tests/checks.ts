@@ -322,10 +322,15 @@ import { XY_SCATTER_MAX_POINTS } from "../src/views/graphs/xy-scatter";
 import { addForestPlot } from "../src/views/graphs/forest-plot";
 import { addScreePlot } from "../src/views/graphs/scree-plot";
 import { addEstimationPlot, estimationDiffLabel } from "../src/views/graphs/estimation-plot";
-import { evaluate as evaluateFittedCurve } from "../src/views/graphs/fitted-curve";
+import { evaluate as evaluateFittedCurve, addLogisticCurve } from "../src/views/graphs/fitted-curve";
 import { addSchildPlot, schildPlotPoints } from "../src/views/graphs/schild-plot";
 import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay";
-import { fitDeming } from "../src/views/graphs/deming-overlay";
+import { addDeming, fitDeming } from "../src/views/graphs/deming-overlay";
+import {
+  addBindingCurve,
+  addDoseResponseSpecialCurve,
+  addEnzymeInhibitionCurve,
+} from "../src/views/graphs/binding-curve";
 import { addPcaBiplot } from "../src/views/graphs/pca-biplot";
 import { addObservedFitted } from "../src/views/graphs/observed-fitted";
 import { asMatched, batchMatched, examplesFor, matched, type Matched } from "../src/views/graphs/match-graph";
@@ -19754,10 +19759,11 @@ check("a shared legend hides each panel's own legend (BUG-REPORT #15)", () => {
   const view = readFileSync("src/views/figures/figure-view.tsx", "utf8");
   ok(view.includes('hideLegend={sharedLegend === "shared" && legend.ok}'), "the preview must pass hideLegend");
   const exporter = readFileSync("src/views/figures/figure-export.ts", "utf8");
-  // seq 216: both call sites gained a trailing colorMode argument; the
+  // seq 216: both call sites gained a trailing colorMode argument; R2
+  // Issues 50/51 added a trailing opts argument (run/rootOrder); the
   // legend.ok position (hideLegend) is unchanged.
-  ok(exporter.includes("}, format, dpi, legend.ok, colorMode)"), "the raster export must pass legend.ok");
-  ok(exporter.includes('}, "svg", dpi, legend.ok, colorMode)'), "the SVG export must pass legend.ok");
+  ok(exporter.includes("}, format, dpi, legend.ok, colorMode, opts)"), "the raster export must pass legend.ok");
+  ok(exporter.includes('}, "svg", dpi, legend.ok, colorMode, opts)'), "the SVG export must pass legend.ok");
 });
 
 // ── seq 173: MCP headless export draws graph overlays ────────────────
@@ -20223,15 +20229,434 @@ check("seq 173: a headless PCA biplot draws its scores, and the export reports i
   // The wiring: the export jobs build through the shared builder and report
   // the overlays, and the dispatcher passes its run through.
   const exporter = readFileSync("src/store/mcp-export.ts", "utf8");
-  ok(exporter.includes("buildGraphFigure(graph, nodes, { run })"), "export-graph must build through buildGraphFigure");
+  ok(
+    exporter.includes("buildGraphFigure(graph, nodes, { run, rootOrder })"),
+    "export-graph must build through buildGraphFigure",
+  );
   ok(exporter.includes("...overlayReport(out.overlays)"), "export-graph must report its overlays");
   ok(exporter.includes("...overlayReport(overlays)"), "export-figure/office must report their overlays");
   const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
   ok(dispatch.includes("run: deps.run ?? runAnalysis,"), "the dispatcher must pass its run to the export jobs");
   const figureExporter = readFileSync("src/views/figures/figure-export.ts", "utf8");
-  ok(figureExporter.includes("buildGraphFigure(graph, nodes, { hideLegend })"), "figure panels must build through buildGraphFigure");
+  ok(
+    figureExporter.includes(
+      "buildGraphFigure(graph, nodes, {\n    hideLegend,\n    run: opts.run,\n    rootOrder: opts.rootOrder,\n  })",
+    ),
+    "figure panels must build through buildGraphFigure",
+  );
   const scriptExporter = readFileSync("src/views/graphs/script-graph-export.ts", "utf8");
   ok(scriptExporter.includes("buildGraphFigure(graph, nodes)"), "script export must build through buildGraphFigure");
+});
+
+// Round 2 Issue 50: figure exports used to build from the graph's primary
+// table only — no secondary tables, no multi-analysis stars, no number
+// formats — and the batch/figure paths dropped `deps.run` and `rootOrder`.
+check("Round 2 Issue 50: a headless multi-table graph draws its extra table's series", async () => {
+  const t1: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Assay 1",
+    parentId: null,
+    tableType: "xy",
+    data: {
+      columns: ["Title", "X", "A:Y1", "A:Y2"],
+      rows: [
+        ["", "1", "2", "2.5"],
+        ["", "2", "3", "3.5"],
+        ["", "3", "4", "4.5"],
+      ],
+      groups: 1,
+      replicates: 2,
+    },
+  };
+  const t2: ProjectNode = {
+    id: "t2",
+    type: "table",
+    name: "Assay 2",
+    parentId: null,
+    tableType: "xy",
+    data: {
+      columns: ["Title", "X", "B:Y1"],
+      rows: [
+        ["", "4", "8"],
+        ["", "5", "9"],
+        ["", "6", "10"],
+      ],
+      groups: 1,
+      replicates: 1,
+    },
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Scatter",
+    parentId: "t1",
+    graphType: "xy-scatter",
+    sourceTableIds: ["t2"],
+    graphOptions: { ...newGraphOptions("xy-scatter") },
+  };
+  const run: AnalysisRunner = async () => ({ error: "no analyses linked" }) as AnalysisOutcome;
+  const { figure } = await buildGraphFigure(graph, { t1, t2, g1: graph }, { run });
+  ok(figure, "the scatter builds");
+  const names = (figure!.data as { name?: string }[]).map((t) => t.name ?? "");
+  ok(names.includes("A"), `the primary table's series draws: ${JSON.stringify(names)}`);
+  ok(
+    names.some((n) => n.includes("Assay 2")),
+    `the extra table's series draws: ${JSON.stringify(names)}`,
+  );
+});
+
+check("Round 2 Issue 50: sigAnalysisIds draws brackets from every listed analysis", async () => {
+  const table: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Column",
+    parentId: null,
+    tableType: "column",
+    data: {
+      columns: ["Title", "A", "B", "C"],
+      rows: [
+        ["r1", "10", "14", "20"],
+        ["r2", "11", "15", "21"],
+        ["r3", "10", "14", "20"],
+      ],
+    },
+  };
+  const a1: ProjectNode = {
+    id: "a1",
+    type: "analysis",
+    name: "ANOVA 1",
+    parentId: "t1",
+    analysisType: "anova",
+    analysisParams: {},
+    frozen: true,
+    cachedResult: resultOf("anova", {
+      comparisons: [{ group1: "A", group2: "B", p: 0.01, diff: 4, low: 1, high: 7 }],
+    }),
+  };
+  const a2: ProjectNode = {
+    id: "a2",
+    type: "analysis",
+    name: "ANOVA 2",
+    parentId: "t1",
+    analysisType: "anova",
+    analysisParams: {},
+    frozen: true,
+    cachedResult: resultOf("anova", {
+      comparisons: [{ group1: "A", group2: "C", p: 0.001, diff: 10, low: 7, high: 13 }],
+    }),
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Means",
+    parentId: "t1",
+    graphType: "mean-error",
+    graphOptions: {
+      ...newGraphOptions("mean-error"),
+      sigAnalysisIds: ["a1", "a2"],
+      sigPairs: [pairKey("A", "B"), pairKey("A", "C")],
+    },
+  };
+  const run: AnalysisRunner = async () => {
+    throw new Error("frozen analyses must not run");
+  };
+  const { figure, overlays } = await buildGraphFigure(graph, { t1: table, a1, a2, g1: graph }, { run });
+  ok(figure, "the mean-error graph builds");
+  const shapes = ((figure!.layout.shapes as unknown[]) ?? []).length;
+  const stars = ((figure!.layout.annotations as { text?: string }[] | undefined) ?? []).filter((a) =>
+    (a.text ?? "").includes("*"),
+  ).length;
+  ok(shapes >= 2 && stars >= 2, `${shapes} bracket shapes, ${stars} star annotations (pre-fix: 0)`);
+  deepStrictEqual(
+    overlays.map((o) => [o.overlay, o.status]),
+    [["significance", "applied"]],
+  );
+});
+
+check("Round 2 Issue 50: the built figure carries the graph's number formats", async () => {
+  const table: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Dose",
+    parentId: null,
+    tableType: "xy",
+    data: {
+      columns: ["Title", "X", "Y1"],
+      rows: [
+        ["", "0", "10"],
+        ["", "1", "6.5"],
+        ["", "2", "4.2"],
+        ["", "3", "2.8"],
+      ],
+      groups: 1,
+      replicates: 1,
+    },
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Scatter",
+    parentId: "t1",
+    graphType: "xy-scatter",
+    graphOptions: { ...newGraphOptions("xy-scatter"), yNumberFormat: { format: "decimal", decimals: 2 } },
+  };
+  const run: AnalysisRunner = async () => ({ error: "no analyses linked" }) as AnalysisOutcome;
+  const { figure } = await buildGraphFigure(graph, { t1: table, g1: graph }, { run });
+  ok(figure, "the scatter builds");
+  strictEqual(
+    (figure!.layout.yaxis as { tickformat?: string } | undefined)?.tickformat,
+    ".2f",
+    "the Y axis tickformat is the graph's decimal format (pre-fix: undefined)",
+  );
+});
+
+check("Round 2 Issue 50: the export-all batch and the figure export forward run and root order", () => {
+  const exporter = readFileSync("src/store/mcp-export.ts", "utf8");
+  ok(
+    exporter.includes("renderGraphImage(graph, nodes, format, dpi, size96, run, undefined, rootOrder)"),
+    "the batch renderer must forward run + rootOrder to the graph render",
+  );
+  ok(
+    exporter.includes("render(item, plan.format, plan.dpi, state.nodes, deps.run, state.rootOrder)"),
+    "the batch runner must pass deps.run + state.rootOrder to its renderer",
+  );
+  ok(
+    exporter.includes(
+      "renderFigureSvg(sized, state.nodes, dpi, colorMode, {\n      run: deps.run,\n      rootOrder: state.rootOrder,\n    })",
+    ),
+    "export-figure must forward run + rootOrder to the figure renderers",
+  );
+  ok(
+    exporter.includes('renderGraphImage(graph, state.nodes, "png", dpi, size96, deps.run, undefined, state.rootOrder)'),
+    "export-office must forward rootOrder to the graph render",
+  );
+  const figureExporter = readFileSync("src/views/figures/figure-export.ts", "utf8");
+  ok(figureExporter.includes("run: opts.run,"), "figure panels must forward the run");
+  ok(figureExporter.includes("rootOrder: opts.rootOrder,"), "figure panels must forward the root order");
+  const view = readFileSync("src/views/figures/figure-view.tsx", "utf8");
+  ok(
+    view.includes("saveFigureImage(node, nodes, exportFormat, dpi, node.name, colorMode, { rootOrder })"),
+    "the figure view must pass rootOrder to its save export",
+  );
+});
+
+// Round 2 Issue 51: replicate XY tables broke the overlays — Deming,
+// binding, enzyme-inhibition and dose-response-special matched params.y
+// against raw subcolumn names instead of dataset names, and the logistic
+// note looked up stat labels the fit never emits.
+check(
+  "Round 2 Issue 51: the replicate overlays resolve dataset names, and the logistic note reads real stat labels",
+  () => {
+    const deming = readFileSync("src/views/graphs/deming-overlay.ts", "utf8");
+    ok(
+      deming.includes("splitXY") && deming.includes("xyPoints"),
+      "addDeming must resolve dataset names via splitXY + xyPoints",
+    );
+    const binding = readFileSync("src/views/graphs/binding-curve.ts", "utf8");
+    ok(
+      binding.includes("splitXY") && binding.includes("xyPoints"),
+      "the binding curves must resolve dataset names via splitXY + xyPoints",
+    );
+    const fitted = readFileSync("src/views/graphs/fitted-curve.ts", "utf8");
+    const logisticFn = fitted.slice(fitted.indexOf("export function addLogisticCurve"));
+    ok(logisticFn.includes('"Odds ratio (per 1 unit X)"'), "addLogisticCurve must read the emitted odds-ratio label");
+    ok(logisticFn.includes('"McFadden pseudo-R²"'), "addLogisticCurve must read the emitted McFadden label");
+    ok(
+      !logisticFn.includes('stat("Odds ratio (per unit of X)")') &&
+        !logisticFn.includes('stat("X at 50% probability")') &&
+        !logisticFn.includes(`stat("Tjur's R squared")`),
+      "addLogisticCurve must not look up nonexistent stat labels",
+    );
+  },
+);
+
+check("Round 2 Issue 51: Deming on a replicate table fits the pooled points, not just A:Y1", () => {
+  // `groups`/`replicates` mark the replicate structure, and the `A:Y1` /
+  // `A:Y2` names carry the set — so splitXY groups them into one dataset.
+  const columns = readTable({
+    columns: ["Title", "X", "A:Y1", "A:Y2"],
+    rows: [
+      ["", "1", "2", "4"],
+      ["", "2", "3", "6"],
+      ["", "3", "4", "8"],
+      ["", "4", "5", "10"],
+    ],
+    groups: 1,
+    replicates: 2,
+  }).columns;
+  const options = { ...DEFAULT_GRAPH_OPTIONS, demingShowOls: false, demingShowEquation: false };
+  const fig: GraphFigure = { data: [], layout: { annotations: [] } };
+  addDeming(fig, columns, options, { y: "A", lambda: 1 }, paintOf(options, 4));
+  const line = (fig.data as { x?: number[]; y?: number[] }[]).find((t) => Array.isArray(t.x) && t.x.length === 2);
+  ok(line, "the Deming line draws");
+  const drawnSlope = (line!.y![1] - line!.y![0]) / (line!.x![1] - line!.x![0]);
+  const { x, ys } = splitXY(columns);
+  const pooledPts = xyPoints(x!, ys[0]);
+  const pooled = fitDeming(pooledPts.x, pooledPts.y, 1);
+  const y1Pts = xyPoints(x!, { name: "A:Y1", columns: [columns[2]] });
+  const y1Only = fitDeming(y1Pts.x, y1Pts.y, 1);
+  ok(pooled !== null && y1Only !== null, "both reference fits exist");
+  ok(
+    Math.abs(pooled!.slope - y1Only!.slope) > 0.01,
+    `the probe discriminates: pooled ${pooled!.slope} vs Y1-only ${y1Only!.slope}`,
+  );
+  ok(
+    Math.abs(drawnSlope - pooled!.slope) < 1e-9,
+    `the drawn line is the pooled fit (slope ${drawnSlope}, pooled ${pooled!.slope}, Y1-only ${y1Only!.slope})`,
+  );
+});
+
+check("Round 2 Issue 51: a binding curve spans every replicate of its dataset", () => {
+  const columns = readTable({
+    columns: ["Title", "X", "Total:Y1", "Total:Y2"],
+    rows: [
+      ["", "1", "10", null],
+      ["", "2", "20", null],
+      ["", "3", "30", null],
+      ["", "4", null, "15"],
+      ["", "5", null, "25"],
+      ["", "6", null, "35"],
+    ],
+    groups: 1,
+    replicates: 2,
+  }).columns;
+  const fit: AnalysisResult = {
+    testType: "binding-saturation",
+    stats: [],
+    groups: [],
+    notes: "",
+    coefficients: [
+      { term: "Bmax", estimate: 100, stdError: null, t: null, p: null },
+      { term: "Kd", estimate: 5, stdError: null, t: null, p: null },
+      { term: "NS", estimate: 0, stdError: null, t: null, p: null },
+      { term: "Background", estimate: 0, stdError: null, t: null, p: null },
+    ],
+  };
+  const options = { ...DEFAULT_GRAPH_OPTIONS, demingShowOls: false, demingShowEquation: false };
+  const fig: GraphFigure = { data: [], layout: { annotations: [] } };
+  addBindingCurve(fig, columns, options, fit, { model: "one-site-total", y: "Total" }, paintOf(options, 4));
+  const curve = (fig.data as { x?: number[]; y?: number[] }[]).find((t) => Array.isArray(t.x) && t.x.length > 2);
+  ok(curve, "the binding curve draws");
+  strictEqual(curve!.x![0], 1, "the curve starts at the first replicate's X (pre-fix: Y1-only range 1–3)");
+  strictEqual(curve!.x![curve!.x!.length - 1], 6, "the curve ends at the last replicate's X");
+});
+
+check("Round 2 Issue 51: enzyme inhibition draws one curve per dataset, by dataset name", () => {
+  const columns = readTable({
+    columns: ["Title", "X", "Control:Y1", "Control:Y2", "Inhibited:Y1", "Inhibited:Y2"],
+    rows: [
+      ["", "1", "10", "11", "5", "6"],
+      ["", "2", "18", "19", "9", "10"],
+      ["", "5", "33", "34", "20", "21"],
+      ["", "10", "50", "51", "33", "34"],
+      ["", "20", "66", "67", "50", "51"],
+    ],
+    groups: 2,
+    replicates: 2,
+  }).columns;
+  const fit: AnalysisResult = {
+    testType: "enzyme-inhibition",
+    stats: [],
+    groups: [],
+    notes: "",
+    coefficients: [
+      { term: "Vmax", estimate: 100, stdError: null, t: null, p: null },
+      { term: "Km", estimate: 10, stdError: null, t: null, p: null },
+      { term: "Ki", estimate: 5, stdError: null, t: null, p: null },
+    ],
+  };
+  const options = { ...DEFAULT_GRAPH_OPTIONS, demingShowOls: false, demingShowEquation: false };
+  const fig: GraphFigure = { data: [], layout: { annotations: [] } };
+  addEnzymeInhibitionCurve(
+    fig,
+    columns,
+    options,
+    fit,
+    { model: "competitive", y: ["Control", "Inhibited"], inhibitorConcentrations: { Control: 0, Inhibited: 10 } },
+    paintOf(options, 4),
+  );
+  const curves = (fig.data as { mode?: string }[]).filter((t) => t.mode === "lines");
+  strictEqual(curves.length, 2, `${curves.length} curve traces (pre-fix: 0 — dataset names matched no subcolumn)`);
+});
+
+check("Round 2 Issue 51: dose-response special draws one curve per dataset, by dataset name", () => {
+  const columns = readTable({
+    columns: ["Title", "X", "Control:Y1", "Control:Y2", "Shifted:Y1", "Shifted:Y2"],
+    rows: [
+      ["", "0.001", "5", "6", "2", "3"],
+      ["", "0.01", "20", "21", "8", "9"],
+      ["", "0.1", "50", "51", "25", "26"],
+      ["", "1", "80", "81", "55", "56"],
+      ["", "10", "95", "96", "85", "86"],
+    ],
+    groups: 2,
+    replicates: 2,
+  }).columns;
+  const fit: AnalysisResult = {
+    testType: "dose-response-special",
+    stats: [],
+    groups: [],
+    notes: "",
+    coefficients: [
+      { term: "Bottom", estimate: 0, stdError: null, t: null, p: null },
+      { term: "Top", estimate: 100, stdError: null, t: null, p: null },
+      { term: "HillSlope", estimate: 1, stdError: null, t: null, p: null },
+      { term: "LogEC50[Control]", estimate: -1, stdError: null, t: null, p: null },
+      { term: "LogEC50[Shifted]", estimate: 0, stdError: null, t: null, p: null },
+      { term: "EC50[Control]", estimate: 0.1, stdError: null, t: null, p: null },
+      { term: "EC50[Shifted]", estimate: 1, stdError: null, t: null, p: null },
+    ],
+  };
+  const options = { ...DEFAULT_GRAPH_OPTIONS, demingShowOls: false, demingShowEquation: false };
+  const fig: GraphFigure = { data: [], layout: { annotations: [] } };
+  addDoseResponseSpecialCurve(
+    fig,
+    columns,
+    options,
+    fit,
+    { model: "ec50-shift", ys: ["Control", "Shifted"], antagonistConcentrations: { Control: 0, Shifted: 1e-6 } },
+    paintOf(options, 4),
+  );
+  const curves = (fig.data as { mode?: string }[]).filter((t) => t.mode === "lines");
+  strictEqual(curves.length, 2, `${curves.length} curve traces (pre-fix: 0)`);
+});
+
+check("Round 2 Issue 51: the logistic note shows the odds ratio, X at 50% and McFadden pseudo-R²", () => {
+  const { x, ys } = splitXY(
+    readTable({
+      columns: ["Title", "X", "Y"],
+      rows: [
+        ["", "0", "0"],
+        ["", "1", "0"],
+        ["", "2", "1"],
+        ["", "3", "1"],
+        ["", "4", "1"],
+      ],
+      groups: 1,
+      replicates: 1,
+    }).columns,
+  );
+  const fit: AnalysisResult = {
+    testType: "simple-logistic-regression",
+    stats: [
+      { label: "Odds ratio (per 1 unit X)", value: Math.E },
+      { label: "McFadden pseudo-R²", value: 0.42 },
+    ],
+    groups: [],
+    notes: "",
+    coefficients: [
+      { term: "Intercept", estimate: -2, stdError: null, t: null, p: null },
+      { term: "X", estimate: 1, stdError: null, t: null, p: null },
+    ],
+  };
+  const options = { ...DEFAULT_GRAPH_OPTIONS, demingShowOls: false, demingShowEquation: false };
+  const fig: GraphFigure = { data: [], layout: { annotations: [] } };
+  addLogisticCurve(fig, x!, ys[0], ys, fit, true, options, paintOf(options, 4));
+  const note = ((fig.layout.annotations as { text?: string }[] | undefined) ?? []).map((a) => a.text ?? "").join(" ");
+  ok(note.includes("Odds ratio = 2.718"), `the note shows the odds ratio (not —): ${note}`);
+  ok(note.includes("X at 50% = 2"), `the note shows X at 50% = 2 from -b0/b1 (not —): ${note}`);
+  ok(note.includes("McFadden pseudo-R² = 0.42"), `the note shows McFadden pseudo-R² (not Tjur's —): ${note}`);
 });
 
 check("an oversize figure offers the largest fitting size, never silently (F-12)", () => {

@@ -531,7 +531,11 @@ export function logisticAt(coefficients: RegressionCoefficient[], x: number): nu
 }
 
 /** Draws a logistic regression's S curve of `y` (0s and 1s) against `x` under the points, in
- *  `y`'s color, and its note when `note`: the odds ratio, the X at 50% and Tjur's R². */
+ *  `y`'s color, and its note when `note`: the odds ratio, the X at 50% and McFadden
+ *  pseudo-R². The note reads the stat labels the logistic-regression analysis
+ *  actually emits ("Odds ratio (per 1 unit X)", "McFadden pseudo-R²"); the X at
+ *  50% is no emitted stat, so it is computed from the coefficients (−b0/b1) —
+ *  the old labels matched nothing the analysis emits, so the note always read —. */
 export function addLogisticCurve(
   fig: GraphFigure,
   x: Column,
@@ -559,11 +563,16 @@ export function addLogisticCurve(
     ...fig.data,
   ];
   const stat = (label: string) => num(fit.stats.find((s) => s.label === label)?.value);
+  // X at 50% probability is where b0 + b1·x = 0: −b0/b1, from the fitted
+  // coefficients (Intercept, then the X slope) — no stat row carries it.
+  const b0 = coefficients[0]?.estimate ?? null;
+  const b1 = coefficients[1]?.estimate ?? null;
+  const x50 = b0 == null || b1 == null || b1 === 0 ? null : -b0 / b1;
   if (note)
     addNote(
       fig,
-      `Odds ratio = ${stat("Odds ratio (per unit of X)")}<br>X at 50% = ${stat("X at 50% probability")}<br>` +
-        `Tjur's R² = ${stat("Tjur's R squared")}`,
+      `Odds ratio = ${stat("Odds ratio (per 1 unit X)")}<br>X at 50% = ${num(x50)}<br>` +
+        `McFadden pseudo-R² = ${stat("McFadden pseudo-R²")}`,
       options,
     );
 }

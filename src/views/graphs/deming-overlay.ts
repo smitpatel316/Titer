@@ -5,7 +5,7 @@
 // "Deming regression" analysis's R-computed fit (checked by `npm test`).
 import type { GraphOptions } from "../../store/types";
 import type { DemingRegressionParams } from "../../stats/types";
-import { pairUp, type Column } from "../../lib/dataset";
+import { splitXY, xyPoints, type Column } from "../../lib/dataset";
 import type { GraphFigure } from ".";
 import { num } from "../../lib/format";
 import { addNote, extent, type Paint } from "./plot-helpers";
@@ -57,7 +57,10 @@ function demingLabel(fit: DemingFit, ols: LinearFit | null): string {
 /** Draws a Deming-regression analysis's fit on an XY scatter (`columns` = X, then
  *  the Y series): its line (solid) and the OLS line (dashed) as chosen, under the
  *  points. The OLS line comes from the same `fitLinear` helper as the regression
- *  overlay, so the two lines always agree with their analyses. */
+ *  overlay, so the two lines always agree with their analyses. `params.y` names
+ *  a Y data set (as the analysis does), so on a replicate table the fit pools
+ *  the set's subcolumns via `xyPoints` — matching a raw subcolumn name would
+ *  fall back to the first replicate and fit the wrong points. */
 export function addDeming(
   fig: GraphFigure,
   columns: Column[],
@@ -65,10 +68,13 @@ export function addDeming(
   params: DemingRegressionParams | undefined,
   paint: Paint,
 ) {
-  const [x, ...ys] = columns;
-  const y = ys.find((c) => c.name === params?.y) ?? ys[0];
+  // The chosen Y data set, by name — the same resolution the Deming
+  // analysis uses (`splitXY` + `xyPoints`), so the line fits the points
+  // the analysis fitted, replicates pooled.
+  const { x, ys } = splitXY(columns);
+  const y = params?.y === undefined ? ys[0] : ys.find((s) => s.name === params.y);
   if (!x || !y) return;
-  const pairs = pairUp(x, y);
+  const pairs = xyPoints(x, y);
   const fit = fitDeming(pairs.x, pairs.y, params?.lambda ?? 1);
   if (!fit) return;
   const ols = fitLinear(pairs.x, pairs.y, false);
