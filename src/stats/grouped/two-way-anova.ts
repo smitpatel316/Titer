@@ -297,9 +297,16 @@ async function runPosthoc(
   // In R: each pair's difference of means, its t (on the ANOVA's mean square, or for
   // Games-Howell the two cells' own variances), its P corrected within its family, and its
   // 95% CI: the difference ± the t at which its corrected P is 0.05.
+  // BUG-REPORT #112: each pair is shifted by a common origin (a[1]) before
+  // the means are subtracted — on values alike in their first 13 digits
+  // (~1e13) the uncentered `mean(a) - mean(b)` loses the differences (the
+  // main ANOVA centers the same way, cf. commit 989f7c0b). a - m0 and b - m0
+  // are exact by Sterbenz (values within a factor of 2 of their origin),
+  // and the shift cancels in every difference of means — and, for
+  // Games-Howell, in the cells' own variances too.
   const df = String(dfResid);
   const pooled = (c: (typeof cells)[number]) =>
-    `{a<-${rVec(c.a)};b<-${rVec(c.b)};d<-mean(a)-mean(b);s<-sqrt(${mse}*(1/length(a)+1/length(b)));t<-d/s;`;
+    `{a<-${rVec(c.a)};b<-${rVec(c.b)};m0<-a[1];a<-a-m0;b<-b-m0;d<-mean(a)-mean(b);s<-sqrt(${mse}*(1/length(a)+1/length(b)));t<-d/s;`;
   // Dunnett: each family's weights (√(n / (n + n of its control))) and critical value, once.
   const families = [...new Set(cells.map((c) => c.family))];
   const dunnett =
@@ -320,7 +327,7 @@ async function runPosthoc(
     method === "dunnett"
       ? `${pooled(c)}h<-cv${c.family}*s;c(d,dun(t,l${c.family},${df}),d-h,d+h)}`
       : method === "games-howell"
-        ? `{a<-${rVec(c.a)};b<-${rVec(c.b)};d<-mean(a)-mean(b);va<-var(a)/length(a);vb<-var(b)/length(b);s<-sqrt(va+vb);` +
+        ? `{a<-${rVec(c.a)};b<-${rVec(c.b)};m0<-a[1];a<-a-m0;b<-b-m0;d<-mean(a)-mean(b);va<-var(a)/length(a);vb<-var(b)/length(b);s<-sqrt(va+vb);` +
           `w<-(va+vb)^2/(va^2/(length(a)-1)+vb^2/(length(b)-1));t<-d/s;h<-crit(function(x)ptk(x*sqrt(2),${c.means},w))*s;` +
           `c(d,ptk(abs(t)*sqrt(2),${c.means},w),d-h,d+h)}`
         : `${pooled(c)}h<-crit(function(x)${ciP(rMethodOf(method) as Method, c.means, df)})*s;c(d,${pOf(rMethodOf(method) as Method, "t", c.means, df)},d-h,d+h)}`,
