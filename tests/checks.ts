@@ -73,7 +73,21 @@ import {
   syncPaneRingFromFocus,
   type PaneId,
 } from "../src/lib/pane-focus";
-import { galleryItems } from "../src/lib/gallery";
+import {
+  applyGalleryPalette,
+  applyGalleryResize,
+  galleryBatchDuplicate,
+  galleryBatchHighlight,
+  galleryBatchPrint,
+  galleryBatchRename,
+  galleryBatchSend,
+  galleryExportPlan,
+  galleryItems,
+  galleryThumbnail,
+  selectAllGallery,
+  selectedGalleryItems,
+  toggleGallerySelection,
+} from "../src/lib/gallery";
 import { loadPrintSettings, printPageCss, savePrintSettings } from "../src/lib/print-settings";
 import {
   DECIMAL_SEPARATOR_KEY,
@@ -461,6 +475,7 @@ import { engineStatusText, getEngineStatus, onEngineStatus, setEngineStatus } fr
 import {
   buildKeynoteScript,
   buildOfficeDocument,
+  buildOfficeDocumentMulti,
   keynoteSizePoints,
   officeDialogTitle,
   officeExtension,
