@@ -2780,6 +2780,7 @@ const anovaSmall = precisionFix.anovaSmall;
 const xyBig = precisionFix.xyBig;
 const xyBigOrigin = precisionFix.xyBigOrigin;
 const multiBig = precisionFix.multiBig;
+const xyBigSlopes = precisionFix.xyBigSlopes;
 // Multi-Y twin of xyBig: Y2 is the origin table's Y (a second 1e13 series),
 // so the per-set fit path is pinned too.
 const xyBigMulti: TableData = {
@@ -3005,6 +3006,14 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["xyBig", xyBig, "linear-regression", { forceOrigin: false }],
   ["xyBig", xyBig, "linear-regression", { forceOrigin: false, weights: "1/y" }],
   ["xyBigMulti", xyBigMulti, "linear-regression", { ys: ["Y", "Y2"], forceOrigin: false }],
+  // 1e13-scale precision (Nov 2026): pre-fix the uncentered stacked fits
+  // errored outright ("subscript out of bounds"); post-fix the two F tests,
+  // the common slope and the per-set lines match the mpmath exact values
+  // (probe/expected-precision.json, slopesParallel/slopesDiffer/slopesThree)
+  // to ~1e-9 — A/B are parallel but distinct, A/C have different slopes.
+  ["xyBigSlopes", xyBigSlopes, "compare-slopes", { ys: ["A", "B"] }],
+  ["xyBigSlopes", xyBigSlopes, "compare-slopes", { ys: ["A", "C"] }],
+  ["xyBigSlopes", xyBigSlopes, "compare-slopes", { ys: ["A", "B", "C"] }],
   // Deming regression (plan 13): the reference case at λ = 1 and λ = 0.25
   // (the λ-sensitivity check lives in disagreements() below), plus the
   // error paths — λ ≤ 0, no covariation, too few pairs, constant X/Y.

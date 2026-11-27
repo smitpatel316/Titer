@@ -10841,6 +10841,101 @@ check("compare-slopes refuses one data set, a short set, a flat X and a missing 
   });
 });
 
+check("compare-slopes at 1e13 scale matches mpmath exact values (precision lane)", async () => {
+  // At ~1e13 scale (values alike in their first 13 digits) the uncentered
+  // stacked fits lose the differences between the lines: pre-fix the
+  // parallel pair's F (lines identical) was off by orders of magnitude and
+  // the per-set intercepts by ~1e-3 relative — the same root cause as ANOVA
+  // / linear / multiple regression (2db68ed1). The table reuses the linreg
+  // 1e13 fixtures: A = slope 2, +1000; B = slope 2, +0 (parallel, distinct
+  // intercepts); C = slope 3, +1000 (slopes differ). Exact values are
+  // mpmath 50-digit (probe/expected-precision.json, keys slopesParallel /
+  // slopesDiffer / slopesThree); tight pins are relative 1e-9, extreme-tail
+  // P values are order-of-magnitude only (p ∝ F^-df/2 amplifies the ~1%
+  // SSE rounding at this scale, as with the through-origin P). The t
+  // critical values in the exact file are inverted from the incomplete beta
+  // in mpmath — scipy's t.ppf is 1.7e-10 off at df=8 and that shows on
+  // intercept CIs, whose SEs are ~1e11 here.
+  const tables = JSON.parse(
+    readFileSync(new URL("./testdata/precision-1e13.json", import.meta.url), "utf8"),
+  ) as Record<string, TableData>;
+  const table = tables.xyBigSlopes;
+  const rel = (got: number | null | undefined, want: number, tol = 1e-9) => {
+    ok(got != null && Math.abs(got - want) <= Math.abs(want) * tol, `got ${got}, want ${want} (rel ${tol})`);
+  };
+  const stat = (out: AnalysisResult, label: string) => out.stats.find((s) => s.label === label)?.value;
+  const fitRow = (out: AnalysisResult, label: string) => out.fit?.rows.find((r) => r.label === label);
+  const ciRows = (out: AnalysisResult) => out.fit?.rows.filter((r) => r.label === "95% CI") ?? [];
+  const run = async (ys: string[]) => {
+    const out = await runAnalysis("compare-slopes", table, { ys });
+    if ("error" in out) throw new Error(out.error);
+    return out;
+  };
+
+  // Parallel but distinct (A slope 2.001, B slope 2.019, intercepts
+  // -1.23e10 vs -1.87e11): slopes P = 0.571, identical-lines P ~ 2.5e-65.
+  const parallel = await run(["A", "B"]);
+  rel(stat(parallel, "F (slopes differ)"), 0.3350163644055008);
+  rel(stat(parallel, "P value (slopes differ)"), 0.5707791232452137);
+  strictEqual(stat(parallel, "DFn (slopes)"), 1);
+  strictEqual(stat(parallel, "DFd (slopes)"), 16);
+  rel(stat(parallel, "F (lines identical)"), 556765819.5393214);
+  ok((stat(parallel, "P value (lines identical)") ?? 1) < 1e-60);
+  strictEqual(stat(parallel, "DFn (lines identical)"), 1);
+  strictEqual(stat(parallel, "DFd (lines identical)"), 17);
+  rel(stat(parallel, "Common slope"), 2.0099431818181817);
+  rel(stat(parallel, "Common slope 95% CI lower"), 1.9788137840159046);
+  rel(stat(parallel, "Common slope 95% CI upper"), 2.041072579620459);
+  rel(fitRow(parallel, "Slope")?.values?.[0], 2.001231060606061);
+  rel(fitRow(parallel, "Slope")?.values?.[1], 2.018655303030303);
+  rel(ciRows(parallel)[0].ranges?.[0]?.[0], 1.9343516151657472);
+  rel(ciRows(parallel)[0].ranges?.[0]?.[1], 2.068110506046374);
+  rel(ciRows(parallel)[0].ranges?.[1]?.[0], 2.0000489723526482);
+  rel(ciRows(parallel)[0].ranges?.[1]?.[1], 2.037261633707958);
+  rel(fitRow(parallel, "Y-intercept")?.values?.[0], -12310605060.59633);
+  rel(fitRow(parallel, "Y-intercept")?.values?.[1], -186553030303.03555);
+  rel(ciRows(parallel)[1].ranges?.[0]?.[0], -681105059463.882);
+  rel(ciRows(parallel)[1].ranges?.[0]?.[1], 656483849342.6893);
+  rel(ciRows(parallel)[1].ranges?.[1]?.[0], -372616337079.6266);
+  rel(ciRows(parallel)[1].ranges?.[1]?.[1], -489723526.44451034);
+  rel(fitRow(parallel, "Pearson r")?.values?.[0], 0.9991609577506635);
+  rel(fitRow(parallel, "Pearson r")?.values?.[1], 0.999936100812514);
+  rel(fitRow(parallel, "R squared")?.values?.[0], 0.9983226194932232);
+  rel(fitRow(parallel, "R squared")?.values?.[1], 0.9998722057081342);
+  rel(fitRow(parallel, "P value (slope ≠ 0)")?.values?.[0], 2.1660877195882448e-12, 0.25);
+  rel(fitRow(parallel, "P value (slope ≠ 0)")?.values?.[1], 7.293333943464613e-17, 0.25);
+  ok(!parallel.stats.some((s) => s.label === "Intersection point (X)"));
+  ok(parallel.summary?.includes("parallel lines with different intercepts"));
+
+  // Slopes differ (A slope 2.001 vs C slope 2.976): F = 864.75, P ~ 2.3e-15;
+  // the lines cross at X ~ -2.55e11.
+  const differ = await run(["A", "C"]);
+  rel(stat(differ, "F (slopes differ)"), 864.7510648492696);
+  ok((stat(differ, "P value (slopes differ)") ?? 1) < 1e-13);
+  strictEqual(stat(differ, "DFd (slopes)"), 16);
+  rel(stat(differ, "F (lines identical)"), 8.511366734192567e26);
+  ok((stat(differ, "P value (lines identical)") ?? 1) < 1e-210);
+  rel(stat(differ, "Common slope"), 2.488778409090909);
+  rel(stat(differ, "Common slope 95% CI lower"), 2.237000357415647);
+  rel(stat(differ, "Common slope 95% CI upper"), 2.740556460766171);
+  rel(fitRow(differ, "Slope")?.values?.[1], 2.976325757575758);
+  rel(fitRow(differ, "Y-intercept")?.values?.[1], 236742425242.5314);
+  rel(stat(differ, "Intersection point (X)"), -255414198310.28735);
+  ok(differ.summary?.includes("slopes of “A” and “C” differ significantly"));
+
+  // Three sets: DFn is 2, and both F tests still pin.
+  const three = await run(["A", "B", "C"]);
+  strictEqual(stat(three, "DFn (slopes)"), 2);
+  strictEqual(stat(three, "DFd (slopes)"), 24);
+  rel(stat(three, "F (slopes differ)"), 802.0829649392812);
+  ok((stat(three, "P value (slopes differ)") ?? 1) < 1e-20);
+  rel(stat(three, "F (lines identical)"), 6.648075790216433e26);
+  ok((stat(three, "P value (lines identical)") ?? 1) < 1e-300);
+  rel(stat(three, "Common slope"), 2.332070707070707);
+  rel(stat(three, "Common slope 95% CI lower"), 2.1470341722825204);
+  rel(stat(three, "Common slope 95% CI upper"), 2.517107241858894);
+});
+
 check("linear-regression with compareSlopes runs the slope/intercept comparison (MCP audit seq 292)", async () => {
   // The audit's bar: the comparison is a param in the linear-regression
   // schema, reachable via titer_run_analysis — not UI-only. Same fixture

@@ -12008,7 +12008,7 @@
   "checks": [
    {
     "ok": true,
-    "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the residuals P = 0.9242)."
+    "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the residuals P = 0.7888)."
    }
   ]
  },
@@ -12085,7 +12085,7 @@
   "checks": [
    {
     "ok": true,
-    "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the weighted residuals P = 0.9226)."
+    "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the weighted residuals P = 0.7888)."
    }
   ]
  },
@@ -12213,6 +12213,557 @@
    "left": []
   },
   "summary": "The slope differs significantly from 0 for “Y” (slope 2.001, P < 0.0001), “Y2” (slope 2.019, P < 0.0001)."
+ },
+ "compare-slopes xyBigSlopes {\"ys\":[\"A\",\"B\"]}": {
+  "testType": "compare-slopes",
+  "subtitle": "Compare slopes and intercepts",
+  "summary": "The slopes of “A” and “B” do not differ significantly (P = 0.5708), but the lines are not identical (P = 2.517e-65): they are parallel lines with different intercepts.",
+  "stats": [
+   {
+    "label": "F (slopes differ)",
+    "value": 0.3350163644
+   },
+   {
+    "label": "DFn (slopes)",
+    "value": 1
+   },
+   {
+    "label": "DFd (slopes)",
+    "value": 16
+   },
+   {
+    "label": "P value (slopes differ)",
+    "value": 0.5707791232,
+    "p": true
+   },
+   {
+    "label": "F (lines identical)",
+    "value": 556765819.5
+   },
+   {
+    "label": "DFn (lines identical)",
+    "value": 1
+   },
+   {
+    "label": "DFd (lines identical)",
+    "value": 17
+   },
+   {
+    "label": "P value (lines identical)",
+    "value": 2.517279868e-65,
+    "p": true
+   },
+   {
+    "label": "Common slope",
+    "value": 2.009943182
+   },
+   {
+    "label": "Common slope 95% CI lower",
+    "value": 1.978813784
+   },
+   {
+    "label": "Common slope 95% CI upper",
+    "value": 2.04107258
+   }
+  ],
+  "fit": {
+   "sets": [
+    "A",
+    "B"
+   ],
+   "rows": [
+    {
+     "label": "Slope",
+     "values": [
+      2.001231061,
+      2.018655303
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       1.934351615,
+       2.068110506
+      ],
+      [
+       2.000048972,
+       2.037261634
+      ]
+     ]
+    },
+    {
+     "label": "Y-intercept",
+     "values": [
+      -12310605060,
+      -186553030300
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       -681105059500,
+       656483849300
+      ],
+      [
+       -372616337100,
+       -489723526.5
+      ]
+     ]
+    },
+    {
+     "label": "Pearson r",
+     "values": [
+      0.9991609578,
+      0.9999361008
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      0.9983226195,
+      0.9998722057
+     ]
+    },
+    {
+     "label": "P value (slope ≠ 0)",
+     "values": [
+      2.16608772e-12,
+      7.293333943e-17
+     ],
+     "p": true
+    },
+    {
+     "label": "N",
+     "values": [
+      10,
+      10
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 10000000000000,
+    "sd": 1.513825177,
+    "sem": 0.4787135539,
+    "median": 10000000000000,
+    "n": 10
+   },
+   {
+    "name": "A",
+    "mean": 20000000000000,
+    "sd": 3.032058101,
+    "sem": 0.9588209598,
+    "median": 20000000000000,
+    "n": 10
+   },
+   {
+    "name": "B",
+    "mean": 20000000000000,
+    "sd": 3.056086947,
+    "sem": 0.9664195479,
+    "median": 20000000000000,
+    "n": 10
+   }
+  ],
+  "notes": "Extra sum-of-squares F tests comparing the lines of “A”, “B” on “X” (equivalent to an ANCOVA): first whether the slopes differ, then — with one slope shared — whether the lines are identical. The slopes do not differ significantly (P = 0.5708), so one slope fits all the lines (the common slope above). Assumes a straight-line relationship in every data set and the same residual scatter in all of them (one residual variance is pooled).",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 10
+    },
+    {
+     "name": "B",
+     "n": 10
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "C"
+   ]
+  }
+ },
+ "compare-slopes xyBigSlopes {\"ys\":[\"A\",\"C\"]}": {
+  "testType": "compare-slopes",
+  "subtitle": "Compare slopes and intercepts",
+  "summary": "The slopes of “A” and “C” differ significantly (P = 2.348e-15): the lines are not parallel, so their intercepts are not compared.",
+  "stats": [
+   {
+    "label": "F (slopes differ)",
+    "value": 864.7510648
+   },
+   {
+    "label": "DFn (slopes)",
+    "value": 1
+   },
+   {
+    "label": "DFd (slopes)",
+    "value": 16
+   },
+   {
+    "label": "P value (slopes differ)",
+    "value": 2.348381694e-15,
+    "p": true
+   },
+   {
+    "label": "F (lines identical)",
+    "value": 8.511366734e+26
+   },
+   {
+    "label": "DFn (lines identical)",
+    "value": 1
+   },
+   {
+    "label": "DFd (lines identical)",
+    "value": 17
+   },
+   {
+    "label": "P value (lines identical)",
+    "value": 6.825812216e-220,
+    "p": true
+   },
+   {
+    "label": "Common slope",
+    "value": 2.488778409
+   },
+   {
+    "label": "Common slope 95% CI lower",
+    "value": 2.237000357
+   },
+   {
+    "label": "Common slope 95% CI upper",
+    "value": 2.740556461
+   },
+   {
+    "label": "Intersection point (X)",
+    "value": -255414198300
+   }
+  ],
+  "fit": {
+   "sets": [
+    "A",
+    "C"
+   ],
+   "rows": [
+    {
+     "label": "Slope",
+     "values": [
+      2.001231061,
+      2.976325758
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       1.934351615,
+       2.068110506
+      ],
+      [
+       2.939258263,
+       3.013393252
+      ]
+     ]
+    },
+    {
+     "label": "Y-intercept",
+     "values": [
+      -12310605060,
+      236742425200
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       -681105059500,
+       656483849300
+      ],
+      [
+       -133932517600,
+       607417368100
+      ]
+     ]
+    },
+    {
+     "label": "Pearson r",
+     "values": [
+      0.9991609578,
+      0.9998833488
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      0.9983226195,
+      0.9997667111
+     ]
+    },
+    {
+     "label": "P value (slope ≠ 0)",
+     "values": [
+      2.16608772e-12,
+      8.099807909e-16
+     ],
+     "p": true
+    },
+    {
+     "label": "N",
+     "values": [
+      10,
+      10
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 10000000000000,
+    "sd": 1.513825177,
+    "sem": 0.4787135539,
+    "median": 10000000000000,
+    "n": 10
+   },
+   {
+    "name": "A",
+    "mean": 20000000000000,
+    "sd": 3.032058101,
+    "sem": 0.9588209598,
+    "median": 20000000000000,
+    "n": 10
+   },
+   {
+    "name": "C",
+    "mean": 30000000000000,
+    "sd": 4.506162592,
+    "sem": 1.42497373,
+    "median": 30000000000000,
+    "n": 10
+   }
+  ],
+  "notes": "Extra sum-of-squares F tests comparing the lines of “A”, “C” on “X” (equivalent to an ANCOVA): first whether the slopes differ, then — with one slope shared — whether the lines are identical. The slopes differ significantly (P = 2.348e-15), so the lines are not parallel and their intercepts are not compared. Assumes a straight-line relationship in every data set and the same residual scatter in all of them (one residual variance is pooled).",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 10
+    },
+    {
+     "name": "C",
+     "n": 10
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "B"
+   ]
+  }
+ },
+ "compare-slopes xyBigSlopes {\"ys\":[\"A\",\"B\",\"C\"]}": {
+  "testType": "compare-slopes",
+  "subtitle": "Compare slopes and intercepts",
+  "summary": "The slopes of “A”, “B” and “C” differ significantly (P = 1.052e-22): the lines are not parallel, so their intercepts are not compared.",
+  "stats": [
+   {
+    "label": "F (slopes differ)",
+    "value": 802.0829649
+   },
+   {
+    "label": "DFn (slopes)",
+    "value": 2
+   },
+   {
+    "label": "DFd (slopes)",
+    "value": 24
+   },
+   {
+    "label": "P value (slopes differ)",
+    "value": 1.052327569e-22,
+    "p": true
+   },
+   {
+    "label": "F (lines identical)",
+    "value": 6.64807579e+26
+   },
+   {
+    "label": "DFn (lines identical)",
+    "value": 2
+   },
+   {
+    "label": "DFd (lines identical)",
+    "value": 26
+   },
+   {
+    "label": "P value (lines identical)",
+    "value": 0,
+    "p": true
+   },
+   {
+    "label": "Common slope",
+    "value": 2.332070707
+   },
+   {
+    "label": "Common slope 95% CI lower",
+    "value": 2.147034172
+   },
+   {
+    "label": "Common slope 95% CI upper",
+    "value": 2.517107242
+   }
+  ],
+  "fit": {
+   "sets": [
+    "A",
+    "B",
+    "C"
+   ],
+   "rows": [
+    {
+     "label": "Slope",
+     "values": [
+      2.001231061,
+      2.018655303,
+      2.976325758
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       1.934351615,
+       2.068110506
+      ],
+      [
+       2.000048972,
+       2.037261634
+      ],
+      [
+       2.939258263,
+       3.013393252
+      ]
+     ]
+    },
+    {
+     "label": "Y-intercept",
+     "values": [
+      -12310605060,
+      -186553030300,
+      236742425200
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       -681105059500,
+       656483849300
+      ],
+      [
+       -372616337100,
+       -489723526.5
+      ],
+      [
+       -133932517600,
+       607417368100
+      ]
+     ]
+    },
+    {
+     "label": "Pearson r",
+     "values": [
+      0.9991609578,
+      0.9999361008,
+      0.9998833488
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      0.9983226195,
+      0.9998722057,
+      0.9997667111
+     ]
+    },
+    {
+     "label": "P value (slope ≠ 0)",
+     "values": [
+      2.16608772e-12,
+      7.293333943e-17,
+      8.099807909e-16
+     ],
+     "p": true
+    },
+    {
+     "label": "N",
+     "values": [
+      10,
+      10,
+      10
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 10000000000000,
+    "sd": 1.513825177,
+    "sem": 0.4787135539,
+    "median": 10000000000000,
+    "n": 10
+   },
+   {
+    "name": "A",
+    "mean": 20000000000000,
+    "sd": 3.032058101,
+    "sem": 0.9588209598,
+    "median": 20000000000000,
+    "n": 10
+   },
+   {
+    "name": "B",
+    "mean": 20000000000000,
+    "sd": 3.056086947,
+    "sem": 0.9664195479,
+    "median": 20000000000000,
+    "n": 10
+   },
+   {
+    "name": "C",
+    "mean": 30000000000000,
+    "sd": 4.506162592,
+    "sem": 1.42497373,
+    "median": 30000000000000,
+    "n": 10
+   }
+  ],
+  "notes": "Extra sum-of-squares F tests comparing the lines of “A”, “B”, “C” on “X” (equivalent to an ANCOVA): first whether the slopes differ, then — with one slope shared — whether the lines are identical. The slopes differ significantly (P = 1.052e-22), so the lines are not parallel and their intercepts are not compared. Assumes a straight-line relationship in every data set and the same residual scatter in all of them (one residual variance is pooled).",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 10
+    },
+    {
+     "name": "B",
+     "n": 10
+    },
+    {
+     "name": "C",
+     "n": 10
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": []
+  }
  },
  "deming-regression deming {\"y\":\"Y\",\"lambda\":1}": {
   "testType": "deming-regression",
