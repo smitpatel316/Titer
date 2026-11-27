@@ -238,11 +238,16 @@ export function ImportDialog({
     try {
       await openFileInDefaultApp(offer.path);
     } catch (err) {
-      await alert(
-        "Couldn't Open File",
-        err instanceof Error ? err.message : "The file couldn't be opened.",
-        "error",
-      );
+      // Tauri 2 rejects `invoke` with a plain string (BUG-REPORT #109), so
+      // the specific Rust message ("…couldn't be found…") would otherwise
+      // be discarded for the generic fallback.
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === "string" && err
+            ? err
+            : "The file couldn't be opened.";
+      await alert("Couldn't Open File", message, "error");
     }
   };
 

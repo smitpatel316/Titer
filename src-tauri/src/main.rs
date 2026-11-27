@@ -1761,6 +1761,11 @@ fn open_support_email() {
 /// The guard every file opener shares (seq 451): the path must name an
 /// existing file, so a moved or deleted source says so instead of opening
 /// nothing (or, on Windows, a bare `start` window).
+/// BUG-REPORT #98: the OS launcher must never receive an executable — a
+/// compromised webview could hand it a `.command` / `.exe` / `.pkg`, and a
+/// `.csv` symlink could point at one. So the data-file extension allowlist
+/// is enforced on the given path AND on the canonical (symlink-resolved)
+/// target.
 fn check_openable_file(path: &str) -> Result<(), String> {
     if path.is_empty() {
         return Err("No file to open.".to_string());
@@ -1768,7 +1773,20 @@ fn check_openable_file(path: &str) -> Result<(), String> {
     if !std::path::Path::new(path).is_file() {
         return Err(format!("“{path}” couldn't be found — the file may have moved or been deleted."));
     }
+    const OPENABLE: &[&str] = &["csv", "tsv", "txt", "dat", "prn", "xlsx"];
+    check_extension(path, OPENABLE)?;
+    let canonical = std::fs::canonicalize(path).map_err(|_| format!("Titer can't access {path}"))?;
+    check_extension(&canonical.to_string_lossy(), OPENABLE)?;
     Ok(())
+}
+
+/// Reap a detached launcher child on its own thread: dropping a `Child`
+/// without waiting leaves a zombie until Titer exits (BUG-REPORT #98).
+fn reap_detached(child: std::process::Child) {
+    std::thread::spawn(move || {
+        let mut child = child;
+        let _ = child.wait();
+    });
 }
 
 /// Opens a file in its default app (seq 451): the Import dialog's
@@ -1779,11 +1797,15 @@ fn check_openable_file(path: &str) -> Result<(), String> {
 #[tauri::command]
 fn open_file(path: String) -> Result<(), String> {
     check_openable_file(&path)?;
-    std::process::Command::new("open")
+    // "--" keeps a relative path starting with "-" from being read as an
+    // `open` flag (BUG-REPORT #98).
+    let child = std::process::Command::new("open")
+        .arg("--")
         .arg(&path)
         .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    reap_detached(child);
+    Ok(())
 }
 
 /// Quitting (Titer ▸ Quit, the Dock, the app switcher, logout) asks the app delegate
@@ -1947,16 +1969,22 @@ fn open_support_email() {
 }
 
 /// Linux: the same file opener as on macOS, via xdg-open (Windows:
-/// `cmd /C start`, whose empty first argument is the window title).
+/// `explorer`, which takes the path as one argv element — no shell, so
+/// `& | ^ %VAR%` in a filename are literal, unlike the old `cmd /C start`,
+/// which ran the path through cmd.exe; BUG-REPORT #98).
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn open_file(path: String) -> Result<(), String> {
     check_openable_file(&path)?;
     #[cfg(target_os = "windows")]
-    let spawned = std::process::Command::new("cmd").args(["/C", "start", "", &path]).spawn();
+    let spawned = std::process::Command::new("explorer").arg(&path).spawn();
+    // "--" keeps a relative path starting with "-" from being read as an
+    // `xdg-open` flag (BUG-REPORT #98).
     #[cfg(not(target_os = "windows"))]
-    let spawned = std::process::Command::new("xdg-open").arg(&path).spawn();
-    spawned.map(|_| ()).map_err(|e| e.to_string())
+    let spawned = std::process::Command::new("xdg-open").arg("--").arg(&path).spawn();
+    let child = spawned.map_err(|e| e.to_string())?;
+    reap_detached(child);
+    Ok(())
 }
 
 /// Linux: no spinning wheel; the page never shows one here.
