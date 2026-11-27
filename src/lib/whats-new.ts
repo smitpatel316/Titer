@@ -83,14 +83,17 @@ export function shouldShowWhatsNew(storedValue: unknown): boolean {
   return storedValue !== whatsNewVersion();
 }
 
-/** A stored seen value that names a version ("2.0.0", "1.9", "v2.0.1"),
- *  or null when it names nothing usable — no record, a garbled record,
- *  or a refusal-shaped value. A bad value never silently takes the
- *  news away: it falls through to the current entry below. */
-function seenVersion(storedValue: unknown): string | null {
+/** A stored seen value that names a version ("2.0.0", "1.9", "v2.0.1",
+ *  "2.0.2-rc.1", "V2.0.1"), or null when it names nothing usable — no
+ *  record, a garbled record, or a refusal-shaped value. A bad value
+ *  never silently takes the news away: it falls through to the current
+ *  entry below. The optional pre-release and the case-insensitive `v`
+ *  are accepted (BR-105): a pre-release install used to read as no
+ *  record at all. */
+export function seenVersion(storedValue: unknown): string | null {
   if (typeof storedValue !== "string") return null;
   const trimmed = storedValue.trim();
-  return /^v?\d+(\.\d+)*$/.test(trimmed) ? trimmed : null;
+  return /^[vV]?\d+(\.\d+)*(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/.test(trimmed) ? trimmed : null;
 }
 
 /** The entries of `entries` (newest first) newer than the version
@@ -121,11 +124,20 @@ export function readWhatsNewSeen(): string | null {
   }
 }
 
-/** Record the news as shown for this version. Never throws: a record
- *  that can't be stored simply shows the news again next launch. */
+/** Record the news as shown for this version — but only forward. The
+ *  dialog's close calls this on every dismiss, including a manual
+ *  Help ▸ What's New open after a downgrade; writing unconditionally
+ *  moved the marker down ("2.1.0" → "2.0.1") and the newer version's
+ *  news auto-opened again later (BR-108). So a stored version that is
+ *  already this version or newer is left alone; only no record, a
+ *  garbled record, or an older version is advanced. Never throws: a
+ *  record that can't be stored simply shows the news again next launch. */
 export function markWhatsNewSeen(): void {
   try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(WHATS_NEW_SEEN_KEY, whatsNewVersion());
+    if (typeof localStorage === "undefined") return;
+    const stored = seenVersion(localStorage.getItem(WHATS_NEW_SEEN_KEY));
+    if (stored !== null && !isNewer(whatsNewVersion(), stored)) return;
+    localStorage.setItem(WHATS_NEW_SEEN_KEY, whatsNewVersion());
   } catch {
     // Not kept: the news appears again next launch.
   }
