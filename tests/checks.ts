@@ -44936,6 +44936,29 @@ check("connected lines stand their rows at their titles' values, when every row 
   deepStrictEqual((lines(gap).data[0] as { x: (number | null)[] }).x, [0, 5, null, 30]);
 });
 
+// BR-104: Connected Lines with `rowsAt: "values"` dropped `options.gridX` —
+// `valueXAxis` called `axisChrome`/`xAxisRange` without it, so X gridlines
+// (Major / Major + minor) were silently ignored on the numeric X axis.
+check("bugfix-br-104: Connected Lines with rowsAt 'values' honour gridX", () => {
+  const [, data] = AXIS_TABLES.grouped;
+  const dataset = readTable(data);
+  const options = { ...newGraphOptions("grouped-lines"), rowsAt: "values" as const, gridX: "major" as const };
+  const major = GRAPHS["grouped-lines"].build(dataset.columns, options, paintOf(options, 2), dataset.titles);
+  strictEqual((major.layout.xaxis as Axis).showgrid, true);
+  strictEqual((major.layout.xaxis as Axis).gridcolor, "#E5E7EB");
+  const both = GRAPHS["grouped-lines"].build(
+    dataset.columns,
+    { ...options, gridX: "major-minor" as const },
+    paintOf(options, 2),
+    dataset.titles,
+  );
+  strictEqual((both.layout.xaxis as Axis).showgrid, true);
+  strictEqual((both.layout.xaxis as Axis).minor?.showgrid, true);
+  // And with gridX off, the numeric X axis stays clean.
+  const off = GRAPHS["grouped-lines"].build(dataset.columns, { ...options, gridX: "none" as const }, paintOf(options, 2), dataset.titles);
+  strictEqual((off.layout.xaxis as Axis).showgrid, false);
+});
+
 check("labels that would overlap are spaced on every axis, at Plotly's own spacing for categories", () => {
   const labels = Array.from({ length: 40 }, (_, i) => `Day ${i}`);
   const layout = { xaxis: { tickmode: "array", tickvals: labels.map((_, i) => i), ticktext: labels } };
@@ -44955,6 +44978,28 @@ check("labels that would overlap are spaced on every axis, at Plotly's own spaci
   deepStrictEqual(fitLabels({ yaxis: { dtick: 1 } }, typed, 12), { "yaxis.dtick": 200 });
   const quarter = { yaxis: { ...typed.yaxis, _vals: ticks([0, 0.25, 0.5]) } };
   deepStrictEqual(fitLabels({ yaxis: { dtick: 0.25 } }, quarter, 12), { "yaxis.dtick": 250 });
+});
+
+// BR-110: coincident adjacent ticks (`at[1] === at[0]`, step 0) made
+// `fitLabels` relayout a degenerate dtick (0 on this code, Plotly needs a
+// positive step), and `graph-view.tsx` checked `!current` only after the
+// `fitLabels` relayout, so a superseded render could overwrite a newer
+// render's ticks. The axis is now left alone, and the stale-render guard
+// runs immediately after `Plotly.react`.
+check("bugfix-br-110: fitLabels skips coincident adjacent ticks; the stale-render guard runs right after Plotly.react", () => {
+  const ticks = (at: number[]) => at.map((x) => ({ x, text: String(x) }));
+  const drawn = { yaxis: { _length: 300, range: [0, 1], _vals: ticks([0, 0, 1]) } };
+  const out = fitLabels({ yaxis: { dtick: 1 } }, drawn, 12);
+  ok(
+    out === null || (Number.isFinite(out["yaxis.dtick"] as number) && (out["yaxis.dtick"] as number) > 0),
+    `no degenerate dtick, got ${JSON.stringify(out)}`,
+  );
+  const src = readFileSync("src/views/graphs/graph-view.tsx", "utf8");
+  const reactAt = src.indexOf("await Plotly.react(");
+  ok(reactAt > 0, "graph-view renders with Plotly.react");
+  const guardAt = src.indexOf("if (!current) return;", reactAt);
+  const fitAt = src.indexOf("fitLabels(fig.layout", reactAt);
+  ok(guardAt > reactAt && guardAt < fitAt, "the stale-render guard runs after Plotly.react and before fitLabels/relayout");
 });
 
 // BR-69: WhatsNewDialog auto-closed itself 2 seconds after a manual
