@@ -62,7 +62,7 @@ export type ScriptEffect =
       format: ExportFormat;
       dpi: number;
       clear: boolean;
-      mode?: "rgbhi" | "gray" | "mono";
+      mode?: "rgbhi" | "rgblow" | "gray" | "mono";
       path: string;
       /** ExportAllPDF only: the sheet's name, so a failed batch item is
        *  named in the log while the batch continues with the rest. */
@@ -1040,17 +1040,14 @@ function execCommand(st: Extract<Statement, { kind: "command" }>, ctx: Ctx) {
       if (![100, 300, 600, 1200].includes(dpi))
         err(line, `resolution ${dpi} isn't one Prism offers — 100, 300, 600 or 1200`);
       let clear = false;
-      let mode: "rgbhi" | "gray" | "mono" | undefined;
+      let mode: "rgbhi" | "rgblow" | "gray" | "mono" | undefined;
       for (const extra of args.slice(2)) {
         const flag = extra.toLowerCase();
         if (flag === "clear") clear = true;
         else if (flag === "compress" || flag === "lzw")
           log(ctx, `${extra}: compression isn't written — the file is uncompressed.`);
         else if (format === "tif" && ["rgblow", "rgbhi", "gray", "mono"].includes(flag)) {
-          if (flag === "rgblow") {
-            mode = "rgbhi";
-            log(ctx, "RGBlow (256 colors) exports as RGBhi.");
-          } else mode = flag as "rgbhi" | "gray" | "mono";
+          mode = flag as "rgbhi" | "rgblow" | "gray" | "mono";
         } else if (format === "tif" && flag === "cmyk")
           err(line, "CMYK TIFFs need a color conversion Titer doesn't have — use RGBhi, GRAY or MONO");
         else err(line, `unexpected argument "${extra}" for ${name}`);
@@ -1061,11 +1058,11 @@ function execCommand(st: Extract<Statement, { kind: "command" }>, ctx: Ctx) {
         clear = false;
         log(ctx, "CLEAR: JPEG has no transparency — exported on white.");
       }
-      // PDF and EPS are drawn on white too (no transparency in either).
-      if ((format === "pdf" || format === "eps") && clear) {
-        clear = false;
-        log(ctx, `CLEAR: ${format === "pdf" ? "PDF" : "EPS"} has no transparency — exported on white.`);
-      }
+      // PDF and EPS keep CLEAR (seq 216 remainder): on Prism Mac a clear
+      // background is offered for PDF, EPS and TIFF as well as PNG/SVG,
+      // and the renderers skip a transparent background instead of
+      // painting white. BMP keeps CLEAR too — its encoder writes 32-bit
+      // BGRA for it; only JPEG strips it, above.
       if (format === "tif" && mode === undefined) {
         mode = "rgbhi";
         log(ctx, "ExportTIF defaults to RGBhi (Prism's CMYK default needs a color conversion Titer doesn't have).");

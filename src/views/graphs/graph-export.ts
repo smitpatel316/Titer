@@ -6,7 +6,7 @@ import { loadPlotly } from "./plotly";
 import { withoutSelection } from "./selection";
 import { vectorTraces } from "./plot-helpers";
 import { largestAt, PX_PER_INCH, withDpi } from "../../lib/image-dpi";
-import { bmpEncode, decodePng, pdfEncode, tiffEncode } from "../../lib/raster-export";
+import { bmpEncode, decodePng, pdfEncode, tiffEncode, type ColorDepth } from "../../lib/raster-export";
 import {
   grayscaleFigure,
   svgToEps,
@@ -98,9 +98,21 @@ let lastFolder: string | null = null;
 
 type Size = { width: number; height: number };
 
-// JPEG, PDF and TIFF have no transparency: a transparent graph is drawn on
-// white for them (PDF/TIFF composite the PNG onto white in raster-export).
+// JPEG and BMP have no transparency: a transparent graph is drawn on
+// white for them (the TIFF encoder composites its PNG onto white too).
+// Every other format keeps the graph's own background, so a transparent
+// graph exports transparent — seq 216 remainder: on Prism Mac a clear
+// background is offered for EPS, PDF and TIFF as well as PNG/SVG, and
+// the vector writers skip a transparent background instead of painting
+// white (see `paintOf` in vector-export.ts).
 const WHITE = { paper_bgcolor: "#ffffff", plot_bgcolor: "#ffffff" };
+
+/** The layout an export draws with: JPEG/BMP are drawn on white, every
+ *  other format keeps the graph's own background (transparent when the
+ *  graph is transparent). Pure, so the checks pin it without a DOM. */
+export function exportLayout(layout: object, format: ExportFormat): object {
+  return format === "jpeg" || format === "bmp" ? { ...layout, ...WHITE } : layout;
+}
 
 const reason = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -120,16 +132,20 @@ function tooLarge(size: Size, dpi: Resolution) {
  *  returned `vector` flag. EPS is true vector, no fallback. BMP is the PNG
  *  re-encoded. Grayscale is drawn gray (the figure is walked before Plotly
  *  draws); CMYK is applied at emit time by the vector/raster encoders. */
-async function toImage(el: HTMLElement, size: Size, format: ExportFormat, dpi: Resolution, colorMode: ColorMode = "color") {
+async function toImage(
+  el: HTMLElement,
+  size: Size,
+  format: ExportFormat,
+  dpi: Resolution,
+  colorMode: ColorMode = "color",
+  depth: ColorDepth = "24bit",
+) {
   validateExportColorMode(format, colorMode);
   const drawn = el as HTMLElement & { data: unknown[]; layout: object };
   // EPS/PDF are drawn as SVG (Plotly has no EPS/PDF output); TIFF/BMP are
   // built from the PNG Plotly draws (it has no TIFF/BMP output).
   const drawnFormat = format === "eps" || format === "pdf" ? "svg" : format === "tiff" || format === "bmp" ? "png" : format;
-  const layout =
-    drawnFormat === "jpeg" || format === "pdf" || format === "tiff" || format === "eps" || format === "bmp"
-      ? { ...drawn.layout, ...WHITE }
-      : drawn.layout;
+  const layout = exportLayout(drawn.layout, format);
   const figure =
     colorMode === "grayscale"
       ? grayscaleFigure({ data: vectorTraces(withoutSelection(drawn.data)), layout })
@@ -169,7 +185,10 @@ async function toImage(el: HTMLElement, size: Size, format: ExportFormat, dpi: R
     }
   }
   if (format === "tiff")
-    return { blob: new Blob([tiffEncode(decodePng(bytes), Number(dpi), colorMode) as BlobPart], { type: "image/tiff" }), vector: false };
+    return {
+      blob: new Blob([tiffEncode(decodePng(bytes), Number(dpi), colorMode, depth) as BlobPart], { type: "image/tiff" }),
+      vector: false,
+    };
   if (format === "bmp")
     return { blob: new Blob([bmpEncode(decodePng(bytes), Number(dpi)) as BlobPart], { type: "image/bmp" }), vector: false };
   return { blob: await withDpi(bytes, format as "png" | "jpeg", Number(dpi)), vector: false };
@@ -182,13 +201,14 @@ export async function saveGraphImage(
   dpi: Resolution,
   name: string,
   colorMode: ColorMode = "color",
+  depth: ColorDepth = "24bit",
 ) {
   // Vector formats are DPI-less (drawn at 96 DPI): no size cap.
   const vector = format === "svg" || format === "eps" || format === "pdf";
   const why = !vector && tooLarge(size, dpi);
   if (why) return alert("Couldn't Export the Graph", why, "error");
   try {
-    const { blob: image, vector: isVector } = await toImage(el, size, format, dpi, colorMode);
+    const { blob: image, vector: isVector } = await toImage(el, size, format, dpi, colorMode, depth);
     const ext = EXTENSION[format];
     const fileName = `${name}.${ext}`;
     const path = await pickSavePath(
@@ -246,12 +266,12 @@ export function vectorClipboardItem(
  *  instead (PDF item where supports() says so, else PNG-only, the old
  *  behaviour); a rejected vector write falls back to a PNG-only write,
  *  so a platform that takes the PDF type but refuses the write still
- *  leaves the PNG on the clipboard. Grayscale applies; CMYK falls back
- *  to colour (the clipboard has no CMYK). */
+ *  leaves the PNG on the clipboard. Grayscale applies; CMYK and
+ *  monochrome fall back to colour (the clipboard has neither form). */
 export async function copyGraphImage(el: HTMLElement, size: Size, dpi: Resolution, colorMode: ColorMode = "color") {
   const why = tooLarge(size, dpi);
   if (why) return void alert("Couldn't Copy the Graph", why, "error");
-  const mode = colorMode === "cmyk" ? "color" : colorMode;
+  const mode = colorMode === "cmyk" || colorMode === "monochrome" ? "color" : colorMode;
   // The PDF render always runs (seq 446): the native write takes it on
   // macOS, the webview write where supports() says so — the raster
   // fallback's size cap above still applies, the PNG is always drawn.

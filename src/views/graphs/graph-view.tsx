@@ -1092,11 +1092,11 @@ export function GraphView({ node }: { node: ProjectNode }) {
             else openSelector({ kind: "new-analysis", tableId: node.parentId, forGraph });
           }}
           canExport={hasData}
-          onSave={(format, dpi, colorMode, widthIn) => {
+          onSave={(format, dpi, colorMode, widthIn, depth) => {
             // The export's final width (seq 294): the chosen width redraws
             // at that size, aspect preserved; unset, the graph's own size.
             const draw = widthIn === undefined ? size : drawSizeAtWidth(size, widthIn);
-            plottedRef.current && saveGraphImage(plottedRef.current, draw, format, dpi, node.name, colorMode);
+            plottedRef.current && saveGraphImage(plottedRef.current, draw, format, dpi, node.name, colorMode, depth);
           }}
           onCopy={(dpi, colorMode, widthIn) => {
             const draw = widthIn === undefined ? size : drawSizeAtWidth(size, widthIn);

@@ -67,7 +67,7 @@ async function renderGraph(
   format: ExportFormat,
   dpi: number,
   clear: boolean,
-  mode: "rgbhi" | "gray" | "mono" | undefined,
+  mode: "rgbhi" | "rgblow" | "gray" | "mono" | undefined,
 ): Promise<{ bytes: Uint8Array; vector: boolean }> {
   const size = {
     width: graph.graphOptions?.width ?? DEFAULT_GRAPH_OPTIONS.width,
@@ -91,12 +91,18 @@ async function renderGraph(
       { displayModeBar: false, scrollZoom: false, doubleClick: false },
     );
     const drawn = el as unknown as { data: unknown[]; layout: object };
+    // JPEG has no transparency, so it is drawn on white; PDF/EPS honour
+    // CLEAR (seq 216 remainder — Prism Mac offers a clear background for
+    // them), otherwise they keep the page's white background; the rest
+    // honour CLEAR or keep the graph's own background.
     const layout =
-      format === "jpeg" || format === "pdf" || format === "eps"
+      format === "jpeg"
         ? { ...drawn.layout, ...WHITE }
-        : clear
-          ? { ...drawn.layout, ...CLEAR_BG }
-          : drawn.layout;
+        : format === "pdf" || format === "eps"
+          ? { ...drawn.layout, ...(clear ? CLEAR_BG : WHITE) }
+          : clear
+            ? { ...drawn.layout, ...CLEAR_BG }
+            : drawn.layout;
     const figure = { data: vectorTraces(withoutSelection(drawn.data)), layout };
     if (format === "svg") {
       const url = await Plotly.toImage(figure, { format, ...size, scale: 1 });
@@ -154,7 +160,7 @@ async function renderFigure(
   format: ExportFormat,
   dpi: number,
   clear: boolean,
-  mode: "rgbhi" | "gray" | "mono" | undefined,
+  mode: "rgbhi" | "rgblow" | "gray" | "mono" | undefined,
 ): Promise<{ bytes: Uint8Array; vector: boolean }> {
   const resolution = String(dpi) as Resolution;
   if (format === "svg") {
@@ -205,7 +211,7 @@ export async function renderScriptGraph(
   format: ExportFormat,
   dpi: number,
   clear: boolean,
-  mode: "rgbhi" | "gray" | "mono" | undefined,
+  mode: "rgbhi" | "rgblow" | "gray" | "mono" | undefined,
 ): Promise<{ bytes: Uint8Array; vector: boolean }> {
   if (node.type === "figure") return renderFigure(node, nodes, format, dpi, clear, mode);
   return renderGraph(node, nodes, format, dpi, clear, mode);

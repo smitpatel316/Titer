@@ -38,16 +38,31 @@
 //   (K = 1 − max, no ICC profile — documented in the tool text); it is
 //   only offered for EPS/PDF/TIFF, never PNG/JPEG/SVG/BMP (those formats
 //   have no CMYK form — `validateExportColorMode` refuses them).
+//   Monochrome (1-bit black and white, no grays) is a TIFF-only colour
+//   mode (seq 216 remainder): the raster TIFF encoder thresholds the
+//   luminance, the vector writers refuse it — a vector EPS/PDF has no
+//   1-bit form.
 
 import { deflate } from "pako";
 
-export type ColorMode = "color" | "grayscale" | "cmyk";
+export type ColorMode = "color" | "grayscale" | "cmyk" | "monochrome";
 
 export const COLOR_MODES: { value: ColorMode; label: string }[] = [
   { value: "color", label: "Color" },
   { value: "grayscale", label: "Grayscale" },
   { value: "cmyk", label: "CMYK" },
+  { value: "monochrome", label: "Monochrome" },
 ];
+
+/** The colour modes the export dialog offers for `format` (seq 216):
+ *  TIFF takes all four (Prism also offers monochrome there, and only
+ *  there); EPS/PDF take colour, grayscale and CMYK; the rest take colour
+ *  and grayscale — CMYK has no form for them, monochrome neither. */
+export function colorModesFor(format: string): { value: ColorMode; label: string }[] {
+  if (format === "tiff") return COLOR_MODES;
+  if (format === "eps" || format === "pdf") return COLOR_MODES.filter((m) => m.value !== "monochrome");
+  return COLOR_MODES.filter((m) => m.value !== "cmyk" && m.value !== "monochrome");
+}
 
 export class VectorExportError extends Error {}
 
@@ -140,10 +155,12 @@ export function grayString(c: Rgb): string {
 }
 
 export function validateExportColorMode(format: string, colorMode: ColorMode): void {
-  if (colorMode !== "color" && colorMode !== "grayscale" && colorMode !== "cmyk")
-    throw new Error(`Unknown colour mode “${colorMode}” — the colour modes are color, grayscale, cmyk.`);
+  if (colorMode !== "color" && colorMode !== "grayscale" && colorMode !== "cmyk" && colorMode !== "monochrome")
+    throw new Error(`Unknown colour mode “${colorMode}” — the colour modes are color, grayscale, cmyk, monochrome.`);
   if (colorMode === "cmyk" && format !== "eps" && format !== "pdf" && format !== "tiff")
     throw new Error(`CMYK is supported for EPS, PDF and TIFF only — ${format} has no CMYK form. Choose color or grayscale.`);
+  if (colorMode === "monochrome" && format !== "tiff")
+    throw new Error(`Monochrome is supported for TIFF only — ${format} has no monochrome form. Choose color or grayscale.`);
 }
 
 export function grayscaleFigure<T extends { data: unknown[]; layout: object }>(figure: T): T {

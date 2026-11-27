@@ -46,7 +46,8 @@ import {
   type ExportSizeUnit,
   type Resolution,
 } from "./graph-export";
-import { COLOR_MODES, type ColorMode } from "../../lib/vector-export";
+import { COLOR_MODES, colorModesFor, type ColorMode } from "../../lib/vector-export";
+import { COLOR_DEPTHS, type ColorDepth } from "../../lib/raster-export";
 import type { OfficeTarget } from "../../lib/office-export";
 import { isMacOs } from "../../lib/channel";
 import {
@@ -95,8 +96,8 @@ interface Props extends SectionContext {
   selection?: Selection;
   canExport: boolean;
   /** Save / copy at the export's final width (`widthIn` undefined = the
-   *  graph's own size). */
-  onSave: (format: ExportFormat, dpi: Resolution, colorMode: ColorMode, widthIn?: number) => void;
+   *  graph's own size). `depth` is the TIFF colour depth (seq 216). */
+  onSave: (format: ExportFormat, dpi: Resolution, colorMode: ColorMode, widthIn?: number, depth?: ColorDepth) => void;
   onCopy: (dpi: Resolution, colorMode: ColorMode, widthIn?: number) => void;
   /** The table's series, in order: each shown one takes its place's color. */
   allSeries: string[];
@@ -149,6 +150,9 @@ type ExportChoice = {
   format: ExportFormat;
   dpi: Resolution;
   colorMode: ColorMode;
+  /** The TIFF colour depth (seq 216 remainder): 24-bit RGB, or 8-bit
+   *  indexed. Only a colour TIFF has a depth choice. */
+  depth: ColorDepth;
   preset: "custom" | ExportPreset;
   /** The export's final width (seq 294): the graph's own size, a preset,
    *  or a custom value in inches or cm. */
@@ -163,6 +167,7 @@ function readExport(): ExportChoice {
       format: EXPORT_FORMATS.some((f) => f.value === saved.format) ? saved.format : "png",
       dpi: RESOLUTIONS.includes(saved.dpi) ? saved.dpi : "300",
       colorMode: COLOR_MODES.some((m) => m.value === saved.colorMode) ? saved.colorMode : "color",
+      depth: COLOR_DEPTHS.some((d) => d.value === saved.depth) ? saved.depth : "24bit",
       preset: EXPORT_PRESETS.some((p) => p.value === saved.preset) ? saved.preset : "custom",
       size: EXPORT_SIZE_PRESETS.some((p) => p.value === saved.size) ? saved.size : "graph",
       customWidth:
@@ -170,7 +175,7 @@ function readExport(): ExportChoice {
       customUnit: saved.customUnit === "cm" ? "cm" : "in",
     };
   } catch {
-    return { format: "png", dpi: "300", colorMode: "color", preset: "custom", size: "graph", customUnit: "in" };
+    return { format: "png", dpi: "300", colorMode: "color", depth: "24bit", preset: "custom", size: "graph", customUnit: "in" };
   }
 }
 
@@ -684,10 +689,13 @@ export function FormatPanel(props: Props) {
             chooseExport({
               format,
               // CMYK has no form for PNG/JPEG/SVG/BMP: picking one of
-              // those drops the colour back to Color.
+              // those drops the colour back to Color. Monochrome has no
+              // form outside TIFF: leaving TIFF drops it back too.
               ...(exported.colorMode === "cmyk" && format !== "eps" && format !== "pdf" && format !== "tiff"
                 ? { colorMode: "color" as const }
-                : {}),
+                : exported.colorMode === "monochrome" && format !== "tiff"
+                  ? { colorMode: "color" as const }
+                  : {}),
             })
           }
           items={EXPORT_FORMATS}
@@ -696,13 +704,19 @@ export function FormatPanel(props: Props) {
           label="Colour"
           value={exported.colorMode}
           onChange={(colorMode) => chooseExport({ colorMode })}
-          // CMYK is offered only for the formats that have a CMYK form.
-          items={
-            exported.format === "eps" || exported.format === "pdf" || exported.format === "tiff"
-              ? COLOR_MODES
-              : COLOR_MODES.filter((m) => m.value !== "cmyk")
-          }
+          // The modes offered depend on the format (seq 216): TIFF takes
+          // all four, EPS/PDF take colour/grayscale/CMYK, the rest take
+          // colour/grayscale.
+          items={colorModesFor(exported.format)}
         />
+        {exported.format === "tiff" && exported.colorMode === "color" && (
+          <Choice
+            label="Colour depth"
+            value={exported.depth}
+            onChange={(depth) => chooseExport({ depth })}
+            items={COLOR_DEPTHS}
+          />
+        )}
         {exported.format !== "svg" && exported.format !== "eps" && exported.format !== "pdf" && (
           <Choice
             label="Resolution (DPI)"
@@ -747,6 +761,7 @@ export function FormatPanel(props: Props) {
                 exported.dpi,
                 exported.colorMode,
                 exportFinalWidthIn(exported.size, exported.customWidth, exported.customUnit),
+                exported.depth,
               )
             }
           >

@@ -58,7 +58,8 @@ import { copyFigureImage, saveFigureImage, sendFigureToOffice } from "./figure-e
 import type { OfficeTarget } from "../../lib/office-export";
 import { isMacOs } from "../../lib/channel";
 import { EXPORT_FORMATS, EXPORT_PRESETS, exportPreset, saveGraphImage, type ExportFormat, type ExportPreset } from "../graphs/graph-export";
-import { COLOR_MODES, type ColorMode } from "../../lib/vector-export";
+import { colorModesFor, type ColorMode } from "../../lib/vector-export";
+import { COLOR_DEPTHS, type ColorDepth } from "../../lib/raster-export";
 
 /** Screen pixels per inch in the editor (the figure keeps its true aspect ratio). */
 const SCREEN_PX_PER_IN = 72;
@@ -188,6 +189,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
   const [exportFormat, setExportFormat] = React.useState<ExportFormat>("png");
   const [exportPresetChoice, setExportPresetChoice] = React.useState<"custom" | ExportPreset>("custom");
   const [colorMode, setColorMode] = React.useState<ColorMode>("color");
+  const [exportDepth, setExportDepth] = React.useState<ColorDepth>("24bit");
   const [exporting, setExporting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [sizeError, setSizeError] = React.useState<string | null>(null);
@@ -393,7 +395,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
   const onExport = async () => {
     setExporting(true);
     try {
-      await saveFigureImage(node, nodes, exportFormat, dpi, node.name, colorMode);
+      await saveFigureImage(node, nodes, exportFormat, dpi, node.name, colorMode, exportDepth);
     } finally {
       setExporting(false);
     }
@@ -674,8 +676,10 @@ export function FigureView({ node }: { node: ProjectNode }) {
               setExportPresetChoice("custom");
               setExportFormat(f);
               // CMYK has no form for PNG/JPEG/SVG/BMP: picking one of
-              // those drops the colour back to Color.
+              // those drops the colour back to Color. Monochrome has no
+              // form outside TIFF: leaving TIFF drops it back too.
               if (colorMode === "cmyk" && f !== "eps" && f !== "pdf" && f !== "tiff") setColorMode("color");
+              if (colorMode === "monochrome" && f !== "tiff") setColorMode("color");
             }}
             options={EXPORT_FORMATS}
           />
@@ -683,15 +687,21 @@ export function FigureView({ node }: { node: ProjectNode }) {
             <Segmented
               value={colorMode}
               onChange={(v) => setColorMode(v)}
-              // CMYK is offered only for the formats that have a CMYK form.
-              options={
-                (exportFormat === "eps" || exportFormat === "pdf" || exportFormat === "tiff"
-                  ? COLOR_MODES
-                  : COLOR_MODES.filter((m) => m.value !== "cmyk")
-                ).map((m) => ({ value: m.value, label: m.label }))
-              }
+              // The modes offered depend on the format (seq 216): TIFF
+              // takes all four, EPS/PDF take colour/grayscale/CMYK, the
+              // rest take colour/grayscale.
+              options={colorModesFor(exportFormat).map((m) => ({ value: m.value, label: m.label }))}
             />
           </Field>
+          {exportFormat === "tiff" && colorMode === "color" && (
+            <Field label="Colour depth">
+              <Segmented
+                value={exportDepth}
+                onChange={(v) => setExportDepth(v)}
+                options={COLOR_DEPTHS.map((d) => ({ value: d.value, label: d.label }))}
+              />
+            </Field>
+          )}
           {exportFormat !== "svg" && exportFormat !== "eps" && exportFormat !== "pdf" && (
             <Field label="Resolution (DPI)">
               <Segmented
@@ -910,7 +920,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
                                 e.stopPropagation();
                                 const el = plottedRef.current.get(panel.graphId);
                                 const options = { ...DEFAULT_GRAPH_OPTIONS, ...graph.graphOptions };
-                                if (el) void saveGraphImage(el, { width: options.width, height: options.height }, exportFormat, dpi, graph.name, colorMode);
+                                if (el) void saveGraphImage(el, { width: options.width, height: options.height }, exportFormat, dpi, graph.name, colorMode, exportDepth);
                               }}
                             >
                               Export panel

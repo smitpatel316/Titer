@@ -3,7 +3,9 @@
 // write PNG/JPEG/SVG, so a script's ExportTIF/ExportBMP encodes here from
 // the RGBA pixels a canvas read back (see script-graph-export.ts).
 
-export type TiffMode = "rgbhi" | "gray" | "mono";
+import { quantizeRgbToPalette } from "./raster-export";
+
+export type TiffMode = "rgbhi" | "rgblow" | "gray" | "mono";
 
 export interface ImageEncodeOptions {
   mode?: TiffMode;
@@ -41,6 +43,8 @@ function stripPixels(rgba: Uint8Array, width: number, height: number, mode: Tiff
     }
     return out;
   }
+  // RGBlow never reaches here: encodeTiff quantizes once and passes the
+  // indices straight through (the palette rides in the ColorMap tag).
   const samples = clear ? 4 : 3;
   const out = new Uint8Array(width * height * samples);
   for (let p = 0; p < width * height; p++) {
@@ -54,7 +58,7 @@ function stripPixels(rgba: Uint8Array, width: number, height: number, mode: Tiff
 }
 
 /** A baseline TIFF: little-endian, one strip, no compression. `rgba` is row-major,
- *  top row first. `mode` picks the samples (RGBhi / GRAY / MONO); `clear` adds an
+ *  top row first. `mode` picks the samples (RGBhi / RGBlow / GRAY / MONO); `clear` adds an
  *  alpha channel to an RGB image. X/YResolution carry `dpi`. */
 export function encodeTiff(
   rgba: Uint8Array,
@@ -63,9 +67,24 @@ export function encodeTiff(
   { mode = "rgbhi", dpi, clear = false }: ImageEncodeOptions,
 ): Uint8Array {
   const samples = mode === "rgbhi" ? (clear ? 4 : 3) : 1;
-  const strip = stripPixels(rgba, width, height, mode, clear);
-  const bits = mode === "mono" ? [1] : mode === "gray" ? [8] : clear ? [8, 8, 8, 8] : [8, 8, 8];
-  const photometric = mode === "rgbhi" ? 2 : 1; // 2 = RGB, 1 = BlackIsZero
+  // RGBlow's palette is quantized once here — the strip reuses its
+  // indices, and the ColorMap tag carries its entries.
+  const indexed =
+    mode === "rgblow"
+      ? (() => {
+          const rgb = new Uint8Array(width * height * 3);
+          for (let p = 0; p < width * height; p++) {
+            const i = p * 4;
+            rgb[p * 3] = rgba[i];
+            rgb[p * 3 + 1] = rgba[i + 1];
+            rgb[p * 3 + 2] = rgba[i + 2];
+          }
+          return quantizeRgbToPalette(rgb);
+        })()
+      : null;
+  const strip = indexed ? indexed.indices : stripPixels(rgba, width, height, mode, clear);
+  const bits = mode === "mono" ? [1] : mode === "gray" || mode === "rgblow" ? [8] : clear ? [8, 8, 8, 8] : [8, 8, 8];
+  const photometric = mode === "rgbhi" ? 2 : mode === "rgblow" ? 3 : 1; // 2 = RGB, 3 = palette, 1 = BlackIsZero
   // Entries, by tag id. A SHORT value fits in the value field itself; a longer
   // one (BitsPerSample, the two RATIONALs) lives past the IFD, pointed at.
   type Entry = { tag: number; type: number; count: number; value: number | number[] };
@@ -85,6 +104,13 @@ export function encodeTiff(
     { tag: 296, type: 3, count: 1, value: 2 }, // inch
   ];
   if (clear && mode === "rgbhi") entries.push({ tag: 338, type: 3, count: 1, value: 1 }); // unassociated alpha
+  if (indexed)
+    entries.push({
+      tag: 320,
+      type: 3,
+      count: 768,
+      value: [...indexed.palette].map((v) => v * 257), // ColorMap: 256 RGB entries, 16-bit each
+    });
   entries.sort((a, b) => a.tag - b.tag);
   const typeSize = (t: number) => ({ 1: 1, 2: 1, 3: 2, 4: 4, 5: 8 })[t] ?? 1;
   const ifdOffset = 8;

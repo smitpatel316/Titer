@@ -39,6 +39,7 @@ import {
   EXPORT_PRESETS,
   RESOLUTIONS,
   drawSizeAtWidth,
+  exportLayout,
   exportPreset,
   type ExportFormat,
 } from "../views/graphs/graph-export";
@@ -325,8 +326,6 @@ export function exportPixelSize(
     : { widthPx, heightPx, capped: false, draw96: size96 };
 }
 
-const WHITE = { paper_bgcolor: "#ffffff", plot_bgcolor: "#ffffff" };
-
 /** One graph as image bytes, drawn offscreen — the GUI's `toImage` path
  *  (`graph-export.ts`) with the mounted element replaced by a detached
  *  div, exactly as the figure export's `panelImage` does. PDF is true
@@ -371,10 +370,7 @@ export async function renderGraphImage(
     // EPS/PDF are drawn as SVG (Plotly has no EPS/PDF output); TIFF/BMP
     // are built from the PNG Plotly draws (it has no TIFF/BMP output).
     const drawnFormat = format === "eps" || format === "pdf" ? "svg" : format === "tiff" || format === "bmp" ? "png" : format;
-    const layout =
-      drawnFormat === "jpeg" || format === "pdf" || format === "tiff" || format === "eps" || format === "bmp"
-        ? { ...drawn.layout, ...WHITE }
-        : drawn.layout;
+    const layout = exportLayout(drawn.layout, format);
     const figure =
       colorMode === "grayscale"
         ? grayscaleFigure({ data: vectorTraces(withoutSelection(drawn.data)), layout })
@@ -495,8 +491,8 @@ export function exportFormatDpi(
     throw jobErr(job, `has no resolution “${dpiRaw}” — the resolutions are ${RESOLUTIONS.join(", ")} DPI.`);
   }
   const colorModeRaw = optStr(job, args, "color_mode") ?? "color";
-  if (colorModeRaw !== "color" && colorModeRaw !== "grayscale" && colorModeRaw !== "cmyk") {
-    throw jobErr(job, `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk.`);
+  if (colorModeRaw !== "color" && colorModeRaw !== "grayscale" && colorModeRaw !== "cmyk" && colorModeRaw !== "monochrome") {
+    throw jobErr(job, `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk, monochrome.`);
   }
   try {
     validateExportColorMode(formatRaw, colorModeRaw as ColorMode);
@@ -982,8 +978,8 @@ async function defaultCopyRender(
  *  PNG at `dpi` and write it to the system clipboard. Exactly one of
  *  `graph_id` / `figure_id`; with neither, the active graph/figure is
  *  copied. `dpi` 100/150/300/600/900/1200 (default 300);
- *  `color_mode` color/grayscale (default color; cmyk falls back to
- *  colour, as the UI copy does — the clipboard has no CMYK). */
+ *  `color_mode` color/grayscale (default color; cmyk and monochrome fall
+ *  back to colour, as the UI copy does — the clipboard has neither form). */
 export async function executeCopyGraphImage(job: McpJob, deps: ExportJobDeps): Promise<ExportJobOutcome> {
   const args = argsOf(job);
   const graphId = optStr(job, args, "graph_id");
@@ -997,11 +993,11 @@ export async function executeCopyGraphImage(job: McpJob, deps: ExportJobDeps): P
   }
   const dpi = dpiRaw as Resolution;
   const colorModeRaw = optStr(job, args, "color_mode") ?? "color";
-  if (colorModeRaw !== "color" && colorModeRaw !== "grayscale" && colorModeRaw !== "cmyk") {
-    throw jobErr(job, `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk.`);
+  if (colorModeRaw !== "color" && colorModeRaw !== "grayscale" && colorModeRaw !== "cmyk" && colorModeRaw !== "monochrome") {
+    throw jobErr(job, `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk, monochrome.`);
   }
-  // CMYK falls back to colour, as the UI copy does (the clipboard has no CMYK).
-  const colorMode = (colorModeRaw === "cmyk" ? "color" : colorModeRaw) as ColorMode;
+  // CMYK and monochrome fall back to colour, as the UI copy does (the clipboard has neither form).
+  const colorMode = (colorModeRaw === "cmyk" || colorModeRaw === "monochrome" ? "color" : colorModeRaw) as ColorMode;
   const state = deps.getState();
   let target: { kind: "graph"; node: ProjectNode } | { kind: "figure"; node: ProjectNode };
   if (figureId !== undefined) {

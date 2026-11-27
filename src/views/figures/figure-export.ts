@@ -8,7 +8,7 @@ import { loadPlotly } from "../graphs/plotly";
 import { withoutSelection } from "../graphs/selection";
 import { vectorTraces } from "../graphs/plot-helpers";
 import { PX_PER_INCH, withDpi } from "../../lib/image-dpi";
-import { bmpEncode, decodePng, pdfEncode, tiffEncode } from "../../lib/raster-export";
+import { bmpEncode, decodePng, pdfEncode, tiffEncode, type ColorDepth } from "../../lib/raster-export";
 import { grayscaleFigure, svgToEps, svgToPdf, VectorExportError, type ColorMode } from "../../lib/vector-export";
 import {
   composeFigureSvg,
@@ -145,6 +145,7 @@ export async function renderFigureRaster(
   format: "png" | "jpeg" | "pdf" | "tiff" | "bmp",
   dpi: Resolution,
   colorMode: ColorMode = "color",
+  depth: ColorDepth = "24bit",
 ): Promise<{
   blob: Blob;
   missing: number;
@@ -256,7 +257,7 @@ export async function renderFigureRaster(
     format === "pdf"
       ? new Blob([pdfEncode(decodePng(png), Number(dpi), colorMode) as BlobPart], { type: "application/pdf" })
       : format === "tiff"
-        ? new Blob([tiffEncode(decodePng(png), Number(dpi), colorMode) as BlobPart], { type: "image/tiff" })
+        ? new Blob([tiffEncode(decodePng(png), Number(dpi), colorMode, depth) as BlobPart], { type: "image/tiff" })
         : format === "bmp"
           ? new Blob([bmpEncode(decodePng(png), Number(dpi)) as BlobPart], { type: "image/bmp" })
           : withDpi(png, rasterFormat, Number(dpi));
@@ -338,6 +339,7 @@ export async function saveFigureImage(
   dpi: Resolution,
   name: string,
   colorMode: ColorMode = "color",
+  depth: ColorDepth = "24bit",
 ) {
   if (!figure.panels?.length) return alert("Couldn't Export the Figure", "Add a panel first.", "error");
   const g = geometry(figure, dpi);
@@ -367,7 +369,7 @@ export async function saveFigureImage(
       capped = out.capped;
       capReason = out.reason;
     } else {
-      const out = await renderFigureRaster(figure, nodes, format, dpi, colorMode);
+      const out = await renderFigureRaster(figure, nodes, format, dpi, colorMode, depth);
       bytes = new Uint8Array(await out.blob.arrayBuffer());
       missing = out.missing;
       capped = out.capped;
@@ -413,7 +415,7 @@ export async function saveFigureImage(
  *  PNG-only, the old behaviour); a rejected vector write falls back to a
  *  PNG-only write, so a platform that takes the PDF type but refuses the
  *  write still leaves the PNG on the clipboard. Grayscale applies; CMYK
- *  falls back to colour (the clipboard has no CMYK). */
+ *  and monochrome fall back to colour (the clipboard has neither form). */
 export async function copyFigureImage(
   figure: ProjectNode,
   nodes: Record<string, ProjectNode>,
@@ -421,7 +423,7 @@ export async function copyFigureImage(
   colorMode: ColorMode = "color",
 ) {
   if (!figure.panels?.length) return void alert("Couldn't Copy the Figure", "Add a panel first.", "error");
-  const mode = colorMode === "cmyk" ? "color" : colorMode;
+  const mode = colorMode === "cmyk" || colorMode === "monochrome" ? "color" : colorMode;
   // The PDF render always runs (seq 446): the native write takes it on
   // macOS, the webview write where supports() says so.
   const pdf = renderFigurePdf(figure, nodes, dpi, mode).then((out) => out.blob);

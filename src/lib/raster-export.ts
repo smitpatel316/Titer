@@ -150,6 +150,128 @@ export function rgbToCmykBytes(rgb: Uint8Array): Uint8Array {
   return out;
 }
 
+/** A TIFF's colour depth (seq 216 remainder — Prism's 8-bit vs 24-bit
+ *  choice): 24-bit RGB, or 8-bit indexed — up to 256 colours in a palette
+ *  (Prism's RGBlow). Only a colour TIFF has a depth choice: grayscale is
+ *  8-bit already, CMYK is 32-bit, monochrome is 1-bit, so the depth is
+ *  ignored for those modes. */
+export type ColorDepth = "24bit" | "8bit";
+
+export const COLOR_DEPTHS: { value: ColorDepth; label: string }[] = [
+  { value: "24bit", label: "24-bit (millions of colours)" },
+  { value: "8bit", label: "8-bit indexed (256 colours)" },
+];
+
+/** RGB bytes reduced to a 256-colour palette and one index per pixel
+ *  (Prism's 8-bit indexed TIFF). At most 256 distinct colours are kept
+ *  exactly, in first-seen order; more are median-cut to 256 boxes, each
+ *  box's palette entry its count-weighted mean. The palette is always
+ *  256 entries, padded with black — the TIFF ColorMap always carries
+ *  3 × 2^BitsPerSample entries, and no index ever points at the padding.
+ *  Every pixel's index is its own colour's box, so no nearest-neighbour
+ *  search runs over the palette. */
+export function quantizeRgbToPalette(rgb: Uint8Array): { palette: Uint8Array; indices: Uint8Array } {
+  const count = rgb.length / 3;
+  const seen = new Map<number, { r: number; g: number; b: number; n: number }>();
+  const order: { r: number; g: number; b: number; n: number }[] = [];
+  for (let p = 0; p < count; p++) {
+    const r = rgb[p * 3]!;
+    const g = rgb[p * 3 + 1]!;
+    const b = rgb[p * 3 + 2]!;
+    const key = (r << 16) | (g << 8) | b;
+    const found = seen.get(key);
+    if (found) found.n++;
+    else {
+      const entry = { r, g, b, n: 1 };
+      seen.set(key, entry);
+      order.push(entry);
+    }
+  }
+  // At most 256 colours: each keeps its own palette entry, exactly.
+  if (order.length <= 256) {
+    const palette = new Uint8Array(256 * 3);
+    order.forEach((c, i) => {
+      palette[i * 3] = c.r;
+      palette[i * 3 + 1] = c.g;
+      palette[i * 3 + 2] = c.b;
+    });
+    const indexOf = new Map<number, number>();
+    order.forEach((c, i) => indexOf.set((c.r << 16) | (c.g << 8) | c.b, i));
+    const indices = new Uint8Array(count);
+    for (let p = 0; p < count; p++)
+      indices[p] = indexOf.get((rgb[p * 3]! << 16) | (rgb[p * 3 + 1]! << 8) | rgb[p * 3 + 2]!)!;
+    return { palette, indices };
+  }
+  // More than 256: median-cut the distinct colours into 256 boxes.
+  type Box = { r: number; g: number; b: number; n: number }[];
+  const boxes: Box[] = [order];
+  const rangeOf = (box: Box, ch: 0 | 1 | 2) => {
+    let lo = 255;
+    let hi = 0;
+    for (const c of box) {
+      const v = ch === 0 ? c.r : ch === 1 ? c.g : c.b;
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    return hi - lo;
+  };
+  while (boxes.length < 256) {
+    let bi = -1;
+    let best = 0;
+    let bestCh: 0 | 1 | 2 = 0;
+    boxes.forEach((box, i) => {
+      for (const ch of [0, 1, 2] as const) {
+        const range = rangeOf(box, ch);
+        if (range > best) {
+          best = range;
+          bi = i;
+          bestCh = ch;
+        }
+      }
+    });
+    if (bi < 0) break; // every box is one colour — nothing left to split
+    const box = boxes[bi]!;
+    const sorted = [...box].sort((a, b) => {
+      const av = bestCh === 0 ? a.r : bestCh === 1 ? a.g : a.b;
+      const bv = bestCh === 0 ? b.r : bestCh === 1 ? b.g : b.b;
+      return av - bv;
+    });
+    const total = sorted.reduce((n, c) => n + c.n, 0);
+    let acc = 0;
+    let cut = sorted.length - 1;
+    for (let i = 0; i < sorted.length - 1; i++) {
+      acc += sorted[i]!.n;
+      if (acc >= total / 2) {
+        cut = i + 1;
+        break;
+      }
+    }
+    boxes.splice(bi, 1, sorted.slice(0, cut), sorted.slice(cut));
+  }
+  const palette = new Uint8Array(256 * 3);
+  const boxOf = new Map<number, number>();
+  boxes.forEach((box, i) => {
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let n = 0;
+    for (const c of box) {
+      r += c.r * c.n;
+      g += c.g * c.n;
+      b += c.b * c.n;
+      n += c.n;
+      boxOf.set((c.r << 16) | (c.g << 8) | c.b, i);
+    }
+    palette[i * 3] = Math.round(r / n);
+    palette[i * 3 + 1] = Math.round(g / n);
+    palette[i * 3 + 2] = Math.round(b / n);
+  });
+  const indices = new Uint8Array(count);
+  for (let p = 0; p < count; p++)
+    indices[p] = boxOf.get((rgb[p * 3]! << 16) | (rgb[p * 3 + 1]! << 8) | rgb[p * 3 + 2]!)!;
+  return { palette, indices };
+}
+
 /** RGBA composited onto white, as RGB — the JPEG rule, shared by PDF/TIFF. */
 export function compositeOnWhite({ width, height, rgba }: RgbaImage): Uint8Array {
   const rgb = new Uint8Array(width * height * 3);
@@ -188,25 +310,62 @@ export function packBits(data: Uint8Array): Uint8Array {
   return new Uint8Array(out);
 }
 
-/** A little-endian TIFF: RGB, PackBits, one strip, X/YResolution = dpi
- *  (rational, unit inch). Reads in Preview, Photoshop, ImageJ.
- *  `colorMode` (seq 216, not yet implemented): "cmyk" / "grayscale". */
-/** A little-endian TIFF: RGB / CMYK / grayscale, PackBits, one strip,
- *  X/YResolution = dpi (rational, unit inch). Reads in Preview,
- *  Photoshop, ImageJ. CMYK is Photometric 5 with 4 samples, grayscale
- *  is Photometric 1 with 1 sample. */
-export function tiffEncode(image: RgbaImage, dpi: number, colorMode: ColorMode = "color"): Uint8Array {
+/** RGB bytes as 1-bit-per-pixel rows (MSB first, each row padded to a
+ *  whole byte): luminance ≥ 128 is white, below is black — the same
+ *  threshold the script TIFF's MONO mode uses. */
+export function rgbToMonoBytes(rgb: Uint8Array, width: number, height: number): Uint8Array {
+  const rowBytes = Math.ceil(width / 8);
+  const out = new Uint8Array(rowBytes * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 3;
+      if (Math.round(0.299 * rgb[i]! + 0.587 * rgb[i + 1]! + 0.114 * rgb[i + 2]!) >= 128)
+        out[y * rowBytes + (x >> 3)] |= 0x80 >> (x & 7);
+    }
+  }
+  return out;
+}
+
+/** A little-endian TIFF: RGB / CMYK / grayscale / monochrome / 8-bit
+ *  indexed, PackBits, one strip, X/YResolution = dpi (rational, unit
+ *  inch). Reads in Preview, Photoshop, ImageJ. CMYK is Photometric 5
+ *  with 4 samples, grayscale is Photometric 1 with 1 sample,
+ *  monochrome is Photometric 1 with 1 bit per sample (packed rows),
+ *  8-bit indexed is Photometric 3 with a 256-entry ColorMap. `depth`
+ *  only applies to a colour TIFF — grayscale is 8-bit already, CMYK
+ *  32-bit, monochrome 1-bit. */
+export function tiffEncode(
+  image: RgbaImage,
+  dpi: number,
+  colorMode: ColorMode = "color",
+  depth: ColorDepth = "24bit",
+): Uint8Array {
   const { width, height } = image;
   const rgb = compositeOnWhite(image);
-  const samples = colorMode === "cmyk" ? 4 : colorMode === "grayscale" ? 1 : 3;
-  const photometric = colorMode === "cmyk" ? 5 : colorMode === "grayscale" ? 1 : 2;
+  const indexed = depth === "8bit" && colorMode === "color";
+  const palette = indexed ? quantizeRgbToPalette(rgb) : null;
+  const samples = colorMode === "cmyk" ? 4 : colorMode === "grayscale" || colorMode === "monochrome" || indexed ? 1 : 3;
+  const photometric =
+    colorMode === "cmyk" ? 5 : colorMode === "grayscale" || colorMode === "monochrome" ? 1 : indexed ? 3 : 2;
+  const bits: number[] =
+    colorMode === "monochrome" ? [1] : colorMode === "cmyk" ? [8, 8, 8, 8] : colorMode === "grayscale" || indexed ? [8] : [8, 8, 8];
   const data =
-    colorMode === "cmyk" ? rgbToCmykBytes(rgb) : colorMode === "grayscale" ? rgbToGrayBytes(rgb) : rgb;
+    colorMode === "cmyk"
+      ? rgbToCmykBytes(rgb)
+      : colorMode === "grayscale"
+        ? rgbToGrayBytes(rgb)
+        : colorMode === "monochrome"
+          ? rgbToMonoBytes(rgb, width, height)
+          : indexed
+            ? palette!.indices
+            : rgb;
   const strip = packBits(data);
-  const bitsOffset = 8 + 2 + 12 * 12 + 4; // header + IFD count + entries + next-IFD
+  const tagCount = indexed ? 13 : 12;
+  const bitsOffset = 8 + 2 + 12 * tagCount + 4; // header + IFD count + entries + next-IFD
   const xResOffset = bitsOffset + 8; // BitsPerSample needs 2 bytes/sample (4 max)
   const yResOffset = xResOffset + 8;
-  const stripOffset = yResOffset + 8;
+  const cmapOffset = yResOffset + 8; // ColorMap: 768 SHORTs, 16-bit each
+  const stripOffset = indexed ? cmapOffset + 1536 : yResOffset + 8;
   const total = stripOffset + strip.length;
   const out = new Uint8Array(total);
   const view = new DataView(out.buffer);
@@ -216,14 +375,14 @@ export function tiffEncode(image: RgbaImage, dpi: number, colorMode: ColorMode =
   out[1] = 0x49;
   set16(2, 42);
   set32(4, 8);
-  set16(8, 12);
+  set16(8, tagCount);
   const tags: [number, number, number, number][] = [
     // tag, type, count, value-or-offset (SHORT=3, LONG=4, RATIONAL=5)
     [256, 4, 1, width], // ImageWidth
     [257, 4, 1, height], // ImageLength
-    [258, 3, samples, bitsOffset], // BitsPerSample 8 per sample
+    [258, 3, samples, samples === 1 ? bits[0]! : bitsOffset], // BitsPerSample
     [259, 3, 1, 32773], // Compression: PackBits
-    [262, 3, 1, photometric], // Photometric: RGB 2 / CMYK 5 / BlackIsZero 1
+    [262, 3, 1, photometric], // Photometric: RGB 2 / palette 3 / CMYK 5 / BlackIsZero 1
     [273, 4, 1, stripOffset], // StripOffsets
     [277, 3, 1, samples], // SamplesPerPixel
     [278, 4, 1, height], // RowsPerStrip
@@ -232,6 +391,7 @@ export function tiffEncode(image: RgbaImage, dpi: number, colorMode: ColorMode =
     [283, 5, 1, yResOffset], // YResolution
     [296, 3, 1, 2], // ResolutionUnit: inch
   ];
+  if (indexed) tags.push([320, 3, 768, cmapOffset]); // ColorMap: 256 RGB entries, 16-bit each
   tags.forEach(([tag, type, count, value], i) => {
     const at = 10 + i * 12;
     set16(at, tag);
@@ -240,13 +400,18 @@ export function tiffEncode(image: RgbaImage, dpi: number, colorMode: ColorMode =
     set32(at + 8, value);
   });
   // One sample: the BitsPerSample value sits inline in the tag, not at bitsOffset.
-  if (samples === 1) set16(10 + 2 * 12 + 8, 8);
-  set32(10 + 12 * 12, 0); // no next IFD
-  for (let s2 = 0; s2 < samples; s2++) set16(bitsOffset + s2 * 2, 8);
+  if (samples === 1) {
+    const bpsAt = 10 + tags.findIndex(([tag]) => tag === 258) * 12;
+    set32(bpsAt + 8, 0);
+    set16(bpsAt + 8, bits[0]!);
+  }
+  set32(10 + tagCount * 12, 0); // no next IFD
+  for (let s2 = 0; s2 < samples; s2++) set16(bitsOffset + s2 * 2, bits[s2]!);
   set32(xResOffset, dpi);
   set32(xResOffset + 4, 1);
   set32(yResOffset, dpi);
   set32(yResOffset + 4, 1);
+  if (indexed) for (let e = 0; e < 768; e++) set16(cmapOffset + e * 2, palette!.palette[e]! * 257);
   out.set(strip, stripOffset);
   return out;
 }
