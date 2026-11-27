@@ -12582,16 +12582,22 @@ check("two-way ANOVA: FDR post-hoc adjusts the LSD P values; cells and marginal 
 
 // BUG-REPORT #112 (seq 584): two-way ANOVA `runPosthoc` computed the
 // difference of uncentered cell means in R (`mean(a) - mean(b)`), losing
-// 12+ digits at ~1e13 scale — the main ANOVA had been centered (commit
-// 989f7c0b) but the post-hoc paths had not. On Cell A = 1e13 + [0.01,
-// 0.02, 0.03] vs Cell B = 1e13 + [0.05, 0.06, 0.07] the uncentered diff
-// is -0.0390625; the exact diff of the stored doubles is -0.041015625
-// (cell-mean offsets 10 vs 31 ULP of 1e13). Post-fix each pair is shifted
-// by a common origin (a[1]) before the means are subtracted, in both the
-// ordinary path and the RM sphericity-assumed path (both go through
-// runPosthoc).
+// precision at ~1e13 scale — the main ANOVA had been centered (commit
+// 989f7c0b) but the post-hoc paths had not. The bug text's verbatim repro
+// (3 reps: A = 1e13 + [0.01, 0.02, 0.03], B = 1e13 + [0.05, 0.06, 0.07])
+// has exact cell-mean offsets 10 vs 31 ULP of 1e13, so webR R's
+// long-double `mean()` happens to return the exact diff -0.041015625
+// there too (verified: raw == centered == -0.041015625) — it pins the
+// repro value but does not discriminate. The 4-replicate variant does:
+// its exact mean offsets are 12.5 vs 33.5 ULP, unrepresentable as a
+// double near 1e13, so the uncentered R diff is -0.04296875 (Row 1) and
+// -0.0390625 (Row 2) while the exact diffs are -0.041015625 and
+// -0.0400390625. Post-fix each pair is shifted by a common origin (a[1])
+// before the means are subtracted, in both the ordinary path and the RM
+// sphericity-assumed path (both go through runPosthoc).
 check("two-way ANOVA post-hoc diff is exact at 1e13 scale (BUG-REPORT #112, seq 584)", async () => {
-  const data: TableData = {
+  // The bug text's verbatim repro (3 replicates per cell).
+  const data3: TableData = {
     columns: ["Title", "A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3"],
     rows: [
       [
@@ -12616,32 +12622,73 @@ check("two-way ANOVA post-hoc diff is exact at 1e13 scale (BUG-REPORT #112, seq 
     groups: 2,
     replicates: 3,
   };
-  const run = async (params: AnalysisParams) => {
+  // The discriminating variant: 4 replicates per cell, so the exact cell
+  // means (12.5 / 33.5 ULP at Row 1, 64 / 84.5 ULP at Row 2) are not
+  // representable as doubles near 1e13 and the uncentered diff is off by
+  // a whole ULP pre-fix.
+  const data4: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "A:Y3", "A:Y4", "B:Y1", "B:Y2", "B:Y3", "B:Y4"],
+    rows: [
+      [
+        "Row 1",
+        "10000000000000.01",
+        "10000000000000.02",
+        "10000000000000.03",
+        "10000000000000.04",
+        "10000000000000.05",
+        "10000000000000.06",
+        "10000000000000.07",
+        "10000000000000.08",
+      ],
+      [
+        "Row 2",
+        "10000000000000.11",
+        "10000000000000.12",
+        "10000000000000.13",
+        "10000000000000.14",
+        "10000000000000.15",
+        "10000000000000.16",
+        "10000000000000.17",
+        "10000000000000.18",
+      ],
+    ],
+    groups: 2,
+    replicates: 4,
+  };
+  const run = async (data: TableData, params: AnalysisParams) => {
     const out = await runAnalysis("two-way-anova", data, params);
     if ("error" in out) throw new Error(`two-way ANOVA failed: ${out.error}`);
     return out;
   };
-  // The A-vs-B comparison at Row 1 is the bug's repro.
-  const diffAtRow1 = (out: Awaited<ReturnType<typeof run>>) => {
-    const c = out.comparisons!.find((c) => c.group1 === "A (Row 1)" && c.group2 === "B (Row 1)");
-    if (!c) throw new Error(`no A-vs-B Row 1 comparison in ${JSON.stringify(out.comparisons)}`);
+  const diffAt = (out: Awaited<ReturnType<typeof run>>, row: string) => {
+    const c = out.comparisons!.find((c) => c.group1 === `A (${row})` && c.group2 === `B (${row})`);
+    if (!c) throw new Error(`no A-vs-B ${row} comparison in ${JSON.stringify(out.comparisons)}`);
     return c.diff;
   };
-  const close = (got: number | null | undefined, label: string) =>
-    ok(got != null && Math.abs(got - -0.041015625) < 1e-12, `${label}: got ${got}, want -0.041015625`);
-  // Every ordinary post-hoc method shares runPosthoc's `d`.
-  for (const method of ["tukey", "sidak", "bonferroni", "holm-sidak", "lsd", "games-howell"] as const) {
-    const out = await run({ design: "ordinary", posthoc: method, posthocTarget: "groups" } as AnalysisParams);
-    close(diffAtRow1(out), `ordinary ${method}`);
+  const close = (got: number | null | undefined, want: number, label: string) =>
+    ok(got != null && Math.abs(got - want) < 1e-12, `${label}: got ${got}, want ${want}`);
+  // The verbatim repro value, ordinary Tukey and RM sphericity-assumed Tukey.
+  for (const params of [
+    { design: "ordinary", posthoc: "tukey", posthocTarget: "groups" },
+    { design: "repeated-measures", posthoc: "tukey", posthocTarget: "groups", sphericity: true },
+  ] as AnalysisParams[]) {
+    close(diffAt(await run(data3, params), "Row 1"), -0.041015625, `verbatim repro ${params.design} tukey`);
   }
-  // The repeated-measures sphericity-assumed path goes through runPosthoc too.
-  const rm = await run({
+  // The discriminating variant: every ordinary post-hoc method shares
+  // runPosthoc's `d`, and the RM sphericity-assumed path goes through it too.
+  for (const method of ["tukey", "sidak", "bonferroni", "holm-sidak", "lsd", "games-howell"] as const) {
+    const out = await run(data4, { design: "ordinary", posthoc: method, posthocTarget: "groups" } as AnalysisParams);
+    close(diffAt(out, "Row 1"), -0.041015625, `ordinary ${method} Row 1`);
+    close(diffAt(out, "Row 2"), -0.0400390625, `ordinary ${method} Row 2`);
+  }
+  const rm = await run(data4, {
     design: "repeated-measures",
     posthoc: "tukey",
     posthocTarget: "groups",
     sphericity: true,
   } as AnalysisParams);
-  close(diffAtRow1(rm), "RM sphericity-assumed tukey");
+  close(diffAt(rm, "Row 1"), -0.041015625, "RM sphericity-assumed tukey Row 1");
+  close(diffAt(rm, "Row 2"), -0.0400390625, "RM sphericity-assumed tukey Row 2");
 });
 
 // Seq 314 — Scheirer-Ray-Hare: the H statistics are the Type I sequential sums of
