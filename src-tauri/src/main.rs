@@ -1649,6 +1649,11 @@ fn clipboard_text() -> Option<String> {
             objc2::msg_send![objc2::class!(NSString), stringWithUTF8String: c"public.utf8-plain-text".as_ptr()];
         let text: *mut AnyObject = objc2::msg_send![board.as_ref()?, stringForType: kind];
         let utf8: *const std::ffi::c_char = objc2::msg_send![text.as_ref()?, UTF8String];
+        // -[NSString UTF8String] can return NULL (e.g. unpaired UTF-16 surrogates
+        // on the pasteboard); CStr::from_ptr on NULL is immediate UB — bail out.
+        if utf8.is_null() {
+            return None;
+        }
         Some(std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned())
     }
 }
