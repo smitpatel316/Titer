@@ -9277,12 +9277,14 @@ check("seq 489: bars with individual points draws each point once, on its own ba
   );
   // The bars sit on numeric category positions (not the "category" axis),
   // so the points share the bars' x instead of landing on float ticks
-  // to the right of them. Group A at r − 0.28, group B at r + 0.28.
+  // to the right of them. Group A at r − 0.2, group B at r + 0.2 —
+  // groupedBarGeometry's category-axis centers, not groupOffset's ±0.28
+  // (seq 547: the ±0.28 spread makes the bars thin).
   const bars = traces.filter((t) => t.type === "bar");
   const close = (a: unknown, b: number[]) =>
     Array.isArray(a) && a.length === b.length && (a as number[]).every((v, i) => Math.abs(v - b[i]) < 1e-9);
-  ok(close(bars[0].x, [-0.28, 0.72]), JSON.stringify(bars[0].x));
-  ok(close(bars[1].x, [0.28, 1.28]), JSON.stringify(bars[1].x));
+  ok(close(bars[0].x, [-0.2, 0.8]), JSON.stringify(bars[0].x));
+  ok(close(bars[1].x, [0.2, 1.2]), JSON.stringify(bars[1].x));
   const layout = fig.layout as { xaxis?: { type?: string; tickmode?: string; ticktext?: string[] } };
   strictEqual(layout.xaxis?.tickmode, "array");
   deepStrictEqual(layout.xaxis?.ticktext, ["r1", "r2"]);

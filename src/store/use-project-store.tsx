@@ -1020,6 +1020,15 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       }
       // One dispatch, one undo step: the table update (which follows the
       // table's other children) plus the orphaning below.
+      // The updateTable below drops cachedResult from non-frozen child
+      // analyses (Issue 33) — but an analysis orphaned by a dataset
+      // removal keeps its frozen result (seq 309). Snapshot the
+      // dependents' results first, restore them when orphaning.
+      const frozenResults = new Map(
+        dependentAnalyses(detached.nodes, action.id, action.setName)
+          .filter((d) => d.cachedResult != null)
+          .map((d) => [d.id, d.cachedResult] as const),
+      );
       const after = applyAction(detached, {
         type: "updateTable",
         id: action.id,
@@ -1033,13 +1042,16 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         if (orphanIds.has(n.id)) {
           // The analysis that ran on the removed set is orphaned — frozen
           // results, re-pointable (seq 242) — and moves to the project root,
-          // like a deleted table's.
+          // like a deleted table's. Its frozen result survives the
+          // updateTable invalidation above (seq 309).
+          const frozen = frozenResults.get(n.id);
           nodes[n.id] = {
             ...n,
             parentId: null,
             orphaned: true,
             sourceTableName: node.name,
             orphanedDataSet: action.setName,
+            ...(frozen != null ? { cachedResult: frozen } : {}),
           };
         } else if (
           n.type === "graph" &&

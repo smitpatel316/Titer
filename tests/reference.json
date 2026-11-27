@@ -44499,6 +44499,272 @@
   },
   "summary": "The data don't show that the difference between the groups depends on the row (interaction P = 0.9971). Overall, the groups differ (P < 0.0001). Overall, the rows differ (P = 0.001934)."
  },
+ "two-way-anova twoWayBig {\"design\":\"ordinary\",\"posthoc\":\"none\",\"posthocTarget\":\"groups\"}": {
+  "testType": "two-way-anova",
+  "subtitle": "Ordinary two-way ANOVA",
+  "stats": [
+   {
+    "label": "Group F",
+    "value": 81.45301413
+   },
+   {
+    "label": "Group DFn",
+    "value": 2
+   },
+   {
+    "label": "Group P value",
+    "value": 2.009348163e-11,
+    "p": true
+   },
+   {
+    "label": "Row F",
+    "value": 51.55342956
+   },
+   {
+    "label": "Row DFn",
+    "value": 3
+   },
+   {
+    "label": "Row P value",
+    "value": 1.302255057e-10,
+    "p": true
+   },
+   {
+    "label": "Interaction F",
+    "value": 1.598983571
+   },
+   {
+    "label": "Interaction DFn",
+    "value": 6
+   },
+   {
+    "label": "Interaction P value",
+    "value": 0.1907102467,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 24
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 10000000000000,
+    "sd": 0.5235461429,
+    "sem": 0.1511347533,
+    "median": 10000000000000,
+    "n": 12
+   },
+   {
+    "name": "B",
+    "mean": 10000000000000,
+    "sd": 0.6616472517,
+    "sem": 0.1910011095,
+    "median": 10000000000000,
+    "n": 12
+   },
+   {
+    "name": "C",
+    "mean": 10000000000000,
+    "sd": 0.8173054327,
+    "sem": 0.2359357558,
+    "median": 10000000000000,
+    "n": 12
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.463907982,
+    "partialEta2": 0.8715932267,
+    "cohensF": 2.605331299,
+    "partialEta2Lo": 0.6719426079,
+    "partialEta2Hi": 0.8867404746
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.4404265648,
+    "partialEta2": 0.8656668464,
+    "cohensF": 2.538538693,
+    "partialEta2Lo": 0.6557644454,
+    "partialEta2Hi": 0.8812919869
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.02732058167,
+    "partialEta2": 0.2855846156,
+    "cohensF": 0.6322546106,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.3679247709
+   }
+  ],
+  "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 12
+    },
+    {
+     "name": "B",
+     "n": 12
+    },
+    {
+     "name": "C",
+     "n": 12
+    }
+   ],
+   "how": "list",
+   "detail": "0 rows",
+   "left": [
+    "A:Y1",
+    "A:Y2",
+    "A:Y3",
+    "B:Y1",
+    "B:Y2",
+    "B:Y3",
+    "C:Y1",
+    "C:Y2",
+    "C:Y3"
+   ]
+  },
+  "summary": "The data don't show that the difference between the groups depends on the row (interaction P = 0.1907). Overall, the groups differ (P < 0.0001). Overall, the rows differ (P < 0.0001).",
+  "checks": [
+   {
+    "ok": true,
+    "text": "Normality of the residuals (Shapiro-Wilk): consistent with a normal distribution (the residuals P = 0.5977)."
+   }
+  ]
+ },
+ "two-way-anova twoWayBig {\"design\":\"repeated-measures\",\"posthoc\":\"none\",\"posthocTarget\":\"groups\"}": {
+  "testType": "two-way-anova",
+  "subtitle": "Repeated-measures two-way ANOVA",
+  "stats": [
+   {
+    "label": "Group F",
+    "value": 70.06743271
+   },
+   {
+    "label": "Group DFn",
+    "value": 2
+   },
+   {
+    "label": "Group P value",
+    "value": 0.00006921372439,
+    "p": true
+   },
+   {
+    "label": "Row F",
+    "value": 54.50572542
+   },
+   {
+    "label": "Row DFn",
+    "value": 3
+   },
+   {
+    "label": "Row P value",
+    "value": 3.118290235e-9,
+    "p": true
+   },
+   {
+    "label": "Interaction F",
+    "value": 1.690552117
+   },
+   {
+    "label": "Interaction DFn",
+    "value": 6
+   },
+   {
+    "label": "Interaction P value",
+    "value": 0.1806901274,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 10000000000000,
+    "sd": 0.5235461429,
+    "sem": 0.1511347533,
+    "median": 10000000000000,
+    "n": 12
+   },
+   {
+    "name": "B",
+    "mean": 10000000000000,
+    "sd": 0.6616472517,
+    "sem": 0.1910011095,
+    "median": 10000000000000,
+    "n": 12
+   },
+   {
+    "name": "C",
+    "mean": 10000000000000,
+    "sd": 0.8173054327,
+    "sem": 0.2359357558,
+    "median": 10000000000000,
+    "n": 12
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.463907982,
+    "partialEta2": 0.9589420363,
+    "cohensF": 4.832785005,
+    "partialEta2Lo": 0.4040823377,
+    "partialEta2Hi": 0.9057185632
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.4404265648,
+    "partialEta2": 0.9008358307,
+    "cohensF": 3.014015191,
+    "partialEta2Lo": 0.6430984229,
+    "partialEta2Hi": 0.8923584009
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.02732058167,
+    "partialEta2": 0.3604164445,
+    "cohensF": 0.7506779417,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.3861445199
+   }
+  ],
+  "notes": "Matched by row: each replicate column is treated as the same subject across every row within its group. Assumes sphericity (no Geisser-Greenhouse correction).",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 12
+    },
+    {
+     "name": "B",
+     "n": 12
+    },
+    {
+     "name": "C",
+     "n": 12
+    }
+   ],
+   "how": "list",
+   "detail": "0 rows",
+   "left": [
+    "A:Y1",
+    "A:Y2",
+    "A:Y3",
+    "B:Y1",
+    "B:Y2",
+    "B:Y3",
+    "C:Y1",
+    "C:Y2",
+    "C:Y3"
+   ]
+  },
+  "summary": "The data don't show that the difference between the groups depends on the row (interaction P = 0.1807). Overall, the groups differ (P < 0.0001). Overall, the rows differ (P < 0.0001)."
+ },
  "multiple-t-tests twoGroups {\"paired\":false,\"gaussian\":true,\"pooledSd\":false,\"correction\":\"holm\"}": {
   "testType": "multiple-t-tests",
   "subtitle": "Multiple t tests",
@@ -48975,6 +49241,184 @@
    }
   ]
  },
+ "three-way-anova threeWayBig {\"posthoc\":\"none\"}": {
+  "testType": "three-way-anova",
+  "subtitle": "Ordinary three-way ANOVA",
+  "stats": [
+   {
+    "label": "A F",
+    "value": 290.0352685
+   },
+   {
+    "label": "A DFn",
+    "value": 1
+   },
+   {
+    "label": "A P value",
+    "value": 1.122599486e-11,
+    "p": true
+   },
+   {
+    "label": "B F",
+    "value": 125.7696258
+   },
+   {
+    "label": "B DFn",
+    "value": 1
+   },
+   {
+    "label": "B P value",
+    "value": 5.449713466e-9,
+    "p": true
+   },
+   {
+    "label": "C F",
+    "value": 101.231852
+   },
+   {
+    "label": "C DFn",
+    "value": 1
+   },
+   {
+    "label": "C P value",
+    "value": 2.522408941e-8,
+    "p": true
+   },
+   {
+    "label": "A:B F",
+    "value": 7.249960392
+   },
+   {
+    "label": "A:B DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B P value",
+    "value": 0.0160136122,
+    "p": true
+   },
+   {
+    "label": "A:C F",
+    "value": 1.242909063
+   },
+   {
+    "label": "A:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:C P value",
+    "value": 0.2813774613,
+    "p": true
+   },
+   {
+    "label": "B:C F",
+    "value": 10.98140454
+   },
+   {
+    "label": "B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "B:C P value",
+    "value": 0.004389607531,
+    "p": true
+   },
+   {
+    "label": "A:B:C F",
+    "value": 0.8371384184
+   },
+   {
+    "label": "A:B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B:C P value",
+    "value": 0.3738000898,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 16
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 10000000000000,
+    "sd": 0.7571401858,
+    "sem": 0.218567545,
+    "median": 10000000000000,
+    "n": 12
+   },
+   {
+    "name": "B",
+    "mean": 10000000000000,
+    "sd": 1.017729259,
+    "sem": 0.2937931307,
+    "median": 10000000000000,
+    "n": 12
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "A — Group",
+    "eta2": 0.5241460803,
+    "partialEta2": 0.9477184441,
+    "cohensF": 4.257605463,
+    "partialEta2Lo": 0.8304137012,
+    "partialEta2Hi": 0.9571830639
+   },
+   {
+    "effect": "B — Row",
+    "eta2": 0.2272884148,
+    "partialEta2": 0.8871408463,
+    "cohensF": 2.803676446,
+    "partialEta2Lo": 0.6622057092,
+    "partialEta2Hi": 0.9091376661
+   },
+   {
+    "effect": "C — Row group",
+    "eta2": 0.1829442286,
+    "partialEta2": 0.863518321,
+    "cohensF": 2.51535102,
+    "partialEta2Lo": 0.6041345298,
+    "partialEta2Hi": 0.8908096029
+   },
+   {
+    "effect": "A:B",
+    "eta2": 0.01310198702,
+    "partialEta2": 0.3118267847,
+    "cohensF": 0.6731437622,
+    "partialEta2Lo": 0.00811614718,
+    "partialEta2Hi": 0.4924718224
+   },
+   {
+    "effect": "A:C",
+    "eta2": 0.002246161018,
+    "partialEta2": 0.07208233012,
+    "cohensF": 0.2787145788,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.2852604407
+   },
+   {
+    "effect": "B:C",
+    "eta2": 0.01984538011,
+    "partialEta2": 0.4069989954,
+    "cohensF": 0.8284550585,
+    "partialEta2Lo": 0.04051836751,
+    "partialEta2Hi": 0.5613548685
+   },
+   {
+    "effect": "A:B:C",
+    "eta2": 0.001512860222,
+    "partialEta2": 0.04971975627,
+    "cohensF": 0.2287381716,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.2574410865
+   }
+  ],
+  "notes": "A = Group (A, B); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells."
+ },
  "three-way-anova grouped3wayEmpty {\"posthoc\":\"none\"}": {
   "error": "Every combination of the three factors needs at least one value. Drug × Day 2 × KO has no values."
  },
@@ -52018,11 +52462,11 @@
   "groups": [
    {
     "name": "Weight",
-    "mean": 76.3,
-    "sd": 12.00971829,
-    "sem": 3.797806384,
-    "median": 73.5,
-    "n": 10
+    "mean": 77.22222222,
+    "sd": 12.35695935,
+    "sem": 4.118986451,
+    "median": 75,
+    "n": 9
    },
    {
     "name": "Height",
@@ -52034,19 +52478,19 @@
    },
    {
     "name": "Age",
-    "mean": 39.9,
-    "sd": 9.837004964,
-    "sem": 3.110734104,
-    "median": 39.5,
-    "n": 10
+    "mean": 40.66666667,
+    "sd": 10.11187421,
+    "sem": 3.370624736,
+    "median": 41,
+    "n": 9
    },
    {
     "name": "Dose",
-    "mean": 1.9,
-    "sd": 0.8755950358,
-    "sem": 0.2768874621,
+    "mean": 2,
+    "sd": 0.8660254038,
+    "sem": 0.2886751346,
     "median": 2,
-    "n": 10
+    "n": 9
    }
   ],
   "notes": "Ordinary least-squares regression of “Weight” on 3 predictor(s), fit on 9 complete rows. Each coefficient's P value tests whether that predictor's slope differs from zero, holding the others fixed. “Height” and “Age” and “Dose” are strongly collinear with the other predictor(s) (VIF above 10) — their coefficient is imprecise.",
@@ -52150,7 +52594,7 @@
    "sets": [
     {
      "name": "Weight",
-     "n": 10
+     "n": 9
     }
    ],
    "how": "list",
@@ -52200,11 +52644,11 @@
   "groups": [
    {
     "name": "Weight",
-    "mean": 76.3,
-    "sd": 12.00971829,
-    "sem": 3.797806384,
-    "median": 73.5,
-    "n": 10
+    "mean": 77.22222222,
+    "sd": 12.35695935,
+    "sem": 4.118986451,
+    "median": 75,
+    "n": 9
    },
    {
     "name": "Height",
@@ -52216,11 +52660,11 @@
    },
    {
     "name": "Age",
-    "mean": 39.9,
-    "sd": 9.837004964,
-    "sem": 3.110734104,
-    "median": 39.5,
-    "n": 10
+    "mean": 40.66666667,
+    "sd": 10.11187421,
+    "sem": 3.370624736,
+    "median": 41,
+    "n": 9
    }
   ],
   "notes": "Ordinary least-squares regression of “Weight” on 2 predictor(s), fit on 9 complete rows. Each coefficient's P value tests whether that predictor's slope differs from zero, holding the others fixed.",
@@ -52303,7 +52747,7 @@
    "sets": [
     {
      "name": "Weight",
-     "n": 10
+     "n": 9
     }
    ],
    "how": "list",
