@@ -63,6 +63,8 @@ export function WhatsNewDialog() {
   }, [open, autoOpened]);
 
   const close = () => {
+    // markWhatsNewSeen only advances the marker (BR-108): closing a
+    // manual open after a downgrade must not move it down.
     markWhatsNewSeen();
     setOpen(false);
   };

@@ -50,7 +50,7 @@ import {
   parseGuideSeen,
   shouldShowGuide,
 } from "../src/lib/startup-guide";
-import { WHAT_S_NEW, filterWhatsNewEntries, visibleWhatsNewEntries } from "../src/lib/whats-new";
+import { WHAT_S_NEW, WHATS_NEW_SEEN_KEY, filterWhatsNewEntries, markWhatsNewSeen, readWhatsNewSeen, seenVersion, visibleWhatsNewEntries } from "../src/lib/whats-new";
 import {
   extractMethod,
   formatMethodReport,
@@ -30492,6 +30492,94 @@ check("a release is newer only when its version number is higher", () => {
   ok(isNewer("2", "1.99.9"));
   ok(!isNewer("v1.0.0", "1.0.0"));
   ok(!isNewer("1.0", "1.0.1"));
+});
+
+// BR-105: isNewer inverted semver pre-release ordering — it split on
+// "." and read "2.0.2-rc.1" as [2, 0, 2, 1], newer than "2.0.2" — and
+// seenVersion rejected pre-release and uppercase-V seen strings, so a
+// pre-release install read as no record at all.
+check("bugfix-br-105: a release outranks its own pre-release, and the seen record accepts pre-releases", () => {
+  // The inversion itself: a release is newer than its pre-release.
+  ok(isNewer("2.0.2", "2.0.2-rc.1"));
+  ok(!isNewer("2.0.2-rc.1", "2.0.2"));
+  // Pre-releases compare identifier by identifier (semver order).
+  ok(isNewer("2.0.2-rc.2", "2.0.2-rc.1"));
+  ok(!isNewer("2.0.2-rc.1", "2.0.2-rc.2"));
+  ok(isNewer("2.0.2-rc.1", "2.0.2-alpha"));
+  ok(isNewer("2.0.2-alpha.1", "2.0.2-alpha"));
+  ok(!isNewer("2.0.2-alpha", "2.0.2-alpha.1"));
+  ok(isNewer("2.0.2-beta.11", "2.0.2-beta.2"));
+  ok(isNewer("2.0.2-alpha", "2.0.2-1"));
+  ok(isNewer("2.0.2-rc.1", "2.0.1"));
+  ok(!isNewer("2.0.2-rc.1", "2.0.2-rc.1"));
+  ok(!isNewer("2.0.2+build.5", "2.0.2"));
+  // The seen record accepts pre-releases and an uppercase V.
+  strictEqual(seenVersion("2.0.2-rc.1"), "2.0.2-rc.1");
+  strictEqual(seenVersion("V2.0.1"), "V2.0.1");
+  strictEqual(seenVersion("v2.0.1"), "v2.0.1");
+  strictEqual(seenVersion("banana"), null);
+  strictEqual(seenVersion("2.0.2-"), null);
+  // So a pre-release seen record filters entries like a release does:
+  // seen 2.0.2-rc.1 has missed 2.0.2 and 2.0.3, not just 2.0.3.
+  const fiveEntries = ["2.0.3", "2.0.2", "2.0.1", "2.0.0", "1.9.0"].map((v) => ({
+    version: v,
+    title: `Titer ${v}`,
+    items: [`${v} note`],
+  }));
+  deepStrictEqual(
+    filterWhatsNewEntries(fiveEntries, "2.0.2-rc.1").map((e) => e.version),
+    ["2.0.3", "2.0.2"],
+    "seen 2.0.2-rc.1 still owes 2.0.2's news",
+  );
+  deepStrictEqual(
+    filterWhatsNewEntries(fiveEntries, "V2.0.1").map((e) => e.version),
+    ["2.0.3", "2.0.2"],
+    "an uppercase-V seen record is read, not treated as no record",
+  );
+});
+
+// BR-108: closing the What's New dialog overwrote titer.whats-new-seen
+// unconditionally, moving the marker down after a downgrade ("2.1.0"
+// → "2.0.1") so the newer version's news auto-opened again later.
+// The marker now only advances: no record, a garbled record, or an
+// older version is written; a stored version already this version or
+// newer is left alone. The dialog's close() goes through
+// markWhatsNewSeen, so this pins the close path's behaviour.
+check("bugfix-br-108: closing the dialog never moves the seen marker down after a downgrade", () => {
+  const stored: Record<string, string> = {};
+  const storage = {
+    getItem: (k: string) => stored[k] ?? null,
+    setItem: (k: string, v: string) => void (stored[k] = v),
+  };
+  Object.assign(globalThis, { localStorage: storage });
+  try {
+    // Running 2.0.1 (package.json) with 2.1.0 already seen: the marker stays.
+    stored[WHATS_NEW_SEEN_KEY] = "2.1.0";
+    markWhatsNewSeen();
+    strictEqual(readWhatsNewSeen(), "2.1.0", "a downgrade close leaves the newer marker alone");
+    // Same version: already seen, no rewrite needed (value unchanged).
+    stored[WHATS_NEW_SEEN_KEY] = "2.0.1";
+    markWhatsNewSeen();
+    strictEqual(readWhatsNewSeen(), "2.0.1");
+    // Older version: the marker advances to the running version.
+    stored[WHATS_NEW_SEEN_KEY] = "2.0.0";
+    markWhatsNewSeen();
+    strictEqual(readWhatsNewSeen(), "2.0.1");
+    // No record: the marker is written.
+    delete stored[WHATS_NEW_SEEN_KEY];
+    markWhatsNewSeen();
+    strictEqual(readWhatsNewSeen(), "2.0.1");
+    // Garbled record: treated as no record, the marker is written.
+    stored[WHATS_NEW_SEEN_KEY] = "banana";
+    markWhatsNewSeen();
+    strictEqual(readWhatsNewSeen(), "2.0.1");
+    // A stored pre-release newer than the running version is left alone.
+    stored[WHATS_NEW_SEEN_KEY] = "2.0.2-rc.1";
+    markWhatsNewSeen();
+    strictEqual(readWhatsNewSeen(), "2.0.2-rc.1", "a newer pre-release marker is not overwritten");
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
 });
 
 check("the update check reads main's package.json, never the GitHub API", async () => {
