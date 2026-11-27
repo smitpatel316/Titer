@@ -186,6 +186,7 @@ import {
   defaultRowGroups,
   deleteColumns,
   deleteRows,
+  dropColumns,
   fillRange,
   freshColumnNames,
   insertColumns,
@@ -196,6 +197,7 @@ import {
   parseClipboardHTML,
   pasteNames,
   pasteSpecialBlock,
+  permuteColumns,
   regroupLoses,
   regroupTable,
   removeRowGroup,
@@ -17113,6 +17115,220 @@ check("renaming a Y column follows y2, ys, globalY, truth, score and record keys
     after.columns,
   ).graphOptions!.points;
   deepStrictEqual(styled, { "A:Mouse 1:R1#0": { size: 3 } });
+});
+
+check("R2-52: followTable follows the newer column-name params and bubble variables", () => {
+  // Extract/rearrange names every variable it reads.
+  const rearranged = followTable(
+    {
+      ...analysis,
+      analysisType: "extract-rearrange",
+      analysisParams: {
+        target: "grouped",
+        response: "Y1",
+        grouping: "G",
+        subject: "S",
+        rowTitles: "T",
+        rowFactor: "R",
+        columnFactor: "C",
+        rowVariable: "RV",
+        outcome: "O",
+        count: "N",
+      } as AnalysisParams,
+    },
+    { renamed: { G: "Group", S: "Subj", T: "Title", R: "RowF", C: "ColF", RV: "RowV", O: "Out", N: "Cnt" } },
+    [],
+  );
+  deepStrictEqual(rearranged.analysisParams, {
+    target: "grouped",
+    response: "Y1",
+    grouping: "Group",
+    subject: "Subj",
+    rowTitles: "Title",
+    rowFactor: "RowF",
+    columnFactor: "ColF",
+    rowVariable: "RowV",
+    outcome: "Out",
+    count: "Cnt",
+  });
+  // Remove-baseline's controls and column math, multifactor's factors,
+  // mixed-effects' fixed factors, transform-concentrations' column, and
+  // select-transform's columns.
+  const baseline = followTable(
+    {
+      ...analysis,
+      analysisType: "remove-baseline",
+      analysisParams: { controls: ["C1", "C2"], columnMathA: "A", columnMathB: "B" } as AnalysisParams,
+    },
+    { renamed: { C1: "Ctrl1", A: "A2", B: "B2" } },
+    [],
+  );
+  deepStrictEqual(baseline.analysisParams, { controls: ["Ctrl1", "C2"], columnMathA: "A2", columnMathB: "B2" });
+  const multifactor = followTable(
+    {
+      ...analysis,
+      analysisType: "multifactor-anova",
+      analysisParams: { posthoc: "tukey", response: "Y", factors: ["F1", "F2"] } as AnalysisParams,
+    },
+    { renamed: { F1: "Fac1" } },
+    [],
+  );
+  deepStrictEqual(multifactor.analysisParams, { posthoc: "tukey", response: "Y", factors: ["Fac1", "F2"] });
+  const mixed = followTable(
+    {
+      ...analysis,
+      analysisType: "mixed-effects",
+      analysisParams: { randomStructure: "intercept", fixedFactors: ["FF1", "FF2"] } as AnalysisParams,
+    },
+    { renamed: { FF1: "Fixed1" } },
+    [],
+  );
+  deepStrictEqual(mixed.analysisParams, { randomStructure: "intercept", fixedFactors: ["Fixed1", "FF2"] });
+  const concentrations = followTable(
+    {
+      ...analysis,
+      analysisType: "transform-concentrations",
+      analysisParams: { column: "Conc" } as AnalysisParams,
+    },
+    { renamed: { Conc: "Concentration" } },
+    [],
+  );
+  deepStrictEqual(concentrations.analysisParams, { column: "Concentration" });
+  const selected = followTable(
+    {
+      ...analysis,
+      analysisType: "select-transform",
+      analysisParams: { columns: ["A", "B"] } as AnalysisParams,
+    },
+    { renamed: { A: "Alpha" } },
+    [],
+  );
+  deepStrictEqual(selected.analysisParams, { columns: ["Alpha", "B"] });
+  // A bubble graph's size and color variables.
+  const bubble = followTable(
+    {
+      ...graph,
+      graphOptions: { ...DEFAULT_GRAPH_OPTIONS, bubbleSizeVariable: "Size", bubbleColorVariable: "Color" },
+    },
+    { renamed: { Size: "Big", Color: "Hue" } },
+    [],
+  ).graphOptions!;
+  strictEqual(bubble.bubbleSizeVariable, "Big");
+  strictEqual(bubble.bubbleColorVariable, "Hue");
+});
+
+check("R2-52: a frozen transformed table keeps its stored values on load", () => {
+  // The frozen table's stored 999s are not its % of control values (100/200/400):
+  // loading must keep them, while its unfrozen twin recomputes.
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Source",
+        parentId: null,
+        tableType: "column",
+        data: { columns: ["Title", "A", "B"], rows: [["r1", "10", "20"], ["r2", "10", "40"]] },
+      },
+      t2: {
+        id: "t2",
+        type: "table",
+        name: "Source, % of control",
+        parentId: null,
+        tableType: "column",
+        data: { columns: ["Title", "A", "B"], rows: [["r1", "999", "999"], ["r2", "999", "999"]] },
+        transform: { from: "t1", kind: "percent-of-control", control: "A" },
+        frozen: true,
+      },
+      t3: {
+        id: "t3",
+        type: "table",
+        name: "Source, % of control 2",
+        parentId: null,
+        tableType: "column",
+        data: { columns: ["Title", "A", "B"], rows: [["r1", null, null], ["r2", null, null]] },
+        transform: { from: "t1", kind: "percent-of-control", control: "A" },
+      },
+    },
+    rootOrder: ["t1", "t2", "t3"],
+    childOrder: { t1: [], t2: [], t3: [] },
+    activeNodeId: "t1",
+  };
+  const loaded = parseProjectFile(JSON.parse(serializeProjectFile(payload)));
+  if ("error" in loaded) throw new Error(loaded.error);
+  deepStrictEqual(loaded.project.nodes.t2.data!.rows, [
+    ["r1", "999", "999"],
+    ["r2", "999", "999"],
+  ]);
+  deepStrictEqual(loaded.project.nodes.t3.data!.rows, [
+    ["r1", "100", "200"],
+    ["r2", "100", "400"],
+  ]);
+});
+
+check("R2-53: permuteColumns and dropColumns carry cellBackgrounds and prune column metadata", () => {
+  const base = {
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      ["r1", 1, 2, 3],
+      ["r2", 4, 5, 6],
+    ],
+    cellBackgrounds: { "0,1": "red", "1,3": "blue" },
+    decimals: { A: 2, B: 1, C: 0 },
+    variableTypes: { A: "numeric", B: "numeric", C: "numeric" },
+    labelVariable: "A",
+    levelOrder: { B: ["x", "y"] },
+    linkedPaste: { col: 2, row: 0 },
+    calculated: [{ name: "B", formula: "A * 2" }],
+  } as unknown as TableData;
+  // Swap A<->C: order [0,3,2,1] — the colors move with their columns.
+  const permuted = permuteColumns(base, [0, 3, 2, 1]);
+  deepStrictEqual(permuted.cellBackgrounds, { "0,3": "red", "1,1": "blue" });
+  // Drop B: the blue shifts C:3 -> 2, and B's metadata goes with it.
+  const dropped = dropColumns(base, [2]);
+  deepStrictEqual(dropped.cellBackgrounds, { "0,1": "red", "1,2": "blue" });
+  deepStrictEqual(dropped.decimals, { A: 2, C: 0 });
+  deepStrictEqual(dropped.variableTypes, { A: "numeric", C: "numeric" });
+  strictEqual(dropped.levelOrder, undefined);
+  strictEqual(dropped.labelVariable, "A");
+  strictEqual(dropColumns({ ...base, labelVariable: "B" } as unknown as TableData, [2]).labelVariable, undefined);
+});
+
+check("R2-53: removeCalculatedVariable empties calculated, shifts the linked paste, prunes metadata and keeps the last data column", () => {
+  const base = {
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      ["r1", 1, 2, 3],
+      ["r2", 4, 5, 6],
+    ],
+    cellBackgrounds: { "0,1": "red", "1,3": "blue" },
+    decimals: { A: 2, B: 1, C: 0 },
+    variableTypes: { A: "numeric", B: "numeric", C: "numeric" },
+    labelVariable: "B",
+    levelOrder: { B: ["x", "y"] },
+    linkedPaste: { col: 2, row: 0 },
+    calculated: [{ name: "B", formula: "A * 2" }],
+  } as unknown as TableData;
+  const removed = removeCalculatedVariable(base, "B");
+  strictEqual(removed.calculated, undefined);
+  strictEqual(removed.linkedPaste, undefined);
+  deepStrictEqual(removed.variableTypes, { A: "numeric", C: "numeric" });
+  strictEqual(removed.labelVariable, undefined);
+  strictEqual(removed.levelOrder, undefined);
+  deepStrictEqual(removed.columns, ["Title", "A", "C"]);
+  // A link past the deleted column shifts left instead of going.
+  const shifted = removeCalculatedVariable(
+    { ...base, linkedPaste: { col: 3, row: 0 }, calculated: [{ name: "B", formula: "A * 2" }] } as unknown as TableData,
+    "B",
+  );
+  deepStrictEqual(shifted.linkedPaste, { col: 2, row: 0 });
+  // The last data column stays: a table with only its title column is not a table.
+  const last = {
+    columns: ["Title", "B"],
+    rows: [["r1", 2]],
+    calculated: [{ name: "B", formula: "1+1" }],
+  } as unknown as TableData;
+  deepStrictEqual(removeCalculatedVariable(last, "B").columns, ["Title", "B"]);
 });
 
 check("graphs follow renamed columns, groups, compared pairs and colors", () => {

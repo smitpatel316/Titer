@@ -979,7 +979,19 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
           }
         }
         for (const t of Object.values(nodes)) {
-          if (t.transform?.from === id) update(t.id, transformTable(data, t.tableType!, t.transform, t.data));
+          if (t.transform?.from === id) {
+            // A frozen table keeps its values, whatever its source does.
+            if (t.frozen) continue;
+            // A renamed control series keeps its name: without the remap the
+            // transform looks the control up by its old name, finds nothing,
+            // and blanks every % of control cell.
+            const transform =
+              t.transform.control !== undefined && action.move?.renamed?.[t.transform.control] !== undefined
+                ? { ...t.transform, control: action.move.renamed[t.transform.control] }
+                : t.transform;
+            if (transform !== t.transform) nodes[t.id] = { ...t, transform };
+            update(t.id, transformTable(data, t.tableType!, transform, t.data));
+          }
         }
       };
       update(action.id, action.data);

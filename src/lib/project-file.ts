@@ -2543,7 +2543,9 @@ export function parseProjectFile(
   // (even through others); without its table, it keeps its values, which can then be typed.
   const computed = new Set<string>();
   const compute = (node: ProjectNode, seen: string[]) => {
-    if (!node.transform || computed.has(node.id)) return;
+    // A frozen transformed table keeps its stored values on load, whatever
+    // its source holds now — recomputing would overwrite the freeze.
+    if (!node.transform || node.frozen || computed.has(node.id)) return;
     const source = nodeOf(node.transform.from);
     if (source?.type !== "table" || seen.includes(source.id)) return void delete node.transform;
     compute(source, [...seen, source.id]);
