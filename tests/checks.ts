@@ -45283,7 +45283,7 @@ check("seq 200: general 1/Y^K weighting (K=2 equals 1/Y², K=1 equals 1/Y)", asy
   );
   // 1/Y^K is nonlinear-only: linear regression refuses it cleanly instead
   // of emitting R code for an exponent it never fits.
-  deepStrictEqual(await runAnalysis("linear-regression", table, { weights: "1/yk" as never }), {
+  deepStrictEqual(await runAnalysis("linear-regression", table, { forceOrigin: false, weights: "1/yk" as never }), {
     error:
       "Weighting by 1/Y^K needs the exponent K, which linear regression doesn't fit — use nonlinear regression with the same weighting.",
   });
