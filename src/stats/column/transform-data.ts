@@ -45,7 +45,7 @@ import {
 } from "../types";
 import { dataGroups, describe, missingColumn } from "./base";
 import { tCrit95 } from "../../lib/student-t";
-import { dependenciesOf, evaluateFormula, parseFormula, type EvalContext, type Expr } from "../../lib/calcvars";
+import { dependenciesOf, evaluateFormula, formulaHasText, parseFormula, type EvalContext, type Expr } from "../../lib/calcvars";
 
 /** Whether a function is one of the arithmetic ones (needs a constant K). */
 export const isArithmeticTransform = (fn: TransformFunction): boolean =>
@@ -478,6 +478,11 @@ export const parseUserFormula = (
     rest = rest.replace(/^Y\s*=\s*/, "");
     const parsed = parseFormula(rest);
     if ("error" in parsed) return { error: parsed.error };
+    // Text in quotes cannot run here: the transform works on numbers,
+    // and a string would otherwise blank the column with no reason
+    // given — text belongs in CONCATENATE, a calculated variable.
+    if (formulaHasText(parsed.ast))
+      return { error: "A user-defined transform works on numbers — text in quotes belongs in CONCATENATE, a calculated variable." };
     const unknown = dependenciesOf(parsed.ast).find((d) => !knownNames.has(d));
     if (unknown)
       return { error: `The formula uses “${unknown}”, which is not a column or data set in this table.` };

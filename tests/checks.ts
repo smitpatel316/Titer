@@ -110,6 +110,8 @@ import {
   type SeriesSpec,
 } from "../src/lib/series";
 import {
+  CALC_FUNCTION_NAMES,
+  CALC_FUNCTION_REFERENCE,
   addCalculatedVariable,
   parseFormula,
   recomputeCalculated,
@@ -33316,6 +33318,13 @@ check("calcvars: CONCATENATE joins cell text, and text lives only inside it (seq
   if ("error" in withFull) throw new Error(withFull.error);
   deepStrictEqual(add(withFull.data, "CountFull", "COUNTA(Full)"), ["4", "4", "4", "4"]);
   deepStrictEqual(add(withFull.data, "Bang", "CONCATENATE(Full, \"!\")"), ["JohnSmith!", "Ada!", "Doe!", "X!"]);
+  // And a chained text column follows a source edit: the recompute reads
+  // what the first formula just computed, not the pre-edit text.
+  const withBang = addCalculatedVariable(withFull.data, "Bang", "CONCATENATE(Full, \"!\")");
+  if ("error" in withBang) throw new Error(withBang.error);
+  const edited = recomputeCalculated(writeBlock(withBang.data, 0, 1, [["Jane"]], "multiple"));
+  deepStrictEqual(calcValues(edited, "Full"), ["JaneSmith", "Ada", "Doe", "X"]);
+  deepStrictEqual(calcValues(edited, "Bang"), ["JaneSmith!", "Ada!", "Doe!", "X!"]);
   // A formula that is only a string literal, and CONCATENATE anywhere but
   // the whole formula, error the variable with a reason — text cannot
   // flow through arithmetic, which only holds numbers.
@@ -33342,6 +33351,23 @@ check("calcvars: CONCATENATE joins cell text, and text lives only inside it (seq
   strictEqual(parsed.updated, false);
   const loaded = parsed.project.nodes.t1 as ProjectNode;
   deepStrictEqual(calcValues(loaded.data!, "Full"), ["JohnSmith", "Ada", "Doe", "X"]);
+});
+
+check("calcvars: the Inspector's function browser lists every function the engine runs (seq 156 remainder)", () => {
+  // The browser renders CALC_FUNCTION_REFERENCE, the engine's own list —
+  // so a function added to the engine without a browser entry (or an
+  // entry for a function the engine does not run) fails here, and every
+  // entry's example is a formula that actually parses.
+  const listed = CALC_FUNCTION_REFERENCE.map((f) => f.name);
+  strictEqual(new Set(listed).size, listed.length, "the browser lists no function twice");
+  for (const name of CALC_FUNCTION_NAMES) ok(listed.includes(name), `the browser is missing ${name}`);
+  for (const fn of CALC_FUNCTION_REFERENCE) {
+    const parsed = parseFormula(fn.example);
+    ok("ast" in parsed, `${fn.name}'s example does not parse: ${fn.example} — ${"error" in parsed ? parsed.error : ""}`);
+  }
+  // The browser's list covers the aliases too, not just the canonical names.
+  for (const alias of ["ARCTAN2", "CEILING", "AVERAGE", "STDEV", "STDERR", "PERC"])
+    ok(listed.includes(alias), `the browser is missing the alias ${alias}`);
 });
 
 // ── Simulate data + Monte Carlo (plan 22) ───────────────────────────────

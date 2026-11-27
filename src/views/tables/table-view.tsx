@@ -45,10 +45,12 @@ import {
 import { DATE_UNITS, type XColumnFormat, type XConversion } from "../../lib/date-time";
 import { isGrouped, isNested } from "../../lib/dataset";
 import {
+  CALC_FUNCTION_REFERENCE,
   addCalculatedVariable,
   isCalculatedColumn,
   removeCalculatedVariable,
   setCalculatedFormula,
+  type CalcFunctionGroup,
 } from "../../lib/calcvars";
 import {
   categoricalLevels,
@@ -689,6 +691,8 @@ function CalculatedVariablesPanel({
   const [editing, setEditing] = React.useState<string | null>(null);
   const [editFormula, setEditFormula] = React.useState("");
   const [editError, setEditError] = React.useState<string | null>(null);
+  const [browserOpen, setBrowserOpen] = React.useState(false);
+  const [browserQuery, setBrowserQuery] = React.useState("");
   // A formula as typed, with or without its leading `=`.
   const bare = (text: string) => (text.startsWith("=") ? text.slice(1) : text);
   const add = () => {
@@ -793,7 +797,108 @@ function CalculatedVariablesPanel({
         Type `=` in an empty variable in the grid, or add one here. Values update live when a source changes, and a
         calculated variable can be used in any analysis like a typed variable.
       </p>
+      <FunctionBrowser
+        open={browserOpen}
+        onToggle={() => setBrowserOpen((v) => !v)}
+        query={browserQuery}
+        onQuery={setBrowserQuery}
+        onInsert={(template) => {
+          // Into the formula being written: the add field, or the row
+          // being edited. Appended at the end (a space joins it to what
+          // is already there, unless the text already ends mid-expression).
+          const current = editing === null ? formula : editFormula;
+          const next = !current
+            ? template
+            : /[\s(,+\-*/%^=<>]$/.test(current)
+              ? current + template
+              : `${current} ${template}`;
+          if (editing === null) setFormula(next);
+          else setEditFormula(next);
+        }}
+      />
     </Section>
+  );
+}
+
+/** The formula language's function browser (seq 156 remainder): every
+ *  function the engine runs, grouped with its syntax and one line saying
+ *  what it does, searchable, and clickable to insert into the formula
+ *  being written. It renders CALC_FUNCTION_REFERENCE, the engine's own
+ *  list, so the panel can never drift from what formulas accept — a
+ *  window clause (OVER / WHERE / ORDER BY / ROWS) inserts as its keyword,
+ *  a function as its name with empty parentheses. */
+const FUNCTION_BROWSER_GROUPS: CalcFunctionGroup[] = ["Math", "Trigonometry", "Statistics", "Logic", "Text", "Random", "Window"];
+const FUNCTION_BROWSER_CLAUSES = new Set(["OVER", "WHERE", "ORDER BY", "ROWS"]);
+
+function FunctionBrowser({
+  open,
+  onToggle,
+  query,
+  onQuery,
+  onInsert,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  query: string;
+  onQuery: (q: string) => void;
+  onInsert: (template: string) => void;
+}) {
+  const q = query.trim().toLowerCase();
+  const visible = CALC_FUNCTION_REFERENCE.filter(
+    (fn) =>
+      !q ||
+      fn.name.toLowerCase().includes(q) ||
+      fn.syntax.toLowerCase().includes(q) ||
+      fn.description.toLowerCase().includes(q),
+  );
+  return (
+    <div className="flex flex-col gap-1 border-t border-separator pt-2">
+      <div className="flex items-center justify-between">
+        <span className="text-small-strong uppercase tracking-wide text-primary">Functions</span>
+        <Button size="small" onClick={onToggle}>
+          {open ? "Hide" : `Browse (${CALC_FUNCTION_REFERENCE.length})`}
+        </Button>
+      </div>
+      {open && (
+        <>
+          <Input
+            value={query}
+            placeholder="Search functions…"
+            aria-label="Search functions"
+            onChange={(e) => onQuery(e.target.value)}
+          />
+          {visible.length === 0 ? (
+            <p className="text-small text-secondary">No functions match “{query.trim()}”.</p>
+          ) : (
+            FUNCTION_BROWSER_GROUPS.map((group) => {
+              const inGroup = visible.filter((fn) => fn.group === group);
+              if (inGroup.length === 0) return null;
+              return (
+                <div key={group} className="flex flex-col">
+                  <span className="pt-1 text-small-strong uppercase tracking-wide text-secondary">{group}</span>
+                  {inGroup.map((fn) => (
+                    <button
+                      key={fn.name}
+                      type="button"
+                      onClick={() => onInsert(FUNCTION_BROWSER_CLAUSES.has(fn.name) ? ` ${fn.name} ` : `${fn.name}()`)}
+                      className="flex w-full flex-col items-start rounded-md px-2 py-1 text-left hover:bg-control"
+                      title={`Insert ${fn.name} into the formula`}
+                    >
+                      <span className="text-regular">
+                        <span className="font-medium">{fn.name}</span>{" "}
+                        <span className="text-secondary">{fn.syntax}</span>
+                      </span>
+                      <span className="text-small text-secondary">{fn.description}</span>
+                    </button>
+                  ))}
+                </div>
+              );
+            })
+          )}
+          <p className="text-small text-secondary">Click a function to insert it into the formula above.</p>
+        </>
+      )}
+    </div>
   );
 }
 

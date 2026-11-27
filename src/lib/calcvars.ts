@@ -29,6 +29,7 @@
 // Calculated Variables panel. Formulas are stored WITHOUT the leading `=`
 // (`formula: "A + B"`); the grid and the panel display them with it.
 import { readTable } from "./dataset";
+import { qnorm } from "./normal";
 import { parseCell } from "./numeric";
 import { maxOf, mean, median, minOf, sd, sem } from "./summary";
 import type { CalculatedVariable, TableData } from "../store/types";
@@ -47,6 +48,7 @@ const cell = (v: number | null) => (v == null || !Number.isFinite(v) ? null : St
 
 type Token =
   | { kind: "num"; value: number }
+  | { kind: "str"; value: string }
   | { kind: "ident"; name: string }
   | { kind: "bracket"; name: string }
   | { kind: "op"; op: string }
@@ -73,6 +75,32 @@ function tokenize(input: string): { tokens: Token[] } | { error: string } {
       if (!name.trim()) return { error: `“${input}” has an empty “[ ]” variable name.` };
       tokens.push({ kind: "bracket", name });
       i = close + 1;
+      continue;
+    }
+    // Text in double quotes — only CONCATENATE reads it (the numeric
+    // engine cannot hold text, so a string anywhere else is a validation
+    // error, not a silent blank). `""` inside is one `"`, the Excel rule.
+    if (ch === '"') {
+      let value = "";
+      let j = i + 1;
+      let closed = false;
+      while (j < input.length) {
+        if (input[j] === '"') {
+          if (input[j + 1] === '"') {
+            value += '"';
+            j += 2;
+            continue;
+          }
+          closed = true;
+          j++;
+          break;
+        }
+        value += input[j];
+        j++;
+      }
+      if (!closed) return { error: `“${input}” has text in quotes with no closing “"”.` };
+      tokens.push({ kind: "str", value });
+      i = j;
       continue;
     }
     if (/[0-9.]/.test(ch)) {
@@ -119,13 +147,15 @@ function tokenize(input: string): { tokens: Token[] } | { error: string } {
 
 export type Expr =
   | { kind: "num"; value: number }
+  | { kind: "str"; value: string }
   | { kind: "var"; name: string }
   | { kind: "unary"; op: "-" | "NOT"; expr: Expr }
   | { kind: "binary"; op: string; left: Expr; right: Expr }
   | { kind: "call"; name: string; args: Expr[] }
   /** A conditional aggregate (seq 372, part A): `name` over the rows where
-   *  `condition` holds, broadcast as one value per row. */
-  | { kind: "condagg"; name: string; variable: string; condition: Expr }
+   *  `condition` holds, broadcast as one value per row. PERCENTILE carries
+   *  its `k` here too (the WHERE form: `PERCENTILE(F, 90) WHERE C <= 14`). */
+  | { kind: "condagg"; name: string; variable: string; condition: Expr; k?: Expr }
   /** A window function (seq 372, part B): `name` over a window of rows —
    *  the partition group, optionally filtered (WHERE / the *IF condition),
    *  ordered, and framed. `name` is the normalized aggregate (STDEV →
@@ -151,7 +181,16 @@ type FrameBound =
   | { kind: "n-following"; n: number }
   | { kind: "unbounded-following" };
 
-/** The elementwise functions: name → argument counts it takes. */
+/** The elementwise functions: name → argument counts it takes. The seq 156
+ *  remainder adds the rest of Prism's library: LOGIT / PROBIT (the
+ *  transform pair), ATAN2 (ARCTAN2 is its other spelling, normalized in the
+ *  parser), the integer functions FACT / INT / MOD / TRUNC, POWER (`^` as
+ *  a function), AND / OR as functions (three-valued, like the operators),
+ *  IS_DEFINED (1 where a value exists, 0 where it is blank — text counts),
+ *  and the random pair RAND / RANDBETWEEN (seeded per variable, so a
+ *  column does not reshuffle on every recompute). CONCATENATE and
+ *  PERCENTILE are not here: CONCATENATE returns text, so the numeric
+ *  evaluator cannot hold it, and PERCENTILE takes a variable plus its k. */
 const ELEMENTWISE: Record<string, number[]> = {
   ABS: [1],
   SQRT: [1],
@@ -166,6 +205,7 @@ const ELEMENTWISE: Record<string, number[]> = {
   ASIN: [1],
   ACOS: [1],
   ATAN: [1],
+  ATAN2: [2],
   FLOOR: [1],
   CEIL: [1],
   SIGN: [1],
@@ -173,6 +213,18 @@ const ELEMENTWISE: Record<string, number[]> = {
   IF: [3],
   MIN: [2, 3, 4, 5, 6, 7, 8, 9, 10],
   MAX: [2, 3, 4, 5, 6, 7, 8, 9, 10],
+  LOGIT: [1],
+  PROBIT: [1],
+  FACT: [1],
+  INT: [1],
+  MOD: [2],
+  TRUNC: [1, 2],
+  POWER: [2],
+  AND: [2, 3, 4, 5, 6, 7, 8, 9, 10],
+  OR: [2, 3, 4, 5, 6, 7, 8, 9, 10],
+  IS_DEFINED: [1],
+  RAND: [0],
+  RANDBETWEEN: [2],
 };
 /** The whole-variable aggregates: one variable argument, broadcast as one
  *  value per row. MIN and MAX are both: one argument aggregates, two or more
@@ -194,9 +246,15 @@ const CONDITIONAL_AGGREGATES: Record<string, string> = {
 };
 const CONSTANTS: Record<string, number> = { PI: Math.PI, E: Math.E };
 
-/** Prism's spellings of the sample SD / SEM, as the windowable names. */
+/** Prism's spellings of the sample SD / SEM, as the windowable names, and
+ *  AVERAGE as MEAN under its other name. */
 const normalizeAggregate = (name: string): string =>
-  name === "STDEV" ? "SD" : name === "STDERR" ? "SEM" : name;
+  name === "STDEV" ? "SD" : name === "STDERR" ? "SEM" : name === "AVERAGE" ? "MEAN" : name;
+/** A function name the parser reads as another: ARCTAN2 is ATAN2, CEILING
+ *  is CEIL. The typed spelling survives in error messages; the canonical
+ *  name is what the evaluator sees. */
+const normalizeFunction = (name: string): string =>
+  name === "ARCTAN2" ? "ATAN2" : name === "CEILING" ? "CEIL" : name;
 /** The aggregates that take window clauses (the docs' list — MEDIAN and
  *  VAR are whole-variable only, and take no OVER / ORDER BY / ROWS). */
 const WINDOWABLE_AGGREGATES = ["MEAN", "SD", "SEM", "COUNT", "COUNTA", "MIN", "MAX", "SUM"];
@@ -206,6 +264,112 @@ const WINDOWABLE_AGGREGATES = ["MEAN", "SD", "SEM", "COUNT", "COUNTA", "MIN", "M
 const ROW_WISE = ["CENTER", "STANDARDIZE", "ZSCORE", "RANK"];
 /** A clause keyword, as the parser sees it after a call's closing paren. */
 const WINDOW_KEYWORDS = ["OVER", "WHERE", "ORDER", "ROWS"];
+
+/** One function in the formula language, as the Inspector's function
+ *  browser shows it: the name to type, its syntax, one line saying what
+ *  it does, and a runnable example (a variable name stands in for a
+ *  column — `A`, `B`, `F`). The browser renders this list, so the panel
+ *  can never drift from the engine: every function the engine runs is
+ *  here, and every entry's example parses (the checks pin both). */
+export type CalcFunctionGroup = "Math" | "Trigonometry" | "Statistics" | "Logic" | "Text" | "Random" | "Window";
+export interface CalcFunctionDoc {
+  name: string;
+  syntax: string;
+  description: string;
+  group: CalcFunctionGroup;
+  example: string;
+}
+export const CALC_FUNCTION_REFERENCE: CalcFunctionDoc[] = [
+  { name: "ABS", syntax: "ABS(x)", description: "Absolute value of x.", group: "Math", example: "ABS(A - B)" },
+  { name: "SQRT", syntax: "SQRT(x)", description: "Square root of x; blank for a negative x.", group: "Math", example: "SQRT(A)" },
+  { name: "EXP", syntax: "EXP(x)", description: "e raised to x.", group: "Math", example: "EXP(A)" },
+  { name: "LN", syntax: "LN(x)", description: "Natural logarithm of x; blank for x ≤ 0.", group: "Math", example: "LN(A)" },
+  { name: "LOG", syntax: "LOG(x)", description: "Base-10 logarithm of x; blank for x ≤ 0.", group: "Math", example: "LOG(A)" },
+  { name: "LOG10", syntax: "LOG10(x)", description: "Base-10 logarithm of x; blank for x ≤ 0.", group: "Math", example: "LOG10(A)" },
+  { name: "LOG2", syntax: "LOG2(x)", description: "Base-2 logarithm of x; blank for x ≤ 0.", group: "Math", example: "LOG2(A)" },
+  { name: "LOGIT", syntax: "LOGIT(p)", description: "Log odds, ln(p / (1 − p)); blank unless 0 < p < 1.", group: "Math", example: "LOGIT(A)" },
+  { name: "PROBIT", syntax: "PROBIT(p)", description: "Standard-normal quantile (R's qnorm); blank unless 0 < p < 1.", group: "Math", example: "PROBIT(A)" },
+  { name: "FACT", syntax: "FACT(n)", description: "Factorial of a whole number n (0–170); blank otherwise.", group: "Math", example: "FACT(A)" },
+  { name: "INT", syntax: "INT(x)", description: "x truncated toward zero (INT(−2.7) is −2, not −3).", group: "Math", example: "INT(A)" },
+  { name: "MOD", syntax: "MOD(a, b)", description: "Remainder of a / b, taking the divisor's sign (Excel's rule).", group: "Math", example: "MOD(A, B)" },
+  { name: "TRUNC", syntax: "TRUNC(x [, digits])", description: "x with digits dropped, not rounded; digits may be negative.", group: "Math", example: "TRUNC(A, 1)" },
+  { name: "POWER", syntax: "POWER(a, b)", description: "a raised to b — the `^` operator as a function.", group: "Math", example: "POWER(A, 2)" },
+  { name: "ROUND", syntax: "ROUND(x [, digits])", description: "x rounded to digits decimal places (0 when omitted).", group: "Math", example: "ROUND(A, 1)" },
+  { name: "FLOOR", syntax: "FLOOR(x)", description: "Largest whole number ≤ x.", group: "Math", example: "FLOOR(A)" },
+  { name: "CEIL", syntax: "CEIL(x)", description: "Smallest whole number ≥ x.", group: "Math", example: "CEIL(A)" },
+  { name: "CEILING", syntax: "CEILING(x)", description: "Smallest whole number ≥ x — CEIL under its other name.", group: "Math", example: "CEILING(A)" },
+  { name: "SIGN", syntax: "SIGN(x)", description: "−1, 0, or 1, by x's sign.", group: "Math", example: "SIGN(A - B)" },
+  { name: "SIN", syntax: "SIN(x)", description: "Sine of x (radians).", group: "Trigonometry", example: "SIN(A)" },
+  { name: "COS", syntax: "COS(x)", description: "Cosine of x (radians).", group: "Trigonometry", example: "COS(A)" },
+  { name: "TAN", syntax: "TAN(x)", description: "Tangent of x (radians).", group: "Trigonometry", example: "TAN(A)" },
+  { name: "ASIN", syntax: "ASIN(x)", description: "Arcsine of x; blank outside [−1, 1].", group: "Trigonometry", example: "ASIN(A)" },
+  { name: "ACOS", syntax: "ACOS(x)", description: "Arccosine of x; blank outside [−1, 1].", group: "Trigonometry", example: "ACOS(A)" },
+  { name: "ATAN", syntax: "ATAN(x)", description: "Arctangent of x.", group: "Trigonometry", example: "ATAN(A)" },
+  { name: "ATAN2", syntax: "ATAN2(x, y)", description: "Angle whose tangent is y / x (Excel order: x first, y second).", group: "Trigonometry", example: "ATAN2(A, B)" },
+  { name: "ARCTAN2", syntax: "ARCTAN2(x, y)", description: "Angle whose tangent is y / x — ATAN2 under Prism's other spelling.", group: "Trigonometry", example: "ARCTAN2(A, B)" },
+  { name: "MEAN", syntax: "MEAN(A)", description: "Mean of a whole variable, broadcast to every row.", group: "Statistics", example: "MEAN(A)" },
+  { name: "AVERAGE", syntax: "AVERAGE(A)", description: "Mean of a whole variable — MEAN under its other name.", group: "Statistics", example: "AVERAGE(A)" },
+  { name: "SUM", syntax: "SUM(A)", description: "Sum of a whole variable, broadcast to every row.", group: "Statistics", example: "SUM(A)" },
+  { name: "COUNT", syntax: "COUNT(A)", description: "Count of numeric values in a variable; only on rows with a value.", group: "Statistics", example: "COUNT(A)" },
+  { name: "COUNTA", syntax: "COUNTA(A)", description: "Count of non-blank values in a variable, text included.", group: "Statistics", example: "COUNTA(A)" },
+  { name: "MEDIAN", syntax: "MEDIAN(A)", description: "Median of a whole variable, broadcast to every row.", group: "Statistics", example: "MEDIAN(A)" },
+  { name: "SD", syntax: "SD(A)", description: "Sample standard deviation of a whole variable.", group: "Statistics", example: "SD(A)" },
+  { name: "STDEV", syntax: "STDEV(A)", description: "Sample standard deviation — SD under Prism's spelling.", group: "Statistics", example: "STDEV(A)" },
+  { name: "SEM", syntax: "SEM(A)", description: "Standard error of the mean of a whole variable.", group: "Statistics", example: "SEM(A)" },
+  { name: "STDERR", syntax: "STDERR(A)", description: "Standard error of the mean — SEM under Prism's spelling.", group: "Statistics", example: "STDERR(A)" },
+  { name: "VAR", syntax: "VAR(A)", description: "Sample variance of a whole variable.", group: "Statistics", example: "VAR(A)" },
+  { name: "MIN", syntax: "MIN(A) / MIN(a, b, …)", description: "Smallest value: one variable aggregates, two or more compare row by row.", group: "Statistics", example: "MIN(A, B)" },
+  { name: "MAX", syntax: "MAX(A) / MAX(a, b, …)", description: "Largest value: one variable aggregates, two or more compare row by row.", group: "Statistics", example: "MAX(A, B)" },
+  { name: "PERCENTILE", syntax: "PERCENTILE(A, k)", description: "Type-7 percentile of a variable (R's default); k is 0–100.", group: "Statistics", example: "PERCENTILE(A, 90)" },
+  { name: "PERC", syntax: "PERC(A, k)", description: "Type-7 percentile of a variable — PERCENTILE's short name.", group: "Statistics", example: "PERC(A, 50)" },
+  { name: "SUMIF", syntax: "SUMIF(A, condition)", description: "Sum of A over the rows where the condition holds.", group: "Statistics", example: "SUMIF(A, B > 0)" },
+  { name: "MEANIF", syntax: "MEANIF(A, condition)", description: "Mean of A over the rows where the condition holds.", group: "Statistics", example: "MEANIF(A, B > 0)" },
+  { name: "COUNTIF", syntax: "COUNTIF(A, condition)", description: "Count of numeric values in A over the matching rows.", group: "Statistics", example: "COUNTIF(A, B > 0)" },
+  { name: "COUNTAIF", syntax: "COUNTAIF(A, condition)", description: "Count of non-blank values in A over the matching rows.", group: "Statistics", example: "COUNTAIF(A, B > 0)" },
+  { name: "MINIF", syntax: "MINIF(A, condition)", description: "Smallest value of A over the rows where the condition holds.", group: "Statistics", example: "MINIF(A, B > 0)" },
+  { name: "MAXIF", syntax: "MAXIF(A, condition)", description: "Largest value of A over the rows where the condition holds.", group: "Statistics", example: "MAXIF(A, B > 0)" },
+  { name: "STDEVIF", syntax: "STDEVIF(A, condition)", description: "Sample SD of A over the rows where the condition holds.", group: "Statistics", example: "STDEVIF(A, B > 0)" },
+  { name: "STDERRIF", syntax: "STDERRIF(A, condition)", description: "SEM of A over the rows where the condition holds.", group: "Statistics", example: "STDERRIF(A, B > 0)" },
+  { name: "IF", syntax: "IF(condition, then, else)", description: "then when the condition holds, else when it does not.", group: "Logic", example: "IF(A > 0, 1, 0)" },
+  { name: "AND", syntax: "AND(a, b, …)", description: "1 when every value holds, 0 when any does not; blank only when nothing decides it.", group: "Logic", example: "AND(A > 0, B > 0)" },
+  { name: "OR", syntax: "OR(a, b, …)", description: "1 when any value holds, 0 when none does; blank only when nothing decides it.", group: "Logic", example: "OR(A > 0, B > 0)" },
+  { name: "IS_DEFINED", syntax: "IS_DEFINED(x)", description: "1 where x has a value, 0 where it is blank — a text cell counts.", group: "Logic", example: "IS_DEFINED(A)" },
+  { name: "CONCATENATE", syntax: "CONCATENATE(a, b, …)", description: "Joins cell text into one value; only as the whole formula. Text in quotes goes here.", group: "Text", example: "CONCATENATE(A, \" \", B)" },
+  { name: "RAND", syntax: "RAND()", description: "Uniform random number on [0, 1); stable per variable, so the column survives recompute.", group: "Random", example: "RAND()" },
+  { name: "RANDBETWEEN", syntax: "RANDBETWEEN(low, high)", description: "Whole random number between low and high, inclusive; stable per variable.", group: "Random", example: "RANDBETWEEN(1, 6)" },
+  { name: "CENTER", syntax: "CENTER(A)", description: "Each value minus its window's mean — a window function.", group: "Window", example: "CENTER(A) OVER B" },
+  { name: "STANDARDIZE", syntax: "STANDARDIZE(A)", description: "Each value's z-score in its window — a window function.", group: "Window", example: "STANDARDIZE(A) OVER B" },
+  { name: "ZSCORE", syntax: "ZSCORE(A)", description: "Each value's z-score — STANDARDIZE under its other name.", group: "Window", example: "ZSCORE(A) OVER B" },
+  { name: "RANK", syntax: "RANK(A)", description: "Each value's rank in its window (ascending, ties averaged).", group: "Window", example: "RANK(A) OVER B" },
+  { name: "OVER", syntax: "F(A) OVER group", description: "Window clause: split rows into groups by group before applying F.", group: "Window", example: "MEAN(A) OVER B" },
+  { name: "WHERE", syntax: "F(A) WHERE condition", description: "Window clause: only the matching rows contribute to F.", group: "Window", example: "SUM(A) WHERE B > 0" },
+  { name: "ORDER BY", syntax: "F(A) ORDER BY x", description: "Window clause: order each group by x before applying F.", group: "Window", example: "MEAN(A) ORDER BY B" },
+  { name: "ROWS", syntax: "F(A) ROWS n PRECEDING", description: "Window clause: only the n rows before each row (and the row itself) contribute.", group: "Window", example: "MEAN(A) ROWS 2 PRECEDING" },
+];
+
+/** Every function name the engine runs, aliases included — the checks pin
+ *  the browser's reference against this list, so a function added to the
+ *  engine without a browser entry (or the reverse) fails loudly. */
+export const CALC_FUNCTION_NAMES: string[] = [
+  ...new Set([
+    ...Object.keys(ELEMENTWISE),
+    ...AGGREGATES,
+    ...Object.keys(CONDITIONAL_AGGREGATES),
+    ...ROW_WISE,
+    "STDEV",
+    "STDERR",
+    "AVERAGE",
+    "ARCTAN2",
+    "CEILING",
+    "PERCENTILE",
+    "PERC",
+    "CONCATENATE",
+    "OVER",
+    "WHERE",
+    "ORDER BY",
+    "ROWS",
+  ]),
+];
 
 class Parser {
   private pos = 0;
@@ -310,6 +474,10 @@ class Parser {
       this.pos++;
       return { kind: "num", value: t.value };
     }
+    if (t.kind === "str") {
+      this.pos++;
+      return { kind: "str", value: t.value };
+    }
     if (t.kind === "bracket") {
       this.pos++;
       return { kind: "var", name: t.name };
@@ -362,6 +530,29 @@ class Parser {
         if (AGGREGATES.includes(aggName) && args.length === 1) {
           return { kind: "call", name: aggName, args };
         }
+        // PERCENTILE takes a variable and its k (PERC is its short name).
+        // It is an aggregate — whole-variable, broadcast — so it reads
+        // through the call path with its k beside it, and the WHERE form
+        // goes through the window-clause parser like any other aggregate.
+        if (upper === "PERCENTILE" || upper === "PERC") {
+          if (args.length !== 2)
+            throw new Error(
+              `“${t.name}” takes 2 arguments — a variable and a percentile, e.g. “${upper}(A, 90)”.`,
+            );
+          if (args[0].kind !== "var")
+            throw new Error(`“${t.name}” takes a variable and a percentile — write “${upper}(A, 90)”.`);
+          return { kind: "call", name: "PERCENTILE", args };
+        }
+        // CONCATENATE returns text, so it is a call node the numeric
+        // evaluator cannot hold — the table integration evaluates it as
+        // text, and validation keeps it out of arithmetic (see
+        // `textMisuse`). One or more arguments; a blank one contributes
+        // nothing.
+        if (upper === "CONCATENATE") {
+          if (args.length < 1)
+            throw new Error(`“${t.name}” takes at least one value, e.g. “CONCATENATE(First, Last)”.`);
+          return { kind: "call", name: "CONCATENATE", args };
+        }
         const condBase = CONDITIONAL_AGGREGATES[upper];
         if (condBase) {
           if (args.length !== 2)
@@ -372,7 +563,7 @@ class Parser {
             throw new Error(`“${t.name}” takes a variable and a condition — write “${upper}(F, C <= 14)”.`);
           return { kind: "condagg", name: condBase, variable: args[0].name, condition: args[1] };
         }
-        const allowed = ELEMENTWISE[upper];
+        const allowed = ELEMENTWISE[normalizeFunction(upper)];
         if (!allowed) {
           if (AGGREGATES.includes(aggName))
             throw new Error(
@@ -384,7 +575,7 @@ class Parser {
           throw new Error(
             `“${t.name}” takes ${allowed.join(" or ")} argument${allowed.length > 1 ? "s" : ""}, not ${args.length}.`,
           );
-        return { kind: "call", name: upper, args };
+        return { kind: "call", name: normalizeFunction(upper), args };
       }
       if (["AND", "OR", "NOT"].includes(upper))
         throw new Error(`“${t.name}” needs values around it — write “A ${upper} B”, not “${t.name}” on its own.`);
@@ -403,7 +594,11 @@ class Parser {
     const condBase = CONDITIONAL_AGGREGATES[upper];
     const rowWise = ROW_WISE.includes(upper);
     const isPlainAgg = AGGREGATES.includes(aggName);
-    if (!condBase && !rowWise && !isPlainAgg) {
+    // PERCENTILE is an aggregate for the WHERE-only form (`PERCENTILE(F, 90)
+    // WHERE C <= 14` is a conditional aggregate, like MEDIAN and VAR) but
+    // takes no OVER / ORDER BY / ROWS — the final guard below says so.
+    const isPercentile = upper === "PERCENTILE" || upper === "PERC";
+    if (!condBase && !rowWise && !isPlainAgg && !isPercentile) {
       throw new Error(
         `“${typedName}” cannot take window clauses — window functions are MEAN, STDEV, STDERR, COUNT, ` +
           `COUNTA, MIN, MAX, SUM, CENTER, STANDARDIZE, ZSCORE, RANK, and the conditional aggregates.`,
@@ -416,6 +611,13 @@ class Parser {
         );
       if (args[0].kind !== "var")
         throw new Error(`“${typedName}” takes a variable and a condition — write “${upper}(F, C <= 14)”.`);
+    } else if (isPercentile) {
+      if (args.length !== 2)
+        throw new Error(
+          `“${typedName}” takes 2 arguments — a variable and a percentile, e.g. “${upper}(A, 90)”.`,
+        );
+      if (args[0].kind !== "var")
+        throw new Error(`“${typedName}” takes a variable and a percentile — write “${upper}(A, 90)”.`);
     } else if (args.length !== 1) {
       throw new Error(
         `“${typedName}” takes one variable, not ${args.length} argument${args.length === 1 ? "" : "s"}.`,
@@ -459,9 +661,16 @@ class Parser {
     }
     const variable = (args[0] as { kind: "var"; name: string }).name;
     // A WHERE on its own, on a plain aggregate, keeps part A's condagg
-    // shape — including MEDIAN and VAR, which take no window clauses.
+    // shape — including MEDIAN and VAR, which take no window clauses, and
+    // PERCENTILE, which carries its k beside the condition.
     if (!partition && !orderBy && !frame && condition !== undefined && !condBase && !rowWise) {
-      return { kind: "condagg", name: aggName, variable, condition };
+      return {
+        kind: "condagg",
+        name: isPercentile ? "PERCENTILE" : aggName,
+        variable,
+        condition,
+        ...(isPercentile ? { k: args[1] } : {}),
+      };
     }
     if (!condBase && !rowWise && !WINDOWABLE_AGGREGATES.includes(aggName)) {
       throw new Error(
@@ -548,6 +757,7 @@ export function dependenciesOf(ast: Expr): string[] {
     } else if (e.kind === "condagg") {
       if (!found.includes(e.variable)) found.push(e.variable);
       walk(e.condition);
+      if (e.k) walk(e.k);
     } else if (e.kind === "window") {
       if (!found.includes(e.variable)) found.push(e.variable);
       if (e.condition) walk(e.condition);
@@ -557,6 +767,71 @@ export function dependenciesOf(ast: Expr): string[] {
   };
   walk(ast);
   return found;
+}
+
+/** Whether a parsed formula holds any text in quotes. The numeric engine
+ *  cannot hold text, so a user-defined transform (which reuses this
+ *  evaluator) refuses it outright — text belongs in CONCATENATE, a
+ *  calculated variable. */
+export function formulaHasText(ast: Expr): boolean {
+  let found = false;
+  const walk = (e: Expr): void => {
+    if (found) return;
+    if (e.kind === "str") found = true;
+    else if (e.kind === "unary") walk(e.expr);
+    else if (e.kind === "binary") {
+      walk(e.left);
+      walk(e.right);
+    } else if (e.kind === "condagg") {
+      walk(e.condition);
+      if (e.k) walk(e.k);
+    } else if (e.kind === "window") {
+      if (e.condition) walk(e.condition);
+      if (e.partition) walk(e.partition);
+      e.orderBy?.forEach(({ expr }) => walk(expr));
+    } else if (e.kind === "call") e.args.forEach(walk);
+  };
+  walk(ast);
+  return found;
+}
+
+/** Why text in a formula cannot run here, if it cannot: CONCATENATE
+ *  returns text, so it can only be the whole formula (or nested inside
+ *  another CONCATENATE), and text in quotes can only sit inside
+ *  CONCATENATE's arguments. Anything else would push text through
+ *  arithmetic, which only holds numbers. */
+function textMisuse(ast: Expr): string | null {
+  let problem: string | null = null;
+  const walk = (e: Expr, inConcat: boolean, isTop: boolean): void => {
+    if (problem) return;
+    if (e.kind === "str") {
+      if (!inConcat)
+        problem =
+          "text in quotes can only be used inside CONCATENATE — write CONCATENATE(First, \" \", Last), not text on its own.";
+      return;
+    }
+    if (e.kind === "call" && e.name === "CONCATENATE") {
+      if (!inConcat && !isTop)
+        problem =
+          "CONCATENATE returns text, so it can only be the whole formula — it cannot sit inside arithmetic or another function.";
+      e.args.forEach((a) => walk(a, true, false));
+      return;
+    }
+    if (e.kind === "unary") walk(e.expr, inConcat, false);
+    else if (e.kind === "binary") {
+      walk(e.left, inConcat, false);
+      walk(e.right, inConcat, false);
+    } else if (e.kind === "condagg") {
+      walk(e.condition, inConcat, false);
+      if (e.k) walk(e.k, inConcat, false);
+    } else if (e.kind === "window") {
+      if (e.condition) walk(e.condition, inConcat, false);
+      if (e.partition) walk(e.partition, inConcat, false);
+      e.orderBy?.forEach(({ expr }) => walk(expr, inConcat, false));
+    } else if (e.kind === "call") e.args.forEach((a) => walk(a, inConcat, false));
+  };
+  walk(ast, false, true);
+  return problem;
 }
 
 // ── Evaluation ─────────────────────────────────────────────────────────
@@ -576,6 +851,12 @@ export interface EvalContext {
   rawTextAt: (name: string, row: number) => string | null;
   rowCount: number;
   row: number;
+  /** RAND's seed: the variable's identity (its name + formula), so one
+   *  variable's random column is stable across recomputes and differs
+   *  from every other variable's. Absent outside calculated variables
+   *  (the transform reuses this evaluator with seed 0 — still stable
+   *  per row, just not per formula). */
+  seed?: number;
   windowColumn?: (node: Expr) => (number | null)[] | undefined;
 }
 
@@ -622,6 +903,52 @@ function aggregate(name: string, values: number[]): number | null {
 function conditionalAggregate(name: string, values: number[]): number | null {
   if (values.length === 0) return name === "SUM" || name === "COUNT" || name === "COUNTA" ? 0 : null;
   return aggregate(name, values);
+}
+
+/** The type-7 percentile — linear interpolation between the closest
+ *  ranks, R's default (`quantile(x, probs, type = 7)`) and Excel's
+ *  PERCENTILE.INC. `k` is 0–100; the caller blanks anything outside. */
+function percentileOf(values: number[], k: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = (k / 100) * (sorted.length - 1);
+  const lo = Math.floor(rank);
+  const frac = rank - lo;
+  return sorted[lo] + frac * ((sorted[lo + 1] ?? sorted[lo]) - sorted[lo]);
+}
+
+/** One uniform draw on [0, 1), seeded by the context's seed (the
+ *  variable's identity) and the row: the same variable in the same row
+ *  always draws the same number, so a random column survives a recompute
+ *  unchanged, while rows — and variables — still differ. Mulberry32. */
+function seededRandom(ctx: EvalContext): number {
+  let s = (((ctx.seed ?? 0) ^ Math.imul(ctx.row + 1, 0x9e3779b9)) >>> 0) + 0x6d2b79f5;
+  s >>>= 0;
+  let t = s;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+/** A formula's text, for CONCATENATE: a string literal is itself, a
+ *  variable is the text typed in its cell (blank contributes nothing), a
+ *  number is written the way a cell holds it, and anything else is its
+ *  computed number written the same way (blank contributes nothing). A
+ *  nested CONCATENATE joins its own arguments. */
+function evalText(e: Expr, ctx: EvalContext): string {
+  switch (e.kind) {
+    case "str":
+      return e.value;
+    case "var": {
+      const text = ctx.rawTextAt(e.name, ctx.row);
+      return text != null && text.trim() !== "" ? text : "";
+    }
+    case "call":
+      if (e.name === "CONCATENATE") return e.args.map((a) => evalText(a, ctx)).join("");
+      return cell(evalExpr(e, ctx)) ?? "";
+    default:
+      return cell(evalExpr(e, ctx)) ?? "";
+  }
 }
 
 /** What a window's whole-column pass reads: any row's value, a row's raw
@@ -767,6 +1094,10 @@ function evalExpr(e: Expr, ctx: EvalContext): number | null {
   switch (e.kind) {
     case "num":
       return e.value;
+    case "str":
+      // Text has no number: a string literal only ever sits inside
+      // CONCATENATE (validation says so), where evalText reads it.
+      return null;
     case "var":
       return ctx.value(e.name);
     case "condagg": {
@@ -783,6 +1114,7 @@ function evalExpr(e: Expr, ctx: EvalContext): number | null {
           rawTextAt: ctx.rawTextAt,
           rowCount: ctx.rowCount,
           row: j,
+          seed: ctx.seed,
           windowColumn: ctx.windowColumn,
         };
         if (truthy(evalExpr(e.condition, rowCtx)) === true) {
@@ -794,6 +1126,11 @@ function evalExpr(e: Expr, ctx: EvalContext): number | null {
         }
       }
       if (e.name === "COUNTA") return matchedNonBlank;
+      if (e.name === "PERCENTILE") {
+        const k = e.k ? evalExpr(e.k, ctx) : null;
+        if (k == null || k < 0 || k > 100) return null;
+        return percentileOf(matched, k);
+      }
       return conditionalAggregate(e.name, matched);
     }
     case "window": {
@@ -880,10 +1217,49 @@ function evalExpr(e: Expr, ctx: EvalContext): number | null {
         const cond = truthy(evalExpr(e.args[0], ctx));
         return cond == null ? null : evalExpr(cond ? e.args[1] : e.args[2], ctx);
       }
+      // CONCATENATE returns text: the numeric evaluator cannot hold it
+      // (the table integration evaluates a CONCATENATE formula as text),
+      // so here it blanks — validation keeps it out of arithmetic.
+      if (e.name === "CONCATENATE") return null;
+      // IS_DEFINED answers whether a value exists — a blank must not
+      // blank it, so it reads before the arguments are evaluated. A text
+      // cell counts as defined, so a bare variable reads its cell text.
+      if (e.name === "IS_DEFINED") {
+        const arg = e.args[0];
+        if (arg.kind === "var")
+          return cellIsNonBlank(ctx.rawTextAt(arg.name, ctx.row), ctx.value(arg.name)) ? 1 : 0;
+        return evalExpr(arg, ctx) == null ? 0 : 1;
+      }
+      // PERCENTILE over the whole variable, with its k beside it.
+      if (e.name === "PERCENTILE") {
+        const vArg = e.args[0];
+        const k = evalExpr(e.args[1], ctx);
+        if (vArg.kind !== "var" || k == null || k < 0 || k > 100) return null;
+        return percentileOf(ctx.values(vArg.name), k);
+      }
       const args = e.args.map((a) => evalExpr(a, ctx));
       if (e.name === "MIN" || e.name === "MAX") {
         if (args.some((a) => a == null)) return null;
         return e.name === "MIN" ? Math.min(...(args as number[])) : Math.max(...(args as number[]));
+      }
+      if (e.name === "RAND") return seededRandom(ctx);
+      if (e.name === "RANDBETWEEN") {
+        const [lo, hi] = args as (number | null)[];
+        if (lo == null || hi == null || !Number.isInteger(lo) || !Number.isInteger(hi) || lo > hi) return null;
+        return Math.floor(seededRandom(ctx) * (hi - lo + 1)) + lo;
+      }
+      // AND / OR as functions: three-valued, like the operators — a
+      // deciding side wins whatever the other side holds, and a blank
+      // only blanks the result when nothing decides it.
+      if (e.name === "AND") {
+        if (args.some((a) => a === 0)) return 0;
+        if (args.some((a) => a == null)) return null;
+        return 1;
+      }
+      if (e.name === "OR") {
+        if (args.some((a) => a != null && a !== 0)) return 1;
+        if (args.some((a) => a == null)) return null;
+        return 0;
       }
       const [a, b] = args as (number | null)[];
       if (a == null) return null;
@@ -921,6 +1297,41 @@ function evalExpr(e: Expr, ctx: EvalContext): number | null {
           return Math.ceil(a);
         case "SIGN":
           return Math.sign(a);
+        case "LOGIT":
+          return a <= 0 || a >= 1 ? null : Math.log(a / (1 - a));
+        case "PROBIT":
+          return a <= 0 || a >= 1 ? null : qnorm(a);
+        case "ATAN2": {
+          if (b == null) return null;
+          // Excel / Prism order: ATAN2(x, y) is the angle whose tangent
+          // is y / x, i.e. atan2(y, x).
+          return Math.atan2(b, a);
+        }
+        case "FACT": {
+          if (!Number.isInteger(a) || a < 0 || a > 170) return null;
+          let f = 1;
+          for (let i = 2; i <= a; i++) f *= i;
+          return f;
+        }
+        case "INT":
+          return Math.trunc(a);
+        case "MOD": {
+          if (b == null || b === 0) return null;
+          // Excel's rule: the remainder takes the divisor's sign.
+          return a - b * Math.floor(a / b);
+        }
+        case "TRUNC": {
+          const digits = b == null ? 0 : Math.trunc(b);
+          const factor = 10 ** digits;
+          if (!Number.isFinite(factor)) return null;
+          const v = Math.trunc(a * factor) / factor;
+          return Number.isFinite(v) ? v : null;
+        }
+        case "POWER": {
+          if (b == null) return null;
+          const v = a ** b;
+          return Number.isFinite(v) ? v : null;
+        }
         case "ROUND": {
           if (b == null && e.args.length === 2) return null;
           const digits = b ?? 0;
@@ -961,7 +1372,7 @@ export function validateFormula(data: TableData, formula: string, self?: string)
     if (dep === self) return `“${self}” refers to itself — a calculated variable cannot use its own values.`;
     if (!columns.has(dep)) return `unknown variable “${dep}” — the table has no variable with that name.`;
   }
-  return null;
+  return textMisuse(parsed.ast);
 }
 
 /**
@@ -981,6 +1392,21 @@ export function recomputeCalculated(data: TableData): TableData {
   const table = readTable(data);
   const byName = new Map(table.columns.map((c) => [c.name, c]));
   const computed = new Map<string, (number | null)[]>();
+  /** A CONCATENATE variable's values, as text — the numeric map above
+   *  cannot hold them. */
+  const computedText = new Map<string, (string | null)[]>();
+  /** RAND's seed: the variable's name + formula, hashed (FNV-1a), so one
+   *  variable's random column is stable across recomputes and differs
+   *  from every other variable's. */
+  const seedOf = (name: string, formula: string): number => {
+    let h = 0x811c9dc5;
+    const s = `${name}\0${formula}`;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  };
   const errors = new Map<string, string>();
   // Dependency order: a formula's calculated inputs first. A cycle leaves
   // its variables unordered — they are named in the error instead.
@@ -988,7 +1414,13 @@ export function recomputeCalculated(data: TableData): TableData {
   for (const v of vars) {
     const p = parseFormula(v.formula);
     if ("error" in p) errors.set(v.name, p.error);
-    else parsed.set(v.name, p.ast);
+    else {
+      // A file can hold text where it cannot run (validation only guards
+      // the add / set paths) — it records the reason, like a parse error.
+      const misuse = textMisuse(p.ast);
+      if (misuse) errors.set(v.name, misuse);
+      else parsed.set(v.name, p.ast);
+    }
   }
   // Dependency order, worked out by repeated passes: a variable runs once
   // every calculated variable it names has run. Whatever is left after no
@@ -1038,6 +1470,19 @@ export function recomputeCalculated(data: TableData): TableData {
       if (done) return done[j] ?? null;
       return byName.get(dep)?.byRow[j] ?? null;
     };
+    // A cell's raw text: a calculated input reads what its formula just
+    // computed — its text, or its number written the way a cell holds it.
+    // The table snapshot predates this recompute, so reading it would hand
+    // back the pre-edit text (bug-report issue 22's stale rawTextAt); the
+    // text path needs the fresh one, or a CONCATENATE chained on an edited
+    // source would keep the old text.
+    const readRawTextAt = (dep: string, j: number): string | null => {
+      const text = computedText.get(dep);
+      if (text) return text[j] ?? null;
+      const done = computed.get(dep);
+      if (done) return cell(done[j] ?? null);
+      return byName.get(dep)?.cells[j] ?? null;
+    };
     const makeRowCtx = (r: number): EvalContext => ({
       value: (dep) => readValueAt(dep, r),
       values: (dep) => {
@@ -1046,9 +1491,10 @@ export function recomputeCalculated(data: TableData): TableData {
         return byName.get(dep)?.values ?? [];
       },
       valueAt: readValueAt,
-      rawTextAt: (dep, j) => byName.get(dep)?.cells[j] ?? null,
+      rawTextAt: readRawTextAt,
       rowCount: data.rows.length,
       row: r,
+      seed: seedOf(name, vars.find((v) => v.name === name)?.formula ?? ""),
       windowColumn: (node) => ensureWindow(node),
     });
     // Window functions evaluate as a whole-column pass: each window node
@@ -1062,7 +1508,7 @@ export function recomputeCalculated(data: TableData): TableData {
       const values = computeWindow(node as WindowExpr, {
         rowCount: data.rows.length,
         valueAt: readValueAt,
-        rawTextAt: (dep, j) => byName.get(dep)?.cells[j] ?? null,
+        rawTextAt: readRawTextAt,
         evalAt: (expr, j) => evalExpr(expr, makeRowCtx(j)),
       });
       windowColumns.set(node, values);
@@ -1074,8 +1520,10 @@ export function recomputeCalculated(data: TableData): TableData {
       else if (e.kind === "binary") {
         collectWindows(e.left);
         collectWindows(e.right);
-      } else if (e.kind === "condagg") collectWindows(e.condition);
-      else if (e.kind === "call") e.args.forEach(collectWindows);
+      } else if (e.kind === "condagg") {
+        collectWindows(e.condition);
+        if (e.k) collectWindows(e.k);
+      } else if (e.kind === "call") e.args.forEach(collectWindows);
       else if (e.kind === "window") {
         windowNodes.push(e);
         if (e.condition) collectWindows(e.condition);
@@ -1085,11 +1533,22 @@ export function recomputeCalculated(data: TableData): TableData {
     };
     collectWindows(ast);
     for (const w of windowNodes) ensureWindow(w);
-    const values: (number | null)[] = [];
-    for (let r = 0; r < data.rows.length; r++) {
-      values.push(evalExpr(ast, makeRowCtx(r)));
+    // A CONCATENATE formula evaluates as text, not numbers — its values
+    // go in the text map, and a join that comes to nothing stays blank.
+    if (ast.kind === "call" && ast.name === "CONCATENATE") {
+      const texts: (string | null)[] = [];
+      for (let r = 0; r < data.rows.length; r++) {
+        const joined = evalText(ast, makeRowCtx(r));
+        texts.push(joined === "" ? null : joined);
+      }
+      computedText.set(name, texts);
+    } else {
+      const values: (number | null)[] = [];
+      for (let r = 0; r < data.rows.length; r++) {
+        values.push(evalExpr(ast, makeRowCtx(r)));
+      }
+      computed.set(name, values);
     }
-    computed.set(name, values);
   }
   // Materialize: only the calculated columns change; every other cell —
   // including text in a source column — stays exactly as typed.
@@ -1098,7 +1557,8 @@ export function recomputeCalculated(data: TableData): TableData {
     for (const v of vars) {
       const c = columns.indexOf(v.name) + 1;
       if (c < 1) continue;
-      const value = cell(computed.get(v.name)?.[r] ?? null);
+      const textVals = computedText.get(v.name);
+      const value = textVals !== undefined ? textVals[r] : cell(computed.get(v.name)?.[r] ?? null);
       if ((row[c] ?? null) !== value) {
         next ??= [...row];
         // A hand-edited file can hold a row shorter than its columns: pad
@@ -1268,6 +1728,26 @@ export function renameVariableInFormula(formula: string, oldName: string, newNam
   let i = 0;
   while (i < formula.length) {
     const ch = formula[i];
+    if (ch === '"') {
+      // Text in quotes is literal — a rename never rewrites inside it
+      // (`CONCATENATE(First, "First")` keeps its "First"). `""` is one
+      // `"`, the tokenizer's rule; an unterminated quote copies the rest.
+      let j = i + 1;
+      while (j < formula.length) {
+        if (formula[j] === '"') {
+          if (formula[j + 1] === '"') {
+            j += 2;
+            continue;
+          }
+          j++;
+          break;
+        }
+        j++;
+      }
+      out += formula.slice(i, j);
+      i = j;
+      continue;
+    }
     if (ch === "[") {
       const close = formula.indexOf("]", i + 1);
       if (close < 0) return out + formula.slice(i);
