@@ -12668,11 +12668,14 @@ check("two-way ANOVA post-hoc diff is exact at 1e13 scale (BUG-REPORT #112, seq 
   const close = (got: number | null | undefined, want: number, label: string) =>
     ok(got != null && Math.abs(got - want) < 1e-12, `${label}: got ${got}, want ${want}`);
   // The verbatim repro value, ordinary Tukey and RM sphericity-assumed Tukey.
-  for (const params of [
-    { design: "ordinary", posthoc: "tukey", posthocTarget: "groups" },
-    { design: "repeated-measures", posthoc: "tukey", posthocTarget: "groups", sphericity: true },
-  ] as AnalysisParams[]) {
-    close(diffAt(await run(data3, params), "Row 1"), -0.041015625, `verbatim repro ${params.design} tukey`);
+  for (const [label, params] of [
+    ["ordinary", { design: "ordinary", posthoc: "tukey", posthocTarget: "groups" }],
+    [
+      "repeated-measures",
+      { design: "repeated-measures", posthoc: "tukey", posthocTarget: "groups", sphericity: true },
+    ],
+  ] as [string, AnalysisParams][]) {
+    close(diffAt(await run(data3, params), "Row 1"), -0.041015625, `verbatim repro ${label} tukey`);
   }
   // The discriminating variant: every ordinary post-hoc method shares
   // runPosthoc's `d`, and the RM sphericity-assumed path goes through it too.
