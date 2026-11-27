@@ -2897,6 +2897,15 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["anovaSmall", anovaSmall, "anova", { posthoc: "games-howell", equalSd: false }],
   ["anovaSmall", anovaSmall, "anova", { posthoc: "t3", equalSd: false }],
   ["anovaSmall", anovaSmall, "anova", { posthoc: "fdr", equalSd: false }],
+  // 1e13-scale precision, Tukey HSD (seq 574, #102): TukeyHSD ran aov(v~gr)
+  // on the raw values, so its P values disagreed with the centered Tukey
+  // CIs — the same 13-digit QR loss the main aov was centered for. The fix
+  // centers the response (v0) before TukeyHSD. The pins are the centered
+  // values, cross-checked against the mpmath/scipy exact values in
+  // probe/expected-precision.json (tukeyBig/tukeySmall): each pair's P and
+  // its CI must agree (P < 0.05 exactly when the CI excludes 0).
+  ["anovaBig", anovaBig, "anova", { posthoc: "tukey" }],
+  ["anovaSmall", anovaSmall, "anova", { posthoc: "tukey" }],
   // One-way ANOVA completion (seq 191): the Brown-Forsythe ANOVA beside
   // Welch's (its F*/df/P ride in the `equalSd: false` case above), the False
   // Discovery Rate after the ordinary ANOVA (pooled-SD t tests) and after
