@@ -517,11 +517,14 @@ import {
   grayOf,
   grayscaleFigure,
   parseColor,
+  parseSvg,
   rgbToCmyk,
   svgToEps,
   svgToPdf,
+  textRuns,
   validateExportColorMode,
   type ColorMode,
+  type Presentation,
 } from "../src/lib/vector-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
 import { formatFigureLabels, formatLabelForPlotly, labelRuns } from "../src/lib/label-format";
@@ -20723,6 +20726,126 @@ check("seq 569: Unicode minus exponents and chained _ runs", () => {
     { text: "10", script: "normal" },
     { text: "\u22126", script: "super" },
   ]);
+});
+
+/** The <text> node's own presentation (seq 556): the parent `textRuns`
+ *  is called with in `walk`. */
+const seq556Parent = (textAnchor: Presentation["textAnchor"]): Presentation => ({
+  fill: "#000000",
+  fillOpacity: 1,
+  stroke: undefined,
+  strokeWidth: 1,
+  strokeOpacity: 1,
+  opacity: 1,
+  fillRule: "nonzero",
+  strokeDasharray: undefined,
+  strokeLinecap: "butt",
+  strokeLinejoin: "miter",
+  clipPath: undefined,
+  fontFamily: "Arial",
+  fontSize: 12,
+  fontWeight: "normal",
+  textAnchor,
+  display: undefined,
+  visibility: undefined,
+});
+
+/** The single `<text>` child of a parsed one-text SVG. */
+const seq556Text = (svg: string) => parseSvg(svg).children.find((c) => c.tag === "text")!;
+
+check("seq 556 (r2-84): single-line Plotly <sup>/<sub> <text> stays one line in textRuns", () => {
+  // Plotly's single-line shape: direct text + inline script tspans with
+  // no x/y (unlike seq 548's wrapped line-tspan shape, whose outer tspan
+  // carries x/y). Pre-fix every direct tspan bumped `line` with
+  // anchored=false, so a centred title or an end-anchored log tick
+  // aligned each fragment on its own width.
+  const wrap = (inner: string) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><rect x="0" y="0" width="640" height="480" fill="#ffffff"/>${inner}</svg>`;
+  const tick = seq556Text(
+    wrap(`<text x="100" y="100" text-anchor="end" font-family="Arial" font-size="12" fill="#000000">10<tspan style="font-size:70%" dy="-0.6em">7</tspan><tspan dy="0.42em"></tspan></text>`),
+  );
+  const tickRuns = textRuns(tick, seq556Parent("end"));
+  deepStrictEqual(tickRuns.map((r) => r.text), ["10", "7"], "the restoring-dy tspan draws no run");
+  ok(tickRuns.every((r) => r.line === tickRuns[0]!.line), `log tick split across lines: ${JSON.stringify(tickRuns.map((r) => r.line))}`);
+  ok(tickRuns.every((r) => r.anchored), "the script run lost the line's anchor");
+  ok(Math.abs(tickRuns[1]!.dy - -5.04) < 1e-9, `superscript baseline shift lost: dy=${tickRuns[1]!.dy}`);
+  strictEqual(tickRuns[0]!.dy, 0);
+  ok(tickRuns[1]!.x > tickRuns[0]!.x, "the script run starts after the base text");
+  // Centred title with a superscript and a subscript stays one line too.
+  const title = seq556Text(
+    wrap(`<text x="320" y="20" text-anchor="middle" font-family="Arial" font-size="12" fill="#000000">R<tspan style="font-size:70%" dy="-0.6em">2</tspan><tspan dy="0.42em"></tspan> vs H<tspan style="font-size:70%" dy="0.3em">2</tspan><tspan dy="-0.21em"></tspan>O</text>`),
+  );
+  const titleRuns = textRuns(title, seq556Parent("middle"));
+  deepStrictEqual(titleRuns.map((r) => r.text), ["R", "2", " vs H", "2", "O"]);
+  ok(titleRuns.every((r) => r.line === titleRuns[0]!.line), `title split across lines: ${JSON.stringify(titleRuns.map((r) => r.line))}`);
+  ok(titleRuns.every((r) => r.anchored), "a title run lost the line's anchor");
+  ok(Math.abs(titleRuns[3]!.dy - 2.52) < 1e-9, `subscript baseline shift lost: dy=${titleRuns[3]!.dy}`);
+  // Regression: wrapped lines still split — x/y line tspans, and a
+  // dy-only line break (a full-line dy, not a script shift).
+  const multi = seq556Text(
+    wrap(`<text x="100" y="100" text-anchor="start" font-family="Arial" font-size="12" fill="#000000"><tspan x="100" y="100" dy="0em">line one</tspan><tspan x="100" dy="1.2em">line two</tspan></text>`),
+  );
+  strictEqual(new Set(textRuns(multi, seq556Parent("start")).map((r) => r.line)).size, 2, "wrapped lines merged");
+  const dyBreak = seq556Text(
+    wrap(`<text x="100" y="100" text-anchor="start" font-family="Arial" font-size="12" fill="#000000"><tspan dy="0em">one</tspan><tspan dy="1.2em">two</tspan></text>`),
+  );
+  strictEqual(new Set(textRuns(dyBreak, seq556Parent("start")).map((r) => r.line)).size, 2, "a dy-only line break merged");
+});
+
+check("seq 556 (r2-84): vector PDF/EPS measure middle/end alignment on the combined line width", () => {
+  // End-anchored log tick 10^7 at x=100. Pre-fix the "7" run sat on its
+  // own unanchored line and drew at x=114.4 — past the anchor, past the
+  // "10" it belongs to. Post-fix the whole line shifts by its combined
+  // width, so the script ends at the anchor (x < 100) and the "10" run
+  // starts one script-width further left than a bare "10" would.
+  const tmX = (stream: string, text: string): number | null => {
+    const m = new RegExp(`1 0 0 -1 ([\\d.]+) [\\d.]+ Tm \\(${text}\\) Tj`).exec(stream);
+    return m ? Number(m[1]) : null;
+  };
+  const wrap = (inner: string) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><rect x="0" y="0" width="640" height="480" fill="#ffffff"/>${inner}</svg>`;
+  const tickSvg = wrap(`<text x="100" y="100" text-anchor="end" font-family="Arial" font-size="12" fill="#000000">10<tspan style="font-size:70%" dy="-0.6em">7</tspan><tspan dy="0.42em"></tspan></text>`);
+  const tickStream = pdfContentStream(svgToPdf(tickSvg));
+  const x10 = tmX(tickStream, "10");
+  const x7 = tmX(tickStream, "7");
+  ok(x10 !== null && x7 !== null, "both tick runs carry a text matrix");
+  ok(x7! < 100, `superscript "7" drawn past the end anchor at x=${x7}`);
+  ok(x10! < x7!, "runs out of order");
+  const plainStream = pdfContentStream(
+    svgToPdf(wrap(`<text x="100" y="100" text-anchor="end" font-family="Arial" font-size="12" fill="#000000">10</text>`)),
+  );
+  const xPlain10 = tmX(plainStream, "10");
+  ok(xPlain10 !== null, "the bare-10 control carries a text matrix");
+  // The "10"→"7" advance is the bare "10" width: the line was measured
+  // whole, then shifted as one (not per fragment).
+  ok(Math.abs(x7! - x10! - (100 - xPlain10!)) < 0.01, `combined-width shift wrong: x10=${x10} x7=${x7} bare10=${xPlain10}`);
+  // Middle-anchored R^2 title at x=320: the combined line centres, so
+  // the "R" run starts further left than a bare "R" would.
+  const titleSvg = wrap(`<text x="320" y="20" text-anchor="middle" font-family="Arial" font-size="12" fill="#000000">R<tspan style="font-size:70%" dy="-0.6em">2</tspan><tspan dy="0.42em"></tspan></text>`);
+  const titleStream = pdfContentStream(svgToPdf(titleSvg));
+  const xR = tmX(titleStream, "R");
+  const x2 = tmX(titleStream, "2");
+  ok(xR !== null && x2 !== null, "both title runs carry a text matrix");
+  const plainRStream = pdfContentStream(
+    svgToPdf(wrap(`<text x="320" y="20" text-anchor="middle" font-family="Arial" font-size="12" fill="#000000">R</text>`)),
+  );
+  const xPlainR = tmX(plainRStream, "R");
+  ok(xPlainR !== null, "the bare-R control carries a text matrix");
+  ok(xR! < xPlainR!, `centred title not measured on the combined width: xR=${xR} bareR=${xPlainR}`);
+  ok(x2! > xR!, "title runs out of order");
+  // EPS draws the same geometry: the "7" translate sits left of the
+  // anchor, not past it.
+  const eps = new TextDecoder().decode(svgToEps(tickSvg));
+  const epsShowX = (text: string): number | null => {
+    const idx = eps.indexOf(`(${text}) show`);
+    if (idx < 0) return null;
+    const tr = eps.lastIndexOf("translate 1 -1 scale", idx);
+    if (tr < 0) return null;
+    const m = /([\d.]+) [\d.]+ $/.exec(eps.slice(0, tr));
+    return m ? Number(m[1]) : null;
+  };
+  const eps7 = epsShowX("7");
+  ok(eps7 !== null && eps7 < 100, `EPS superscript "7" drawn past the end anchor at x=${eps7}`);
 });
 
 check("seq 485 (r2-27): EPS text has a current point and clips do not leak", () => {

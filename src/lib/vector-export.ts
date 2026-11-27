@@ -323,7 +323,7 @@ export function parseSvg(svg: string): SvgNode {
 
 /** A node's presentation: its own attributes over the inherited ones,
  *  with `style="…"` winning over presentation attributes (CSS order). */
-type Presentation = {
+export type Presentation = {
   fill: string | undefined;
   fillOpacity: number;
   stroke: string | undefined;
@@ -802,10 +802,11 @@ const fmt = (n: number) => {
 // The cursor follows the SVG text model: a tspan's x/y reset it
 // absolutely, its dy shifts it relatively (em of that tspan's own font
 // size), otherwise text continues where the previous run ended. Runs are
-// grouped by line (a direct child tspan of the <text>), and each line
-// anchors on its own start x — Plotly's positionText sets every line
-// tspan's x/y to the text's anchor point, so a middle-anchored title
-// still centres per line.
+// grouped by line (a direct child tspan of the <text> that starts a new
+// line — its own x/y, or a line-break dy — while an inline script tspan
+// stays on the current line, seq 556), and each line anchors on its own
+// start x — Plotly's positionText sets every line tspan's x/y to the
+// text's anchor point, so a middle-anchored title still centres per line.
 
 /** One drawn run of a <text>: its text at its own size and baseline
  *  shift (`dy` from the text's y), starting at `x`, on `line`. A line
@@ -888,10 +889,29 @@ export function textRuns(node: SvgNode, parent: Presentation): TextRun[] {
       walkParts(part, childPres);
     }
   };
-  // The <text>'s own parts in order — except a direct child tspan starts
-  // a new line (Plotly's line tspans, one per wrapped line). A first line
-  // without its own x still anchors on the text's x when nothing was
-  // drawn before it.
+  /** Whether a direct child tspan starts a new logical line: Plotly's
+   *  wrapped-line tspans carry their own x/y, or a line-break dy that
+   *  drops the baseline by about a full line. An inline script tspan
+   *  (Plotly `<sup>`/`<sub>`: no x/y, a small dy baseline shift such as
+   *  -0.6em / +0.3em, and the restoring dy after it) stays on the
+   *  current line — splitting it off made each fragment align on its
+   *  own width for middle/end anchors instead of the combined line
+   *  (BUG-REPORT R2 #84, seq 556). A line-break dy is a downward shift
+   *  of at least ~0.8 of the tspan's font size; script shifts top out
+   *  at +0.42em (the restore after a -0.6em sup). */
+  const startsNewLine = (el: SvgNode, pres: Presentation): boolean => {
+    if (svgLength(el.attrs.x, pres.fontSize) !== undefined) return true;
+    if (svgLength(el.attrs.y, pres.fontSize) !== undefined) return true;
+    const dy = svgLength(el.attrs.dy, pres.fontSize);
+    return dy !== undefined && dy >= 0.8 * pres.fontSize;
+  };
+  // The <text>'s own parts in order — except a direct child tspan that
+  // starts a new line (Plotly's line tspans, one per wrapped line). An
+  // inline tspan without x/y or a line-break dy (a <sup>/<sub> script
+  // run, or its restoring-dy tspan) stays on the current line with the
+  // line's anchor, so middle/end anchoring measures the combined line
+  // width. A first line without its own x still anchors on the text's
+  // x when nothing was drawn before it.
   const topParts = node.parts ?? [node.text, ...node.children];
   for (const part of topParts) {
     if (typeof part === "string") {
@@ -899,8 +919,15 @@ export function textRuns(node: SvgNode, parent: Presentation): TextRun[] {
       continue;
     }
     if (part.tag !== "tspan" && part.tag !== "a") continue;
-    line++;
     const childPres = presentationOf(part, parent);
+    if (part.tag === "tspan" && !startsNewLine(part, childPres)) {
+      // Inline run: same logical line, same anchor; its dy is a
+      // baseline shift, applied by shiftCursor below.
+      shiftCursor(part, childPres);
+      walkParts(part, childPres);
+      continue;
+    }
+    line++;
     anchored = shiftCursor(part, childPres) || (line === 1 && runs.length === 0);
     walkParts(part, childPres);
   }
