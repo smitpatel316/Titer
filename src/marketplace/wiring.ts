@@ -20,7 +20,17 @@ let storePromise: Promise<MarketplaceStore> | null = null;
 
 /** The app's marketplace store (singleton, created on first use). */
 export function getMarketplaceStore(): Promise<MarketplaceStore> {
-  if (!storePromise) storePromise = createMarketplaceStore();
+  if (!storePromise) {
+    const created = createMarketplaceStore();
+    storePromise = created;
+    // Seq 518: a transient startup failure (a slow import, a native call
+    // that missed) used to poison the cache forever — every later call
+    // returned the same rejection and the dialog could never load. Drop
+    // the cached promise on rejection, so the next call retries.
+    created.catch(() => {
+      if (storePromise === created) storePromise = null;
+    });
+  }
   return storePromise;
 }
 

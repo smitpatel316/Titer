@@ -45,14 +45,26 @@ if (isNative) {
 // opens: installed+enabled plugins re-register their analyses into the
 // registry on launch (seq 461), so the picker and MCP see them. A failure
 // here must never break startup — the dialog reports it plainly.
-void getMarketplaceStore().catch(() => undefined);
+// Seq 518: the mount waits for that hydration. Firing it fire-and-forget
+// let a restored plugin analysis sheet (or an early MCP call) race the
+// store's dynamic import() + appVersion() and permanently render
+// "Unknown plugin analysis: plugin:..." — the registry resolves an
+// analysis id once, at sheet open, and never retries.
+async function mount(): Promise<void> {
+  try {
+    await getMarketplaceStore();
+  } catch {
+    // A failed hydration must never break startup — the dialog reports it plainly.
+  }
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <ProjectProvider>
+        <LayoutProvider>
+          <AppShell />
+        </LayoutProvider>
+      </ProjectProvider>
+    </StrictMode>,
+  );
+}
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <ProjectProvider>
-      <LayoutProvider>
-        <AppShell />
-      </LayoutProvider>
-    </ProjectProvider>
-  </StrictMode>,
-);
+void mount();

@@ -42580,6 +42580,118 @@ check("plugin-registry-rehydrate-461: an enabled plugin's analyses survive a fre
   clearPluginRegistry();
 });
 
+check("plugin-rehydrate-518: an incompatible plugin is re-checked on restart — compatible again returns to disabled, still-incompatible stays incompatible", async () => {
+  // Bug-report #12 remainder (seq 518), gap 2: loadInstalled() skipped
+  // every record whose status was not "enabled", so a plugin marked
+  // "incompatible" by an older app stayed incompatible forever after an
+  // upgrade made it compatible again — and its analyses were never
+  // re-registered. The store's loader port is the REAL loader here, so
+  // the pin exercises recheckPluginCompatibility exactly as production
+  // does; the three records are seeded straight into storage, as a
+  // restart would find them.
+  const { clearPluginRegistry, getPluginVersion, listPluginAnalyses } = await import("../src/plugins/index");
+  const loaderModule = await import("../src/plugins/loader");
+  const realPort: PluginLoaderPort = {
+    loadPluginFromZip: loaderModule.loadPluginFromZip,
+    installPlugin: loaderModule.installPlugin,
+    requestEnable: loaderModule.requestEnable,
+    confirmEnable: loaderModule.confirmEnable,
+    disablePlugin: loaderModule.disablePlugin,
+    rehydrateEnabledPlugin: loaderModule.rehydrateEnabledPlugin,
+    pluginReviewLines: loaderModule.pluginReviewLines,
+  };
+  clearPluginRegistry();
+  const bytes = new Uint8Array(readFileSync(`${M2_FIXTURES}/hello-analysis-1.1.0.zip`));
+  const parsed = await realPort.loadPluginFromZip(bytes, "hello-analysis-1.1.0.zip");
+  if ("errors" in parsed) throw new Error(`hello fixture failed to parse: ${parsed.errors.join(" ")}`);
+  const { manifest, analyses } = parsed.package;
+  const storage = createMemoryStorage();
+  storage.setItem(
+    MARKETPLACE_INSTALLED_KEY,
+    JSON.stringify([
+      {
+        manifest: { ...manifest, id: "example.hello-enabled" },
+        analyses,
+        status: "enabled",
+        installedAt: new Date(M2_NOW).toISOString(),
+        grantedPermissions: ["read-table"],
+        source: { kind: "zip", name: "hello-analysis-1.1.0.zip" },
+      },
+      {
+        // Marked incompatible when the app was 1.0.0; the app is 1.9.0
+        // now, past the plugin's 1.5.0 floor — compatible again.
+        manifest: { ...manifest, id: "example.hello-upgraded", minAppVersion: "1.5.0" },
+        analyses,
+        status: "incompatible",
+        installedAt: new Date(M2_NOW).toISOString(),
+        incompatibility: "“Hello Analysis” needs Titer 1.5.0 or newer — this Titer is 1.0.0.",
+        grantedPermissions: ["read-table"],
+        source: { kind: "zip", name: "hello-analysis-1.1.0.zip" },
+      },
+      {
+        // Still needs an app newer than this one — stays incompatible.
+        manifest: { ...manifest, id: "example.hello-future", minAppVersion: "2.0.0" },
+        analyses,
+        status: "incompatible",
+        installedAt: new Date(M2_NOW).toISOString(),
+        incompatibility: "“Hello Analysis” needs Titer 2.0.0 or newer — this Titer is 1.9.0.",
+        grantedPermissions: ["read-table"],
+        source: { kind: "zip", name: "hello-analysis-1.1.0.zip" },
+      },
+    ]),
+  );
+  const store = new MarketplaceStore(m2StoreDeps({ loader: realPort, storage }));
+  // The enabled plugin re-registers, with its version recorded.
+  strictEqual(store.getInstalled("example.hello-enabled")?.status, "enabled");
+  ok(
+    listPluginAnalyses().some((e) => e.id === "plugin:example.hello-enabled:hello-mean"),
+    "restart must re-register the enabled plugin's analyses (seq 461)",
+  );
+  strictEqual(getPluginVersion("example.hello-enabled"), "1.1.0", "restart must re-record the enabled plugin's version");
+  // Compatible again after the upgrade: back to disabled, never auto-enabled.
+  strictEqual(
+    store.getInstalled("example.hello-upgraded")?.status,
+    "disabled",
+    "an incompatible plugin compatible again after the app upgrade must return to disabled, not stay stuck incompatible (seq 518)",
+  );
+  strictEqual(store.getInstalled("example.hello-upgraded")?.incompatibility, undefined);
+  ok(
+    !listPluginAnalyses().some((e) => e.id === "plugin:example.hello-upgraded:hello-mean"),
+    "a plugin that became compatible again must wait for the user to re-enable it, not auto-register",
+  );
+  // Still incompatible: stays incompatible, with a fresh message.
+  strictEqual(store.getInstalled("example.hello-future")?.status, "incompatible");
+  ok(
+    /2\.0\.0/.test(store.getInstalled("example.hello-future")?.incompatibility ?? ""),
+    "a still-incompatible plugin keeps its incompatibility message",
+  );
+  ok(
+    !listPluginAnalyses().some((e) => e.id === "plugin:example.hello-future:hello-mean"),
+    "a still-incompatible plugin must not register",
+  );
+  clearPluginRegistry();
+});
+
+check("plugin-rehydrate-518: startup awaits the marketplace store before mounting, and a rejected store is retried, not cached forever", () => {
+  // Bug-report #12 remainder (seq 518), gaps 1 and 3: neither property
+  // can execute under tsx — main.tsx mounts React into a DOM, and
+  // wiring.ts carries Vite `?url` zip imports node cannot load — so the
+  // pin reads the source, as the grid/native pins above already do.
+  const main = readFileSync("src/main.tsx", "utf8");
+  ok(!/void getMarketplaceStore\(\)/.test(main), "startup must not fire the marketplace store fire-and-forget (seq 518)");
+  const awaitAt = main.indexOf("await getMarketplaceStore()");
+  const renderAt = main.indexOf('createRoot(document.getElementById("root")!).render(');
+  ok(
+    awaitAt !== -1 && renderAt !== -1 && awaitAt < renderAt,
+    "startup must await the marketplace store hydration before mounting <AppShell /> (seq 518)",
+  );
+  const wiring = readFileSync("src/marketplace/wiring.ts", "utf8");
+  ok(
+    wiring.includes("storePromise = null") && wiring.includes(".catch("),
+    "a rejected marketplace store must drop the cached promise so the next call retries (seq 518)",
+  );
+});
+
 check("M2-install: a hash mismatch refuses loudly and installs nothing", async () => {
   const listing = m2Listing();
   const store = new MarketplaceStore(
