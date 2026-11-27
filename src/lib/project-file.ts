@@ -1020,13 +1020,11 @@ const PARAM_CHOICES: Record<string, Record<string, readonly string[]>> = {
   // this runner never sees (the runner refuses it cleanly; anything else
   // outside the five reaches R as an undefined weight).
   "linear-regression": { weights: ["none", "1/y", "1/y2", "1/x", "1/x2"] },
-  // Plot a function plots the fitter's library minus the user-defined
-  // equation (it has no equation to plot), plus the distributions.
+  // Plot a function plots the fitter's library — including the
+  // user-defined equation, whose equation travels in `customEquation` —
+  // plus the distributions.
   "plot-function": {
-    equation: [
-      ...NONLINEAR_MODELS.filter((m) => m !== "user-defined"),
-      ...PLOT_FUNCTION_DISTRIBUTIONS,
-    ],
+    equation: [...NONLINEAR_MODELS, ...PLOT_FUNCTION_DISTRIBUTIONS],
     // The extra series the runner can plot alongside the function — the
     // same four PARAMS already lists; kept here so PARAM_CHOICES mirrors
     // every ENUM_OVERRIDES entry (BUG-REPORT #34). The runner refuses
@@ -1265,7 +1263,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   ],
   "bland-altman": ["sets"],
   "roc-curve": ["truth", "score", "positive", "sets"],
-  "plot-function": ["equation", "xMin", "xMax", "segments", "curves", "extra", "ligandConcentration", "sets"],
+  "plot-function": ["equation", "customEquation", "xMin", "xMax", "segments", "curves", "extra", "ligandConcentration", "sets"],
   correlation: ["method", "mode", "datasets", "effectSizes", "sets"],
   "linear-regression": ["x", "y", "ys", "forceOrigin", "compareSlopes", "weights", "sets"],
   "compare-slopes": ["ys", "sets"],

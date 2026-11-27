@@ -19,6 +19,7 @@ import { PLOT_FUNCTION_DISCRETE_DISTRIBUTIONS, PLOT_FUNCTION_DISTRIBUTIONS } fro
 import { binomialPmf, chiSquarePdf, fPdf, normalPdf, poissonPmf, tPdf } from "../distributions";
 import { modelSpec } from "./nonlinear-fit";
 import { MODEL_LABEL, nonNegativeXOnly, positiveXOnly, termLabel } from "./nonlinear-regression";
+import { evaluateUserEquation, parseUserEquation } from "./user-defined";
 import { evaluate } from "../../views/graphs/fitted-curve";
 import { NONLINEAR_MODELS } from "../types";
 
@@ -33,18 +34,17 @@ export const isDiscreteDistribution = (model: PlotFunctionModel): boolean =>
   (PLOT_FUNCTION_DISCRETE_DISTRIBUTIONS as readonly string[]).includes(model);
 
 /** The equations the wizard offers, in Prism's spirit: the fitter's whole
- *  library (which now includes the Gaussian and the other classic curves).
- *  A user-defined equation stays out — it has no equation for the wizard
- *  to plot (see PlotFunctionModel). */
+ *  library (which now includes the Gaussian and the other classic curves),
+ *  user-defined last among the curves — its parameters come from the
+ *  equation the wizard asks for next — then the distributions. */
 export const PLOT_FUNCTION_MODELS: PlotFunctionModel[] = [
-  ...NONLINEAR_MODELS.filter((m): m is Exclude<NonlinearModel, "user-defined"> => m !== "user-defined"),
+  ...NONLINEAR_MODELS,
   ...PLOT_FUNCTION_DISTRIBUTIONS,
 ];
 
 /** The equation's plain-language name, as the wizard, the results and the graph note show it. */
-const { "user-defined": _unplottable, ...PLOTTABLE_LABELS } = MODEL_LABEL;
 export const PLOT_FUNCTION_LABEL: Record<PlotFunctionModel, string> = {
-  ...PLOTTABLE_LABELS,
+  ...MODEL_LABEL,
   gaussian: "Gaussian",
   "normal-distribution": "Normal distribution",
   "t-distribution": "Student's t distribution",
@@ -75,10 +75,18 @@ const DISTRIBUTION_PARAMS: Record<PlotFunctionDistribution, readonly string[]> =
  *  plus "X0" for the segmental-linear hinge, which the fitter derives from
  *  the data (a breakpoint) instead of fitting, so the plotter asks for it
  *  outright — and "XCenter" for the centered polynomials, derived the
- *  same way (the mean of X). */
-export function plotFunctionParams(model: PlotFunctionModel): string[] {
+ *  same way (the mean of X). A user-defined equation's parameters are the
+ *  names its equation uses, in first-appearance order — none when the
+ *  equation is missing or unparseable, so the wizard asks for nothing per
+ *  curve rather than guessing names. */
+export function plotFunctionParams(model: PlotFunctionModel, customEquation?: string): string[] {
   if (isDistributionModel(model)) return [...DISTRIBUTION_PARAMS[model]];
   if (model === "gaussian") return [...GAUSSIAN_PARAMS];
+  if (model === "user-defined") {
+    if (!customEquation?.trim()) return [];
+    const parsed = parseUserEquation(customEquation);
+    return "error" in parsed ? [] : [...parsed.params];
+  }
   const terms = modelSpec(model).terms;
   if (model === "segmental-linear") return [...terms, "X0"];
   if (model.startsWith("centered-")) return [...terms, "XCenter"];
@@ -180,6 +188,9 @@ export const PLOT_FUNCTION_DEFAULTS: Record<PlotFunctionModel, Record<string, nu
   "chi-square-distribution": { DF: 5 },
   "binomial-distribution": { N: 20, P: 0.5 },
   "poisson-distribution": { Lambda: 5 },
+  // A user-defined equation's parameters are the names its equation uses —
+  // no fixed set, so no fixed defaults: the wizard starts each at 1.
+  "user-defined": {},
 };
 
 /** The wizard's starting X range, per model: log-X curves need X > 0, raw
@@ -208,15 +219,19 @@ export const PLOT_FUNCTION_SEGMENTS = { default: 150, min: 10, max: 1000 };
 export const PLOT_FUNCTION_MAX_CURVES = 8;
 
 /** The equation at `x`: the Gaussian here, the distributions (seq 203)
- *  through their density / mass functions, the fitter's models through
- *  `evaluate()` (its coefficients take the display names — "Hill slope",
- *  not "HillSlope" — so the params are renamed on the way in). A value the
- *  equation cannot give (a log at X ≤ 0, a pole) is NaN, never thrown. */
+ *  through their density / mass functions, a user-defined equation
+ *  through the fitter's own parser (`customEquation` — NaN when it is
+ *  missing or unparseable, so the curve leaves a gap rather than throwing),
+ *  the fitter's models through `evaluate()` (its coefficients take the
+ *  display names — "Hill slope", not "HillSlope" — so the params are
+ *  renamed on the way in). A value the equation cannot give (a log at
+ *  X ≤ 0, a pole) is NaN, never thrown. */
 export function evaluatePlotFunction(
   model: PlotFunctionModel,
   params: Record<string, number>,
   x: number,
   ligandConcentration?: number,
+  customEquation?: string,
 ): number {
   if (model === "gaussian") {
     const sd = params.SD;
@@ -224,6 +239,7 @@ export function evaluatePlotFunction(
     const z = (x - params.Mean) / sd;
     return params.Amplitude * Math.exp(-0.5 * z * z);
   }
+  if (model === "user-defined") return evaluateUserEquation(customEquation ?? "", params, x);
   if (model === "normal-distribution") return normalPdf(x, params.Mean, params.SD);
   if (model === "t-distribution") return tPdf(x, params.DF);
   if (model === "f-distribution") return fPdf(x, params.DF1, params.DF2);
@@ -340,7 +356,22 @@ export async function runPlotFunction(
     return { error: "The homologous model needs the radioligand concentration [L] (greater than 0)." };
   if (model === "homologous-competition-logx" && params.ligandConcentration! <= 0)
     return { error: "The radioligand concentration [L] must be greater than 0." };
-  const names = plotFunctionParams(model);
+  // A user-defined equation plots through the fitter's own parser: without
+  // an equation there is nothing to plot, and a bad one fails here with the
+  // parser's message — the same message the fitter shows for it. Its
+  // parameters are the names the equation uses, in first-appearance order.
+  let names: string[];
+  let userEquation: string | undefined;
+  if (model === "user-defined") {
+    userEquation = params.customEquation?.trim() ? params.customEquation.trim() : undefined;
+    if (!userEquation)
+      return { error: "Enter a user-defined equation first — for example “Y = A*exp(-k*X) + C”." };
+    const parsed = parseUserEquation(userEquation);
+    if ("error" in parsed) return { error: parsed.error };
+    names = [...parsed.params];
+  } else {
+    names = plotFunctionParams(model);
+  }
   for (const [i, curve] of curves.entries()) {
     const label = curve.label?.trim() ? curve.label.trim() : `Curve ${i + 1}`;
     for (const name of names) {
@@ -393,7 +424,7 @@ export async function runPlotFunction(
   const generated: GeneratedCurve[] = curves.map((curve, i) => {
     const label = curve.label?.trim() ? curve.label.trim() : `Curve ${i + 1}`;
     const y = x.map((x0) => {
-      const v = evaluatePlotFunction(model, curve.params, x0, params.ligandConcentration);
+      const v = evaluatePlotFunction(model, curve.params, x0, params.ligandConcentration, userEquation);
       return Number.isFinite(v) ? v : null;
     });
     return { label, y, extra: extraSeries(extra, x, y, label) };
@@ -404,11 +435,15 @@ export async function runPlotFunction(
   const gridWord = discrete
     ? `one point per whole number from ${x[0]} to ${x[x.length - 1]}`
     : `X from ${xMin} to ${xMax} in ${segments} line segments`;
+  const equationPhrase =
+    model === "user-defined"
+      ? `the user-defined equation “${userEquation}”`
+      : `the ${PLOT_FUNCTION_LABEL[model]}${isDistributionModel(model) ? "" : " equation"}`;
   return {
     testType: "plot-function",
     subtitle: PLOT_FUNCTION_LABEL[model],
     summary:
-      `Generated ${generated.length} ${curveWord} from the ${PLOT_FUNCTION_LABEL[model]}${isDistributionModel(model) ? "" : " equation"}, ` +
+      `Generated ${generated.length} ${curveWord} from ${equationPhrase}, ` +
       `${gridWord}${extraWord}. ` +
       `No data was analysed — the curves come from the parameter values below.`,
     stats: [

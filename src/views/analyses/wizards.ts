@@ -4000,13 +4000,24 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       const model = a.equation as PlotFunctionModel | undefined;
       const count = (a.curves as number | undefined) ?? 1;
       const [defMin, defMax] = plotFunctionXRange(model ?? "line");
-      const paramNames = model ? plotFunctionParams(model) : [];
+      // A user-defined equation's parameters are the names its equation
+      // uses — none until the equation is entered and parses, so no
+      // per-curve questions are asked before then.
+      const paramNames = model ? plotFunctionParams(model, a.customEquation as string | undefined) : [];
       return [
         choice(
           "equation",
           "Which equation should the curve come from?",
           PLOT_FUNCTION_MODELS.map((m): [string, string] => [m, PLOT_FUNCTION_LABEL[m]]),
         ),
+        model === "user-defined" && {
+          id: "customEquation",
+          ask: "What is the equation? Write it as “Y = …”, with X and named parameters — for example “Y = A*exp(-k*X) + C”.",
+          kind: "text",
+          label: "Equation",
+          initial: "",
+          placeholder: "e.g. Y = A*exp(-k*X) + C",
+        },
         {
           id: "xMin",
           ask: "Where should the X axis start?",
@@ -4054,7 +4065,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           placeholder: "e.g. 1",
           parse: (text: string) => parseRequiredPositive(text, "radioligand concentration [L]"),
         },
-        ...(model
+        ...(paramNames.length
           ? Array.from({ length: count }, (_, i) => i).flatMap((i): Question[] => [
               {
                 id: `curve${i + 1}_label`,
@@ -4070,7 +4081,10 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
                   ask: `Curve ${i + 1}: what is ${name}?`,
                   kind: "number",
                   label: name,
-                  initial: PLOT_FUNCTION_DEFAULTS[model][name] ?? 0,
+                  // A user-defined parameter starts at 1, not 0 — a 0 start
+                  // silences most equations (A = 0 flattens the curve,
+                  // k = 0 kills the decay).
+                  initial: model === "user-defined" ? 1 : (PLOT_FUNCTION_DEFAULTS[model][name] ?? 0),
                 }),
               ),
             ])
@@ -4080,12 +4094,13 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
     finish: (a) => {
       const model = a.equation as PlotFunctionModel;
       const count = (a.curves as number | undefined) ?? 1;
-      const paramNames = plotFunctionParams(model);
+      const paramNames = plotFunctionParams(model, a.customEquation as string | undefined);
       const ligand = parseRequiredPositive(String(a.ligandConcentration ?? ""), "radioligand concentration [L]");
       return {
         type: "plot-function",
         params: {
           equation: model,
+          ...(model === "user-defined" ? { customEquation: a.customEquation as string } : {}),
           xMin: a.xMin as number,
           xMax: a.xMax as number,
           segments: a.segments as number,

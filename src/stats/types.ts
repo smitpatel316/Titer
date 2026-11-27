@@ -1850,13 +1850,14 @@ export interface RocPoint {
  *  function"): every nonlinear-regression model — evaluated by the same
  *  `evaluate()` the fitted-curve overlay uses — plus a Gaussian, Prism's
  *  canonical example (mean 0, SD 1, amplitude 100 over X −3..3), which the
- *  fitter does not offer, so it lives here only. A user-defined equation is
- *  NOT plottable: the wizard has no equation input, and its spec can't be
- *  built without one (modelSpec throws), so it is excluded here.
- *  Seq 203: the statistical distributions Prism's Plot a function also
- *  plots (FAQ 1578) — the normal (z), Student's t, F and chi-square
+ *  fitter does not offer, so it lives here only.
+ *  Seq 203 remainder: a user-defined equation plots too, through the same
+ *  parser the fitter uses (`user-defined.ts`) — the wizard asks for the
+ *  equation (`customEquation` on the params), then one value per parameter
+ *  it names. Seq 203: the statistical distributions Prism's Plot a function
+ *  also plots (FAQ 1578) — the normal (z), Student's t, F and chi-square
  *  densities, and the binomial + Poisson mass functions. */
-export type PlotFunctionModel = Exclude<NonlinearModel, "user-defined"> | PlotFunctionDistribution;
+export type PlotFunctionModel = NonlinearModel | PlotFunctionDistribution;
 
 /** The statistical distributions "plot-function" can plot (Prism's Plot a
  *  function, FAQ 1578): the normal (z), Student's t, F and chi-square
@@ -1898,6 +1899,11 @@ export interface PlotFunctionCurve {
  *  ignore it. */
 export interface PlotFunctionParams {
   equation: PlotFunctionModel;
+  /** User-defined equation (seq 203 remainder, model "user-defined" only):
+   *  the equation as the user typed it (`Y = A*exp(-k*X) + C`, or just the
+   *  right-hand side) — the curves' parameters are the names it uses, asked
+   *  one per curve. Built-in models ignore it. */
+  customEquation?: string;
   xMin: number;
   xMax: number;
   /** Line segments per curve (points = segments + 1); omitted = 150. */
