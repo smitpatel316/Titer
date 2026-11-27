@@ -2792,9 +2792,6 @@ const xyBigSlopes = precisionFix.xyBigSlopes;
 // probe/expected-precision.json.
 const twoWayBig = precisionFix.twoWayBig;
 const threeWayBig = precisionFix.threeWayBig;
-const expectedPrecision = JSON.parse(
-  readFileSync(new URL("../probe/expected-precision.json", import.meta.url), "utf8"),
-) as Record<string, Record<string, number>>;
 // Multi-Y twin of xyBig: Y2 is the origin table's Y (a second 1e13 series),
 // so the per-set fit path is pinned too.
 const xyBigMulti: TableData = {

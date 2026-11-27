@@ -308,7 +308,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, applyDateAxis, applyNumberFormats, axesRangeInputs, baseLayout, centers, curveXs, errorOf, errors, fitLabels, groupedBarLayout, groupedScatterLayout, hasTableXAxis, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowStats, perRowSummaryStats, rowValues, scatterOffsets, summaryErrorAt, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, applyDateAxis, applyNumberFormats, axesRangeInputs, baseLayout, centers, curveXs, errorOf, errors, fitLabels, groupedBarLayout, groupedScatterLayout, hasTableXAxis, heatmapLayout, jitter, labelOnAxes, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowStats, perRowSummaryStats, rowValues, scatterOffsets, summaryErrorAt, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
