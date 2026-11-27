@@ -45481,64 +45481,6 @@ check("seq 200: the curve wizard asks about 1/Y^K, convergence, replicates, clea
 });
 
 
-// ── Run ──────────────────────────────────────────────────────────────────
-
-// Descriptives are computed by R since the v1.0.7 rebase, so checks that run
-// an analysis need the engine — booted from the installed webR, as
-// tests/reference.ts does. Package installs read the BUNDLED repo
-// (webr-repo/, served on localhost — the same pattern as reference.ts and
-// packages.ts), never the CDN: a survival install must not depend on the
-// egress proxy being up.
-const REPO_DIR = fileURLToPath(new URL("../webr-repo/", import.meta.url));
-// Hoisted so the run can shut the server down at the end: without the
-// close + process.exit() below, the listening server keeps the event loop
-// alive and `npm test` never reaches tests/reference.ts (the process hung
-// ~20 min after printing "All 119 checks pass" on the rebased tree).
-let repoServer: ReturnType<typeof createServer> | undefined;
-if (existsSync(`${REPO_DIR}MANIFEST.json`)) {
-  const server = (repoServer = createServer((req, res) => {
-    const path = decodeURIComponent(req.url!.split("?")[0]).replace(/^\/+/, "");
-    const file = `${REPO_DIR}${path}`;
-    if (!path || !existsSync(file) || !statSync(file).isFile()) {
-      res.writeHead(404);
-      res.end();
-      return;
-    }
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end(readFileSync(file));
-  }));
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  setPackageRepo(`http://127.0.0.1:${(server.address() as { port: number }).port}`, {
-    allowCdnFallback: false,
-  });
-} else {
-  console.log("⚠ webr-repo/ is not built — package-dependent checks will use the CDN. Run scripts/build-webr-repo.sh, then re-run npm test.");
-}
-await startR(fileURLToPath(new URL("../node_modules/webr/dist/", import.meta.url)));
-
-let failed = 0;
-// CHECK=<substring> runs only the matching checks (e.g. CHECK=FL-rebrand
-// for the rebrand regression check alone, without the full suite).
-const only = process.env.CHECK;
-const selected = only ? checks.filter(([name]) => name.includes(only)) : checks;
-for (const [name, fn] of selected) {
-  try {
-    await fn();
-  } catch (err) {
-    failed++;
-    console.log(`✗ ${name}\n  ${err instanceof Error ? err.message.split("\n").join("\n  ") : err}`);
-  }
-}
-console.log(failed ? `${failed} of ${selected.length} checks failed.` : `All ${selected.length} checks pass.`);
-process.exitCode = failed ? 1 : 0;
-// Shut down the repo server and exit explicitly (same as reference.ts /
-// packages.ts): otherwise the listening server + webR workers keep the
-// process alive forever and `npm test` stalls here.
-repoServer?.close();
-process.exit(process.exitCode);
-
-
-
 // BUG-REPORT Round 2 #90: `ensurePackages` checked only `status ===
 // "failed"` after awaiting a joined in-flight batch, so an evicted joined
 // batch settling while a retry had flipped the packages back to "loading"
@@ -45594,3 +45536,60 @@ check("r2-90 webr: ensurePackages does not resolve until every package is ready 
     `the joined caller B must not resolve while the retry is still loading, got ${outcome.B} (status ${packageStatus("survival").status})`,
   );
 });
+
+
+// ── Run ──────────────────────────────────────────────────────────────────
+
+// Descriptives are computed by R since the v1.0.7 rebase, so checks that run
+// an analysis need the engine — booted from the installed webR, as
+// tests/reference.ts does. Package installs read the BUNDLED repo
+// (webr-repo/, served on localhost — the same pattern as reference.ts and
+// packages.ts), never the CDN: a survival install must not depend on the
+// egress proxy being up.
+const REPO_DIR = fileURLToPath(new URL("../webr-repo/", import.meta.url));
+// Hoisted so the run can shut the server down at the end: without the
+// close + process.exit() below, the listening server keeps the event loop
+// alive and `npm test` never reaches tests/reference.ts (the process hung
+// ~20 min after printing "All 119 checks pass" on the rebased tree).
+let repoServer: ReturnType<typeof createServer> | undefined;
+if (existsSync(`${REPO_DIR}MANIFEST.json`)) {
+  const server = (repoServer = createServer((req, res) => {
+    const path = decodeURIComponent(req.url!.split("?")[0]).replace(/^\/+/, "");
+    const file = `${REPO_DIR}${path}`;
+    if (!path || !existsSync(file) || !statSync(file).isFile()) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end(readFileSync(file));
+  }));
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  setPackageRepo(`http://127.0.0.1:${(server.address() as { port: number }).port}`, {
+    allowCdnFallback: false,
+  });
+} else {
+  console.log("⚠ webr-repo/ is not built — package-dependent checks will use the CDN. Run scripts/build-webr-repo.sh, then re-run npm test.");
+}
+await startR(fileURLToPath(new URL("../node_modules/webr/dist/", import.meta.url)));
+
+let failed = 0;
+// CHECK=<substring> runs only the matching checks (e.g. CHECK=FL-rebrand
+// for the rebrand regression check alone, without the full suite).
+const only = process.env.CHECK;
+const selected = only ? checks.filter(([name]) => name.includes(only)) : checks;
+for (const [name, fn] of selected) {
+  try {
+    await fn();
+  } catch (err) {
+    failed++;
+    console.log(`✗ ${name}\n  ${err instanceof Error ? err.message.split("\n").join("\n  ") : err}`);
+  }
+}
+console.log(failed ? `${failed} of ${selected.length} checks failed.` : `All ${selected.length} checks pass.`);
+process.exitCode = failed ? 1 : 0;
+// Shut down the repo server and exit explicitly (same as reference.ts /
+// packages.ts): otherwise the listening server + webR workers keep the
+// process alive forever and `npm test` stalls here.
+repoServer?.close();
+process.exit(process.exitCode);
