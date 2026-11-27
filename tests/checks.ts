@@ -493,7 +493,7 @@ import {
   type ImportChoices,
   type ImportOffer,
 } from "../src/lib/import-choices";
-import { executeExportTableData, tableTextRows, tableToCsv, tableToTxt, tableToXml, tableToXlsx } from "../src/store/mcp-export";
+import { executeExportTableData, resolveTableDataExportOptions, tableTextRows, tableToCsv, tableToTxt, tableToXml, tableToXlsx } from "../src/store/mcp-export";
 import {
   exportTableData,
   serializeTableData,
@@ -39935,7 +39935,9 @@ check("export-164: the export goes through the save dialog and honours cancel", 
 check("export-164: the File menu offers Export Table Data in CSV, XLSX, TXT and Prism XML", () => {
   const menu = readFileSync("src/app-menu.ts", "utf8");
   ok(menu.includes("Export Table Data"), "File menu has no Export Table Data item");
-  ok(menu.includes("exportTableData"), "File menu never calls the table-data export");
+  // The menu opens the export dialog (seq 164 remainder); the dialog
+  // itself calls exportTableData once the options are chosen.
+  ok(menu.includes('kind: "export-table-data"'), "File menu never opens the export dialog");
   ok(menu.includes("hasTable"), "Export Table Data is not gated on having a table");
   const exporter = readFileSync("src/views/tables/table-data-export.ts", "utf8");
   ok(exporter.includes("TABLE_DATA_EXPORT_FORMATS"), "exporter has no format list");
@@ -39947,6 +39949,162 @@ check("export-164: the File menu offers Export Table Data in CSV, XLSX, TXT and 
     ["csv", "xlsx", "txt", "xml"],
     "UI formats differ from the MCP export's csv/xlsx/txt/xml",
   );
+});
+
+// Seq 164 remainder — the Export dialog's options (Prism parity): how
+// excluded values are written, which decimal separator, and whether the
+// column titles are written at all. Prism's Export dialog offers the
+// same three excluded-values choices as its copy preference — blank (as
+// if missing), the value, or the value followed by an asterisk — for the
+// plain-text formats, and the separator you choose in the Export dialog
+// is the one the export uses (GraphPad Prism 8 user guide, "Excluding
+// or highlighting values"; Prism 7 guide, "Specifying decimal places").
+// Prism XML is a machine format: it always keeps the excluded marker
+// and the titles, whatever the text-format options say.
+check("export-164-dialog-opts: excluded values, decimal separator and column titles are export options", async () => {
+  const data = EXPORT_164_DATA;
+  // Defaults: blank excluded cells, titles on, the stored separator —
+  // the existing export-164 pins cover the default bytes.
+  deepStrictEqual(resolveTableDataExportOptions(), {
+    excludedValues: "blank",
+    decimalSeparator: ".",
+    includeColumnTitles: true,
+  });
+  // Excluded values as the value, and as the value with an asterisk.
+  strictEqual(
+    await serializeTableData(data, "My: Table", "csv", "column", { excludedValues: "value" }),
+    'Title,ID,Value\ns1,0123,1.5\n"a, b","x""y",9.9',
+  );
+  strictEqual(
+    await serializeTableData(data, "My: Table", "csv", "column", { excludedValues: "asterisk" }),
+    'Title,ID,Value\ns1,0123,1.5\n"a, b","x""y",9.9*',
+  );
+  strictEqual(
+    await serializeTableData(data, "My: Table", "txt", "column", { excludedValues: "asterisk" }),
+    'Title\tID\tValue\ns1\t0123\t1.5\na, b\t"x""y"\t9.9*',
+  );
+  const starred = await parseXlsx(
+    (await serializeTableData(data, "My: Table", "xlsx", "column", { excludedValues: "asterisk" })) as Uint8Array,
+  );
+  deepStrictEqual(starred.sheet.rows, [
+    ["Title", "ID", "Value"],
+    ["s1", "0123", "1.5"],
+    ["a, b", 'x"y', "9.9*"],
+  ]);
+  // The dialog's decimal separator beats the stored preference.
+  strictEqual(
+    await serializeTableData(data, "My: Table", "csv", "column", { decimalSeparator: "," }),
+    'Title,ID,Value\ns1,0123,"1,5"\n"a, b","x""y","9,9"',
+  );
+  strictEqual(
+    await serializeTableData(data, "My: Table", "txt", "column", { decimalSeparator: "," }),
+    'Title\tID\tValue\ns1\t0123\t1,5\na, b\t"x""y"\t9,9',
+  );
+  // No column titles: the header row is gone from every plain-text format.
+  strictEqual(
+    await serializeTableData(data, "My: Table", "csv", "column", { includeColumnTitles: false }),
+    's1,0123,1.5\n"a, b","x""y",',
+  );
+  strictEqual(
+    await serializeTableData(data, "My: Table", "txt", "column", { includeColumnTitles: false }),
+    's1\t0123\t1.5\na, b\t"x""y"\t',
+  );
+  const noTitles = await parseXlsx(
+    (await serializeTableData(data, "My: Table", "xlsx", "column", { includeColumnTitles: false })) as Uint8Array,
+  );
+  deepStrictEqual(noTitles.sheet.rows, [
+    ["s1", "0123", "1.5"],
+    ["a, b", 'x"y'],
+  ]);
+  // The options combine: comma separator, asterisked excluded value, no titles.
+  strictEqual(
+    await serializeTableData(data, "My: Table", "csv", "column", {
+      excludedValues: "asterisk",
+      decimalSeparator: ",",
+      includeColumnTitles: false,
+    }),
+    's1,0123,"1,5"\n"a, b","x""y","9,9*"',
+  );
+  // Prism XML ignores the text-format options: the excluded marker stays.
+  const xml = new TextDecoder().decode(
+    (await serializeTableData(data, "My: Table", "xml", "column", {
+      excludedValues: "value",
+      includeColumnTitles: false,
+    })) as Uint8Array,
+  );
+  ok(xml.includes('<d Excluded="1">9.9</d>'), "xml dropped the excluded marker for a text-format option");
+  ok(xml.includes("<Title>My: Table</Title>"), "xml dropped the table title for a text-format option");
+  // exportTableData honours the options through the save dialog.
+  const written: { path: string; bytes: string | Uint8Array }[] = [];
+  const io = {
+    pickSavePath: async () => "/exports/opts.csv",
+    writeFile: async (path: string, bytes: string | Uint8Array) => {
+      written.push({ path, bytes });
+    },
+    alert: async () => {},
+  };
+  await exportTableData(EXPORT_164_NODE as never, "csv", io, { includeColumnTitles: false });
+  strictEqual(written.length, 1);
+  strictEqual(written[0].bytes, 's1,0123,1.5\n"a, b","x""y",');
+  // The MCP job carries the same three options, and rejects bad values plainly.
+  const jobDeps = {
+    getState: () => ({
+      nodes: { table_1: EXPORT_164_NODE },
+      rootOrder: ["table_1"],
+      childOrder: { table_1: [] as string[] },
+      activeNodeId: "table_1",
+    }),
+    io: {
+      writeFile: async (path: string, bytes: string | Uint8Array) => {
+        written.push({ path, bytes });
+      },
+    },
+  };
+  const job = {
+    job_id: "job-164-opts",
+    action: "export-table-data",
+    project_id: "project-1",
+    status: "queued",
+    args: {
+      table_id: "table_1",
+      format: "csv",
+      path: "/exports/opts.csv",
+      excluded_values: "asterisk",
+      decimal_separator: ",",
+      include_column_titles: false,
+    },
+  };
+  const out = await executeExportTableData(job as never, jobDeps as never);
+  strictEqual((out.result as { excluded_values: string }).excluded_values, "asterisk");
+  strictEqual((out.result as { decimal_separator: string }).decimal_separator, ",");
+  strictEqual((out.result as { include_column_titles: boolean }).include_column_titles, false);
+  strictEqual(written[written.length - 1].bytes, 's1,0123,"1,5"\n"a, b","x""y","9,9*"');
+  await rejects(
+    executeExportTableData(
+      { ...job, args: { table_id: "table_1", format: "csv", path: "/x", excluded_values: "drop" } } as never,
+      jobDeps as never,
+    ),
+    /excluded_values/,
+  );
+  await rejects(
+    executeExportTableData(
+      { ...job, args: { table_id: "table_1", format: "csv", path: "/x", decimal_separator: ";" } } as never,
+      jobDeps as never,
+    ),
+    /decimal_separator/,
+  );
+  // The dialog itself: the File menu opens it (one per format), it offers
+  // all three options, and the shell renders it.
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(menu.includes('kind: "export-table-data"'), "File menu never opens the export dialog");
+  const dialog = readFileSync("src/components/table-data-export-dialog.tsx", "utf8");
+  ok(dialog.includes("TableDataExportDialog"), "export dialog has no TableDataExportDialog component");
+  ok(dialog.includes("Excluded values"), "export dialog has no excluded-values control");
+  ok(dialog.includes("Decimal separator"), "export dialog has no decimal-separator control");
+  ok(dialog.includes("Include column titles"), "export dialog has no column-titles control");
+  ok(dialog.includes("exportTableData"), "export dialog never calls the table-data export");
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(shell.includes("TableDataExportDialog"), "app shell never renders the export dialog");
 });
 
 // ── Linked paste (seq 168) ─────────────────────────────────────────────
