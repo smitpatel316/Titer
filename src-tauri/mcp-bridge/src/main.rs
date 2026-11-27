@@ -390,8 +390,10 @@ fn initialized_message() -> String {
 /// `initialize` + `notifications/initialized` for a fresh session, and
 /// store the new session id. Returns false when any step fails — the
 /// caller then reports the original 404 as a JSON-RPC error instead of
-/// retrying forever. Only ever called after a 404 on a request that
-/// carried a session id.
+/// retrying forever, and the old session id is left untouched so the next
+/// request can try recovery again (seq 560: clearing it first wedged the
+/// bridge permanently after one transient initialize failure). Only ever
+/// called after a 404 on a request that carried a session id.
 fn recover_session(
     client: &Client,
     cfg: &mut BridgeConfig,
@@ -404,9 +406,16 @@ fn recover_session(
     if let Ok(fresh) = load_config(cfg.explicit_discovery.as_deref()) {
         *cfg = fresh;
     }
-    *session_id = None;
+    // Keep the old session id until the replay fully succeeds (seq 560):
+    // clearing it first wedged the bridge — a transient initialize
+    // failure left session_id None, so no later request ever triggered
+    // recovery again. The replay posts with a local None; the stored id
+    // is replaced only once initialize + notifications/initialized both
+    // succeed, so a failed attempt leaves recovery armed for the next
+    // request.
+    let no_session: Option<String> = None;
     let init = reinitialize_message(protocol_version);
-    let resp = match post_once(client, cfg, session_id, protocol_version, &init) {
+    let resp = match post_once(client, cfg, &no_session, protocol_version, &init) {
         Ok(r) => r,
         Err(_) => return false,
     };
@@ -416,14 +425,49 @@ fn recover_session(
     let Some(sid) = resp.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()) else {
         return false;
     };
-    *session_id = Some(sid.to_string());
+    let new_sid = sid.to_string();
     // Consume the body so the connection is released, then complete the
     // handshake the spec requires after initialize.
     let _ = resp.text();
-    match post_once(client, cfg, session_id, protocol_version, &initialized_message()) {
+    let initialized_ok = match post_once(
+        client,
+        cfg,
+        &Some(new_sid.clone()),
+        protocol_version,
+        &initialized_message(),
+    ) {
         Ok(r) => r.status().is_success(),
         Err(_) => false,
+    };
+    if !initialized_ok {
+        return false;
     }
+    *session_id = Some(new_sid);
+    true
+}
+
+/// Re-read the discovery file and adopt it when the URL or token changed
+/// (a restart rebinds the ephemeral port and/or rotates the token, seq
+/// 560). Returns false when the file cannot be read or nothing changed —
+/// the caller keeps the old config and reports the original failure.
+fn reload_config_if_changed(cfg: &mut BridgeConfig) -> bool {
+    match load_config(cfg.explicit_discovery.as_deref()) {
+        Ok(fresh) if fresh.token != cfg.token || fresh.url != cfg.url => {
+            *cfg = fresh;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The contract's token-changed outcome: a JSON-RPC error for requests,
+/// silence (plus a stderr note) for notifications.
+fn token_changed_outcome(request_id: &Value, is_notification: bool) -> ForwardOutcome {
+    if is_notification {
+        eprintln!("titer-stdio-bridge: notification failed: {TOKEN_CHANGED_MESSAGE}");
+        return ForwardOutcome::NoResponse;
+    }
+    ForwardOutcome::Failed(jsonrpc_error(request_id, -32000, TOKEN_CHANGED_MESSAGE))
 }
 
 /// Forward one raw JSON-RPC line to the Streamable HTTP endpoint.
@@ -441,45 +485,65 @@ fn forward(
 ) -> ForwardOutcome {
     let mut resp = match post_once(client, cfg, session_id, protocol_version, line) {
         Ok(r) => r,
-        Err(e) => return forward_post_error(&e, request_id, is_notification),
+        Err(e) => {
+            // Port-change restart (seq 560): Titer rebound to a new
+            // ephemeral port, so the old socket refuses connections.
+            // Re-read discovery once and retry once at the new endpoint;
+            // a reload that changes nothing (or fails) keeps the original
+            // server-off error, and any other transport error is reported
+            // as before.
+            if !e.is_connect() {
+                return forward_post_error(&e, request_id, is_notification);
+            }
+            if !reload_config_if_changed(cfg) {
+                return forward_post_error(&e, request_id, is_notification);
+            }
+            match post_once(client, cfg, session_id, protocol_version, line) {
+                Ok(r) => r,
+                Err(e2) => return forward_post_error(&e2, request_id, is_notification),
+            }
+        }
     };
 
-    // 404 with a live session id: the session expired (the server
-    // restarted, or the session timed out) — re-establish it and retry
-    // the request once (seq 540). A 404 without a session id is not a
-    // dead session (initialize itself cannot 404 one), so it falls
-    // through to the plain error below.
-    if resp.status().as_u16() == 404 && session_id.is_some() {
-        if recover_session(client, cfg, session_id, protocol_version) {
+    // Session recovery (seq 540 + seq 560): a 401 means the token rotated
+    // (reload + retry once with the fresh token); a 404 with a live
+    // session id means the session died (re-initialize + retry once). A
+    // 404 without a session id is not a dead session (initialize itself
+    // cannot 404 one), so it falls through to the plain error below.
+    // Either can follow the other — a rotated-token retry lands on a dead
+    // session (401 then 404) — so run at most one of each, in whichever
+    // order they arrive.
+    let mut did_token_retry = false;
+    let mut did_session_recovery = false;
+    loop {
+        if resp.status().as_u16() == 401 && !did_token_retry {
+            did_token_retry = true;
+            if !reload_config_if_changed(cfg) {
+                return token_changed_outcome(request_id, is_notification);
+            }
             match post_once(client, cfg, session_id, protocol_version, line) {
                 Ok(r) => resp = r,
                 Err(e) => return forward_post_error(&e, request_id, is_notification),
             }
+            if resp.status().as_u16() == 401 {
+                return token_changed_outcome(request_id, is_notification);
+            }
+            continue;
         }
-    }
-
-    // 401: the token may have rotated since this bridge started (contract
-    // §2). Re-read the discovery file once and retry once with the fresh
-    // token; a second 401 gets the contract's token-changed message, not
-    // the server's plain-text body.
-    if resp.status().as_u16() == 401 {
-        let mut retried = false;
-        if let Ok(fresh) = load_config(cfg.explicit_discovery.as_deref()) {
-            if fresh.token != cfg.token || fresh.url != cfg.url {
-                *cfg = fresh;
-                if let Ok(r) = post_once(client, cfg, session_id, protocol_version, line) {
-                    resp = r;
-                    retried = true;
+        if resp.status().as_u16() == 404 && session_id.is_some() && !did_session_recovery {
+            did_session_recovery = true;
+            if recover_session(client, cfg, session_id, protocol_version) {
+                match post_once(client, cfg, session_id, protocol_version, line) {
+                    Ok(r) => resp = r,
+                    Err(e) => return forward_post_error(&e, request_id, is_notification),
                 }
             }
+            // Recovery failed: fall through with the original 404 below.
+            // Recovery succeeded but the retry came back 401: the loop
+            // above handles the token retry.
+            continue;
         }
-        if !retried || resp.status().as_u16() == 401 {
-            if is_notification {
-                eprintln!("titer-stdio-bridge: notification failed: {TOKEN_CHANGED_MESSAGE}");
-                return ForwardOutcome::NoResponse;
-            }
-            return ForwardOutcome::Failed(jsonrpc_error(request_id, -32000, TOKEN_CHANGED_MESSAGE));
-        }
+        break;
     }
 
     if let Some(sid) = resp.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()) {
@@ -1180,6 +1244,211 @@ mod tests {
         // Give the fake thread a moment to record, then check it saw one.
         std::thread::sleep(Duration::from_millis(200));
         assert_eq!(seen.lock().unwrap().len(), 1, "no replay without a session");
+        let _ = std::fs::remove_file(&discovery);
+    }
+
+    #[test]
+    fn forward_reloads_discovery_on_connect_error() {
+        // Seq 560 (bug 1): Titer restarted on a new ephemeral port — the
+        // old socket refuses connections. The bridge must re-read
+        // discovery.json and retry at the new endpoint instead of failing
+        // the request with the server-off message.
+        let (url, seen) = run_fake_server(vec![(
+            200,
+            vec![],
+            r#"{"jsonrpc":"2.0","id":3,"result":{"tools":[]}}"#.to_string(),
+        )]);
+        let client = Client::builder().timeout(Duration::from_secs(10)).build().expect("client");
+        // A port nothing listens on: bind one, then drop it.
+        let dead_port = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("dead port");
+            listener.local_addr().expect("dead addr").port()
+        };
+        let dead_url = format!("http://127.0.0.1:{dead_port}/mcp");
+        let discovery = fake_discovery_file("port-change", &dead_url);
+        let mut cfg = BridgeConfig {
+            url: dead_url,
+            token: "test-token".to_string(),
+            protocol_version: None,
+            explicit_discovery: Some(discovery.clone()),
+        };
+        // Titer restarts: discovery now names the new port, same token.
+        std::fs::write(&discovery, serde_json::json!({ "endpoint": url, "token": "test-token" }).to_string())
+            .expect("rewrite discovery");
+        let mut session_id = Some("old-session".to_string());
+        let line = serde_json::json!({
+            "jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {},
+        })
+        .to_string();
+        let outcome = forward(&client, &mut cfg, &mut session_id, "2025-11-25", &line, &serde_json::json!(3), false);
+        match outcome {
+            ForwardOutcome::Messages(messages) => {
+                assert_eq!(messages.len(), 1, "one reply: {messages:?}");
+                let v: Value = serde_json::from_str(&messages[0]).expect("result json");
+                assert_eq!(v["id"], 3, "the retried call answers with its own id");
+                assert!(v.get("result").is_some(), "the retried call succeeds: {}", messages[0]);
+            }
+            other => panic!("expected the retried result, got {other:?}"),
+        }
+        assert_eq!(cfg.url, url, "config moved to the new port");
+        assert_eq!(seen.lock().unwrap().len(), 1, "only the retried request reached the new server");
+        let _ = std::fs::remove_file(&discovery);
+    }
+
+    #[test]
+    fn forward_recovers_after_rotated_token_retry_404s() {
+        // Seq 560 (bug 2): the token rotated AND the session died on
+        // restart. The first request 401s; the bridge reloads the token
+        // and retries with the stale session id, which 404s; that 404
+        // must trigger session recovery, not a raw HTTP 404 error.
+        let (url, seen) = run_fake_server(vec![
+            (401, vec![], "unauthorized".to_string()),
+            (
+                404,
+                vec![],
+                r#"{"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"Session not found"}}"#.to_string(),
+            ),
+            (
+                200,
+                vec![("mcp-session-id", "new-session".to_string())],
+                r#"{"jsonrpc":"2.0","id":"titer-bridge-reinit","result":{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"titer","version":"1.9.0"}}}"#.to_string(),
+            ),
+            (202, vec![], String::new()),
+            (
+                200,
+                vec![],
+                r#"{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{}"}]}}"#.to_string(),
+            ),
+        ]);
+        let client = Client::builder().timeout(Duration::from_secs(10)).build().expect("client");
+        let discovery = fake_discovery_file("rotated", &url);
+        let mut cfg = BridgeConfig {
+            url,
+            token: "old-token".to_string(),
+            protocol_version: None,
+            explicit_discovery: Some(discovery.clone()),
+        };
+        let mut session_id = Some("old-session".to_string());
+        let line = serde_json::json!({
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": { "name": "titer_list_projects", "arguments": {} },
+        })
+        .to_string();
+        let outcome = forward(&client, &mut cfg, &mut session_id, "2025-11-25", &line, &serde_json::json!(7), false);
+        match outcome {
+            ForwardOutcome::Messages(messages) => {
+                assert_eq!(messages.len(), 1, "one reply: {messages:?}");
+                let v: Value = serde_json::from_str(&messages[0]).expect("result json");
+                assert_eq!(v["id"], 7, "the retried call answers with its own id");
+                assert!(v.get("result").is_some(), "the retried call succeeds: {}", messages[0]);
+            }
+            other => panic!("expected the retried result, got {other:?}"),
+        }
+        assert_eq!(session_id.as_deref(), Some("new-session"), "session id refreshed");
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 5, "five HTTP requests: {seen:?}");
+        assert_eq!(seen[0].0, "tools/call");
+        assert_eq!(seen[1].0, "tools/call", "token retry replays the call");
+        assert_eq!(seen[2].0, "initialize");
+        assert_eq!(seen[2].1.as_deref(), None, "re-init carries no dead session id");
+        assert_eq!(seen[3].0, "notifications/initialized");
+        assert_eq!(seen[4].0, "tools/call");
+        assert_eq!(seen[4].1.as_deref(), Some("new-session"), "retry uses the fresh session");
+        let _ = std::fs::remove_file(&discovery);
+    }
+
+    #[test]
+    fn failed_recovery_keeps_session_armed() {
+        // Seq 560 (bug 3): recovery's initialize fails once transiently
+        // (HTTP 500). The old session id must survive so the NEXT request
+        // still triggers recovery — otherwise the bridge wedges forever.
+        let (url, seen) = run_fake_server(vec![
+            (
+                404,
+                vec![],
+                r#"{"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"Session not found"}}"#.to_string(),
+            ),
+            (500, vec![], "boom".to_string()),
+            (
+                404,
+                vec![],
+                r#"{"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"Session not found"}}"#.to_string(),
+            ),
+            (
+                200,
+                vec![("mcp-session-id", "new-session".to_string())],
+                r#"{"jsonrpc":"2.0","id":"titer-bridge-reinit","result":{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"titer","version":"1.9.0"}}}"#.to_string(),
+            ),
+            (202, vec![], String::new()),
+            (
+                200,
+                vec![],
+                r#"{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{}"}]}}"#.to_string(),
+            ),
+        ]);
+        let client = Client::builder().timeout(Duration::from_secs(10)).build().expect("client");
+        let discovery = fake_discovery_file("wedge", &url);
+        let mut cfg = BridgeConfig {
+            url,
+            token: "test-token".to_string(),
+            protocol_version: None,
+            explicit_discovery: Some(discovery.clone()),
+        };
+        let mut session_id = Some("old-session".to_string());
+        let line = serde_json::json!({
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": { "name": "titer_list_projects", "arguments": {} },
+        })
+        .to_string();
+        // First attempt: recovery fails transiently; the 404 surfaces.
+        let _first = forward(&client, &mut cfg, &mut session_id, "2025-11-25", &line, &serde_json::json!(7), false);
+        assert_eq!(
+            session_id.as_deref(),
+            Some("old-session"),
+            "a failed recovery must not clear the session id (seq 560 wedge)"
+        );
+        // Second attempt, server healthy now: recovery must fire again.
+        let outcome = forward(&client, &mut cfg, &mut session_id, "2025-11-25", &line, &serde_json::json!(7), false);
+        match outcome {
+            ForwardOutcome::Messages(messages) => {
+                assert_eq!(messages.len(), 1, "one reply: {messages:?}");
+                let v: Value = serde_json::from_str(&messages[0]).expect("result json");
+                assert!(v.get("result").is_some(), "the retried call succeeds: {}", messages[0]);
+            }
+            other => panic!("expected the retried result, got {other:?}"),
+        }
+        assert_eq!(session_id.as_deref(), Some("new-session"), "session id refreshed on retry");
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 6, "six HTTP requests: {seen:?}");
+        assert_eq!(seen[1].0, "initialize", "first recovery attempted initialize");
+        assert_eq!(seen[3].0, "initialize", "second recovery re-attempted initialize");
+        assert_eq!(seen[5].1.as_deref(), Some("new-session"), "retry uses the fresh session");
+        let _ = std::fs::remove_file(&discovery);
+    }
+
+    #[test]
+    fn reload_config_if_changed_detects_port_and_token_moves() {
+        // Seq 560 helper: a restart that rebinds the port or rotates the
+        // token must be picked up; an unchanged file must not churn cfg.
+        let discovery = fake_discovery_file("reload", "http://127.0.0.1:18741/mcp");
+        let mut cfg = BridgeConfig {
+            url: "http://127.0.0.1:11111/mcp".to_string(),
+            token: "old-token".to_string(),
+            protocol_version: None,
+            explicit_discovery: Some(discovery.clone()),
+        };
+        assert!(reload_config_if_changed(&mut cfg), "new port + token are adopted");
+        assert_eq!(cfg.url, "http://127.0.0.1:18741/mcp");
+        assert_eq!(cfg.token, "test-token");
+        assert!(!reload_config_if_changed(&mut cfg), "unchanged discovery reloads to nothing");
+        std::fs::write(
+            &discovery,
+            serde_json::json!({ "endpoint": "http://127.0.0.1:18741/mcp", "token": "rotated" }).to_string(),
+        )
+        .expect("rewrite discovery");
+        assert!(reload_config_if_changed(&mut cfg), "a rotated token alone is adopted");
+        assert_eq!(cfg.token, "rotated");
+        assert_eq!(cfg.url, "http://127.0.0.1:18741/mcp");
         let _ = std::fs::remove_file(&discovery);
     }
 }
