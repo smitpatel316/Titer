@@ -798,7 +798,8 @@ fn move_file_blocking(from: &str, to: &str) -> Result<(), String> {
     // Gated like every other file command: only a file type Titer itself
     // reads or writes may move — the extension-equality check below then
     // keeps the format across the rename.
-    check_extension(from, WRITE_FILE_EXTENSIONS)?;    let from_path = Path::new(from);
+    check_extension(from, WRITE_FILE_EXTENSIONS)?;
+    let from_path = Path::new(from);
     let to_path = Path::new(to);
     if !from_path.exists() {
         return Err("The file couldn't be found. It may have been moved or deleted.".into());

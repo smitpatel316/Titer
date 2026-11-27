@@ -43,6 +43,7 @@ import { SimulateDataDialog } from "./simulate-data-dialog";
 import { ConvertToNestedDialog } from "./convert-to-nested-dialog";
 import { SampleSizePowerDialog } from "./sample-size-power-dialog";
 import { CloneGraphDialog } from "./clone-graph-dialog";
+import { clonableGraphs } from "../lib/clone-graph";
 import { RegenerateGraphsDialog } from "./regenerate-graphs-dialog";
 import { ScriptDialog } from "./script-dialog";
 import { PreferencesDialog } from "./preferences-dialog";
@@ -100,7 +101,7 @@ export function AppShell() {
     return () => window.removeEventListener(PRINT_SETTINGS_CHANGED_EVENT, apply);
   }, []);
   const hidden = HIDDEN_SIDEBAR[fullscreen ? "fullscreen" : "window"];
-  const { nodes, rootOrder, childOrder, selector, closeSelector, createTable, createGraph, setActiveNode, isDirty } =
+  const { nodes, rootOrder, childOrder, selector, openSelector, closeSelector, createTable, createGraph, setActiveNode, isDirty } =
     useProjectStore();
   const startAnalysis = useStartAnalysis();
   // The New Analysis / New Graph pickers list what fits the target table's type.
@@ -441,7 +442,9 @@ export function AppShell() {
 
       {/* The Welcome dialog (seq 167): the gallery + Graph Portfolio + recents
           on a fresh window (use-document decides when it auto-shows); File ▸
-          Welcome… opens it on demand. */}
+          Welcome… opens it on demand. Clone a Graph (seq 167 remainder, M4)
+          opens the Clone dialog for the picked graph; a shared template (M6)
+          opens as a new untitled project, like any .pzt. */}
       <WelcomeDialog
         open={documentActions.welcomeOpen}
         onClose={documentActions.closeWelcome}
@@ -454,6 +457,9 @@ export function AppShell() {
               )
             : documentActions.openRemoteEntry(entry)
         }
+        clonableGraphs={clonableGraphs({ nodes, rootOrder, childOrder })}
+        onCloneGraph={(graphId) => openSelector({ kind: "clone-graph", graphId })}
+        onOpenSharedTemplate={(path) => openProjectsOrSay([path])}
       />
 
       {/* A template's instructions on open (plan 38): Prism's popup, in-app

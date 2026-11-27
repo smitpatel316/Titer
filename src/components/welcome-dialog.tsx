@@ -1,7 +1,9 @@
 // The Welcome dialog (seq 167): what a fresh window opens with — Prism's
 // Welcome dialog, Titer's shape. New project (one blank table per type),
 // the template gallery (worked examples), the Graph Portfolio (one example
-// per graph type), recent projects, and Open…. Picking a template replaces
+// per graph type), Clone a Graph (seq 167 remainder, M4 — the project's
+// graphs, in sidebar order), shared templates from registered template
+// folders (M6), recent projects, and Open…. Picking a template replaces
 // the fresh window's untouched table and adds one anywhere else (the plan
 // in src/lib/templates.ts decides); the dialog itself never touches the
 // project — it reports the choice and the owner applies it.
@@ -235,6 +237,57 @@ export function WelcomeDialog({
               onPick={() => pick(entry.templateId)}
             />
           ))}
+        </Section>
+
+        {clonableGraphs.length > 0 && (
+          <Section title="Clone a Graph">
+            {clonableGraphs.map((graph) => (
+              <Row
+                key={graph.id}
+                label={graph.name}
+                description="Clone this graph with its data table."
+                onPick={() => {
+                  onCloneGraph(graph.id);
+                  onClose();
+                }}
+              />
+            ))}
+          </Section>
+        )}
+
+        {sharedTemplates.length > 0 && (
+          <Section title="Shared templates">
+            {sharedTemplates.map((entry) => (
+              <Row
+                key={entry.id}
+                label={entry.name}
+                description={entry.description ?? `From ${templateFolderLabel(entry.folderPath)}.`}
+                onPick={() => {
+                  onOpenSharedTemplate(entry.path);
+                  onClose();
+                }}
+              />
+            ))}
+          </Section>
+        )}
+
+        <Section title="Template folders">
+          {folders.map((folder) => (
+            <li key={folder.path} className="flex items-center gap-2 px-2 py-1.5">
+              <span className="block flex-1 text-regular">{templateFolderLabel(folder.path)}</span>
+              <span className="block text-small text-secondary">{folder.shared ? "Shared" : "Managed"}</span>
+              <Button onClick={() => removeFolder(folder.path)}>Remove</Button>
+            </li>
+          ))}
+          <li>
+            <button
+              type="button"
+              className="w-full rounded-md px-2 py-1.5 text-left text-regular outline-none focus:bg-accent focus:text-white"
+              onClick={addFolder}
+            >
+              Add template folder…
+            </button>
+          </li>
         </Section>
 
         {recents.length > 0 && (
