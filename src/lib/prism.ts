@@ -793,7 +793,7 @@ export async function convertPrism(
     const rows = parseCsv(await csvFile.async("string"));
     for (const row of rows) {
       for (const cell of row) {
-        if (/^-?\d{1,3}(,\d{3}){2,}(\.\d+)?$/.test(cell)) {
+        if (/^[+-]?\d{1,3}(,\d{3}){2,}(\.\d+)?([eE][+-]?\d+)?$/.test(cell)) {
           thousandsMode = true;
           thousandsExample = cell;
           break;
