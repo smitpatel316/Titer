@@ -320,7 +320,14 @@ export async function runThreeWayAnova(
   }
 
   const rFactor = (labels: string[]) => `factor(c(${labels.map(rStr).join(",")}))`;
-  const setup = `${R_EFFECT_CI};v<-${rVec(flat.values)};A<-${rFactor(flat.a)};B<-${rFactor(flat.b)};C<-${rFactor(flat.c)}`;
+  // Centered first (cf. commit 2db68ed1 for the one-way ANOVA): drop1's
+  // model-selection F values are differences of cell means, and on values
+  // alike in their first 13 digits (~1e13) the uncentered fit loses them
+  // (F 1.7e-3–1.6e-2 off the mpmath exact values, and drop1 warns about an
+  // "essentially perfect fit"). v-mean(v) is exact by Sterbenz (values
+  // within a factor of 2 of their mean), and the mean's own rounding is a
+  // common shift that cancels in every difference of means.
+  const setup = `${R_EFFECT_CI};v<-${rVec(flat.values)};v<-v-mean(v);A<-${rFactor(flat.a)};B<-${rFactor(flat.b)};C<-${rFactor(flat.c)}`;
   // Type III sums of squares (matches GraphPad Prism on unbalanced designs; on
   // balanced designs Type I = II = III, so nothing changes there). Base-R recipe:
   // sum-to-zero contrasts on the factors + drop1 over the full scope. Contrasts are
