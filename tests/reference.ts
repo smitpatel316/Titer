@@ -2777,6 +2777,7 @@ const precisionFix = JSON.parse(
 ) as Record<string, TableData>;
 const anovaBig = precisionFix.anovaBig;
 const anovaSmall = precisionFix.anovaSmall;
+const nestedBig = precisionFix.nestedBig;
 const xyBig = precisionFix.xyBig;
 const xyBigOrigin = precisionFix.xyBigOrigin;
 const multiBig = precisionFix.multiBig;
@@ -3540,6 +3541,13 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["nested3", nested3, "nested-anova", { posthoc: "none" }],
   ["nested3", nested3, "nested-anova", { posthoc: "tukey" }],
   ["nested3", nested3, "nested-anova", { posthoc: "bonferroni" }],
+  // 1e13-scale precision (Nov 2026): nested ANOVA on subcolumn means — pre-fix
+  // the uncentered F was 69.119 against the exact 68.981, the Tukey p-values
+  // up to 5.9e-3 off; post-fix all match the mpmath exact values
+  // (probe/expected-precision.json) to ~1e-12.
+  ["nestedBig", nestedBig, "nested-anova", { posthoc: "none" }],
+  ["nestedBig", nestedBig, "nested-anova", { posthoc: "tukey" }],
+  ["nestedBig", nestedBig, "nested-anova", { posthoc: "bonferroni" }],
   ["nested3", nested3, "nested-t-test", {}],
   ["nested2", nested2, "nested-anova", { posthoc: "none" }],
   ["nestedDrop", nestedDrop, "nested-t-test", {}],
@@ -4225,6 +4233,40 @@ async function disagreements(): Promise<string[]> {
       rel(oP, 2.2055762756384253e-133) > 0.25
     )
       out.push(`Origin fit at 1e13: slope ${oSlope}, CI [${oLo}, ${oHi}], R² ${oR2}, P ${oP}`);
+  }
+  // 1e13-scale precision, nested ANOVA (Nov 2026): the ANOVA on the subcolumn
+  // means, plus both post-hocs, against the mpmath exact values
+  // (probe/expected-precision.json, computed from the TS subgroup means — the
+  // doubles R receives). Pre-fix the F was 69.119 against the exact 68.981
+  // and the Tukey p-values up to 5.9e-3 off; post-fix the main table matches
+  // to ~1e-12 and the post-hoc p-values to the scipy studentized-range / t
+  // values below (tolerances carry headroom over the measured agreement).
+  {
+    const nStat = (r: AnalysisResult | { error: string }, label: string) =>
+      "error" in r ? null : r.stats.find((s) => s.label === label)?.value;
+    const rel = (got: number | null | undefined, want: number) =>
+      got == null ? Infinity : Math.abs(got - want) / Math.abs(want);
+    const n = await runAnalysis("nested-anova", nestedBig, { posthoc: "none" });
+    if (
+      rel(nStat(n, "F"), 68.98107352530053) > 1e-9 ||
+      rel(nStat(n, "P value"), 7.239503890992253e-05) > 1e-9 ||
+      rel(nStat(n, "SS between groups"), 14.641800774468315) > 1e-9 ||
+      rel(nStat(n, "SS within groups"), 0.6367746988932291) > 1e-9 ||
+      rel(nStat(n, "Grand mean"), 10000000000001.955) > 1e-9
+    )
+      out.push(
+        `Nested ANOVA at 1e13: F ${nStat(n, "F")}, P ${nStat(n, "P value")}, ` +
+          `SSb ${nStat(n, "SS between groups")}, SSw ${nStat(n, "SS within groups")}, grand ${nStat(n, "Grand mean")}`,
+      );
+    for (const [posthoc, want] of [
+      ["tukey", [0.0017704410897247946, 5.7127634021991724e-05, 0.003982732802081279]],
+      ["bonferroni", [0.0021864560260264443, 6.93679079560287e-05, 0.004960154226929977]],
+    ] as const) {
+      const r = await runAnalysis("nested-anova", nestedBig, { posthoc });
+      const ps = "error" in r ? [] : (r.comparisons ?? []).map((c) => c.p);
+      if (ps.length !== 3 || ps.some((p, i) => rel(p, want[i]) > 1e-6))
+        out.push(`Nested ANOVA ${posthoc} at 1e13: p-values ${JSON.stringify(ps)}`);
+    }
   }
   // Deming regression (plan 13): the TS closed form must match the R closed
   // form on the reference table, and λ must run the right way round. The

@@ -57,17 +57,28 @@ export async function runNestedAnova(
     };
   }
   const asGroups = groups.map((g) => ({ name: g.name, values: g.means }));
-  const setup = `${groupsSetup(asGroups)};a<-summary(aov(v~gr))[[1]]`;
+  // Centered first: aov's QR on values alike in their first digits (1000000000000.4…)
+  // loses the differences between groups — at 1e13 scale the uncentered F reads
+  // 69.119 against the exact 68.981. The centered fit is the same ANOVA
+  // (translation-invariant sums of squares); `grand` stays the plain mean,
+  // which is exact to 1e-16 relative at this scale. Same pattern as the
+  // one-way ANOVA's aov(I(v-mean(v))~gr).
+  const setup = `${groupsSetup(asGroups)};a<-summary(aov(I(v-mean(v))~gr))[[1]]`;
   const mainNames =
     `F=a$"F value"[1],dfn=a$Df[1],dfd=a$Df[2],p=a$"Pr(>F)"[1],` + `ssb=a$"Sum Sq"[1],ssw=a$"Sum Sq"[2],grand=mean(v)`;
   let code: string;
   if (method === "none") {
     code = `${setup};c(${mainNames})`;
   } else {
+    // The post-hocs run on the centered values too: TukeyHSD refits its own
+    // aov (its group differences and MSE are translation-invariant), and the
+    // pairwise t tests' mean differences are exact on centered values — on
+    // the raw ~1e13 values the two ~1e13 means each carry ~1e-3 of rounding
+    // and the Tukey p-values come out up to 5.9e-3 off.
     const ph =
       method === "tukey"
-        ? tukeyPosthocStatements(groups.length)
-        : pairwisePosthocStatements(groups.length, `pairwise.t.test(v,gr,p.adjust.method="bonferroni")$p.value`);
+        ? tukeyPosthocStatements(groups.length, "aov(I(v-mean(v))~gr)")
+        : pairwisePosthocStatements(groups.length, `pairwise.t.test(I(v-mean(v)),gr,p.adjust.method="bonferroni")$p.value`);
     code = `${setup};${ph.setup};c(${mainNames},${ph.assign})`;
   }
   const v = await evalNamedVector(code);
