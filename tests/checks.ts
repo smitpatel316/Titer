@@ -27045,19 +27045,23 @@ check("row means and totals runs on a grouped table, from the data-set means", a
   const close = (got: number | null, want: number) => got != null && Math.abs(got - want) < 1e-9;
   const [first, second] = out.rowMeans ?? [];
   ok(first && close(first.sd, 1.4142135623730951) && close(first.sem, 1));
-  ok(first && close(first.ciLow, -10.206204736432095) && close(first.ciHigh, 15.206204736432095));
+  // CI and geometric-CI values are webR's, not the textbook's: webR's
+  // qt(0.975, 1) is 12.706204736174693 (see the pooled XY pin's note) —
+  // the textbook 12.706204736432095 is 2.6e-9 off at Day 2's SEM, and the
+  // geometric CI magnifies it further at Day 2's scale.
+  ok(first && close(first.ciLow, -10.206204736174692) && close(first.ciHigh, 15.206204736174692));
   ok(first && close(first.cv, 56.568542494923804) && close(first.geoMean, 2.29128784747792));
   // Min/max, quartiles and percentiles (R type 6) of [1.5, 3.5], and the
   // geometric SD with the 95% CI of the geometric mean (t, df 1).
   ok(first && close(first.min, 1.5) && close(first.max, 3.5) && close(first.q1, 1.5) && close(first.q3, 3.5));
   ok(first && close(first.p10, 1.5) && close(first.p90, 3.5));
-  ok(first && close(first.geoSd, 1.8205343606802824) && close(first.geoCiLow, 0.010526535649579975) && close(first.geoCiHigh, 498.73958297091593));
+  ok(first && close(first.geoSd, 1.8205343606802824) && close(first.geoCiLow, 0.010526535650727881) && close(first.geoCiHigh, 498.739582916529));
   ok(second && close(second.sd, 14.142135623730951) && close(second.sem, 10));
-  ok(second && close(second.ciLow, -102.06204736432096) && close(second.ciHigh, 152.06204736432096));
+  ok(second && close(second.ciLow, -102.06204736174692) && close(second.ciHigh, 152.06204736174692));
   ok(second && close(second.cv, 56.568542494923804) && close(second.geoMean, 22.9128784747792));
   ok(second && close(second.min, 15) && close(second.max, 35) && close(second.q1, 15) && close(second.q3, 35));
   ok(second && close(second.p10, 15) && close(second.p90, 35));
-  ok(second && close(second.geoSd, 1.8205343606802822) && close(second.geoCiLow, 0.10526535649579986) && close(second.geoCiHigh, 4987.395829709157));
+  ok(second && close(second.geoSd, 1.8205343606802822) && close(second.geoCiLow, 0.10526535650727901) && close(second.geoCiHigh, 4987.395829165287));
   ok(out.notes.includes("“A”, “B”"));
 });
 
