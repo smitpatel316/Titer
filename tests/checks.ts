@@ -27019,7 +27019,7 @@ check("row means and totals summarises each row across its data sets", async () 
   );
 });
 
-check("row means and totals runs on a grouped table, across every replicate", async () => {
+check("row means and totals runs on a grouped table, from the data-set means", async () => {
   const grouped: TableData = {
     columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
     rows: [
@@ -27031,29 +27031,33 @@ check("row means and totals runs on a grouped table, across every replicate", as
   };
   const out = await runAnalysis("row-means-totals", grouped, { ys: ["A", "B"] });
   if ("error" in out) throw new Error(out.error);
+  // Mean of means: Day 1 summarises the data-set means [1.5, 3.5], Day 2
+  // [15, 35] — so N is 2 (the data-set count), the total is the sum of the
+  // means, and the SD/SEM/CI/CV, geometric mean and quartiles are over the
+  // means. (Balanced replicates, so the mean itself is unchanged at 2.5/25.)
   deepStrictEqual(
     out.rowMeans?.map((r) => [r.row, r.x, r.n, r.total, r.mean, r.median]),
     [
-      ["Day 1", undefined, 4, 10, 2.5, 2.5],
-      ["Day 2", undefined, 4, 100, 25, 25],
+      ["Day 1", undefined, 2, 5, 2.5, 2.5],
+      ["Day 2", undefined, 2, 50, 25, 25],
     ],
   );
   const close = (got: number | null, want: number) => got != null && Math.abs(got - want) < 1e-9;
   const [first, second] = out.rowMeans ?? [];
-  ok(first && close(first.sd, 1.2909944487358056) && close(first.sem, 0.6454972243679028));
-  ok(first && close(first.ciLow, 0.445739743239121) && close(first.ciHigh, 4.5542602567608785));
-  ok(first && close(first.cv, 51.63977794943222) && close(first.geoMean, 2.213363839400643));
-  // Min/max, quartiles and percentiles (R type 6) of [1, 2, 3, 4], and the
-  // geometric SD with the 95% CI of the geometric mean (t, df 3).
-  ok(first && close(first.min, 1) && close(first.max, 4) && close(first.q1, 1.25) && close(first.q3, 3.75));
-  ok(first && close(first.p10, 1) && close(first.p90, 4));
-  ok(first && close(first.geoSd, 1.8242475707663655) && close(first.geoCiLow, 0.8503745620786809) && close(first.geoCiHigh, 5.760966642265432));
-  ok(second && close(second.sd, 12.909944487358056) && close(second.sem, 6.454972243679028));
-  ok(second && close(second.ciLow, 4.457397432391211) && close(second.ciHigh, 45.54260256760879));
-  ok(second && close(second.cv, 51.639777949432215) && close(second.geoMean, 22.133638394006436));
-  ok(second && close(second.min, 10) && close(second.max, 40) && close(second.q1, 12.5) && close(second.q3, 37.5));
-  ok(second && close(second.p10, 10) && close(second.p90, 40));
-  ok(second && close(second.geoSd, 1.8242475707663655) && close(second.geoCiLow, 8.50374562078681) && close(second.geoCiHigh, 57.609666422654364));
+  ok(first && close(first.sd, 1.4142135623730951) && close(first.sem, 1));
+  ok(first && close(first.ciLow, -10.206204736432095) && close(first.ciHigh, 15.206204736432095));
+  ok(first && close(first.cv, 56.568542494923804) && close(first.geoMean, 2.29128784747792));
+  // Min/max, quartiles and percentiles (R type 6) of [1.5, 3.5], and the
+  // geometric SD with the 95% CI of the geometric mean (t, df 1).
+  ok(first && close(first.min, 1.5) && close(first.max, 3.5) && close(first.q1, 1.5) && close(first.q3, 3.5));
+  ok(first && close(first.p10, 1.5) && close(first.p90, 3.5));
+  ok(first && close(first.geoSd, 1.8205343606802824) && close(first.geoCiLow, 0.010526535649579975) && close(first.geoCiHigh, 498.73958297091593));
+  ok(second && close(second.sd, 14.142135623730951) && close(second.sem, 10));
+  ok(second && close(second.ciLow, -102.06204736432096) && close(second.ciHigh, 152.06204736432096));
+  ok(second && close(second.cv, 56.568542494923804) && close(second.geoMean, 22.9128784747792));
+  ok(second && close(second.min, 15) && close(second.max, 35) && close(second.q1, 15) && close(second.q3, 35));
+  ok(second && close(second.p10, 15) && close(second.p90, 35));
+  ok(second && close(second.geoSd, 1.8205343606802822) && close(second.geoCiLow, 0.10526535649579986) && close(second.geoCiHigh, 4987.395829709157));
   ok(out.notes.includes("“A”, “B”"));
 });
 

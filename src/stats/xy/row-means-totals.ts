@@ -11,11 +11,14 @@
 // chosen data set separately — one summary per row per data set. The source
 // data is never touched — the summaries live in the result only.
 //
-// Prism's whole-row rule for multi-subcolumn data sets (first average each
-// data set, then summarise the data-set means — its "mean of means") is NOT
-// applied here: pooled mode pools the values, as this analysis always has,
-// so a grouped row's N is its replicate count. Per-column mode is the way
-// to see each data set's own summary instead.
+// Prism's whole-row rule for multi-subcolumn data sets: first average each
+// data set, then summarise the data-set means — its "mean of means". So in
+// pooled mode a grouped row's N is its data-set count, not its replicate
+// count: a data set with more replicates does not swamp the row (Prism's
+// worked example: A {2, 3, 4}, B {4, 6}, C {7, 8, 9} give means 3, 5, 8,
+// so the row is Mean 5.333, SD 2.517, N = 3 — not the pooled eight values).
+// A single-subcolumn data set is unaffected (its mean is the value itself).
+// Per-column mode is the way to see each data set's own summary instead.
 import type { AnalysisOutcome, RowMeansRow, RowMeansTotalsParams } from "../types";
 import { evalNamedVector } from "../webr";
 import { datasetColumns, type Column as DatasetColumn } from "../../lib/dataset";
@@ -72,9 +75,19 @@ export async function runRowMeansTotals(
     // Row-major order, so each row's data sets sit together under its title.
     cells.sort((a, b) => a.row - b.row || named.indexOf(a.column!) - named.indexOf(b.column!));
   } else {
+    // Prism's mean of means: each chosen data set contributes its own mean
+    // for the row — the average of the values it holds in that row — and
+    // the cell summarises those means. A data set holding no value in the
+    // row contributes no mean. So N is the number of data sets, the total
+    // is the sum of the data-set means, and the SD/SEM/CI/CV, median,
+    // geometric mean, min/max, quartiles/percentiles and geometric SD/CI
+    // are all over the data-set means.
     const rows = [...new Set(targets.flatMap((c) => c.rows))].sort((a, b) => a - b);
     for (const r of rows) {
-      const values = targets.flatMap((c) => (c.byRow[r] == null ? [] : [c.byRow[r]!]));
+      const values = named.flatMap((name) => {
+        const inRow = datasetColumns(columns, name).flatMap((c) => (c.byRow[r] == null ? [] : [c.byRow[r]!]));
+        return inRow.length ? [inRow.reduce((a, b) => a + b, 0) / inRow.length] : [];
+      });
       if (values.length) cells.push({ row: r, values });
     }
   }
@@ -132,10 +145,10 @@ export async function runRowMeansTotals(
     notes:
       (perColumn
         ? `Summarised each row separately within ${named.map((n) => `“${n}”`).join(", ")}: one summary per row per data set. `
-        : `Summarised each row across ${named.map((n) => `“${n}”`).join(", ")}: one summary per row. `) +
+        : `Summarised each row across ${named.map((n) => `“${n}”`).join(", ")}: one summary per row, from the mean of means — each data set averaged first, then the data-set means summarised, so N is the number of data sets holding a value in the row. `) +
       "Each summary is the row's total, mean, SD, SEM, median, 95% CI of the mean, %CV, geometric mean, " +
       "minimum, maximum, 25th and 75th percentiles, 10th and 90th percentiles, geometric SD and 95% CI of the geometric mean. " +
-      "Only values present in the row count; rows holding no value are not listed. " +
+      "Only values present in the row count toward their data set's mean, and a data set holding no value in the row contributes no mean; rows holding no value are not listed. " +
       "95% CI is the t-based confidence interval of the mean. " +
       "The coefficient of variation is SD ÷ mean. " +
       "Quartiles and percentiles are R's type 6, the (n + 1)p method. " +

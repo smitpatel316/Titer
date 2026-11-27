@@ -2355,9 +2355,11 @@ export interface FractionOfTotalColumn {
 }
 
 /** How "row-means-totals" groups the values: `pooled` is one summary per row
- *  across all the chosen data sets; `per-column` is one summary per row
- *  within each chosen data set (Prism's "for each data set column"
- *  option). */
+ *  across all the chosen data sets — from the mean of means: each data set
+ *  averaged first, then the data-set means summarised (Prism's whole-row
+ *  rule), so N is the number of data sets holding a value in the row;
+ *  `per-column` is one summary per row within each chosen data set
+ *  (Prism's "for each data set column" option). */
 export const ROW_MEANS_SCOPES = ["pooled", "per-column"] as const;
 export type RowMeansScope = (typeof ROW_MEANS_SCOPES)[number];
 
@@ -2376,9 +2378,11 @@ export interface RowMeansTotalsParams {
 
 /** One row's summary ("row-means-totals"): the total, mean, SD, SEM, median,
  *  t-based 95% CI of the mean, %CV and geometric mean of the values that row
- *  holds across the chosen data sets — plus the minimum, maximum, 25th and
- *  75th percentiles, 10th and 90th percentiles, geometric SD and the t-based
- *  95% CI of the geometric mean. `row` is the row title, or the row
+ *  holds across the chosen data sets — in pooled mode, the data-set means
+ *  (Prism's mean of means), not the pooled replicates, so `n` is the number
+ *  of data sets and `total` is the sum of the data-set means — plus the
+ *  minimum, maximum, 25th and 75th percentiles, 10th and 90th percentiles,
+ *  geometric SD and the t-based 95% CI of the geometric mean. `row` is the
  *  number when the table has none; `x` is the X value at that row (XY tables
  *  only). `column` is the data set the summary is within, in per-column mode
  *  only. SD, SEM, CI and %CV are null on a one-value row; the geometric mean,

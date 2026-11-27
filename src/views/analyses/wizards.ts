@@ -3957,7 +3957,8 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   "row-means-totals": {
     questions: (_, table, tableType) => {
       // XY: the Y data sets; Grouped: the groups (each spanning its
-      // replicate columns), so a row is summarised across every replicate.
+      // replicate columns), so a row is summarised across the data-set
+      // means (the mean of means), not the pooled replicates.
       const targets =
         tableType === "xy"
           ? yNames(table)
