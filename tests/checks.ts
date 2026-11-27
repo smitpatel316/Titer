@@ -265,12 +265,13 @@ import { writePzfx } from "../src/lib/pzfx-write";
 import {
   mergeGraphTables,
   mergedGraphData,
+  overlayAnalysisData,
   remapQualifiedOptions,
   validateGraphSources,
   type MergeInput,
 } from "../src/lib/multi-table";
 import { executeBuildGraph, executeUpdateFigure, executeUpdateGraph, type FigurePatch, type GraphJobDeps } from "../src/store/mcp-graphs";
-import { buildPanelFigure } from "../src/views/figures/panel-figure";
+import { buildPanelFigure, frozenFigureNodes } from "../src/views/figures/panel-figure";
 import type { McpJob } from "../src/native";
 import { nestedMeans } from "../src/stats/nested/base";
 import { runNestedTTest } from "../src/stats/nested/nested-t-test";
@@ -2090,6 +2091,190 @@ check("a frozen graph survives save/load; a frozen graph with no snapshot is unf
   deepStrictEqual(project.nodes.g1.frozenData, s.nodes[t1].data);
   strictEqual(project.nodes.g2.frozen, undefined, "frozen without a snapshot is corrupt — unfrozen on load");
   strictEqual(project.nodes.g2.frozenData, undefined);
+});
+
+// Issue #17 remainder: freezing a multi-table graph snapshots its extra
+// tables too, so editing one leaves the frozen graph alone; the snapshots
+// survive save/load, and unfreezing clears them.
+check("17: freezing a multi-table graph snapshots its extra tables (Issue #17)", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "t2",
+      type: "table",
+      name: "Assay 2",
+      parentId: null,
+      tableType: "column",
+      data: colTable("Assay 2", { Control: [4, 5, 6] }).data,
+    },
+  });
+  // `create` numbers a root table from its name, so the graph's qualified
+  // set is built from the name the table really has (see the #48 rename check).
+  const t2Name = s.nodes.t2?.name ?? "Assay 2";
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "g1",
+      type: "graph",
+      name: "Plot",
+      parentId: t1,
+      graphType: "mean-error",
+      graphOptions: newGraphOptions("mean-error"),
+      sourceTableIds: ["t2"],
+    },
+  });
+  const extraBefore = s.nodes.t2.data;
+  s = reducer(s, { type: "setGraphFrozen", id: "g1", kind: "graph", frozen: true });
+  strictEqual(s.nodes.g1.frozen, true);
+  deepStrictEqual(s.nodes.g1.frozenDataByTable?.t2, extraBefore);
+  ok(s.nodes.g1.frozenDataByTable?.t2 !== extraBefore, "the extra snapshot owns its data");
+  // Editing the extra table leaves the frozen merge alone.
+  s = reducer(s, {
+    type: "updateTable",
+    id: "t2",
+    data: { columns: ["Title", "Control"], rows: [["r1", "40"], ["r2", "50"], ["r3", "60"]] },
+    label: "Typing",
+  });
+  const frozen = mergedGraphData(s.nodes.g1, s.nodes);
+  ok(frozen, "a frozen multi-table graph still merges");
+  const extraColumn = frozen!.dataset.columns.find((c) => c.name === `${t2Name} — Control`);
+  ok(extraColumn, "the merged dataset still carries the extra table's series");
+  deepStrictEqual(extraColumn!.values, [4, 5, 6], "the frozen merge draws the snapshot, not the edit");
+  ok(
+    !frozen!.dataset.columns.some((c) => c.values.includes(40)),
+    "no edited extra value leaks into the frozen merge",
+  );
+  // The snapshots survive save/load. (`updated` is true here — a frozen
+  // graph reopens updated, Issue #20's territory, not this fix's.)
+  const kept = read(
+    serializeProjectFile({ nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId }),
+  );
+  deepStrictEqual(kept.project.nodes.g1.frozenDataByTable?.t2, extraBefore);
+  // Unfreezing clears the extra snapshots, and the merge follows the live tables again.
+  s = reducer(s, { type: "setGraphFrozen", id: "g1", kind: "graph", frozen: false });
+  strictEqual(s.nodes.g1.frozenDataByTable, undefined);
+  const live = mergedGraphData(s.nodes.g1, s.nodes);
+  deepStrictEqual(
+    live!.dataset.columns.find((c) => c.name === `${t2Name} — Control`)?.values,
+    [40, 50, 60],
+    "unfrozen, the merge follows the live extra table again",
+  );
+});
+
+// Issue #17 remainder: a frozen graph's significance brackets run on its
+// snapshot when the analysis ran on the graph's own table; a copy-table
+// analysis still reads its own table's live data.
+check("17: a frozen graph's significance overlays read its snapshot (Issue #17)", () => {
+  const v1 = colTable("Assay 1", { Control: [1, 2, 3] }).data!;
+  const t1: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Assay 1",
+    parentId: null,
+    tableType: "column",
+    // Edited after the freeze: the live table no longer matches the snapshot.
+    data: colTable("Assay 1", { Control: [9, 9, 9] }).data,
+  };
+  const t2: ProjectNode = {
+    id: "t2",
+    type: "table",
+    name: "Assay 2",
+    parentId: null,
+    tableType: "column",
+    data: colTable("Assay 2", { Control: [4, 5, 6] }).data,
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Plot",
+    parentId: "t1",
+    graphType: "mean-error",
+    graphOptions: newGraphOptions("mean-error"),
+    frozen: true,
+    frozenData: v1,
+  };
+  const nodes = {
+    t1,
+    t2,
+    g1: graph,
+    a1: { id: "a1", type: "analysis", parentId: "t1" } as ProjectNode,
+    a2: { id: "a2", type: "analysis", parentId: "t2" } as ProjectNode,
+  };
+  deepStrictEqual(
+    overlayAnalysisData(graph, nodes.a1, nodes),
+    v1,
+    "an analysis on the graph's own table reads the frozen snapshot",
+  );
+  deepStrictEqual(
+    overlayAnalysisData(graph, nodes.a2, nodes),
+    t2.data,
+    "a copy-table analysis still reads its own table's live data",
+  );
+  deepStrictEqual(
+    overlayAnalysisData({ ...graph, frozen: undefined, frozenData: undefined }, nodes.a1, nodes),
+    t1.data,
+    "unfrozen, the graph's own analysis reads the live table again",
+  );
+});
+
+// Issue #73: a frozen figure's snapshot wins over a graph re-frozen
+// afterwards — the panel draws the figure's v1, not the graph's v2.
+check("73: a frozen figure keeps its snapshot when its graph is re-frozen (Issue #73)", () => {
+  const v1 = colTable("Assay 1", { Control: [1, 2, 3] }).data!;
+  const v2 = colTable("Assay 1", { Control: [9, 9, 9] }).data!;
+  const t1: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Assay 1",
+    parentId: null,
+    tableType: "column",
+    data: v2,
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Plot",
+    parentId: "t1",
+    graphType: "mean-error",
+    graphOptions: newGraphOptions("mean-error"),
+    frozen: true,
+    frozenData: v2,
+  };
+  const figure = {
+    id: "f1",
+    type: "figure",
+    name: "Figure",
+    parentId: null,
+    panels: [{ graphId: "g1", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 }],
+    grid: { rows: 1, cols: 1 },
+    figureSize: { widthIn: 10, heightIn: 7.5 },
+    labelStyle: { position: "top-left", fontSizePt: 12, bold: true },
+    figureTitle: "",
+    sharedLegend: "none",
+    dpi: "600",
+    frozen: true,
+    frozenDataByGraph: { g1: v1 },
+  } as ProjectNode;
+  const nodes = { t1, g1: graph, f1: figure };
+  const drawn = frozenFigureNodes(figure, nodes);
+  strictEqual(drawn.g1.frozen, true, "the figure's panel graph is frozen in the figure's nodes");
+  deepStrictEqual(drawn.g1.frozenData, v1, "the graph entry carries the figure's snapshot, not its own");
+  deepStrictEqual(drawn.t1.data, v1, "the parent table still carries the figure's snapshot");
+  // What the panel draws: the figure's v1, with no v2 value leaking in.
+  const merged = mergedGraphData(drawn.g1, drawn);
+  ok(merged, "the frozen figure's panel still merges");
+  ok(
+    merged!.dataset.columns.some((c) => c.values.includes(1)),
+    "the panel draws the figure's v1",
+  );
+  ok(!merged!.dataset.columns.some((c) => c.values.includes(9)), "no v2 value leaks into the frozen figure");
+  // An unfrozen figure passes the nodes through untouched.
+  strictEqual(
+    frozenFigureNodes({ ...figure, frozen: undefined, frozenDataByGraph: undefined }, nodes),
+    nodes,
+  );
 });
 
 // seq 238: drawing objects — add, move, edit, group, reorder, duplicate,

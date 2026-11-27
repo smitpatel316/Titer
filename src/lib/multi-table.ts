@@ -81,9 +81,10 @@ export function mergedGraphData(
   if (!parent?.data || !parent.tableType) return null;
   // A frozen graph (seq 237) draws its snapshot, not the live table:
   // the freeze captured the primary table's data at freeze time, so the
-  // merge reads that snapshot as its primary input. Extra tables in
-  // `sourceTableIds` were not snapshotted by the freeze, so they still
-  // read live — a frozen multi-table graph's extras can still move.
+  // merge reads that snapshot as its primary input. Its extra tables
+  // were snapshotted the same way (`frozenDataByTable`, Issue #17), so
+  // the merge reads those snapshots too — an extra added after freezing,
+  // or frozen before the snapshots existed, has none and still reads live.
   const primaryData = graph.frozen && graph.frozenData ? graph.frozenData : parent.data;
   const primary: MergeInput = { id: parent.id, name: parent.name, tableType: parent.tableType, data: primaryData };
   const extras: MergeInput[] = [];
@@ -102,9 +103,26 @@ export function mergedGraphData(
       };
     }
     if (table.type !== "table" || !table.data || !table.tableType) continue;
-    extras.push({ id: table.id, name: table.name, tableType: table.tableType, data: table.data });
+    const extraData = graph.frozen && graph.frozenDataByTable?.[id] ? graph.frozenDataByTable[id] : table.data;
+    extras.push({ id: table.id, name: table.name, tableType: table.tableType, data: extraData });
   }
   return mergeGraphTables(primary, extras);
+}
+
+/** The data a graph's significance-bracket overlay runs on: when the
+ *  analysis ran on the graph's own table, a frozen graph reads its
+ *  snapshot, so its brackets don't move when the table is edited after
+ *  freezing; an analysis on another table (a copy's t test) still reads
+ *  that table's live data (Issue #17 remainder). */
+export function overlayAnalysisData(
+  graph: ProjectNode,
+  analysis: ProjectNode,
+  nodes: Record<string, ProjectNode>,
+): TableData | undefined {
+  if (analysis.parentId && analysis.parentId === graph.parentId && graph.frozen && graph.frozenData) {
+    return graph.frozenData;
+  }
+  return analysis.parentId ? nodes[analysis.parentId]?.data : undefined;
 }
 
 /** Whether `sourceIds` can be a graph's extra tables on `primary`:

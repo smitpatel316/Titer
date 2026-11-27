@@ -23,7 +23,7 @@ import { useProjectStore } from "../../store/use-project-store";
 import { useZoom, ZOOM_LIMITS } from "../../store/use-zoom";
 import { groupsOf, isGrouped, readTable, splitXY, xyProblem, type Column } from "../../lib/dataset";
 import { xZeroMs } from "../../lib/date-time";
-import { mergedGraphData } from "../../lib/multi-table";
+import { mergedGraphData, overlayAnalysisData } from "../../lib/multi-table";
 import { summaryTableProblem } from "../../lib/summary-format";
 import { paletteOf } from "../../lib/palettes";
 import { computeGroupedDEG } from "../../lib/deg";
@@ -163,8 +163,8 @@ export function GraphView({ node }: { node: ProjectNode }) {
     [node, nodes],
   );
   // `mergedGraphData` is frozen-aware (seq 237): a frozen graph's merged
-  // dataset reads its snapshot for the primary table, so the merged
-  // dataset never pulls live data into a frozen graph.
+  // dataset reads its snapshots for the primary table and its extra
+  // tables, so the merged dataset never pulls live data into a frozen graph.
   const drawDataset = merged ? merged.dataset : dataset;
   const drawColumns = React.useMemo(
     () => (drawDataset && parent?.tableType ? plotColumns(drawDataset, type, options, parent.tableType) : []),
@@ -432,7 +432,10 @@ export function GraphView({ node }: { node: ProjectNode }) {
       ? sigAnalyses.map((a) => ({
           id: a.id,
           type: a.analysisType,
-          data: a.parentId ? nodes[a.parentId]?.data : undefined,
+          // A frozen graph's brackets come from its snapshot when the
+          // analysis ran on the graph's own table (Issue #17 remainder);
+          // a copy-table analysis still reads its own table's live data.
+          data: overlayAnalysisData(node, a, nodes),
           params: a.analysisParams,
         }))
       : [],
