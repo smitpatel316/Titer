@@ -1,14 +1,15 @@
-# Titer (Helix) Bug Report — Round 2 (Recheck 2 at `8c877d8`)
+# Titer (Helix) Bug Report — Round 2 (Recheck 3 at `d4b45130`)
 
-Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findings), rechecked at `b8a2528` (`62678b2..b8a2528`, +14 findings `#68`–`#81`), and rechecked at `HEAD` `8c877d8` across the 46 commits in `0b80c30..8c877d8` (+16 findings `#82`–`#97`).
+Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findings), rechecked at `b8a2528` (+14 findings `#68`–`#81`), at `8c877d8` (+16 findings `#82`–`#97`), and at `HEAD` `d4b45130` across the 69 commits in `60f3da5..d4b45130` (+14 findings `#98`–`#111`).
 
-## Recheck Status at `8c877d8`
+## Recheck Status at `d4b45130`
 
 - **Round 1 (`85f6c91`, 28 issues)**: **28 of 28** fixed.
-- **Round 2 (`d44c1da`, #1–#67)**: **18 Fixed** (`#2`, `#3`, `#5`, `#13`, `#14`, `#15`, `#21`, `#27`, `#30`, `#38`, `#42`, `#43`, `#55`, `#61`, `#62`, `#64`, `#66`, `#67` — +8 newly fixed at `8c877d8`), **19 Partially Fixed** (`#1`, `#6`, `#7`, `#8`, `#12`, `#17`, `#23`, `#24`, `#28`, `#29`, `#31`, `#34`, `#36`, `#37`, `#39`, `#49`, `#54`, `#56`, `#63` — +11 newly partial at `8c877d8`), **30 Open** (`#25`, `#26`, `#60` were merged in `67b89f0` and reverted in `294da63`).
-- **Recheck 1 (`b8a2528`, #68–#81)**: **14 Open** (**5 High**, **8 Medium**, **1 Low**).
-- **New in `0b80c30..8c877d8` (#82–#97)**: **16 New** (**9 High**, **6 Medium**, **1 Low**).
-- **Active Total**: **79 Active** (**45 High**, **31 Medium**, **3 Low**; 18 Fixed out of 97 total).
+- **Round 2 (`d44c1da`, #1–#67)**: **28 Fixed** (`#2`, `#3`, `#5`, `#8`, `#12`, `#13`, `#14`, `#15`, `#21`, `#27`, `#30`, `#31`, `#34`, `#36`, `#38`, `#39`, `#42`, `#43`, `#48`, `#49`, `#54`, `#55`, `#56`, `#61`, `#62`, `#64`, `#66`, `#67` — +10 newly fixed at `d4b45130`), **10 Partially Fixed** (`#1`, `#6`, `#7`, `#17`, `#23`, `#24`, `#28`, `#29`, `#37`, `#63`), **29 Open**.
+- **Recheck 1 (`b8a2528`, #68–#81)**: **11 Fixed** (`#68`, `#69`, `#70`, `#71`, `#74`, `#75`, `#76`, `#77`, `#78`, `#79`, `#81`), **3 Partially Fixed** (`#72`, `#73`, `#80`), **0 Open**.
+- **Recheck 2 (`8c877d8`, #82–#97)**: **12 Fixed** (`#83`, `#84`, `#85`, `#86`, `#87`, `#88`, `#91`, `#92`, `#93`, `#94`, `#96`, `#97`), **4 Partially Fixed** (`#82`, `#89`, `#90`, `#95`), **0 Open**.
+- **New in `60f3da5..d4b45130` (#98–#111)**: **14 New** (**5 High**, **5 Medium**, **4 Low**).
+- **Active Total**: **60 Active** (**34 High**, **21 Medium**, **5 Low**; **51 Fixed** out of 111 total).
 
 ---
 
@@ -23,11 +24,11 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 | 5 | **High** | Fixed | Plugins / Security | Plugin capability revocation bypass: disabling/uninstalling a plugin never tears down its Isolation session, letting re-enable retain revoked permissions |
 | 6 | **High** | Partial | Plugins / Security | Plugin static-gate bypasses (`__TAURI_INTERNALS__` regex typo, `Function()`, R backtick/dynamic dispatch) and `.GlobalEnv` escape in shared WebR |
 | 7 | **High** | Partial | Plugins / Security | Path traversal in `manifest.entry` / zip-slip entries in `loadPluginFromZip`, plus unverified manifest ID/version on marketplace install & update |
-| 8 | **High** | Partial | Server / Security | Feedback server global rate limit can be exhausted by a single per-IP blocked attacker, plus unbounded rate-limiter maps and dedupe TOCTOU race |
+| 8 | **High** | Fixed | Server / Security | Feedback server global rate limit can be exhausted by a single per-IP blocked attacker, plus unbounded rate-limiter maps and dedupe TOCTOU race |
 | 9 | **High** | Open | Cloud Sync | Cloud conflict "Overwrite" always fails (`expectedVersion ?? handle.version`), while offline-opened remote files silently overwrite remote edits |
 | 10 | **High** | Open | Cloud Auth | Concurrent Box token refresh deletes fresh single-use tokens and signs user out; deleted tokens leave permanent zombie accounts |
 | 11 | **High** | Open | Plugins / Isolation | `PluginIsolationWebview` is non-functional in both dev (`<StrictMode>` teardown) and release builds (Tauri CSP blocks `srcDoc` inline `<script>`s) |
-| 12 | **High** | Partial | Marketplace / Plugins | Enabled marketplace plugins are never re-registered into the live plugin registry on app restart |
+| 12 | **High** | Fixed | Marketplace / Plugins | Enabled marketplace plugins are never re-registered into the live plugin registry on app restart |
 | 13 | **High** | Fixed | UI / Scripts | `ScriptDialog` crashes React on opening File ▸ Run Script… (conditional `useState` after early `return null`) |
 | 14 | **High** | Fixed | UI / Wizard | `AnalysisWizard` crashes with uncaught `TypeError` on Change Parameters… (`⌘T`) whenever a wizard has 0 questions for the current table |
 | 15 | **High** | Fixed | UI / Analyses | `AnalysisView` Cancel button and elapsed-time/queue display are unreachable dead code while an analysis is running |
@@ -46,15 +47,15 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 | 28 | **High** | Partial | Vector Export (PDF) | PDF vector export corrupts all non-ASCII text (`−`, `R²`, `±`, `µM`, `°C`, `×`) by writing UTF-16BE bytes into single-byte Type1 `Tj` streams |
 | 29 | **High** | Partial | Vector Export (PDF/EPS) | Vector PDF/EPS export silently ignores Plotly CSS `px` units (`font-size`, `stroke-width`, `stroke-dasharray`), erases parent `<g>` opacity, and `grayscaleFigure` rewrites series labels matching CSS color names |
 | 30 | **High** | Fixed | Vector Export (Figures) | Multi-panel Figure vector PDF and EPS exports are shrunk to 75% (`0.75×`) of configured physical dimensions |
-| 31 | **High** | Partial | Graphs (Grouped) | `grouped-bars-scatter` ("Bars with individual points") plots numeric scatter X coordinates on a categorical X axis and duplicates points/legend entries |
+| 31 | **High** | Fixed | Graphs (Grouped) | `grouped-bars-scatter` ("Bars with individual points") plots numeric scatter X coordinates on a categorical X axis and duplicates points/legend entries |
 | 32 | **High** | Open | Graphs (Summary) | Summary tables draw no SEM error bars on `"mean-sem"` tables and drop asymmetric lower error bars (`errorMinus`) on XY summary graphs |
 | 33 | **High** | Open | MCP Server | `titer_read_results` returns stale cached results after table mutations and returns `not_computed` for frozen/orphaned/cloned analyses with saved `cachedResult` |
-| 34 | **High** | Partial | MCP / Param Validation | `validateAnalysisParams` omits 11 per-analysis enum narrowings from `analysis-params-schema.json`, allowing cross-family params that silently run the wrong statistical test or crash R |
+| 34 | **High** | Fixed | MCP / Param Validation | `validateAnalysisParams` omits 11 per-analysis enum narrowings from `analysis-params-schema.json`, allowing cross-family params that silently run the wrong statistical test or crash R |
 | 35 | **High** | Open | XY Graphs / Overlays | `addFittedCurve` draws all-`NaN` curves (no line rendered) for every multi-Y (`params.ys`) and curve-comparison (`params.compareWith`) nonlinear regression |
-| 36 | **High** | Partial | XY Stats (Nonlinear) | Raw-X sigmoidal models (`sigmoidal-4pl-x`, `absolute-ic50-x`, `asymmetric-5pl-x`, `agonist-4pl-normalized-x`) force `Y = Bottom` (or `0`) at `X = 0` in R even when `HillSlope < 0`, corrupting falling-curve fits and disagreeing with TS `evaluate()` |
+| 36 | **High** | Fixed | XY Stats (Nonlinear) | Raw-X sigmoidal models (`sigmoidal-4pl-x`, `absolute-ic50-x`, `asymmetric-5pl-x`, `agonist-4pl-normalized-x`) force `Y = Bottom` (or `0`) at `X = 0` in R even when `HillSlope < 0`, corrupting falling-curve fits and disagreeing with TS `evaluate()` |
 | 37 | **High** | Partial | XY Stats (Nonlinear) | `applyFitOptions` (`transformNlsCall`) silently strips built-in `lower=`/`upper=` bounds on 17+ models whenever weights, fixed params, bounds, or robust/Poisson IRLS are used — and crashes on `logistic-growth` / `gompertz-growth` |
 | 38 | **High** | Fixed | XY Stats (Nonlinear) | Weighted, robust, and Poisson fits on log-Y models (`semilog-y-log`, `log-log-line`, `exponential-growth-log`) compute `R²` by dividing `log(Y)`-scale SS by raw `Y`-scale SST, and Poisson IRLS uses `1/log(Y)` weights |
-| 39 | **High** | Partial | XY Stats (Nonlinear) | `ecAnything` crashes R (`subscript out of bounds`) when `params.ecx` is requested on competition models, and `runGlobalNonlinear` mislabels shared `IC50`/`IC50Hi`/`LogKd` midpoints as `"EC50"` |
+| 39 | **High** | Fixed | XY Stats (Nonlinear) | `ecAnything` crashes R (`subscript out of bounds`) when `params.ecx` is requested on competition models, and `runGlobalNonlinear` mislabels shared `IC50`/`IC50Hi`/`LogKd` midpoints as `"EC50"` |
 | 40 | **High** | Open | XY Stats (User-Defined) | `user-defined.ts` accepts R reserved keywords (`NA`, `Inf`, `NULL`, `TRUE`, `for`, `in`, …) causing R syntax errors, and naming a parameter `HillSlope` causes the fitted curve overlay to render nothing (all `NaN`) |
 | 41 | **High** | Open | Multiple Stats | Multiple Linear Regression (`multiple-regression.ts`) miscomputes VIFs, crashes with R syntax error when only categorical predictors are present, and passes raw unaligned columns to `describe()` |
 | 42 | **High** | Fixed | Grouped Stats | Three-way ANOVA Games–Howell post-hoc crashes R (`object 'Infinity' not found`) when compared cells have zero variance (identical replicates) |
@@ -63,15 +64,15 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 | 45 | **Medium** | Open | Cloud Auth (Box) | Box OAuth loopback flow has bind-after-open race, aborts on single non-callback socket, blocks Tokio worker, and leaks thread/port on timeout |
 | 46 | **Medium** | Open | Auto-Updater | Auto-updater `download_update` and `apply_update` block the macOS main thread and accept arbitrary HTTPS URLs / unverified bundles |
 | 47 | **Medium** | Open | MCP Server | Failed `titer_open_project`, `titer_import_prism`, `titer_create_project`, and `titer_cloud_download` leak a blank window and hijack `last_published` |
-| 48 | **Medium** | Open | Export / Paths | Export tools fail with `"Titer can't access <path>"` whenever the output filename contains a dot (e.g. `Fig 1.2`) or on Windows paths with a dot in a parent directory |
-| 49 | **Medium** | Partial | MCP Schema | `analysis-params-schema.json` omits `"none"` from `posthoc` enum for `nested-anova`/`multifactor-anova`, marks defaulted params required for `two-way-anova`/`rm-anova`, and duplicates `"xy"` in `nonlinear-regression.offered_on` |
+| 48 | **Medium** | Fixed | Export / Paths | Export tools fail with `"Titer can't access <path>"` whenever the output filename contains a dot (e.g. `Fig 1.2`) or on Windows paths with a dot in a parent directory |
+| 49 | **Medium** | Fixed | MCP Schema | `analysis-params-schema.json` omits `"none"` from `posthoc` enum for `nested-anova`/`multifactor-anova`, marks defaulted params required for `two-way-anova`/`rm-anova`, and duplicates `"xy"` in `nonlinear-regression.offered_on` |
 | 50 | **Medium** | Open | Graphs / Figures Export | `titer_export_all_graphs` and Figure exports omit `deps.run` / `rootOrder`; `buildGraphFigure` diverges from `GraphView` (drops `sourceTableIds`, `frozenData`, `sigAnalysisIds`, number/date formatting) |
 | 51 | **Medium** | Open | XY Graphs / Overlays | Replicate XY tables break `deming-overlay.ts` & `binding-curve.ts` overlays; `addLogisticCurve` queries three nonexistent stat labels (always displaying `—`) |
 | 52 | **Medium** | Open | Store / Transforms | Renaming a column/group blanks dependent `% of control` transformed tables, edits overwrite frozen transformed tables, and `followTable` misses newly added column-name fields |
 | 53 | **Medium** | Open | Tables / CalcVars | `permuteColumns`, `dropColumns`, and `removeCalculatedVariable` corrupt or leak `cellBackgrounds`, `linkedPaste`, `calculated`, `decimals`, `variableTypes`, `labelVariable`, and `levelOrder` |
-| 54 | **Medium** | Partial | Data Grid / Clipboard | Copying cells in Titer and pasting via Paste Special (default options) inserts a spurious column-header row |
+| 54 | **Medium** | Fixed | Data Grid / Clipboard | Copying cells in Titer and pasting via Paste Special (default options) inserts a spurious column-header row |
 | 55 | **Medium** | Fixed | Prism `.pzfx` Import | `.pzfx` XML parser scrambles mixed-content `<Title>`/`<d>` tags (`H<Sub>2</Sub>O` → `"HO2"`), drops `<Font>`-wrapped `<Info>` text, double-decodes CDATA, and matches closing-tag prefixes |
-| 56 | **Medium** | Partial | Prism Import | Scientific-notation comma-decimal numbers (e.g. `"4,096e+007"`, `"1,5e-3"`) are not normalized in `.pzfx` or `.prism` import and are silently dropped as non-numeric text |
+| 56 | **Medium** | Fixed | Prism Import | Scientific-notation comma-decimal numbers (e.g. `"4,096e+007"`, `"1,5e-3"`) are not normalized in `.pzfx` or `.prism` import and are silently dropped as non-numeric text |
 | 57 | **Medium** | Open | Prism Scripts | `prism-script.ts`: `DuplicateDataTable Clear` leaks phantom exclusions, `Import` at `row = 0` drops first CSV row, Survival tables mis-index Y columns by 1, `ExportTable All` without `SetPath` targets `/`, and script table mutations leave calculated variables & transformed tables stale |
 | 58 | **Medium** | Open | Prism Graph Regen | `applyRegenDecisions` mutates the project before validating later decisions (creating duplicate graphs on retry), and `mapSidecarGraph` ignores summary formats on grouped `.prism` tables |
 | 59 | **Medium** | Open | Multi-Table Graphs | `mergeGraphTables` skips the `summaryFormat` mismatch check for XY tables and silently drops extra Nested tables whose name contains `:` |
@@ -83,36 +84,50 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 | 65 | **Low** | Open | UI / Menus | UI/menu minor defects: duplicate Grubbs' `"Outliers by column"` table, duplicate `Edit ▸ Fill Down` menu item (first lacks `!activeTableFrozen`), `CmdOrCtrl+Alt+I` shortcut collision (`New Info Sheet…` vs `Inspector`), and stale `Change Parameters…` enabled state |
 | 66 | **Low** | Fixed | WebR / Survival | WebR / survival edge cases: `ensurePackages` doubles caller `timeoutMs` on claim timeout; `survival-analysis.ts` computes 2-group HR on `k ≥ 3` and returns `—` without explanation on disjoint risk sets |
 | 67 | **Low** | Fixed | Nested Tables (R1 #28) | [Carryover from Round 1 #28] Pasting wide data into a Nested table silently drops overflow columns without showing the `"Some Values Weren't Pasted"` notice (`columnsBeyond` omits `isNested(data)`) |
-| 68 | **High** | Open | Native Clipboard | `copy_pdf_to_clipboard` puts two separate `NSPasteboardItem`s on the macOS clipboard instead of one multi-flavour item |
-| 69 | **High** | Open | UI / What's New | `WhatsNewDialog` auto-closes itself 2 seconds after opening via Help ▸ What's New |
-| 70 | **High** | Open | Error Reporting | Independent error-report sharing (`CrashReportDialog` / `try_send_error_entry`) never sends when feedback sharing is off |
-| 71 | **High** | Open | UI / Startup Guide | `StartupGuideDialog`'s `mailto:smit@muse.ai` support link is silently blocked by Tauri's `.on_navigation` policy |
-| 72 | **High** | Open | Error Reporting | Startup flush race and permanent unsent-duplicate loop in `CrashReportDialog` / `main.tsx` / `mcp_flush_error_log` |
-| 73 | **Medium** | Open | Figures / Freeze | Freezing or re-freezing a graph overrides the snapshot of a previously frozen Figure |
-| 74 | **Medium** | Open | UI / Analyses | macOS native `NSProgressIndicator` spinner overlaps the `Running…` text and `Cancel` button in `AnalysisView` |
-| 75 | **Medium** | Open | Native Clipboard | `copy_pdf_to_clipboard` JXA `if (!pdfData)` / `if (!pngData)` checks are dead code, wiping the user's clipboard on read failure |
-| 76 | **Medium** | Open | Feedback / Privacy | `SendFeedbackDialog` and `AiConnectionsDialog` drop server/network errors and falsely claim "Sharing is off"; `mcp_send_feedback` sends `project_file` + `recent_activity` |
-| 77 | **Medium** | Open | UI / Modals | `StartupGuideDialog`'s global `window` keydown handler hijacks `Enter` and `Escape` from top-layer `<dialog>` modals (including `SendFeedbackDialog`) |
-| 78 | **Medium** | Open | Native Menu | Windowless Help menu exposes Help ▸ Send Feedback and Help ▸ What's New as enabled dead no-ops |
-| 79 | **Medium** | Open | UI / Startup Guide | `StartupGuideDialog` auto-show omits `!openedFile.current` and pops over opened `.pzt` templates, Sample Project, and slow/failed file launches |
-| 80 | **Medium** | Open | Math / Distributions | `noncentralTCdf` (`logWeights` path) silently returns `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447` |
-| 81 | **Low** | Open | Native IPC | `send_to_keynote_blocking` / `applescript_number` lacks `.is_finite()` / upper-bound checks and can emit invalid AppleScript `inf` or `0` |
-| 82 | **High** | New | Graphs / Labels | `formatFigureLabels` HTML-escapes `<br>` and `<b>` across graph overlays, tooltips, and survival tables |
-| 83 | **High** | New | Graphs / Security | `formatLabelForPlotly` double-escapes `&`, `<`, `>`, `\^`, `\_` in `buildGraphFigure` and allows HTML-escaping bypass (XSS) via `<sup>`/`<sub>` |
-| 84 | **High** | New | Vector Export (PDF/EPS) | `vector-export.ts` `textRuns` splits single-line Plotly `<sup>`/`<sub>` `<text>` into separate lines, breaking `middle`/`end` alignment |
-| 85 | **High** | New | XY Stats (Nonlinear) | `ecAnything` for `homologous-competition-logx` uses inverted `(100 - f) / f`, computing `IC(100-F)` labeled as `IC{F}` |
-| 86 | **High** | New | XY Stats (Nonlinear) | Sign-aware `X = 0` guard `ifelse(HillSlope<0, Top, Bottom)` truncates unshared `Top[g]`/`Bottom[g]` to length 1 in global fits |
-| 87 | **High** | New | Server / Reliability | `feedback-server` `DedupeSet` has permanent `in_flight` leak on client disconnect, two-mutex TOCTOU race, and `Notify` lost wakeup |
-| 88 | **High** | New | MCP Bridge | `mcp-bridge` `seq 540` session recovery fails on port-change restart, fails on rotated-token restart, and permanently wedges on transient failure |
-| 89 | **High** | New | WebR / Concurrency | `webr.ts` P-12 claim-stamp matching uses a 5-second fuzzy window and never clears `claimStamps` on install/reset/release |
-| 90 | **High** | New | WebR / Concurrency | `webr.ts` `ensurePackages` resolves as success while packages are still `"loading"` when an evicted joined batch settles after a retry started |
-| 91 | **Medium** | New | Graphs / Labels | `formatFigureLabels` rewrites `layout.annotations[i].name`, breaking point-label drag repositioning and leaking phantom keys into `graphOptions.points` |
-| 92 | **Medium** | New | Graphs (Grouped) | `buildGroupedBars` breaks `groupLayout: "superimposed"` when `showPoints: true`, misaligning bars with significance overlays |
-| 93 | **Medium** | New | MCP Server | `TiterMcpServer::get_info()` never advertises `capabilities.tools.listChanged: true` and `mcp_set_enabled(false)` never clears `inner.peers` |
-| 94 | **Medium** | New | MCP Server | `reapply_antigravity_entry_if_connected` silently overwrites custom/remote `"titer"` entries in `~/.gemini/config/mcp_config.json` on every launch |
-| 95 | **Medium** | New | Tabular Import | `parseXlsx` skips self-closing `<si/>` (and `<si ...>` with attributes) in `sharedStrings.xml`, shifting all subsequent cell strings off by 1, and concatenates `<rPh>` phonetic runs |
-| 96 | **Medium** | New | WebR / Concurrency | `webr.ts` `resolveInEngine` fires an unconditional `releaseClaimCode(pending)` on claim timeout (`codes === null`), risking wiping another window's live claim |
-| 97 | **Low** | New | Graphs / Tables Labels | `labelRuns` splits Unicode minus (`10^−6` → `10<sup>−</sup>6`) and collapses consecutive `_` runs (`ctrl_1_a` → `ctrl<sub>1a</sub>`) |
+| 68 | **High** | Fixed | Native Clipboard | `copy_pdf_to_clipboard` puts two separate `NSPasteboardItem`s on the macOS clipboard instead of one multi-flavour item |
+| 69 | **High** | Fixed | UI / What's New | `WhatsNewDialog` auto-closes itself 2 seconds after opening via Help ▸ What's New |
+| 70 | **High** | Fixed | Error Reporting | Independent error-report sharing (`CrashReportDialog` / `try_send_error_entry`) never sends when feedback sharing is off |
+| 71 | **High** | Fixed | UI / Startup Guide | `StartupGuideDialog`'s `mailto:smit@muse.ai` support link is silently blocked by Tauri's `.on_navigation` policy |
+| 72 | **High** | Partial | Error Reporting | Startup flush race and permanent unsent-duplicate loop in `CrashReportDialog` / `main.tsx` / `mcp_flush_error_log` |
+| 73 | **Medium** | Partial | Figures / Freeze | Freezing or re-freezing a graph overrides the snapshot of a previously frozen Figure |
+| 74 | **Medium** | Fixed | UI / Analyses | macOS native `NSProgressIndicator` spinner overlaps the `Running…` text and `Cancel` button in `AnalysisView` |
+| 75 | **Medium** | Fixed | Native Clipboard | `copy_pdf_to_clipboard` JXA `if (!pdfData)` / `if (!pngData)` checks are dead code, wiping the user's clipboard on read failure |
+| 76 | **Medium** | Fixed | Feedback / Privacy | `SendFeedbackDialog` and `AiConnectionsDialog` drop server/network errors and falsely claim "Sharing is off"; `mcp_send_feedback` sends `project_file` + `recent_activity` |
+| 77 | **Medium** | Fixed | UI / Modals | `StartupGuideDialog`'s global `window` keydown handler hijacks `Enter` and `Escape` from top-layer `<dialog>` modals (including `SendFeedbackDialog`) |
+| 78 | **Medium** | Fixed | Native Menu | Windowless Help menu exposes Help ▸ Send Feedback and Help ▸ What's New as enabled dead no-ops |
+| 79 | **Medium** | Fixed | UI / Startup Guide | `StartupGuideDialog` auto-show omits `!openedFile.current` and pops over opened `.pzt` templates, Sample Project, and slow/failed file launches |
+| 80 | **Medium** | Partial | Math / Distributions | `noncentralTCdf` (`logWeights` path) silently returns `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447` |
+| 81 | **Low** | Fixed | Native IPC | `send_to_keynote_blocking` / `applescript_number` lacks `.is_finite()` / upper-bound checks and can emit invalid AppleScript `inf` or `0` |
+| 82 | **High** | Partial | Graphs / Labels | `formatFigureLabels` HTML-escapes `<br>` and `<b>` across graph overlays, tooltips, and survival tables |
+| 83 | **High** | Fixed | Graphs / Security | `formatLabelForPlotly` double-escapes `&`, `<`, `>`, `\^`, `\_` in `buildGraphFigure` and allows HTML-escaping bypass (XSS) via `<sup>`/`<sub>` |
+| 84 | **High** | Fixed | Vector Export (PDF/EPS) | `vector-export.ts` `textRuns` splits single-line Plotly `<sup>`/`<sub>` `<text>` into separate lines, breaking `middle`/`end` alignment |
+| 85 | **High** | Fixed | XY Stats (Nonlinear) | `ecAnything` for `homologous-competition-logx` uses inverted `(100 - f) / f`, computing `IC(100-F)` labeled as `IC{F}` |
+| 86 | **High** | Fixed | XY Stats (Nonlinear) | Sign-aware `X = 0` guard `ifelse(HillSlope<0, Top, Bottom)` truncates unshared `Top[g]`/`Bottom[g]` to length 1 in global fits |
+| 87 | **High** | Fixed | Server / Reliability | `feedback-server` `DedupeSet` has permanent `in_flight` leak on client disconnect, two-mutex TOCTOU race, and `Notify` lost wakeup |
+| 88 | **High** | Fixed | MCP Bridge | `mcp-bridge` `seq 540` session recovery fails on port-change restart, fails on rotated-token restart, and permanently wedges on transient failure |
+| 89 | **High** | Partial | WebR / Concurrency | `webr.ts` P-12 claim-stamp matching uses a 5-second fuzzy window and never clears `claimStamps` on install/reset/release |
+| 90 | **High** | Partial | WebR / Concurrency | `webr.ts` `ensurePackages` resolves as success while packages are still `"loading"` when an evicted joined batch settles after a retry started |
+| 91 | **Medium** | Fixed | Graphs / Labels | `formatFigureLabels` rewrites `layout.annotations[i].name`, breaking point-label drag repositioning and leaking phantom keys into `graphOptions.points` |
+| 92 | **Medium** | Fixed | Graphs (Grouped) | `buildGroupedBars` breaks `groupLayout: "superimposed"` when `showPoints: true`, misaligning bars with significance overlays |
+| 93 | **Medium** | Fixed | MCP Server | `TiterMcpServer::get_info()` never advertises `capabilities.tools.listChanged: true` and `mcp_set_enabled(false)` never clears `inner.peers` |
+| 94 | **Medium** | Fixed | MCP Server | `reapply_antigravity_entry_if_connected` silently overwrites custom/remote `"titer"` entries in `~/.gemini/config/mcp_config.json` on every launch |
+| 95 | **Medium** | Partial | Tabular Import | `parseXlsx` skips self-closing `<si/>` (and `<si ...>` with attributes) in `sharedStrings.xml`, shifting all subsequent cell strings off by 1, and concatenates `<rPh>` phonetic runs |
+| 96 | **Medium** | Fixed | WebR / Concurrency | `webr.ts` `resolveInEngine` fires an unconditional `releaseClaimCode(pending)` on claim timeout (`codes === null`), risking wiping another window's live claim |
+| 97 | **Low** | Fixed | Graphs / Tables Labels | `labelRuns` splits Unicode minus (`10^−6` → `10<sup>−</sup>6`) and collapses consecutive `_` runs (`ctrl_1_a` → `ctrl<sub>1a</sub>`) |
+| 98 | **High** | New | Native IPC / Security | `open_file` IPC permits arbitrary executable launch (no extension allowlist), Windows `cmd /C start` shell injection, and macOS `open` flag injection |
+| 99 | **High** | New | Data Grid / Tables | `pasteNames` (upstream 1.1.1) corrupts Nested tables (`isNested` omitted), drops column metadata/calculated formulas, and cross-renames lead/group collisions |
+| 100 | **High** | New | Graphs / Format Panel | Upstream 1.1.1 `axisKind` is not wired into `FormatPanel`: `rowsAt: "values"` and `histogram`/`qq-plot` lose X controls, `grouped-stacked`/`residuals` offer dead Log controls, `grouped-hbars` mislabels value axis as `"Y"`, and `scree-plot`/`dendrogram` misdeclare `XY_AXES` |
+| 101 | **High** | New | Graphs (Horizontal Bars) | Point labels on Horizontal Bars (`grouped-hbars`) with Log scale transform `y` instead of `x`, placing labels at `10^v` off-canvas and `NaN` on row 0 |
+| 102 | **High** | New | Column Stats (ANOVA) | `2db68ed1` ANOVA 13-digit centering missed `TukeyHSD` (making Tukey P values contradict centered Tukey CIs), plus Welch, Brown-Forsythe, linear trend, and post-hoc diffs |
+| 103 | **Medium** | New | XY Stats (Linear) | `2db68ed1` linear-regression centering missed `compare-slopes.ts`, `report/checks.ts`, and `regression-overlay.ts` (crashes or inflates graph CI bands on 13-digit data) |
+| 104 | **Medium** | New | Graphs (Grouped) | `valueXAxis` drops `options.gridX`, silently disabling X gridlines on Connected Lines with `rowsAt: "values"` |
+| 105 | **Medium** | New | UI / What's New | `isNewer` and `seenVersion` invert semver pre-release ordering (`2.0.2-rc.1 > 2.0.2`) and reject pre-release / uppercase-`V` seen strings |
+| 106 | **Medium** | New | Native Clipboard | `clipboard_text` (macOS) passes unchecked nullable `UTF8String` pointer to `CStr::from_ptr` in `unsafe` |
+| 107 | **Medium** | New | Math / Distributions | `noncentralTCdf` overflows `tt * tt` for `|t| ≥ 1.34e154` (returning `normalCdf(-delta)` instead of `1`/`0`) and `noncentralTTwinSeriesModeCentered` breaks at `|δ| ≥ 1e6` / large `df + δ` |
+| 108 | **Low** | New | UI / What's New | `WhatsNewDialog` `close()` unconditionally overwrites `titer.whats-new-seen` with the running version, regressing the seen marker after a downgrade |
+| 109 | **Low** | New | UI / Import | `openSourceFile` discards the specific Rust error string returned by `open_file` (`err instanceof Error` is `false` for Tauri string rejections) |
+| 110 | **Low** | New | Graphs / Ticks | `fitLabels` produces `dtick: NaN` on coincident adjacent ticks (`at[1] === at[0]`), and `graph-view.tsx` checks `!current` after `Plotly.relayout` instead of immediately after `Plotly.react` |
+| 111 | **Low** | New | XY Graphs / Overlays | `fitted-curve.ts` `x === 0` guard misses 4 other R-guarded raw-X ratio models (`agonist-3pl-x`, `agonist-3pl-normalized-x`, `biphasic-x`, `bell-shaped-x`) and `asymmetric-5pl-x` underflow at tiny `HillSlope` |
 
 ---
 
@@ -120,8 +135,8 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 1 [PARTIALLY FIXED]: Unrestricted AppleScript execution (RCE), arbitrary file deletion, and ungated file moves in new shell IPC commands
 - **Severity**: High
-- **Status**: Partially Fixed at `b8a2528` (core AppleScript RCE and ungated `move_file` closed)
-- **Remaining at `b8a2528`**: `canonicalize_in_temp_dir` (`src-tauri/src/main.rs:573-581`) runs `check_extension(path, allowed)?` *before* `Path::new(path).canonicalize()` and never re-checks the extension on `canonical`. A `*.png`/`*.pdf` symlink in shared `$TMPDIR` targeting a non-image file in `$TMPDIR` passes validation, is read, and is deleted (`fs::remove_file`), and any other app's `.png`/`.pdf` in shared `$TMPDIR` can be read/deleted via IPC.
+- **Status**: Partially Fixed at `d4b45130` (`canonicalize_in_temp_dir` at `src-tauri/src/main.rs:613` now re-checks `check_extension(canonical, allowed)`)
+- **Remaining at `d4b45130`**: `canonicalize_in_temp_dir` (`src-tauri/src/main.rs:604-615`) still confines `canonical` only to shared `std::env::temp_dir()` and follows symlinks instead of rejecting them, letting webview IPC read and delete arbitrary other-app `.png`/`.pdf` files (or symlink targets) in `$TMPDIR`.
 - **Files**:
   - `src-tauri/src/main.rs:671-700` (`move_file`, `move_file_blocking`)
   - `src-tauri/src/main.rs:714-759` (`send_to_keynote`, `send_to_keynote_blocking`)
@@ -269,10 +284,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 8 [PARTIALLY FIXED]: Feedback server global rate limit can be exhausted by a single per-IP blocked attacker, plus unbounded rate-limiter maps and dedupe TOCTOU race
+### Issue 8 [FIXED]: Feedback server global rate limit can be exhausted by a single per-IP blocked attacker, plus unbounded rate-limiter maps and dedupe TOCTOU race
 - **Severity**: High
-- **Status**: Partially Fixed at `8c877d8` (global-before-per-IP drain and unbounded rate-limiter maps fixed in `feedback-server/src/lib.rs:79-84, 243-293` and `broker/src/lib.rs:60-65, 163-177`)
-- **Remaining at `8c877d8`**: New `DedupeSet` (`feedback-server/src/lib.rs:336-397, 677-741`) introduces a permanent `in_flight` leak on disconnect, a two-mutex TOCTOU race, and a `Notify` lost wakeup (tracked as new Issue `#87`).
+- **Status**: Fixed at `d4b45130` (`feedback-server/src/lib.rs:350-478, 775-840` unifies `DedupeSet` under a single `Mutex<DedupeState>` with RAII `InFlightGuard` and pre-registered `OwnedNotified`, closing the remaining dedupe gap alongside `#87`)
 - **Files**:
   - `feedback-server/src/lib.rs:156-226` (`RateLimiter::check`)
   - `feedback-server/src/lib.rs:545-565` (`submit_feedback` dedupe check)
@@ -345,10 +359,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 12 [PARTIALLY FIXED]: Enabled marketplace plugins are never re-registered into the live plugin registry on app restart
+### Issue 12 [FIXED]: Enabled marketplace plugins are never re-registered into the live plugin registry on app restart
 - **Severity**: High
-- **Status**: Partially Fixed at `b8a2528` (`rehydrateEnabledPlugin` added in `src/plugins/loader.ts:266-282` and called from `src/main.tsx:48` / `src/marketplace/store.ts:92-99`)
-- **Remaining at `b8a2528`**: (1) `src/main.tsx:48` fires `void getMarketplaceStore()` without awaiting it before mounting `<AppShell />`, so a restored plugin analysis sheet or early MCP call races `import()` + `appVersion()` and permanently renders `"Unknown plugin analysis: plugin:..."` (`src/views/analyses/use-analysis.ts:114-122`, `src/store/mcp-dispatch.ts:961-1027`); (2) `MarketplaceStore.loadInstalled()` skips `record.status !== "enabled"`, leaving `"incompatible"` plugins permanently stuck after an app upgrade; (3) `getMarketplaceStore()` (`src/marketplace/wiring.ts:19-25`) caches a rejected `storePromise` forever on transient startup failure.
+- **Status**: Fixed at `d4b45130` (`src/main.tsx:54-71` awaits `getMarketplaceStore()` before mount; `src/marketplace/store.ts:99-111` rechecks `"incompatible"` records on upgrade; `src/marketplace/wiring.ts:22-35` drops rejected `storePromise` on error)
 - **Files**:
   - `src/marketplace/store.ts:76-90`
   - `src/marketplace/wiring.ts:22-52`
@@ -439,8 +452,8 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 17 [PARTIALLY FIXED]: Freezing a graph does not freeze it — `mergedGraphData` always reads live `parent.data` and overrides `frozenData`
 - **Severity**: High
-- **Status**: Partially Fixed at `b8a2528` (single-table frozen graphs now read `graph.frozenData` in `src/lib/multi-table.ts:87`, `src/views/graphs/graph-view.tsx:90, 167`, `src/views/figures/panel-figure.ts:42`, and `src/views/graphs/graph-figure.ts:193, 361`; see also regression Issue #73)
-- **Remaining at `b8a2528`**: (1) Multi-table frozen graphs (`graph.sourceTableIds`) do not snapshot extra tables in `setGraphFrozen` (`src/store/use-project-store.tsx:749-754`) and `mergedGraphData` (`src/lib/multi-table.ts:84-86, 90-105`) still reads live `table.data` for secondary tables; (2) significance-bracket overlays in `GraphView` (`src/views/graphs/graph-view.tsx:429-438`) still pass live `nodes[a.parentId]?.data` even when `a.parentId === node.parentId` on a frozen graph.
+- **Status**: Partially Fixed at `d4b45130` (`setGraphFrozen` snapshots extra `sourceTableIds` into `frozenDataByTable` at `src/store/use-project-store.tsx:757-763`, `mergedGraphData` reads `graph.frozenDataByTable` at `src/lib/multi-table.ts:106`, and `GraphView` uses `overlayAnalysisData` at `src/views/graphs/graph-view.tsx:452`)
+- **Remaining at `d4b45130`**: (1) `buildGraphFigure` (`src/views/graphs/graph-figure.ts:194-200, 367, 424`) still reads `parent.data`/`graph.frozenData` directly rather than `mergedGraphData` and `overlayAnalysisData` (already open under `#50`); (2) `#20` still causes saved frozen graphs (including `frozenDataByTable`) to reopen `updated: true`; (3) removing an extra source table does not prune stale table IDs from `frozenDataByTable`.
 - **Files**:
   - `src/lib/multi-table.ts:76-101` (`mergedGraphData`)
   - `src/views/graphs/graph-view.tsx:89-90, 140, 160-166`
@@ -681,10 +694,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 31 [PARTIALLY FIXED]: `grouped-bars-scatter` ("Bars with individual points") plots numeric scatter X coordinates on a categorical X axis and duplicates points/legend entries
+### Issue 31 [FIXED]: `grouped-bars-scatter` ("Bars with individual points") plots numeric scatter X coordinates on a categorical X axis and duplicates points/legend entries
 - **Severity**: High
-- **Status**: Partially Fixed at `8c877d8` (duplicate points when `showPoints: true` and duplicate legend entries fixed in `78aad76` at `src/views/graphs/grouped-common.ts:203, 239`)
-- **Remaining at `8c877d8`**: Default `showPoints: false` still appends float scatter X coordinates onto `xaxis: { type: "category" }` (`src/views/graphs/grouped-common.ts:201, 211-241`). (See also `groupLayout: "superimposed"` regression in new Issue `#92`.)
+- **Status**: Fixed at `d4b45130` (`buildGroupedBarsScatter` at `src/views/graphs/grouped-common.ts:229-237` delegates directly to `buildGroupedBars` with `showPoints: true` on the numeric bar axis, alongside `#92`)
 - **Files**:
   - `src/views/graphs/grouped-common.ts:60-64, 171-213` (`buildGroupedBars`, `buildGroupedBarsScatter`)
   - `src/views/graphs/grouped-bars-scatter.ts:6-14`
@@ -733,10 +745,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 34 [PARTIALLY FIXED]: `validateAnalysisParams` omits 11 per-analysis enum narrowings from `analysis-params-schema.json`, allowing cross-family params that silently run the wrong statistical test or crash R
+### Issue 34 [FIXED]: `validateAnalysisParams` omits 11 per-analysis enum narrowings from `analysis-params-schema.json`, allowing cross-family params that silently run the wrong statistical test or crash R
 - **Severity**: High
-- **Status**: Partially Fixed at `b8a2528` (15 enum narrowings added to `PARAM_CHOICES` in `src/lib/project-file.ts:996-1029`; runtime guards added in `chi-square.ts:40-43`, `shapiro-wilk.ts:74-77`, and `rm-anova.ts:30-39`)
-- **Remaining at `b8a2528`**: `spline-lowess.method` and `transform-data.xFunction` (`scripts/generate-analysis-params-schema.py:111, 147-148`) are still omitted from `PARAM_CHOICES` (`src/lib/project-file.ts:982-1030`), and direct calls to `runMonteCarlo` (`src/stats/simulation/monte-carlo.ts:124, 334`) or `runMixedModel` (`src/stats/column/mixed-model.ts:90-97`) still lack enum validation.
+- **Status**: Fixed at `d4b45130` (100% key parity between `ENUM_OVERRIDES` in `scripts/generate-analysis-params-schema.py:102-151` and `PARAM_CHOICES` in `src/lib/project-file.ts:986-1050`; runtime enum guards added in `src/stats/simulation/monte-carlo.ts:203-206` and `src/stats/column/mixed-model.ts:94-109`)
 - **Files**:
   - `src/lib/project-file.ts:980-991, 1441-1451` (`PARAM_CHOICES`, `validateAnalysisParams`)
   - `scripts/generate-analysis-params-schema.py:102-144` (`ENUM_OVERRIDES`)
@@ -774,10 +785,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 36 [PARTIALLY FIXED]: Raw-X sigmoidal models (`sigmoidal-4pl-x`, `absolute-ic50-x`, `asymmetric-5pl-x`, `agonist-4pl-normalized-x`) force `Y = Bottom` (or `0`) at `X = 0` in R even when `HillSlope < 0`, corrupting falling-curve fits and disagreeing with TS `evaluate()`
+### Issue 36 [FIXED]: Raw-X sigmoidal models (`sigmoidal-4pl-x`, `absolute-ic50-x`, `asymmetric-5pl-x`, `agonist-4pl-normalized-x`) force `Y = Bottom` (or `0`) at `X = 0` in R even when `HillSlope < 0`, corrupting falling-curve fits and disagreeing with TS `evaluate()`
 - **Severity**: High
-- **Status**: Partially Fixed at `8c877d8` (R `x == 0` guards made sign-aware via `ifelse(HillSlope<0, ...)`)
-- **Remaining at `8c877d8`**: `src/views/graphs/fitted-curve.ts` still lacks an explicit `x === 0` guard when `EC50 <= 0`, and `ifelse(HillSlope<0, Top, Bottom)` truncates unshared `Top[g]`/`Bottom[g]` in global fits (tracked as new Issue `#86`).
+- **Status**: Fixed at `d4b45130` (length-safe R guards `Bottom+(Top-Bottom)*ifelse(HillSlope<0,1,0)` in `src/stats/xy/nonlinear-fit.ts:425, 891, 1390`, and explicit `x === 0` `EC50 <= 0` guards for all 4 raw-X sigmoidal models in `src/views/graphs/fitted-curve.ts:58-64`; minor adjacent gap on other raw-X ratio models tracked in `#111`)
 - **Files**:
   - `src/stats/xy/nonlinear-fit.ts:379, 391, 658, 676, 853-875, 1143, 1158, 1342-1356`
   - `src/views/graphs/fitted-curve.ts:63-64, 85-86, 137-138, 174-175`
@@ -827,10 +837,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 39 [PARTIALLY FIXED]: `ecAnything` crashes R (`subscript out of bounds`) when `params.ecx` is requested on competition models, and `runGlobalNonlinear` mislabels shared `IC50`/`IC50Hi`/`LogKd` midpoints as `"EC50"`
+### Issue 39 [FIXED]: `ecAnything` crashes R (`subscript out of bounds`) when `params.ecx` is requested on competition models, and `runGlobalNonlinear` mislabels shared `IC50`/`IC50Hi`/`LogKd` midpoints as `"EC50"`
 - **Severity**: High
-- **Status**: Partially Fixed at `8c877d8` (two-site competition `ecx` refusal and `midpointLabel` mapping fixed)
-- **Remaining at `8c877d8`**: `ecAnything` for `homologous-competition-logx` (`src/stats/xy/nonlinear-fit.ts:282`) uses an inverted `(100 - f) / f` formula (tracked as new Issue `#85`).
+- **Status**: Fixed at `d4b45130` (`src/stats/xy/nonlinear-fit.ts:283` fixes `homologous-competition-logx` `ecAnything` to `log10(f/(100-f))` alongside `#85`)
 - **Files**:
   - `src/stats/xy/nonlinear-fit.ts:263-284, 1841, 1876, 1919`
   - `src/stats/xy/nonlinear-regression.ts:1940-1954, 2004-2011, 2203-2208`
@@ -957,8 +966,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 48: Export tools fail with `"Titer can't access <path>"` whenever the output filename contains a dot (e.g. `Fig 1.2`) or on Windows paths with a dot in a parent directory
+### Issue 48 [FIXED]: Export tools fail with `"Titer can't access <path>"` whenever the output filename contains a dot (e.g. `Fig 1.2`) or on Windows paths with a dot in a parent directory
 - **Severity**: Medium
+- **Status**: Fixed at `d4b45130` (`src-tauri/src/mcp.rs:10181-10197` and `src/native.ts:129-151` split on `/` and `\` and check recognized export extensions)
 - **Files**:
   - `src-tauri/src/mcp.rs:9340` (`ensure_export_extension`)
   - `src/native.ts:131-135` (`ensureSaveExtension`)
@@ -970,10 +980,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 49 [PARTIALLY FIXED]: `analysis-params-schema.json` omits `"none"` from `posthoc` enum for `nested-anova`/`multifactor-anova`, marks defaulted params required for `two-way-anova`/`rm-anova`, and duplicates `"xy"` in `nonlinear-regression.offered_on`
+### Issue 49 [FIXED]: `analysis-params-schema.json` omits `"none"` from `posthoc` enum for `nested-anova`/`multifactor-anova`, marks defaulted params required for `two-way-anova`/`rm-anova`, and duplicates `"xy"` in `nonlinear-regression.offered_on`
 - **Severity**: Medium
-- **Status**: Partially Fixed at `b8a2528` (`"none"` added for `nested-anova`/`multifactor-anova` `posthoc`, `rm-anova.posthoc` & `two-way-anova.{posthoc,posthocTarget}` defaulted, and `nonlinear-regression.offered_on` deduplicated)
-- **Remaining at `b8a2528`**: `two-way-anova.params.design` (`src-tauri/src/analysis-params-schema.json:3405-3413`) is still marked `"required": true` with no `"default"` because `scripts/generate-analysis-params-schema.py:492-493` omitted `("two-way-anova", "design"): "ordinary"`.
+- **Status**: Fixed at `d4b45130` (`two-way-anova.design` now has `default: "ordinary", required: false` in `scripts/generate-analysis-params-schema.py:495` and `src-tauri/src/analysis-params-schema.json:3412-3413`)
 - **Files**:
   - `scripts/generate-analysis-params-schema.py:124-125, 494-505`
   - `src-tauri/src/analysis-params-schema.json:1385-1390, 1524-1529, 1563-1567, 2663-2674, 3260-3296`
@@ -1040,10 +1049,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 54 [PARTIALLY FIXED]: Copying cells in Titer and pasting via Paste Special (default options) inserts a spurious column-header row
+### Issue 54 [FIXED]: Copying cells in Titer and pasting via Paste Special (default options) inserts a spurious column-header row
 - **Severity**: Medium
-- **Status**: Partially Fixed at `b8a2528` (`parseClipboardHTML` at `src/views/tables/table-data.ts:1397` now strips `<thead>...</thead>`)
-- **Remaining at `b8a2528`**: `decodeHtmlEntities` (`src/views/tables/table-data.ts:1370-1371`) still calls `String.fromCodePoint` without a `<= 0x10ffff` / surrogate check, throwing an uncaught `RangeError` on malformed numeric entities (e.g. `&#9999999;`).
+- **Status**: Fixed at `d4b45130` (`src/views/tables/table-data.ts:1421-1438` `safeCodePoint` guards `<= 0x10ffff` and UTF-16 surrogates `0xd800..0xdfff`)
 - **Files**:
   - `src/views/tables/grid.tsx:506-515, 769-781`
   - `src/views/tables/table-data.ts:1271-1292, 1384-1413`
@@ -1066,10 +1074,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 56 [PARTIALLY FIXED]: Scientific-notation comma-decimal numbers (e.g. `"4,096e+007"`, `"1,5e-3"`) are not normalized in `.pzfx` or `.prism` import and are silently dropped as non-numeric text
+### Issue 56 [FIXED]: Scientific-notation comma-decimal numbers (e.g. `"4,096e+007"`, `"1,5e-3"`) are not normalized in `.pzfx` or `.prism` import and are silently dropped as non-numeric text
 - **Severity**: Medium
-- **Status**: Partially Fixed at `b8a2528` (optional exponent `([eE][+-]?\d+)?` added to `src/lib/pzfx.ts:368`, `src/lib/prism.ts:655`, `src/lib/import-choices.ts:206`, `src/lib/variable-types.ts:20`, and `src/views/tables/table-data.ts:1237`)
-- **Remaining at `b8a2528`**: Optional leading `+` (e.g. `"+1,5e-3"`) is still rejected by `^-?` in `src/lib/pzfx.ts:320, 368`, `src/lib/prism.ts:655`, and `src/views/tables/table-data.ts:1237` (while `src/lib/variable-types.ts:20` classifies it as numeric), and `src/lib/prism.ts:653` `thousandsMode` omits the optional exponent.
+- **Status**: Fixed at `d4b45130` (leading `+` accepted in `src/views/tables/table-data.ts:1293`, `src/lib/pzfx.ts:320,323,326,368`, `src/lib/prism.ts:653,655,796`, and `src/lib/import-choices.ts:212,215`; `src/lib/prism.ts:653,796` `thousandsMode` accepts scientific exponents)
 - **Files**:
   - `src/lib/pzfx.ts:285, 329-334`
   - `src/lib/prism.ts:648-654`
@@ -1169,8 +1176,8 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 63 [PARTIALLY FIXED]: `noncentralTCdf` underflows to `0` at `|δ| ≥ 38.57`, causing t-test power to jump discontinuously to `100%` and `solveN` to underestimate `n` at small `df` / strict `α`
 - **Severity**: Medium
-- **Status**: Partially Fixed at `b8a2528` (`src/stats/distributions.ts:331-385` switches to log-space `logP`/`logQ` for `mu > 700`, fixing `sample-size-power.ts` underflow at `|δ| ≈ 38.57`)
-- **Remaining at `b8a2528`**: The `logWeights` branch introduces a silent cliff to `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447` (tracked as new Issue #80).
+- **Status**: Partially Fixed at `d4b45130` (`src/stats/distributions.ts:335-345` fixes `mu > 700` via mode-centered twin series)
+- **Remaining at `d4b45130`**: `mu <= 700` (`|δ| <= 37.42`) still hits `rxb = Math.pow(1 - x, b)` underflow at large `df` (`src/stats/distributions.ts:355`, e.g. `noncentralTCdf(39, 1e5, 37.4) -> 1.0` vs true `0.9445`); see also `#80` and new Issue `#107`.
 - **Files**:
   - `src/stats/distributions.ts:306-361`
   - `src/stats/sample-size-power.ts:291-306`
@@ -1242,9 +1249,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ## New Issues Found in Recheck at `b8a2528` (#68–#81)
 
-### Issue 68: `copy_pdf_to_clipboard` puts TWO separate `NSPasteboardItem`s on the macOS clipboard instead of one multi-flavour item
+### Issue 68 [FIXED]: `copy_pdf_to_clipboard` puts TWO separate `NSPasteboardItem`s on the macOS clipboard instead of one multi-flavour item
 - **Severity**: High
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Fixed at `d4b45130` (`src-tauri/src/main.rs:1081-1094` writes a single multi-flavour `NSPasteboardItem` carrying `com.adobe.pdf`, `public.pdf`, and `public.png`)
 - **Files**:
   - `src-tauri/src/main.rs:1039-1044` (`copy_pdf_to_clipboard_blocking`)
 - **Explanation**:
@@ -1256,9 +1263,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 69: `WhatsNewDialog` auto-closes itself 2 seconds after opening via **Help ▸ What's New**
+### Issue 69 [FIXED]: `WhatsNewDialog` auto-closes itself 2 seconds after opening via **Help ▸ What's New**
 - **Severity**: High
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Fixed at `d4b45130` (`src/components/whats-new-dialog.tsx:34, 38-41, 57-63` tracks `autoOpened` so manual Help ▸ What's New skips the 2s auto-close timer)
 - **Files**:
   - `src/components/whats-new-dialog.tsx:16-35`
   - `src/lib/whats-new.ts:51-53, 68-74`
@@ -1272,9 +1279,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 70: Independent error-report sharing (`CrashReportDialog` / `try_send_error_entry`) never sends when feedback sharing is off
+### Issue 70 [FIXED]: Independent error-report sharing (`CrashReportDialog` / `try_send_error_entry`) never sends when feedback sharing is off
 - **Severity**: High
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Fixed at `d4b45130` (`src-tauri/src/mcp.rs:1647-1669` gates `try_send_error_entry` solely on `error_log_sharing_enabled` and posts directly; `src/components/ai-connections-dialog.tsx:174-195, 571-578` adds "Send unsent reports")
 - **Files**:
   - `src-tauri/src/mcp.rs:1558-1574, 2510-2525` (`try_send_error_entry`, `feedback_share_result`)
   - `src/components/crash-report-dialog.tsx:79-93, 150-155`
@@ -1289,9 +1296,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 71: `StartupGuideDialog`'s `mailto:smit@muse.ai` support link is silently blocked by Tauri's `.on_navigation` policy
+### Issue 71 [FIXED]: `StartupGuideDialog`'s `mailto:smit@muse.ai` support link is silently blocked by Tauri's `.on_navigation` policy
 - **Severity**: High
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Fixed at `d4b45130` (`src/components/startup-guide-dialog.tsx:108-129` routes native `mailto:` clicks through `openSupportEmail()`; minor keyboard note: `startup-guide-dialog.tsx:54, 67` still checks only `HTMLButtonElement`/`"button"`, skipping the focused `<a>` on `Enter`/`Tab`)
 - **Files**:
   - `src/components/startup-guide-dialog.tsx:99-105`
   - `src/lib/startup-guide.ts:63-67`
@@ -1305,9 +1312,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 72: Startup flush race and permanent unsent-duplicate loop in `CrashReportDialog` / `main.tsx` / `mcp_flush_error_log`
+### Issue 72 [PARTIALLY FIXED]: Startup flush race and permanent unsent-duplicate loop in `CrashReportDialog` / `main.tsx` / `mcp_flush_error_log`
 - **Severity**: High
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Partially Fixed at `d4b45130` (startup flush await in `src/lib/error-log.ts:116-128`, `src/main.tsx:42`, `src/components/crash-report-dialog.tsx:54` and flush-vs-flush `ERROR_LOG_FLUSH_LOCK` in `src-tauri/src/mcp.rs:1718, 1729` fixed)
+- **Remaining at `d4b45130`**: (1) `mcp_log_error` (`src-tauri/src/mcp.rs:1700-1704`) still saves live `ErrorSendOutcome::Duplicate` entries as `sent = false`; (2) lost-update race between `flush_error_log_entries` (`1728-1769`) and `mcp_log_error`/`record_rust_panic` (`1704, 1812`) wipes errors appended during an in-flight flush.
 - **Files**:
   - `src/main.tsx:37-42, 50-57`
   - `src/components/crash-report-dialog.tsx:38-60, 62-77, 150-155`
@@ -1322,9 +1330,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 73: Freezing or re-freezing a graph overrides the snapshot of a previously frozen Figure
+### Issue 73 [PARTIALLY FIXED]: Freezing or re-freezing a graph overrides the snapshot of a previously frozen Figure
 - **Severity**: Medium
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Partially Fixed at `d4b45130` (`frozenFigureNodes` at `src/views/figures/panel-figure.ts:29-42` and `FigureView` at `src/views/figures/figure-view.tsx:211-214, 888-889` prevent on-screen re-frozen graph override)
+- **Remaining at `d4b45130`**: (1) Freezing a Figure containing an already-frozen graph snapshots live `parent.data` (`src/store/use-project-store.tsx:766-771`), immediately overwriting the frozen graph panel on screen; (2) Figure export/copy (`src/views/figures/figure-view.tsx:396, 406, 717` and `src/views/figures/figure-export.ts:142-305`) never calls `frozenFigureNodes(figure, nodes)` and exports live/re-frozen data; (3) multi-table graphs inside frozen Figures do not snapshot `sourceTableIds` and retain live `frozenDataByTable`.
 - **Files**:
   - `src/lib/multi-table.ts:87`
   - `src/views/graphs/graph-figure.ts:193, 361`
@@ -1339,9 +1348,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 74: macOS native `NSProgressIndicator` spinner overlaps the `Running…` text and `Cancel` button in `AnalysisView`
+### Issue 74 [FIXED]: macOS native `NSProgressIndicator` spinner overlaps the `Running…` text and `Cancel` button in `AnalysisView`
 - **Severity**: Medium
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Fixed at `d4b45130` (`src/views/analyses/analysis-view.tsx:45-70` anchors `ref` on a dedicated `h-9 w-9` spacer above text and Cancel)
 - **Files**:
   - `src/views/analyses/analysis-view.tsx:34-66` (`Running`)
   - `src-tauri/src/main.rs:1597-1629` (`set_spinner`)
@@ -1354,9 +1363,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 75: `copy_pdf_to_clipboard` JXA `if (!pdfData)` / `if (!pngData)` checks are dead code, wiping the user's clipboard on read failure
+### Issue 75 [FIXED]: `copy_pdf_to_clipboard` JXA `if (!pdfData)` / `if (!pngData)` checks are dead code, wiping the user's clipboard on read failure
 - **Severity**: Medium
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Fixed at `d4b45130` (`src-tauri/src/main.rs:1084-1088` checks `pdfData.isNil()` / `pngData.isNil()` before `pb.clearContents`)
 - **Files**:
   - `src-tauri/src/main.rs:1033-1038` (`copy_pdf_to_clipboard_blocking`)
 - **Explanation**:
@@ -1368,9 +1377,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 76: `SendFeedbackDialog` and `AiConnectionsDialog` drop server/network errors and falsely claim "Sharing is off", and `mcp_send_feedback` sends `project_file` + `recent_activity` despite promising "Only the text below is ever shared"
+### Issue 76 [FIXED]: `SendFeedbackDialog` and `AiConnectionsDialog` drop server/network errors and falsely claim "Sharing is off", and `mcp_send_feedback` sends `project_file` + `recent_activity` despite promising "Only the text below is ever shared"
 - **Severity**: Medium
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Fixed at `d4b45130` (`src-tauri/src/mcp.rs:1841-1853` `new_ui_feedback_entry` omits `project_file`/`recent_activity`; `src/components/send-feedback-dialog.tsx:72, 101-108` and `src/components/ai-connections-dialog.tsx:160-167` surface `out.error` vs `sharing === "disabled"` accurately)
 - **Files**:
   - `src-tauri/src/mcp.rs:1738-1756, 1766-1780, 2510-2540`
   - `src/components/send-feedback-dialog.tsx:62-98`
@@ -1385,9 +1394,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 77: `StartupGuideDialog`'s global `window` keydown handler hijacks `Enter` and `Escape` from top-layer `<dialog>` modals (including `SendFeedbackDialog`)
+### Issue 77 [FIXED]: `StartupGuideDialog`'s global `window` keydown handler hijacks `Enter` and `Escape` from top-layer `<dialog>` modals (including `SendFeedbackDialog`)
 - **Severity**: Medium
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Fixed at `d4b45130` (`src/components/startup-guide-dialog.tsx:50-53` ignores events when `dialog[open]`, input/textarea, or outside `panelRef.current`)
 - **Files**:
   - `src/components/startup-guide-dialog.tsx:42-72, 106-110`
   - `src/components/send-feedback-dialog.tsx:30-32, 117-124`
@@ -1401,9 +1410,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 78: Windowless Help menu exposes **Help ▸ Send Feedback** and **Help ▸ What's New** as enabled dead no-ops
+### Issue 78 [FIXED]: Windowless Help menu exposes **Help ▸ Send Feedback** and **Help ▸ What's New** as enabled dead no-ops
 - **Severity**: Medium
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Fixed at `d4b45130` (`src/menus.ts:125, 172, 177` and `src/engine.ts:41` pass `hasProjectWindow = false` to disable Send Feedback and What's New when windowless)
 - **Files**:
   - `src/menus.ts:119, 166, 171`
   - `src/engine.ts:28-40`
@@ -1418,9 +1427,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 79: `StartupGuideDialog` auto-show omits `!openedFile.current` and pops over opened `.pzt` templates, Sample Project, and slow/failed file launches
+### Issue 79 [FIXED]: `StartupGuideDialog` auto-show omits `!openedFile.current` and pops over opened `.pzt` templates, Sample Project, and slow/failed file launches
 - **Severity**: Medium
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Fixed at `d4b45130` (`src/store/use-document.ts:2743-2767` checks `!openedFile.current` and defers while `dialog[open]` is present)
 - **Files**:
   - `src/store/use-document.ts:1710-1763, 2714-2726`
 - **Explanation**:
@@ -1432,9 +1441,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 80: `noncentralTCdf` (`logWeights` path) silently returns `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447`
+### Issue 80 [PARTIALLY FIXED]: `noncentralTCdf` (`logWeights` path) silently returns `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447`
 - **Severity**: Medium
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Partially Fixed at `d4b45130` (`noncentralTTwinSeriesModeCentered` at `src/stats/distributions.ts:335-345` fixes `mu > 700` at moderate `df` and `|δ| <= 1e5`)
+- **Remaining at `d4b45130`**: `mu <= 700` (`|δ| <= 37.42`) still hits `rxb = Math.pow(1 - x, b)` underflow at large `df` (`src/stats/distributions.ts:355`, e.g. `noncentralTCdf(39, 1e5, 37.4) -> 1.0` vs true `0.9445`); extreme `|t| >= 1.34e154` and `|δ| >= 1e6` / large `df + δ` tracked as new Issue `#107`.
 - **Files**:
   - `src/stats/distributions.ts:316-389` (`noncentralTCdf`)
 - **Explanation**:
@@ -1447,9 +1457,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 81: `send_to_keynote_blocking` / `applescript_number` lacks `.is_finite()` / upper-bound checks and can emit invalid AppleScript `inf` or `0`
+### Issue 81 [FIXED]: `send_to_keynote_blocking` / `applescript_number` lacks `.is_finite()` / upper-bound checks and can emit invalid AppleScript `inf` or `0`
 - **Severity**: Low
-- **Status**: Open (from Recheck 1 at `b8a2528`)
+- **Status**: Fixed at `d4b45130` (`src-tauri/src/main.rs:563-592, 892` adds `check_keynote_image_size` finite `1.0..=1e5` check and clamps `applescript_number`)
 - **Files**:
   - `src-tauri/src/main.rs:557-564, 856-859`
 - **Explanation**:
@@ -1464,9 +1474,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ## New Issues Found in Recheck 2 at `8c877d8` (#82–#97)
 
-### Issue 82: `formatFigureLabels` HTML-escapes `<br>` and `<b>` across graph overlays, tooltips, and survival tables
+### Issue 82 [PARTIALLY FIXED]: `formatFigureLabels` HTML-escapes `<br>` and `<b>` across graph overlays, tooltips, and survival tables
 - **Severity**: High
-- **Status**: New
+- **Status**: Partially Fixed at `d4b45130` (`SAFE_TAG` in `src/lib/label-format.ts:158` preserves `<br>`, `<b>`, `<i>`)
+- **Remaining at `d4b45130`**: Regression in `isAlreadyFormatted` (`src/lib/label-format.ts:124-152`) returns `true` on any `<br>`/`<b>`/`<i>`-bearing raw label without checking for unformatted `^`, `_`, or `>`, silently disabling super/subscript formatting in tooltips and multi-line notes (e.g. `"H_2O<br>CO_2"` stays raw).
 - **Files**:
   - `src/lib/label-format.ts:104-126, 157-191` (`formatLabelForPlotly`, `formatFigureLabels`)
   - `src/views/graphs/graph-figure.ts:281, 798`
@@ -1485,9 +1496,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 83: `formatLabelForPlotly` double-escapes `&`, `<`, `>`, `\^`, `\_` in `buildGraphFigure` and allows HTML-escaping bypass (XSS) via `<sup>`/`<sub>`
+### Issue 83 [FIXED]: `formatLabelForPlotly` double-escapes `&`, `<`, `>`, `\^`, `\_` in `buildGraphFigure` and allows HTML-escaping bypass (XSS) via `<sup>`/`<sub>`
 - **Severity**: High
-- **Status**: New
+- **Status**: Fixed at `d4b45130` (`isAlreadyFormatted` at `src/lib/label-format.ts:124-152` validates allowlisted tags and entities, closing both double-escaping and the XSS bypass)
 - **Files**:
   - `src/lib/label-format.ts:104-126` (`formatLabelForPlotly`)
   - `src/views/graphs/graph-figure.ts:281, 507, 798` (`buildBaseFigure`, `buildGraphFigure`)
@@ -1501,9 +1512,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 84: `vector-export.ts` `textRuns` splits single-line Plotly `<sup>`/`<sub>` `<text>` into separate lines, breaking `middle`/`end` alignment in PDF/EPS
+### Issue 84 [FIXED]: `vector-export.ts` `textRuns` splits single-line Plotly `<sup>`/`<sub>` `<text>` into separate lines, breaking `middle`/`end` alignment in PDF/EPS
 - **Severity**: High
-- **Status**: New
+- **Status**: Fixed at `d4b45130` (`startsNewLine` at `src/lib/vector-export.ts:902-907, 923-932` keeps inline `<sup>`/`<sub>` `<tspan>`s on one logical line)
 - **Files**:
   - `src/lib/vector-export.ts:849-908, 1149-1178` (`textRuns`, line positioning in vector backends)
 - **Explanation**:
@@ -1515,9 +1526,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 85: `ecAnything` for `homologous-competition-logx` uses inverted `(100 - f) / f`, computing `IC(100-F)` labeled as `IC{F}`
+### Issue 85 [FIXED]: `ecAnything` for `homologous-competition-logx` uses inverted `(100 - f) / f`, computing `IC(100-F)` labeled as `IC{F}`
 - **Severity**: High
-- **Status**: New
+- **Status**: Fixed at `d4b45130` (`src/stats/xy/nonlinear-fit.ts:283` now uses `log10(f/(100-f))` and `tests/checks.ts` pins the corrected expectation)
 - **Files**:
   - `src/stats/xy/nonlinear-fit.ts:279-290` (`ecAnything`)
   - `tests/checks.ts:13201-13217` (pins the inverted expectation)
@@ -1530,9 +1541,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 86: Sign-aware `X = 0` guard `ifelse(HillSlope<0, Top, Bottom)` truncates unshared `Top[g]`/`Bottom[g]` to length 1 in global fits
+### Issue 86 [FIXED]: Sign-aware `X = 0` guard `ifelse(HillSlope<0, Top, Bottom)` truncates unshared `Top[g]`/`Bottom[g]` to length 1 in global fits
 - **Severity**: High
-- **Status**: New
+- **Status**: Fixed at `d4b45130` (`src/stats/xy/nonlinear-fit.ts:425, 1390` uses length-preserving arithmetic `Bottom+(Top-Bottom)*ifelse(HillSlope<0,1,0)`)
 - **Files**:
   - `src/stats/xy/nonlinear-fit.ts:419, 1384`
   - `src/stats/xy/nonlinear-regression.ts:1630-1635, 1783-1791`
@@ -1545,9 +1556,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 87: `feedback-server` `DedupeSet` has permanent `in_flight` leak on client disconnect, two-mutex TOCTOU race, and `Notify` lost wakeup
+### Issue 87 [FIXED]: `feedback-server` `DedupeSet` has permanent `in_flight` leak on client disconnect, two-mutex TOCTOU race, and `Notify` lost wakeup
 - **Severity**: High
-- **Status**: New
+- **Status**: Fixed at `d4b45130` (`feedback-server/src/lib.rs:350-478, 775-840` unifies `Mutex<DedupeState>`, adds RAII `InFlightGuard` with `Arc::ptr_eq`, and pre-registers `Pin<Box<OwnedNotified>>` before unlock)
 - **Files**:
   - `feedback-server/src/lib.rs:336-397, 677-741` (`DedupeSet`, `submit_feedback`)
 - **Explanation**:
@@ -1562,9 +1573,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 88: `mcp-bridge` `seq 540` session recovery fails on port-change restart, fails on rotated-token restart, and permanently wedges on transient failure
+### Issue 88 [FIXED]: `mcp-bridge` `seq 540` session recovery fails on port-change restart, fails on rotated-token restart, and permanently wedges on transient failure
 - **Severity**: High
-- **Status**: New
+- **Status**: Fixed at `d4b45130` (`src-tauri/mcp-bridge/src/main.rs:397-547` reloads discovery on `e.is_connect()`, handles `401` + `404` recovery in either order, and preserves `session_id` until `initialize` + `notifications/initialized` succeed)
 - **Files**:
   - `src-tauri/mcp-bridge/src/main.rs:395-427, 442-483` (`forward_rpc`, `recover_session`)
 - **Explanation**:
@@ -1578,9 +1589,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 89: `webr.ts` P-12 claim-stamp matching uses a 5-second fuzzy window and never clears `claimStamps` on install/reset/release
+### Issue 89 [PARTIALLY FIXED]: `webr.ts` P-12 claim-stamp matching uses a 5-second fuzzy window and never clears `claimStamps` on install/reset/release
 - **Severity**: High
-- **Status**: New
+- **Status**: Partially Fixed at `d4b45130` (exact rotated `claimTokens` replace the 5-second fuzzy timestamp match)
+- **Remaining at `d4b45130`**: `ensurePackages` (`src/stats/webr.ts:1192-1203`) unconditionally deletes `claimTokens.delete(n)` after a 2 s `await` (wiping both P-12 timeout reclaim tokens and a racing retry's fresh token `T2`), and `installBatch` (`line 1331`) prematurely deletes `claimTokens` before `ensurePackages` reads it.
 - **Files**:
   - `src/stats/webr.ts:209-229, 796, 847, 905-938, 1080-1139, 1219`
 - **Explanation**:
@@ -1592,9 +1604,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 90: `webr.ts` `ensurePackages` resolves as success while packages are still `"loading"` when an evicted joined batch settles after a retry started
+### Issue 90 [PARTIALLY FIXED]: `webr.ts` `ensurePackages` resolves as success while packages are still `"loading"` when an evicted joined batch settles after a retry started
 - **Severity**: High
-- **Status**: New
+- **Status**: Partially Fixed at `d4b45130` (`ensurePackages` at `src/stats/webr.ts:1181` now waits for `"ready"`)
+- **Remaining at `d4b45130`**: If `resetR()` clears `states` back to `"idle"` after a batch completes and before an awaiting caller resumes, the `while` loop (`src/stats/webr.ts:1181-1230`) has no `"idle"` branch and spins in a 100 ms poll loop until the 360 s deadline.
 - **Files**:
   - `src/stats/webr.ts:1100-1148, 1216-1239` (`ensurePackages`)
 - **Explanation**:
@@ -1608,9 +1621,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ## Medium-Severity Issues (Recheck 2)
 
-### Issue 91: `formatFigureLabels` rewrites `layout.annotations[i].name`, breaking point-label drag repositioning and leaking phantom keys into `graphOptions.points`
+### Issue 91 [FIXED]: `formatFigureLabels` rewrites `layout.annotations[i].name`, breaking point-label drag repositioning and leaking phantom keys into `graphOptions.points`
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Fixed at `d4b45130` (`formatValue` at `src/lib/label-format.ts:224-248` leaves `annotation.name` untouched)
 - **Files**:
   - `src/lib/label-format.ts:157-171` (`formatFigureLabels`)
   - `src/views/graphs/plot-helpers.ts:457-466`
@@ -1624,9 +1637,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 92: `buildGroupedBars` breaks `groupLayout: "superimposed"` when `showPoints: true`, misaligning bars with significance overlays
+### Issue 92 [FIXED]: `buildGroupedBars` breaks `groupLayout: "superimposed"` when `showPoints: true`, misaligning bars with significance overlays
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Fixed at `d4b45130` (`src/views/graphs/grouped-common.ts:82-109, 144, 160-194` keeps `superimposed` bars row-centered via `superimposedPositions` with `showPoints: true`)
 - **Files**:
   - `src/views/graphs/grouped-common.ts:61-75, 164-177` (`buildGroupedBars`)
   - `src/views/graphs/significance-overlay.ts:491-492`
@@ -1639,9 +1652,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 93: `TiterMcpServer::get_info()` never advertises `capabilities.tools.listChanged: true` and `mcp_set_enabled(false)` never clears `inner.peers`
+### Issue 93 [FIXED]: `TiterMcpServer::get_info()` never advertises `capabilities.tools.listChanged: true` and `mcp_set_enabled(false)` never clears `inner.peers`
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Fixed at `d4b45130` (`TiterMcpServer::get_info()` at `src-tauri/src/mcp.rs:10215-10221` calls `.enable_tool_list_changed()`; `McpState::disable_server()` at `:456-461, 1109` clears `inner.peers`)
 - **Files**:
   - `src-tauri/src/mcp.rs:1098-1102, 10090-10092`
 - **Explanation**:
@@ -1652,9 +1665,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 94: `reapply_antigravity_entry_if_connected` silently overwrites custom/remote `"titer"` entries in `~/.gemini/config/mcp_config.json` on every launch
+### Issue 94 [FIXED]: `reapply_antigravity_entry_if_connected` silently overwrites custom/remote `"titer"` entries in `~/.gemini/config/mcp_config.json` on every launch
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Fixed at `d4b45130` (`antigravity_entry_needs_reapply` at `src-tauri/src/mcp.rs:2628-2692` checks `existing["command"] == bridge` before overwriting; minor note: `state.ensure_dir(app)` at `:2679` still runs before that check when a remote/custom `"titer"` entry exists)
 - **Files**:
   - `src-tauri/src/mcp.rs:1897-1901, 2541-2580` (`reapply_antigravity_entry_if_connected`)
 - **Explanation**:
@@ -1664,9 +1677,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 95: `parseXlsx` skips self-closing `<si/>` (and `<si ...>` with attributes) in `sharedStrings.xml`, shifting all subsequent cell strings off by 1, and concatenates `<rPh>` phonetic runs
+### Issue 95 [PARTIALLY FIXED]: `parseXlsx` skips self-closing `<si/>` (and `<si ...>` with attributes) in `sharedStrings.xml`, shifting all subsequent cell strings off by 1, and concatenates `<rPh>` phonetic runs
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Partially Fixed at `d4b45130` (bare `<si/>`, attributed `<si ...>...</si>`, and `<rPh>` stripping added at `src/lib/tabular-import.ts:293-298`)
+- **Remaining at `d4b45130`**: Line `293` uses greedy `[^>]*` (`/<si(?:\s[^>]*)?(?:\/>|>([\s\S]*?)<\/si>)/g`), so `<si />` or `<si foo="1"/>` consumes `/` and swallows the next `<si>...</si>`, shifting all subsequent string indices off by 1; `<rPh>` stripping is also omitted for `inlineStr` cells at line `354`.
 - **Files**:
   - `src/lib/tabular-import.ts:288-294` (`parseXlsx` sharedStrings parser)
 - **Explanation**:
@@ -1680,9 +1694,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 96: `webr.ts` `resolveInEngine` fires an unconditional `releaseClaimCode(pending)` on claim timeout (`codes === null`), risking wiping another window's live claim
+### Issue 96 [FIXED]: `webr.ts` `resolveInEngine` fires an unconditional `releaseClaimCode(pending)` on claim timeout (`codes === null`), risking wiping another window's live claim
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Fixed at `d4b45130` (`src/stats/webr.ts:875-891, 969` uses conditional token release on timeout)
 - **Files**:
   - `src/stats/webr.ts:828-841, 918-926` (`resolveInEngine`)
 - **Explanation**:
@@ -1694,9 +1708,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ## Low-Severity Issues (Recheck 2)
 
-### Issue 97: `labelRuns` splits Unicode minus (`10^−6` → `10<sup>−</sup>6`) and collapses consecutive `_` runs (`ctrl_1_a` → `ctrl<sub>1a</sub>`)
+### Issue 97 [FIXED]: `labelRuns` splits Unicode minus (`10^−6` → `10<sup>−</sup>6`) and collapses consecutive `_` runs (`ctrl_1_a` → `ctrl<sub>1a</sub>`)
 - **Severity**: Low
-- **Status**: New
+- **Status**: Fixed at `d4b45130` (`src/lib/label-format.ts:49, 85` supports Unicode minus `U+2212` and only coalesces `"normal"` runs)
 - **Files**:
   - `src/lib/label-format.ts:43, 77-90` (`labelRuns`)
   - `src/views/tables/grid.tsx:996, 999, 1154, 1180`
@@ -1704,3 +1718,221 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
   `labelRuns` only recognizes ASCII `-` (U+002D) as part of signed exponents, so Unicode minus `−` (U+2212) terminates the superscript run after `−` (`"10^−6"` → `10<sup>−</sup>6`). It also collapses chained `_` tokens when unbraced (`"ctrl_1_a"` → `ctrl<sub>1a</sub>`), affecting both graph labels and `grid.tsx` headers.
 - **Suggested Fix**:
   Include Unicode minus `\u2212` alongside ASCII `-` in exponent sign matching, and avoid merging separated `_` tokens into a single subscript run.
+
+---
+
+## New Issues Found in Recheck 3 at `d4b45130` (#98–#111)
+
+### Issue 98: `open_file` IPC permits arbitrary executable launch (no extension allowlist), Windows `cmd /C start` shell injection, and macOS `open` flag injection
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/main.rs:1752-1775, 1939-1948` (`check_openable_file`, `open_file`)
+  - `src/native.ts:781` (`openSourceFile`)
+- **Explanation**:
+  Unlike all other file IPC commands in `main.rs` (`read_data_text`, `read_data_bytes`, `write_file`, `move_file`, `canonicalize_in_temp_dir`), `open_file` validates only `Path::new(path).is_file()` (`check_openable_file`, lines 1752–1760) with no extension allowlist and no canonical symlink-target check:
+  1. **Arbitrary executable launch**: A compromised webview can pass `.command`, `.scpt`, `.terminal`, `.pkg`, `.dmg`, `.exe`, `.bat`, or `.desktop` paths to `open_file`, executing them with the OS launcher.
+  2. **Windows `cmd /C start` shell injection (`main.rs:1944`)**: `Command::new("cmd").args(["/C", "start", "", &path])` passes `path` through `cmd.exe`, which evaluates metacharacters (`&`, `|`, `^`, `%VAR%`) even in separate argv elements — so an existing file named `data&calc.csv` executes `calc`.
+  3. **macOS `open` / Linux `xdg-open` flag injection**: Missing `"--"` before `&path` lets a relative path beginning with `-` be interpreted as a launcher flag (and `.spawn()` drops the child handle without reaping).
+- **Minimal Reproduction**:
+  Invoke `open_file` from the webview with `path: "/tmp/test.command"` on macOS (or `"C:\\temp\\a&calc.csv"` on Windows).
+- **Suggested Fix**:
+  Canonicalize `path` and enforce `check_extension` on both the given path and canonical target against data extensions (`&["csv", "tsv", "txt", "dat", "prn", "xlsx"]`); use `--` on macOS/Linux (or `NSWorkspace::openURL`) and avoid `cmd /C start` on Windows (use `ShellExecuteW` / `tauri-plugin-opener`).
+
+---
+
+### Issue 99: `pasteNames` (upstream 1.1.1) corrupts Nested tables (`isNested` omitted), drops column metadata/calculated formulas, and cross-renames lead/group collisions
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/views/tables/table-data.ts:498-546` (`pasteNames`)
+  - `src/views/tables/grid-menu.ts:95, 208-215` (exposes `"Paste Group Names"` on Nested tables)
+  - `src/lib/dataset.ts:86-90` (`isGrouped` vs `isNested`)
+- **Explanation**:
+  1. **Corrupts Nested tables**: `grid-menu.ts:95, 209` exposes `"Paste Group Names"` whenever `isGrouped(data) || isNested(data)`, yet `pasteNames` (`table-data.ts:507`) checks only `const grouped = isGrouped(data);` (which returns `false` for Nested tables). On Nested tables (`"Title", "A:S1:Y1", "A:S1:Y2", ...`), `pasteNames` overwrites subcolumns directly with bare strings (`"WT"`, `"KO"`) and destroys the `Group:Subgroup:Replicate` structure.
+  2. **Drops column metadata and breaks calculated formulas**: Unlike `renameColumn` and `renameGroup`, `pasteNames` (`533-542`) only remaps `widths` and leaves `decimals`, `variableTypes`, `labelVariable`, `levelOrder`, and `calculated` (`v.name` and formulas via `renameCalculatedReferences`) pointing at stale column names.
+  3. **Lead vs group namespace collision**: Line `517` allows a lead column and a group to share a name (`"X"` and `"X:Y1"`), but line `523` merges both into one `renamed` map applied to both lead and group columns at line `528`.
+- **Minimal Reproduction**:
+  Create a Nested table, copy `"WT\tKO"`, right-click `"A:S1:Y1"`, and select **Paste Group Names** → column headers become `["Title", "WT", "KO", "B:S1:Y1", ...]`. Or paste a new name onto column `A` referenced by a calculated column `C = A + B`.
+- **Suggested Fix**:
+  Use `const grouped = isGrouped(data) || isNested(data);`, keep separate `leadRenamed` and `groupRenamed` maps, and remap `decimals`, `variableTypes`, `labelVariable`, `levelOrder`, and `calculated` references.
+
+---
+
+### Issue 100: Upstream 1.1.1 `axisKind` is not wired into `FormatPanel`: `rowsAt: "values"` and `histogram`/`qq-plot` lose X controls, `grouped-stacked`/`residuals` offer dead Log controls, `grouped-hbars` mislabels value axis as `"Y"`, and `scree-plot`/`dendrogram` misdeclare `XY_AXES`
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/views/graphs/format-panel.tsx:453-522`
+  - `src/views/graphs/grouped-lines.ts:8-10`
+  - `src/views/graphs/grouped-stacked.ts:8-12`
+  - `src/views/graphs/residuals.ts:39, 48, 74-76`
+  - `src/views/graphs/histogram.ts:64-67`, `src/views/graphs/monte-carlo-histogram.ts:27-30`, `src/views/graphs/qq-plot.ts:60-61`
+  - `src/views/graphs/scree-plot.ts:26-31, 85`, `src/views/graphs/dendrogram.ts:75-86, 124`
+  - `src/views/graphs/plot-helpers.ts:441-460` (`axesRangeInputs`, `logScaleOffered`)
+- **Explanation**:
+  Commits `6592ac77` and `67187d2f` added `axes()`/`axisKind()` per graph module, but `FormatPanel` (`format-panel.tsx:453-522`) still gates axis controls on legacy `family === "xy"`, `family === "histogram"` (which no module sets), `logScaleOffered`, and `axesRangeInputs`:
+  1. Switching `grouped-lines` to `rowsAt: "values"` ("X axis: Numbers") never reveals `<Scale axis="X">`, `<AxisRange axis="X">`, or `<NumberFormat axis="X">`.
+  2. `grouped-stacked` and `residuals` (`qq` mode) force linear axes while `FormatPanel` still shows Log10/Log2 selectors (and `refLineParts` still reads `options.yScale`).
+  3. `histogram`, `monte-carlo-histogram`, `qq-plot`, and numeric `multiple` plots (`pca-biplot`, `kmeans-scatter`, `observed-fitted`) lose X Scale / Range / NumberFormat controls.
+  4. `grouped-hbars` hardcodes `axis="Y"` on its horizontal value-axis controls (`454-480`).
+  5. `scree-plot` (`85`) and `dendrogram` (`124`) declare `axes: XY_AXES` (`x: "scale"`) despite categorical/leaf X axes.
+- **Minimal Reproduction**:
+  On a Grouped table with numeric row titles, open a **Connected lines** graph and toggle **X axis: Numbers**: no X Scale or Min/Max/Step inputs appear. Open **Stacked bars** → Log10 Y scale is selectable and does nothing.
+- **Suggested Fix**:
+  Drive `FormatPanel` axis controls from `axisKind(graphType, options, key, props.atValues)`, change `scree-plot`/`dendrogram` `axes` to `{ x: "labels", y: "scale" }`, and pass effective scale to `refLineParts`.
+
+---
+
+### Issue 101: Point labels on Horizontal Bars (`grouped-hbars`) with Log scale transform `y` instead of `x`, placing labels at `10^v` off-canvas and `NaN` on row 0
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/views/graphs/graph-view.tsx:275-279, 870-875`
+  - `src/views/graphs/graph-figure.ts:787-791`
+  - `src/views/graphs/index.ts:148-152` (`axisKind`)
+  - `src/views/graphs/grouped-common.ts:187-188`
+- **Explanation**:
+  For `grouped-hbars` (`horizontal: true`), `axisKind` maps option key `"y"` (the value axis) to `"scale"` (`scaled.y === true`) and `"x"` to `"labels"` (`scaled.x === false`), whereas Plotly draws horizontal bar values on `xaxis` and categories on `yaxis`. `graph-view.tsx:873-874` applies `scaled.x`/`scaled.y` directly to `label.x`/`label.y`, leaving `label.x = value` untransformed ($10^{\text{value}}$ off-screen on a log axis) and passing row index `label.y = 0` through `onAxis(0, "log10")` → `NaN` (dropping row 0's labels). `graph-figure.ts:789-790` has the same swapped-axis bug.
+- **Minimal Reproduction**:
+  Create a Grouped table (`[10, 100]`), plot **Horizontal bars**, enable **Show individual points**, set scale to **Log10**, and turn on a point label: row 0 vanishes and labels jump off-canvas.
+- **Suggested Fix**:
+  Map `scaled` onto physical Plotly coordinates: when `horizontal`, transform `label.x` using `scaled.y ? options.yScale : "linear"` and keep `label.y` `"linear"`.
+
+---
+
+### Issue 102: `2db68ed1` ANOVA 13-digit centering missed `TukeyHSD` (making Tukey P values contradict centered Tukey CIs), plus Welch, Brown-Forsythe, linear trend, and post-hoc diffs
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/stats/column/anova.ts:69-77, 218, 226, 230, 246-248`
+  - `src/stats/column/base.ts:208` (`tukeyPosthocStatements`)
+- **Explanation**:
+  1. `anova.ts:218` centers `aov(I(v-mean(v))~gr)` for the ANOVA table and uses that centered `mse` for Tukey 95% CIs (`lines 70, 76-77`), **but** line `72` calls `tukeyPosthocStatements(k)` with the uncentered default `aov(v~gr)`. On 13-digit datasets (e.g. NIST `SmLs09`), uncentered `aov(v~gr)` inflates MSE ~3×, causing Tukey **P values** and Tukey **95% CIs** in the same table to disagree directly.
+  2. `m <- sapply(G, mean)` (`line 218`) rounds group means at $10^{13}$, corrupting differences (`m[i] - m[j]`) in Brown-Forsythe (`line 226`), Welch `oneway.test(v~gr)` (`line 230`), linear trend (`line 246`), and post-hoc `diff(i, j)` (`line 69`).
+- **Minimal Reproduction**:
+  Run One-way ANOVA with Tukey post-hoc on NIST `SmLs09` (or `anovaBig` from `tests/testdata/precision-1e13.json`): adjusted P values come from the corrupted uncentered fit while 95% CIs come from the centered fit.
+- **Suggested Fix**:
+  Center `mv <- mean(v); v0 <- v - mv; G0 <- lapply(G, function(x) x - mv); mc <- sapply(G0, mean)` in `anova.ts:218`, pass `"aov(v0~gr)"` to `tukeyPosthocStatements`, run `oneway.test(v0~gr, var.equal=FALSE)`, and use `mc` for Brown-Forsythe, linear trend, and post-hoc diffs (retaining `m` only for lognormal `exp(m)`).
+
+---
+
+## Medium-Severity Issues (Recheck 3)
+
+### Issue 103: `2db68ed1` linear-regression centering missed `compare-slopes.ts`, `report/checks.ts`, and `regression-overlay.ts`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/stats/xy/compare-slopes.ts:64, 73-75`
+  - `src/stats/report/checks.ts:225-226`
+  - `src/views/graphs/regression-overlay.ts:111, 130`
+- **Explanation**:
+  1. `compare-slopes.ts` (`compareSlopes: true` in `linear-regression`) still fits uncentered `lm(y0 ~ x0)`, `lm(y ~ g*x)`, and `lm(y ~ g+x)`, aliasing/crashing on 13-digit data like `xyBig`.
+  2. `report/checks.ts:225-226` runs Shapiro-Wilk normality checks on `resid(lm(y ~ x))` uncentered, testing aliased garbage residuals when X sits at $10^{13}$.
+  3. `regression-overlay.ts:111, 130` computes `ssRes` from uncentered `y[i] - (intercept + slope * x[i])` (off by $+19.6\%$ at $X \approx 10^{13}$), inflating graph CI bands and making graph annotations disagree with the Analysis sheet.
+- **Suggested Fix**:
+  Center `x`/`y` before `lm()` in `compare-slopes.ts` and `report/checks.ts`, and compute `ssRes` and `yHat` centered around `(xbar, ybar)` in `regression-overlay.ts`.
+
+---
+
+### Issue 104: `valueXAxis` drops `options.gridX`, silently disabling X gridlines on Connected Lines with `rowsAt: "values"`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/views/graphs/plot-helpers.ts:883-888, 1679-1680` (`valueXAxis`, `groupedScatterLayout`)
+- **Explanation**:
+  `valueXAxis` (`plot-helpers.ts:883-888`) invokes `axisChrome(options)` and `xAxisRange(options)` without passing `options.gridX`, unlike `xyLayout` (`lines 1300-1301`). Connected Lines graphs using `rowsAt: "values"` therefore ignore **X gridlines: Major / Major + minor**.
+- **Suggested Fix**:
+  Forward `options.gridX` to `axisChrome(options, options.gridX)` and `xAxisRange(options, undefined, options.gridX)` inside `valueXAxis`.
+
+---
+
+### Issue 105: `isNewer` and `seenVersion` invert semver pre-release ordering (`2.0.2-rc.1 > 2.0.2`) and reject pre-release / uppercase-`V` seen strings
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/lib/version.ts:4-15` (`isNewer`)
+  - `src/lib/whats-new.ts:90-94, 102-106` (`seenVersion`)
+- **Explanation**:
+  `isNewer` splits version strings on `"."` and converts segments via `parseInt(n, 10) || 0`, so `"2.0.2-rc.1"` becomes `[2, 0, 2, 1] > [2, 0, 2]`, reporting `"2.0.2-rc.1"` as newer than `"2.0.2"`. Additionally, `seenVersion` (`whats-new.ts:93`) validates `/^v?\d+(\.\d+)*$/`, rejecting pre-releases (`"2.0.2-rc.1"` → `null`) and uppercase `"V2.0.1"`.
+- **Suggested Fix**:
+  Parse core numeric tuple and optional `-prerelease` separately (where no pre-release ranks newer than same core + pre-release) and accept optional pre-release/case-insensitive `v?` in `seenVersion`.
+
+---
+
+### Issue 106: `clipboard_text` (macOS) passes unchecked nullable `UTF8String` pointer to `CStr::from_ptr` in `unsafe`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/main.rs:1645-1654` (`clipboard_text`)
+- **Explanation**:
+  Inside `clipboard_text`, `let utf8: *const std::ffi::c_char = objc2::msg_send![text.as_ref()?, UTF8String];` is passed directly to `std::ffi::CStr::from_ptr(utf8)` with no `utf8.is_null()` check. If `-[NSString UTF8String]` returns `NULL` (e.g. unpaired UTF-16 surrogates on the pasteboard), dereferencing `NULL` in `CStr::from_ptr` causes immediate UB / crash.
+- **Suggested Fix**:
+  Add `if utf8.is_null() { return None; }` before `CStr::from_ptr(utf8)`.
+
+---
+
+### Issue 107: `noncentralTCdf` overflows `tt * tt` for `|t| ≥ 1.34e154` (returning `normalCdf(-delta)` instead of `1`/`0`) and `noncentralTTwinSeriesModeCentered` breaks at `|δ| ≥ 1e6` / large `df + δ`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/stats/distributions.ts:135, 331-332, 413-439` (`noncentralTCdf`, `noncentralTTwinSeriesModeCentered`)
+- **Explanation**:
+  1. Line `331` computes `x = (tt * tt) / (tt * tt + df)`. For `|t| >= 1.34e154`, `tt * tt` overflows to `Infinity`, yielding `x = NaN`, skipping the twin series, and silently returning `normalCdf(-del)` (e.g. `2.87e-7` or `0` instead of `1.0`).
+  2. At `|δ| >= 1e6` (`m >= 5e11`), `m * logMu - lgamma(m + 1)` suffers massive floating-point cancellation and `MAX_STEPS = 5_000_000` truncates the mode peak mid-sum (`noncentralTCdf(1e7, 100, 1e7)` → `0.2276` instead of `0.4812`). At large `df + δ` (`df = 1e8, δ = 1e5`), `incompleteBetaCf`'s `MAXIT = 200` fails to converge (`0` instead of `0.500`).
+- **Minimal Reproduction**:
+  `noncentralTCdf(1e155, 10, 5)` returns `2.8665e-7` (true `1.0`); `noncentralTCdf(-1e6, 100, 1e6)` returns `3.659e-5` (true `0`); `noncentralTCdf(1e5, 1e8, 1e5)` returns `0` (true `0.500`).
+- **Suggested Fix**:
+  Compute `x = 1 / (1 + (df / tt) / tt)` to avoid squaring overflow, and route extreme `|δ|` / `df` regimes to a Stirling/normal asymptotic approximation.
+
+---
+
+## Low-Severity Issues (Recheck 3)
+
+### Issue 108: `WhatsNewDialog` `close()` unconditionally overwrites `titer.whats-new-seen` with the running version, regressing the seen marker after a downgrade
+- **Severity**: Low
+- **Status**: New
+- **Files**:
+  - `src/components/whats-new-dialog.tsx:65-68`
+- **Explanation**:
+  Dismissing a manual **Help ▸ What's New** dialog calls `markWhatsNewSeen()` unconditionally, overwriting `titer.whats-new-seen` downward (e.g. `"2.1.0"` → `"2.0.1"`) and causing `"2.1.0"`'s What's New dialog to re-auto-open later.
+- **Suggested Fix**:
+  Only update `titer.whats-new-seen` when no valid version is stored or `isNewer(whatsNewVersion(), storedSeen)`.
+
+---
+
+### Issue 109: `openSourceFile` discards the specific Rust error string returned by `open_file`
+- **Severity**: Low
+- **Status**: New
+- **Files**:
+  - `src/views/tables/import-dialog.tsx:236-247` (`openSourceFile`)
+- **Explanation**:
+  Tauri 2 `invoke("open_file", ...)` rejects with a plain string, so `err instanceof Error ? err.message : "The file couldn't be opened."` discards `check_openable_file`'s specific missing-file message and always displays the generic fallback.
+- **Suggested Fix**:
+  Also extract non-empty string errors (`typeof err === "string" && err ? err : ...`).
+
+---
+
+### Issue 110: `fitLabels` produces `dtick: NaN` on coincident adjacent ticks (`at[1] === at[0]`), and `graph-view.tsx` checks `!current` after `Plotly.relayout` instead of immediately after `Plotly.react`
+- **Severity**: Low
+- **Status**: New
+- **Files**:
+  - `src/views/graphs/plot-helpers.ts:873-875` (`fitLabels`)
+  - `src/views/graphs/graph-view.tsx:899-903`
+- **Explanation**:
+  1. `fitLabels` computes `step = at[1] - at[0]` and `step * Math.pow(10, Math.ceil(Math.log10(gap / step)))`; if `at[1] === at[0]`, `step === 0` produces `dtick: NaN`.
+  2. `graph-view.tsx:899-903` runs `fitLabels` and `await Plotly.relayout(el, thinned)` before checking `if (!current) return;`, letting an older superseded render overwrite a newer render's ticks.
+- **Suggested Fix**:
+  Guard `if (!(step > 0) || !Number.isFinite(gap)) continue;` in `fitLabels`, and check `if (!current) return;` immediately after `await Plotly.react(...)`.
+
+---
+
+### Issue 111: `fitted-curve.ts` `x === 0` guard misses 4 other R-guarded raw-X ratio models and `asymmetric-5pl-x` underflow at tiny `HillSlope`
+- **Severity**: Low
+- **Status**: New
+- **Files**:
+  - `src/views/graphs/fitted-curve.ts:58-64, 82, 96, 121-145, 188`
+- **Explanation**:
+  R's `nonlinear-fit.ts` guards `x == 0` unconditionally for `agonist-3pl-x`, `agonist-3pl-normalized-x`, `biphasic-x`, and `bell-shaped-x`, whereas TS `fitted-curve.ts` only guards the 4 sigmoidal models when `c("EC50") <= 0` (`EC50 === 0` at `x === 0` still yields `0/0 = NaN` in the other 4 models, and `asymmetric-5pl-x` with `EC50 > 0` and tiny positive `HillSlope` can underflow `(2^(1/S)-1)^(1/HillSlope)` to `0` → `NaN` at `x === 0`).
+- **Suggested Fix**:
+  Handle `x === 0` explicitly in `fitted-curve.ts` for all 8 raw-X ratio models matching R's exact limits.
