@@ -60,6 +60,9 @@ type Selector =
   // no project — the selector carries no table id by design.
   | { kind: "sample-size-power" }
   | { kind: "go-to-sheet" }
+  // Seq 240 remainder (O4): the sheets linked to the active one, picked
+  // from the Linked Sheets button (View ▸ Go to Linked Sheet cycles them).
+  | { kind: "go-to-linked" }
   | { kind: "script" }
   | { kind: "converter" }
   | { kind: "save-prompt" }

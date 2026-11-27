@@ -20,6 +20,7 @@ import { NODE_NAMES, SHEET_HIGHLIGHTS, SHEET_HIGHLIGHT_STYLE, TAG_COLORS, type T
 import { colorDot } from "../views/graphs/style-menus";
 import { titleCase } from "../lib/format";
 import { highlightStyle, searchProject, SEARCH_FIELD_LABELS } from "../lib/project-search";
+import { familyPanelEntries } from "../lib/sheet-navigation";
 import { clampWidth, SIDEBAR_WIDTH, useLayout } from "../store/use-layout";
 import {
   beginFigureDrag,
@@ -101,6 +102,20 @@ export function ProjectSidebar() {
     // selection — enough to refresh the results while the user types.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, tables, figures]);
+
+  // The Family panel (seq 240 remainder, G5): the active sheet's family —
+  // its table with the children and info sheets under it. The family
+  // members are emphasized (bold) in the tree below.
+  const familyEntries = React.useMemo(() => {
+    const s = get();
+    const node = s.activeNodeId ? s.nodes[s.activeNodeId] : undefined;
+    return node ? familyPanelEntries(node, s.nodes, s.childOrder) : [];
+    // The outline (tables, figures) changes on every rename, reorder and
+    // selection — enough to refresh the panel while the user works.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeNodeId, tables, infos, figures]);
+  const emphasized = React.useMemo(() => new Set(familyEntries.map((e) => e.id)), [familyEntries]);
+  const familyClass = (id: string) => (emphasized.has(id) ? "font-semibold" : "");
 
   const dragInfo = React.useRef<DragInfo | null>(null);
   const dropTargetRef = React.useRef<DropTarget | null>(null);
@@ -449,7 +464,7 @@ export function ProjectSidebar() {
               e.preventDefault();
               tableMenu(table);
             }}
-            className={rowClass(table.id)}
+            className={[rowClass(table.id), familyClass(table.id)].filter(Boolean).join(" ")}
             {...rowDnd("table", table.id, null)}
           >
             {table.children.map((child) => (
@@ -469,7 +484,9 @@ export function ProjectSidebar() {
                   e.preventDefault();
                   childMenu(child);
                 }}
-                className={[rowClass(child.id), frozenClass(child)].filter(Boolean).join(" ")}
+                className={[rowClass(child.id), frozenClass(child), familyClass(child.id)]
+                  .filter(Boolean)
+                  .join(" ")}
                 {...rowDnd(
                   "child",
                   child.id,
@@ -487,6 +504,7 @@ export function ProjectSidebar() {
             tags={info.tags?.map((c) => TAG_COLORS[c])}
             title={info.name}
             selected={activeNodeId === info.id}
+            className={familyClass(info.id)}
             renaming={renaming === info.id}
             onRename={(name) => rename(info, name)}
             onClick={() => select(info.id)}
@@ -504,6 +522,7 @@ export function ProjectSidebar() {
             title={figure.name}
             selected={activeNodeId === figure.id}
             highlight={highlightStyle(figure.highlight) ?? undefined}
+            className={[frozenClass(figure), familyClass(figure.id)].filter(Boolean).join(" ")}
             renaming={renaming === figure.id}
             onRename={(name) => rename(figure, name)}
             onClick={() => select(figure.id)}
@@ -511,7 +530,6 @@ export function ProjectSidebar() {
               e.preventDefault();
               childMenu(figure);
             }}
-            className={frozenClass(figure)}
           />
         ))}
         {orphaned.map((orphan) => (
@@ -522,6 +540,7 @@ export function ProjectSidebar() {
             title={orphan.name}
             suffix="(orphaned)"
             selected={activeNodeId === orphan.id}
+            className={familyClass(orphan.id)}
             renaming={renaming === orphan.id}
             onRename={(name) => rename(orphan, name)}
             onClick={() => select(orphan.id)}
@@ -532,6 +551,26 @@ export function ProjectSidebar() {
           />
         ))}
       </div>
+      {/* Family panel (seq 240 remainder, G5): the active sheet's family at
+          the Navigator bottom — the table at the top, its children and info
+          sheets indented under it. A click jumps to the sheet. */}
+      {familyEntries.length > 0 && (
+        <div className="border-t border-separator px-2 py-2">
+          <div className="px-2 pb-1 text-small text-secondary">Family</div>
+          {familyEntries.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              onClick={() => select(entry.id)}
+              className={`flex w-full items-center rounded-md px-2 py-1 text-left text-regular hover:bg-control ${entry.depth > 0 ? "pl-6" : ""} ${activeNodeId === entry.id ? "bg-separator" : ""}`}
+            >
+              <span className="truncate">
+                {entry.section} — {entry.label}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </SidePanel>
   );
 }

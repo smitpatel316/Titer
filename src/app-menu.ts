@@ -21,7 +21,13 @@ import { pluginHasQuestions } from "./views/analyses/plugin-wizard";
 import { GRAPH_OPTIONS_BY_TABLE } from "./views/graphs";
 import { useStartAnalysis } from "./views/analyses/use-analysis-launcher";
 import { SECTIONS } from "./views/graphs/format-panel";
-import { linkedSheetIds, pingPongTarget } from "./lib/sheet-navigation";
+import {
+  linkedSheetIds,
+  nextSheetId,
+  pingPongTarget,
+  sectionFirstSheetId,
+  type GoToSheetEntry,
+} from "./lib/sheet-navigation";
 import { canRevertToSaved } from "./lib/revert";
 import { applyResimulation, simulateTableData } from "./stats/simulation/simulate";
 
@@ -122,7 +128,7 @@ export function useAppMenu(doc: DocumentActions) {
     [],
   );
 
-  const { activeTableId, activeNodeId, activeNode, isDirty, filePath, nodes, childOrder, recentNodeIds, undoName, redoName } =
+  const { activeTableId, activeNodeId, activeNode, isDirty, filePath, nodes, rootOrder, childOrder, recentNodeIds, undoName, redoName } =
     store;
 
   // A text field being typed in has its own Undo, so the menu follows the focus.
@@ -229,6 +235,16 @@ export function useAppMenu(doc: DocumentActions) {
   // and the sheet Previous Sheet walks back to.
   const linkedIds = activeNode ? linkedSheetIds(activeNode, nodes, childOrder) : [];
   const previousId = activeNodeId ? pingPongTarget(recentNodeIds, activeNodeId) : null;
+  // Seq 240 remainder (H4/H5): the sheet Next Sheet walks forward to, and
+  // the first sheet of each section for Go to Section.
+  const nextId = nextSheetId(nodes, rootOrder, childOrder, activeNodeId);
+  const sectionFirst: Record<GoToSheetEntry["section"], string | null> = {
+    Data: sectionFirstSheetId("Data", nodes, rootOrder, childOrder),
+    Results: sectionFirstSheetId("Results", nodes, rootOrder, childOrder),
+    Graphs: sectionFirstSheetId("Graphs", nodes, rootOrder, childOrder),
+    Layouts: sectionFirstSheetId("Layouts", nodes, rootOrder, childOrder),
+    Info: sectionFirstSheetId("Info", nodes, rootOrder, childOrder),
+  };
   // Re-run simulation (seq 243): the simulated table behind the active
   // graph — or the active table itself, when it is the simulated one.
   const simTableId =
@@ -853,6 +869,33 @@ export function useAppMenu(doc: DocumentActions) {
               if (target) s.setActiveNode(target);
             },
           },
+          {
+            // Keyboard navigation (seq 240 remainder, H5): the forward
+            // counterpart of Previous Sheet — the next sheet in the
+            // outline order, wrapping from the last back to the first.
+            text: "Next Sheet",
+            accelerator: "CmdOrCtrl+Alt+X",
+            enabled: nextId !== null,
+            action: () => {
+              const s = latest.current.store;
+              const target = nextSheetId(s.nodes, s.rootOrder, s.childOrder, s.activeNodeId);
+              if (target) s.setActiveNode(target);
+            },
+          },
+          {
+            // Keyboard navigation (seq 240 remainder, H4): jump straight
+            // to the first sheet of a section.
+            text: "Go to Section",
+            items: (["Data", "Results", "Graphs", "Layouts", "Info"] as const).map((section) => ({
+              text: section,
+              enabled: sectionFirst[section] !== null,
+              action: () => {
+                const s = latest.current.store;
+                const target = sectionFirstSheetId(section, s.nodes, s.rootOrder, s.childOrder);
+                if (target) s.setActiveNode(target);
+              },
+            })),
+          },
           sep,
           {
             text: "Appearance",
@@ -896,6 +939,12 @@ export function useAppMenu(doc: DocumentActions) {
     activeNode?.graphType,
     linkedIds.length,
     previousId,
+    nextId,
+    sectionFirst.Data,
+    sectionFirst.Results,
+    sectionFirst.Graphs,
+    sectionFirst.Layouts,
+    sectionFirst.Info,
     Boolean(simSpec),
     tableCount,
     formatShown,

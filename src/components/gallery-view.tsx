@@ -11,6 +11,17 @@ export function GalleryView() {
   const { nodes, rootOrder, childOrder, setActiveNode } = useProjectStore();
   const { setLayout } = useLayout();
   const items = React.useMemo(() => galleryItems(nodes, rootOrder, childOrder), [nodes, rootOrder, childOrder]);
+  // Family groups (seq 240 remainder, G5): a graph's family is its table,
+  // so the cards group under their table, in outline order.
+  const families = React.useMemo(() => {
+    const groups: { tableName: string; items: typeof items }[] = [];
+    for (const item of items) {
+      const group = groups.find((g) => g.tableName === item.tableName);
+      if (group) group.items.push(item);
+      else groups.push({ tableName: item.tableName, items: [item] });
+    }
+    return groups;
+  }, [items]);
   const open = (id: string) => {
     setActiveNode(id);
     setLayout({ gallery: false });
@@ -30,21 +41,26 @@ export function GalleryView() {
       <p className="mb-4 text-regular text-secondary">
         {items.length === 1 ? "1 graph" : `${items.length} graphs`} in this project. Select one to open it.
       </p>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => open(item.id)}
-            onDoubleClick={() => open(item.id)}
-            className="rounded-lg bg-surface p-3 text-left ring-1 ring-separator hover:ring-accent"
-          >
-            <div className="truncate text-regular font-medium">{item.name}</div>
-            <div className="truncate text-small text-secondary">{item.graphLabel}</div>
-            <div className="truncate text-small text-secondary">from {item.tableName}</div>
-          </button>
-        ))}
-      </div>
+      {families.map((family) => (
+        <section key={family.tableName} aria-label={`Family ${family.tableName}`} className="mb-6">
+          <h2 className="mb-2 text-strong">Family: {family.tableName}</h2>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
+            {family.items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => open(item.id)}
+                onDoubleClick={() => open(item.id)}
+                className="rounded-lg bg-surface p-3 text-left ring-1 ring-separator hover:ring-accent"
+              >
+                <div className="truncate text-regular font-medium">{item.name}</div>
+                <div className="truncate text-small text-secondary">{item.graphLabel}</div>
+                <div className="truncate text-small text-secondary">from {item.tableName}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }

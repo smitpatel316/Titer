@@ -49,7 +49,7 @@ import { PreferencesDialog } from "./preferences-dialog";
 import { PRINT_SETTINGS_CHANGED_EVENT, loadPrintSettings, printPageCss } from "../lib/print-settings";
 import { useStartAnalysis } from "../views/analyses/use-analysis-launcher";
 import { GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
-import { goToSheetEntries } from "../lib/sheet-navigation";
+import { goToSheetEntries, linkedSheetIds } from "../lib/sheet-navigation";
 import { installPaneFocusCycling } from "../lib/pane-focus";
 
 // The traffic lights sit at x 20–80, centered in the 52 px toolbars (`trafficLightPosition`
@@ -100,7 +100,7 @@ export function AppShell() {
     return () => window.removeEventListener(PRINT_SETTINGS_CHANGED_EVENT, apply);
   }, []);
   const hidden = HIDDEN_SIDEBAR[fullscreen ? "fullscreen" : "window"];
-  const { nodes, rootOrder, childOrder, selector, closeSelector, createTable, createGraph, setActiveNode, isDirty } =
+  const { nodes, rootOrder, childOrder, selector, closeSelector, openSelector, createTable, createGraph, setActiveNode, activeNode, isDirty } =
     useProjectStore();
   const startAnalysis = useStartAnalysis();
   // The New Analysis / New Graph pickers list what fits the target table's type.
@@ -130,6 +130,16 @@ export function AppShell() {
   };
   // Go to Sheet (seq 240): every sheet in outline order, grouped by section.
   const goToEntries = selector?.kind === "go-to-sheet" ? goToSheetEntries(nodes, rootOrder, childOrder) : [];
+  // Go to Linked Sheet (seq 240 remainder, O4): the active sheet's linked
+  // sheets, in the order View ▸ Go to Linked Sheet cycles them.
+  const linkedIds = activeNode ? linkedSheetIds(activeNode, nodes, childOrder) : [];
+  const goToLinkedEntries =
+    selector?.kind === "go-to-linked"
+      ? linkedIds.map((id) => {
+          const entry = goToSheetEntries(nodes, rootOrder, childOrder).find((e) => e.id === id);
+          return { value: id, label: entry ? `${entry.section} — ${entry.label}` : (nodes[id]?.name ?? id) };
+        })
+      : [];
 
   return (
     <div className="flex h-full">
@@ -161,6 +171,17 @@ export function AppShell() {
           >
             <FloppyDiskIcon />
             Save
+          </Button>
+          {/* Linked Sheets (seq 240 remainder, O4): the active sheet's
+              linked sheets, as a picker — the button beside Save, where a
+              status-bar link control would sit. */}
+          <Button
+            disabled={linkedIds.length === 0}
+            onClick={() => openSelector({ kind: "go-to-linked" })}
+            title="Linked Sheets — jump to a sheet linked to the active one"
+            aria-label="Linked Sheets"
+          >
+            Linked Sheets
           </Button>
         </div>
         <Workspace
@@ -535,6 +556,20 @@ export function AppShell() {
         title="Go to Sheet"
         description="Jump to a sheet in this project."
         options={goToEntries.map((e) => ({ value: e.id, label: `${e.section} — ${e.label}` }))}
+        onSelect={(id) => {
+          setActiveNode(id);
+          closeSelector();
+        }}
+        onClose={closeSelector}
+      />
+
+      {/* Go to Linked Sheet (seq 240 remainder, O4): the active sheet's
+          linked sheets — the same list View ▸ Go to Linked Sheet cycles. */}
+      <UniversalModal
+        open={selector?.kind === "go-to-linked"}
+        title="Linked Sheets"
+        description="Jump to a sheet linked to the active one."
+        options={goToLinkedEntries}
         onSelect={(id) => {
           setActiveNode(id);
           closeSelector();
