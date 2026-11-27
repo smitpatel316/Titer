@@ -45279,6 +45279,19 @@ check("prefs-225-new-graph-defaults: Preferences offers New Graph defaults, pers
   );
 });
 
+// Seq 225 remainder (L11) — the preferred new-graph defaults must not
+// clobber a graph kind's own defaults: the MV summary-symbol and bar-chart
+// kinds are mean-with-SD graphs by definition, so they keep SD error bars
+// even though the preferred default is SEM. This pin fails while the
+// preference is spread after the kind defaults in newGraphOptions.
+check("prefs-225-new-graph-defaults: a graph kind's own error default wins over the preferred new-graph default", () => {
+  strictEqual(newGraphOptions("mv-summary-symbol").error, "sd");
+  strictEqual(newGraphOptions("mv-bar-chart").error, "sd");
+  strictEqual(newGraphOptions("mv-bar-strip").error, "sd");
+  // A kind with no error default of its own still takes the preference.
+  strictEqual(newGraphOptions("xy-scatter").error, "sem");
+});
+
 // Seq 225 remainder (L12) — Prism's Preferences offers a P-value format
 // (the threshold below which p shows as "<"). Titer's format.ts hardcodes
 // 0.0001 with no such setting. This pin fails until the dialog offers the

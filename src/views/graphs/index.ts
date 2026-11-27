@@ -364,14 +364,17 @@ export function graphSeriesDataset(
 export function newGraphOptions(type: GraphType, error?: TableErrorFormat): GraphOptions {
   const { palette, defaults } = GRAPHS[type];
   // The preferred new-graph defaults (seq 225 remainder L11): points and
-  // error bars as the user set them in Preferences. The table's own error
-  // format still wins — it describes the data, not a preference.
+  // error bars as the user set them in Preferences. They sit under the
+  // graph kind's own defaults — a kind that defines its error bars (the MV
+  // summary-symbol and bar-chart kinds are mean-with-SD graphs by
+  // definition) keeps them. The table's own error format still wins — it
+  // describes the data, not a preference.
   const preferred = loadNewGraphDefaults();
   return {
     ...DEFAULT_GRAPH_OPTIONS,
-    ...defaults,
     showPoints: preferred.showPoints,
     error: preferred.error,
+    ...defaults,
     palette: savedPalette(paletteNamed(palette ?? "okabe-ito")!),
     ...(error ? { error } : {}),
   };
