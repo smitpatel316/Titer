@@ -511,10 +511,11 @@ import {
 import { executeExportAllGraphs, runExportAllBatch, type ExportJobDeps } from "../src/store/mcp-export";
 import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
-import { decodePng, bmpEncode, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
+import { decodePng, bmpEncode, packBits, pdfEncode, quantizeRgbToPalette, tiffEncode } from "../src/lib/raster-export";
 import {
   COLOR_MODES,
   VectorExportError,
+  colorModesFor,
   grayOf,
   grayscaleFigure,
   parseColor,
@@ -527,7 +528,7 @@ import {
   type ColorMode,
   type Presentation,
 } from "../src/lib/vector-export";
-import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
+import { EXPORT_FORMATS, RESOLUTIONS, exportLayout } from "../src/views/graphs/graph-export";
 import { formatFigureLabels, formatLabelForPlotly, labelRuns } from "../src/lib/label-format";
 import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnalysisType, AnovaParams, ChiSquareGofParams, ComparedCell, DoseResponseSpecialParams, GroupDescriptives, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, RemoveBaselineParams, RmAnovaParams, SimulationSpec, ThreeWayAnovaParams } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
@@ -21478,6 +21479,214 @@ check("seq 216: raster PDF in CMYK/Grayscale uses the matching colour space", ()
     new Uint8Array(pdfContentBytes(gray).slice(0, 4)),
     new Uint8Array([76, 150, 29, 255]),
   );
+});
+
+// ── Seq 216 remainder: 8/24-bit, TIFF monochrome, transparent EPS ───────
+// Pre-fix pins: each failed on the d4b45130 base and passes with the lane.
+// The fixture is 4×3 — red, green, blue, white / white, blue, green, red /
+// black, red, green, blue — five distinct colours, so the 8-bit palette
+// keeps them exactly. The live-Plotly end-to-end proof (a transparent
+// graph exported to EPS/PDF/TIFF from the dialog, and an 8-bit TIFF
+// opened in Preview) is owed on the Mac, as for the seq 216 pins.
+const unpackPackBits = (strip: Uint8Array): number[] => {
+  const out: number[] = [];
+  for (let i = 0; i < strip.length;) {
+    const n = strip[i]!;
+    if (n <= 127) {
+      for (let j = 0; j <= n; j++) out.push(strip[i + 1 + j]!);
+      i += n + 2;
+    } else if (n >= 129) {
+      for (let j = 0; j < 257 - n; j++) out.push(strip[i + 1]!);
+      i += 2;
+    } else i += 1; // 128: no-op
+  }
+  return out;
+};
+
+/** A TIFF's IFD tags by id, with each tag's type, count and value field
+ *  (an offset for values that don't fit inline, e.g. the ColorMap). */
+const readTiffTags = (tiff: Uint8Array) => {
+  const view = new DataView(tiff.buffer);
+  const count = view.getUint16(8, true);
+  const tags = new Map<number, { type: number; count: number; value: number }>();
+  for (let i = 0; i < count; i++) {
+    const at = 10 + i * 12;
+    tags.set(view.getUint16(at, true), {
+      type: view.getUint16(at + 2, true),
+      count: view.getUint32(at + 4, true),
+      value: view.getUint32(at + 8, true),
+    });
+  }
+  return { tags, view };
+};
+
+check("seq 216 remainder: the 8-bit palette keeps ≤256 colours exactly, median-cuts more", () => {
+  const { palette, indices } = quantizeRgbToPalette(fixtureRgb);
+  strictEqual(palette.length, 256 * 3, "the palette is always 256 entries");
+  // First-seen order: red, green, blue, white, black — the rest is padding.
+  deepStrictEqual(
+    [...palette.subarray(0, 15)],
+    [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0],
+  );
+  deepStrictEqual([...palette.subarray(15, 18)], [0, 0, 0], "unused entries pad black");
+  deepStrictEqual([...indices], [0, 1, 2, 3, 3, 2, 1, 0, 4, 0, 1, 2]);
+  const expanded = new Uint8Array(fixtureRgb.length);
+  for (let p = 0; p < indices.length; p++) {
+    expanded[p * 3] = palette[indices[p]! * 3]!;
+    expanded[p * 3 + 1] = palette[indices[p]! * 3 + 1]!;
+    expanded[p * 3 + 2] = palette[indices[p]! * 3 + 2]!;
+  }
+  deepStrictEqual(expanded, fixtureRgb, "re-expanding the indices gives the exact pixels");
+  // More than 256 colours: 1024 distinct colours median-cut to 256.
+  const many = new Uint8Array(1024 * 3);
+  for (let i = 0; i < 1024; i++) {
+    many[i * 3] = i % 256;
+    many[i * 3 + 1] = Math.floor(i / 256);
+    many[i * 3 + 2] = 0;
+  }
+  const cut = quantizeRgbToPalette(many);
+  strictEqual(cut.palette.length, 256 * 3);
+  strictEqual(cut.indices.length, 1024);
+  ok(cut.indices.every((v) => v < 256), "every index points at the palette");
+  const used = new Set(cut.indices);
+  ok(used.size > 200, `median-cut uses most of the palette, not a handful (${used.size})`);
+  deepStrictEqual(quantizeRgbToPalette(many), cut, "quantization is deterministic");
+});
+
+check("seq 216 remainder: 8-bit TIFF is a paletted TIFF that re-expands exactly", () => {
+  const tiff = tiffEncode({ width: 4, height: 3, rgba: fixtureRgba }, 300, "color", "8bit");
+  const { tags, view } = readTiffTags(tiff);
+  strictEqual(tags.get(262)?.value, 3, "Photometric: palette");
+  strictEqual(tags.get(277)?.value, 1, "1 sample per pixel");
+  strictEqual(tags.get(258)?.count, 1);
+  strictEqual(tags.get(258)?.value, 8, "8 bits per sample, inline");
+  strictEqual(tags.get(259)?.value, 32773, "still PackBits");
+  strictEqual(tags.get(320)?.type, 3, "ColorMap is SHORT");
+  strictEqual(tags.get(320)?.count, 768, "256 RGB entries");
+  const cmapAt = tags.get(320)!.value;
+  deepStrictEqual(
+    [...Array.from({ length: 15 }, (_, i) => view.getUint16(cmapAt + i * 2, true))],
+    [65535, 0, 0, 0, 65535, 0, 0, 0, 65535, 65535, 65535, 65535, 0, 0, 0],
+    "ColorMap entries are the palette ×257",
+  );
+  const strip = tiff.subarray(tags.get(273)!.value, tags.get(273)!.value + tags.get(279)!.value);
+  deepStrictEqual(unpackPackBits(strip), [0, 1, 2, 3, 3, 2, 1, 0, 4, 0, 1, 2], "the strip is the indices");
+  // Depth is ignored where it has no meaning: grayscale is 8-bit already.
+  deepStrictEqual(
+    tiffEncode({ width: 4, height: 3, rgba: fixtureRgba }, 300, "grayscale", "8bit"),
+    tiffEncode({ width: 4, height: 3, rgba: fixtureRgba }, 300, "grayscale"),
+  );
+});
+
+check("seq 216 remainder: monochrome TIFF is 1-bit packed, thresholded at luma 128", () => {
+  const tiff = tiffEncode({ width: 4, height: 3, rgba: fixtureRgba }, 300, "monochrome");
+  const { tags } = readTiffTags(tiff);
+  strictEqual(tags.get(262)?.value, 1, "Photometric: BlackIsZero");
+  strictEqual(tags.get(277)?.value, 1, "1 sample per pixel");
+  strictEqual(tags.get(258)?.count, 1);
+  strictEqual(tags.get(258)?.value, 1, "1 bit per sample, inline");
+  strictEqual(tags.get(259)?.value, 32773, "still PackBits");
+  ok(!tags.has(320), "no ColorMap for monochrome");
+  const strip = tiff.subarray(tags.get(273)!.value, tags.get(273)!.value + tags.get(279)!.value);
+  // Row 1 red/green/blue/white → 0,1,0,1 = 0x50; row 2 → 1,0,1,0 = 0xA0;
+  // row 3 black/red/green/blue → 0,0,1,0 = 0x20 (luma 76/150/29/255/0).
+  deepStrictEqual(unpackPackBits(strip), [0x50, 0xa0, 0x20]);
+  deepStrictEqual(
+    tiffEncode({ width: 4, height: 3, rgba: fixtureRgba }, 300, "monochrome", "8bit"),
+    tiff,
+    "depth is ignored for monochrome",
+  );
+});
+
+check("seq 216 remainder: monochrome is TIFF-only, and the dialogs offer it per format", () => {
+  validateExportColorMode("tiff", "monochrome");
+  for (const format of ["eps", "pdf", "png", "jpeg", "svg", "bmp"]) {
+    throws(() => validateExportColorMode(format, "monochrome"), /Monochrome is supported for TIFF only/);
+  }
+  throws(() => validateExportColorMode("tiff", "sepia" as ColorMode), /Unknown colour mode/);
+  deepStrictEqual(
+    colorModesFor("tiff").map((m) => m.value),
+    ["color", "grayscale", "cmyk", "monochrome"],
+  );
+  deepStrictEqual(
+    colorModesFor("pdf").map((m) => m.value),
+    ["color", "grayscale", "cmyk"],
+  );
+  deepStrictEqual(
+    colorModesFor("png").map((m) => m.value),
+    ["color", "grayscale"],
+  );
+  // The dialogs offer the per-format modes and the TIFF depth choice.
+  const panel = readFileSync("src/views/graphs/format-panel.tsx", "utf8");
+  ok(panel.includes("colorModesFor(exported.format)"), "graph dialog offers the per-format modes");
+  ok(panel.includes("Colour depth"), "graph dialog offers a colour-depth choice");
+  ok(panel.includes("exported.depth"), "graph dialog carries the depth to Save");
+  const figure = readFileSync("src/views/figures/figure-view.tsx", "utf8");
+  ok(figure.includes("colorModesFor(exportFormat)"), "figure dialog offers the per-format modes");
+  ok(figure.includes("Colour depth"), "figure dialog offers a colour-depth choice");
+  ok(figure.includes("exportDepth"), "figure dialog carries the depth to Export");
+});
+
+check("seq 216 remainder: script RGBlow writes a paletted TIFF instead of upgrading to RGBhi", () => {
+  const low = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportTIF "g.tif", 600, RGBlow');
+  strictEqual(low.stopped, false, scriptLog(low));
+  deepStrictEqual(low.effects, [
+    { type: "export-graph", graphId: "g1", format: "tif", dpi: 600, clear: false, mode: "rgblow", path: "/tmp/out/g.tif" },
+  ]);
+  ok(!scriptLog(low).includes("exports as RGBhi"), scriptLog(low));
+  const tiff = encodeTiff(fixtureRgba, 4, 3, { mode: "rgblow", dpi: 300 });
+  const { tags, view } = readTiffTags(tiff);
+  strictEqual(tags.get(262)?.value, 3, "Photometric: palette");
+  strictEqual(tags.get(277)?.value, 1, "1 sample per pixel");
+  strictEqual(tags.get(259)?.value, 1, "script TIFF is uncompressed");
+  strictEqual(tags.get(320)?.count, 768, "256-entry ColorMap");
+  const cmapAt = tags.get(320)!.value;
+  strictEqual(view.getUint16(cmapAt, true), 65535, "first palette entry is red");
+  const strip = tiff.subarray(tags.get(273)!.value, tags.get(273)!.value + tags.get(279)!.value);
+  deepStrictEqual([...strip], [0, 1, 2, 3, 3, 2, 1, 0, 4, 0, 1, 2], "the strip is the raw indices");
+});
+
+check("seq 216 remainder: script CLEAR survives for EPS/PDF instead of being stripped", () => {
+  const eps = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportEPS "g.eps", 300, CLEAR');
+  strictEqual(eps.stopped, false, scriptLog(eps));
+  deepStrictEqual(eps.effects, [
+    { type: "export-graph", graphId: "g1", format: "eps", dpi: 300, clear: true, path: "/tmp/out/g.eps" },
+  ]);
+  ok(!scriptLog(eps).includes("has no transparency"), scriptLog(eps));
+  const pdf = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportPDF "g.pdf", 300, CLEAR');
+  strictEqual(pdf.stopped, false, scriptLog(pdf));
+  deepStrictEqual(pdf.effects, [
+    { type: "export-graph", graphId: "g1", format: "pdf", dpi: 300, clear: true, path: "/tmp/out/g.pdf" },
+  ]);
+});
+
+check("seq 216 remainder: a transparent graph exports transparent for EPS/PDF, on white for JPEG/BMP", () => {
+  const clear = { paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" };
+  const white = { paper_bgcolor: "#ffffff", plot_bgcolor: "#ffffff" };
+  for (const format of ["eps", "pdf", "tiff", "png", "svg"] as const) {
+    strictEqual(exportLayout(clear, format), clear, `${format} keeps a transparent background`);
+    strictEqual(exportLayout(white, format), white, `${format} keeps a white background`);
+  }
+  for (const format of ["jpeg", "bmp"] as const) {
+    deepStrictEqual(
+      exportLayout(clear, format),
+      { paper_bgcolor: "#ffffff", plot_bgcolor: "#ffffff" },
+      `${format} is drawn on white`,
+    );
+  }
+  // The vector writers themselves skip a transparent background paint:
+  // a full-page rect at zero alpha leaves no white fill behind.
+  const transparentSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><rect x="0" y="0" width="640" height="480" fill="rgba(0,0,0,0)"/><path d="M80,420 L580,420" fill="none" stroke="#000000" stroke-width="1"/></svg>`;
+  const whiteSvg = transparentSvg.replace('fill="rgba(0,0,0,0)"', 'fill="#ffffff"');
+  const eps = new TextDecoder().decode(svgToEps(transparentSvg));
+  ok(!eps.includes("1 1 1 setrgbcolor"), "transparent EPS paints no white background");
+  ok(eps.includes("0 0 0 setrgbcolor"), "transparent EPS still draws the black line");
+  const epsWhite = new TextDecoder().decode(svgToEps(whiteSvg));
+  ok(epsWhite.includes("1 1 1 setrgbcolor"), "control: a white background does paint white");
+  const pdf = pdfContentStream(svgToPdf(transparentSvg));
+  ok(!/(^|\n)1 1 1 rg(\n|$)/.test(pdf), "transparent PDF sets no white fill");
+  const pdfWhite = pdfContentStream(svgToPdf(whiteSvg));
+  ok(/(^|\n)1 1 1 rg(\n|$)/.test(pdfWhite), "control: a white background does fill white");
 });
 
 // ── TIFF discoverability (seq 290) ───────────────────────────────────────
