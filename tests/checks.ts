@@ -27057,6 +27057,67 @@ check("row means and totals runs on a grouped table, across every replicate", as
   ok(out.notes.includes("“A”, “B”"));
 });
 
+// Row means / totals, pooled mean-of-means (seq 194 remainder): Prism's
+// whole-row rule for multi-subcolumn data sets — first average each data
+// set, then summarise the data-set means. Pinned on Prism's own worked
+// example (Statistics Guide, "Row means and totals"): A {2, 3, 4},
+// B {4, 6}, C {7, 8, 9} give data-set means 3, 5, 8, so the row summary
+// is Mean = 5.333, SD = 2.517, N = 3 — not the pooled eight values
+// (Mean 5.375, SD 2.504, N = 8). Two more rows pin the rule per row: an
+// unbalanced second row, and a third row where one data set holds no
+// value, so it contributes no mean.
+check("row means and totals pooled mode summarises the data-set means, not the pooled values", async () => {
+  const grouped: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3", "C:Y1", "C:Y2", "C:Y3"],
+    rows: [
+      ["Row 1", "2", "3", "4", "4", "6", "", "7", "8", "9"],
+      ["Row 2", "10", "10", "10", "0", "100", "", "20", "20", "20"],
+      ["Row 3", "6", "6", "6", "", "", "", "12", "12", "12"],
+    ],
+    groups: 3,
+    replicates: 3,
+  };
+  const out = await runAnalysis("row-means-totals", grouped, { ys: ["A", "B", "C"] });
+  if ("error" in out) throw new Error(out.error);
+  // Exact: N is the number of data sets, the total is the sum of the
+  // data-set means, and the mean/median are over those means.
+  deepStrictEqual(
+    out.rowMeans?.map((r) => [r.row, r.x, r.n, r.total, r.mean, r.median]),
+    [
+      ["Row 1", undefined, 3, 16, 5.333333333333333, 5],
+      ["Row 2", undefined, 3, 80, 26.666666666666668, 20],
+      ["Row 3", undefined, 2, 18, 9, 9],
+    ],
+  );
+  // The rest to 1e-9 — except the t-based CIs, to 1e-6: webR's qt differs
+  // from the textbook value in the 10th decimal (see the pooled XY pin's
+  // note), which is ~3e-9 of CI at Row 2's SEM.
+  const close = (got: number | null, want: number | null) =>
+    (got == null && want == null) || (got != null && want != null && Math.abs(got - want) < 1e-9);
+  const closeCI = (got: number | null, want: number | null) =>
+    (got == null && want == null) || (got != null && want != null && Math.abs(got - want) < 1e-6);
+  const expected: [number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null][] = [
+    // Row 1, data-set means [3, 5, 8]: SD, SEM, CI low, CI high, %CV,
+    // geometric mean, min, max, q1, q3, p10, p90, geometric SD, geo CI.
+    [2.516611478423583, 1.4529663145135578, -0.9182761462775506, 11.584942812944217, 47.18646522044219, 4.93242414866094, 3, 8, 3, 8, 3, 8, 1.6332243503480317, 1.4582271976010548, 16.683825416448943],
+    // Row 2, data-set means [10, 50, 20].
+    [20.81665999466133, 12.018504251546632, -25.04478346070071, 78.37811679403404, 78.06247497997997, 21.544346900318835, 10, 50, 10, 50, 10, 50, 2.2418311715664743, 2.8999294925730887, 160.0586788575444],
+    // Row 3, data-set means [6, 12] (B holds nothing, so no third mean).
+    [4.242640687119285, 3, -29.118614209296283, 47.11861420929628, 47.14045207910316, 8.48528137423857, 6, 12, 6, 12, 6, 12, 1.6325269194381529, 0.10379868936934417, 693.6503768732979],
+  ];
+  ok(out.rowMeans?.length === expected.length);
+  out.rowMeans?.forEach((r, i) => {
+    const [sd, sem, lo, hi, cv, gm, min, max, q1, q3, p10, p90, gsd, glo, ghi] = expected[i];
+    ok(
+      close(r.sd, sd) && close(r.sem, sem) && closeCI(r.ciLow, lo) && closeCI(r.ciHigh, hi) && close(r.cv, cv) && close(r.geoMean, gm) &&
+        close(r.min, min) && close(r.max, max) && close(r.q1, q1) && close(r.q3, q3) && close(r.p10, p10) && close(r.p90, p90) &&
+        close(r.geoSd, gsd) && closeCI(r.geoCiLow, glo) && closeCI(r.geoCiHigh, ghi),
+      `row ${i + 1}: got sd ${r.sd} sem ${r.sem} CI ${r.ciLow}–${r.ciHigh} CV ${r.cv} gm ${r.geoMean} min ${r.min} max ${r.max} q1 ${r.q1} q3 ${r.q3} p10 ${r.p10} p90 ${r.p90} gsd ${r.geoSd} geoCI ${r.geoCiLow}–${r.geoCiHigh}`,
+    );
+  });
+  ok(out.notes.includes("mean of means"));
+});
+
 // Row means / totals, per-column mode (seq 194): each row summarised
 // separately within each chosen data set — one summary per row per data
 // set — with the same min/max, quartiles, percentiles and geometric
