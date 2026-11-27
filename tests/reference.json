@@ -48114,6 +48114,255 @@
   ],
   "comparisonsLabel": "Bonferroni-corrected multiple comparisons"
  },
+ "nested-anova nestedBig {\"posthoc\":\"none\"}": {
+  "testType": "nested-anova",
+  "stats": [
+   {
+    "label": "F",
+    "value": 68.98107353
+   },
+   {
+    "label": "DFn",
+    "value": 2
+   },
+   {
+    "label": "DFd",
+    "value": 6
+   },
+   {
+    "label": "P value",
+    "value": 0.00007239503891,
+    "p": true
+   },
+   {
+    "label": "SS between groups",
+    "value": 14.64180077
+   },
+   {
+    "label": "SS within groups",
+    "value": 0.6367746989
+   },
+   {
+    "label": "Grand mean",
+    "value": 10000000000000
+   },
+   {
+    "label": "Subcolumns",
+    "value": 9
+   },
+   {
+    "label": "Groups",
+    "value": 3
+   }
+  ],
+  "groups": [
+   {
+    "name": "Control",
+    "mean": 10000000000000,
+    "sd": 0.3264641281,
+    "sem": 0.1884841522,
+    "median": 10000000000000,
+    "n": 3
+   },
+   {
+    "name": "Treated",
+    "mean": 10000000000000,
+    "sd": 0.4441180355,
+    "sem": 0.2564116674,
+    "median": 10000000000000,
+    "n": 3
+   },
+   {
+    "name": "High",
+    "mean": 10000000000000,
+    "sd": 0.1206993325,
+    "sem": 0.06968579209,
+    "median": 10000000000000,
+    "n": 3
+   }
+  ],
+  "notes": "Ran on subcolumn means — one value per animal/subject, not the individual replicate values — for “Control” (3 subcolumns), “Treated” (3 subcolumns), “High” (3 subcolumns). One-way ANOVA on the subcolumn means, assuming normal distributions with equal variances."
+ },
+ "nested-anova nestedBig {\"posthoc\":\"tukey\"}": {
+  "testType": "nested-anova",
+  "stats": [
+   {
+    "label": "F",
+    "value": 68.98107353
+   },
+   {
+    "label": "DFn",
+    "value": 2
+   },
+   {
+    "label": "DFd",
+    "value": 6
+   },
+   {
+    "label": "P value",
+    "value": 0.00007239503891,
+    "p": true
+   },
+   {
+    "label": "SS between groups",
+    "value": 14.64180077
+   },
+   {
+    "label": "SS within groups",
+    "value": 0.6367746989
+   },
+   {
+    "label": "Grand mean",
+    "value": 10000000000000
+   },
+   {
+    "label": "Subcolumns",
+    "value": 9
+   },
+   {
+    "label": "Groups",
+    "value": 3
+   }
+  ],
+  "groups": [
+   {
+    "name": "Control",
+    "mean": 10000000000000,
+    "sd": 0.3264641281,
+    "sem": 0.1884841522,
+    "median": 10000000000000,
+    "n": 3
+   },
+   {
+    "name": "Treated",
+    "mean": 10000000000000,
+    "sd": 0.4441180355,
+    "sem": 0.2564116674,
+    "median": 10000000000000,
+    "n": 3
+   },
+   {
+    "name": "High",
+    "mean": 10000000000000,
+    "sd": 0.1206993325,
+    "sem": 0.06968579209,
+    "median": 10000000000000,
+    "n": 3
+   }
+  ],
+  "notes": "Ran on subcolumn means — one value per animal/subject, not the individual replicate values — for “Control” (3 subcolumns), “Treated” (3 subcolumns), “High” (3 subcolumns). One-way ANOVA on the subcolumn means, assuming normal distributions with equal variances, followed by Tukey's multiple comparisons test.",
+  "comparisons": [
+   {
+    "group1": "Control",
+    "group2": "Treated",
+    "diff": -1.68359375,
+    "p": 0.00177044109
+   },
+   {
+    "group1": "Control",
+    "group2": "High",
+    "diff": -3.12109375,
+    "p": 0.00005706444402
+   },
+   {
+    "group1": "Treated",
+    "group2": "High",
+    "diff": -1.4375,
+    "p": 0.003982732802
+   }
+  ],
+  "comparisonsLabel": "Tukey's multiple comparisons test"
+ },
+ "nested-anova nestedBig {\"posthoc\":\"bonferroni\"}": {
+  "testType": "nested-anova",
+  "stats": [
+   {
+    "label": "F",
+    "value": 68.98107353
+   },
+   {
+    "label": "DFn",
+    "value": 2
+   },
+   {
+    "label": "DFd",
+    "value": 6
+   },
+   {
+    "label": "P value",
+    "value": 0.00007239503891,
+    "p": true
+   },
+   {
+    "label": "SS between groups",
+    "value": 14.64180077
+   },
+   {
+    "label": "SS within groups",
+    "value": 0.6367746989
+   },
+   {
+    "label": "Grand mean",
+    "value": 10000000000000
+   },
+   {
+    "label": "Subcolumns",
+    "value": 9
+   },
+   {
+    "label": "Groups",
+    "value": 3
+   }
+  ],
+  "groups": [
+   {
+    "name": "Control",
+    "mean": 10000000000000,
+    "sd": 0.3264641281,
+    "sem": 0.1884841522,
+    "median": 10000000000000,
+    "n": 3
+   },
+   {
+    "name": "Treated",
+    "mean": 10000000000000,
+    "sd": 0.4441180355,
+    "sem": 0.2564116674,
+    "median": 10000000000000,
+    "n": 3
+   },
+   {
+    "name": "High",
+    "mean": 10000000000000,
+    "sd": 0.1206993325,
+    "sem": 0.06968579209,
+    "median": 10000000000000,
+    "n": 3
+   }
+  ],
+  "notes": "Ran on subcolumn means — one value per animal/subject, not the individual replicate values — for “Control” (3 subcolumns), “Treated” (3 subcolumns), “High” (3 subcolumns). One-way ANOVA on the subcolumn means, assuming normal distributions with equal variances, followed by Bonferroni-corrected multiple comparisons.",
+  "comparisons": [
+   {
+    "group1": "Control",
+    "group2": "Treated",
+    "diff": -1.68359375,
+    "p": 0.002186456026
+   },
+   {
+    "group1": "Control",
+    "group2": "High",
+    "diff": -3.12109375,
+    "p": 0.00006936790796
+   },
+   {
+    "group1": "Treated",
+    "group2": "High",
+    "diff": -1.4375,
+    "p": 0.004960154227
+   }
+  ],
+  "comparisonsLabel": "Bonferroni-corrected multiple comparisons"
+ },
  "nested-t-test nested3 {}": {
   "error": "Nested t test needs exactly two groups — this table has 3."
  },
