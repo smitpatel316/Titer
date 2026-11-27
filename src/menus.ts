@@ -14,6 +14,7 @@ import {
 } from "./native";
 import { openSendFeedback, openWhatsNew } from "./lib/feedback-ui";
 import { fileName } from "./lib/paths";
+import { markNewProjectWindow, NEW_PROJECT_WINDOW_KEY } from "./lib/templates";
 import { checkForUpdates } from "./updates";
 import { version } from "../package.json";
 import { recentLabel, type RecentEntry } from "./store/recents";
@@ -109,7 +110,26 @@ export function projectItems(
       ]
     : [{ text: "No Recent Projects", enabled: false }];
   return [
-    { text: "New Project", accelerator: "CmdOrCtrl+N", action: () => void newProject() },
+    {
+      text: "New Project",
+      accelerator: "CmdOrCtrl+N",
+      // B1 (seq 167 remainder): New Project routes through Welcome — the
+      // menu stamps the window it is about to open, so the new window's
+      // auto-show offers the gallery instead of a bare blank table. The
+      // show-on-startup setting still gates it there, and the stamp
+      // expires after NEW_PROJECT_WINDOW_MS. A stamp that can't be stored
+      // just means the new window opens blank, as before.
+      action: () => {
+        try {
+          if (typeof localStorage !== "undefined") {
+            localStorage.setItem(NEW_PROJECT_WINDOW_KEY, markNewProjectWindow(Date.now()));
+          }
+        } catch {
+          // Never throw from a menu action.
+        }
+        void newProject();
+      },
+    },
     { text: "Open…", accelerator: "CmdOrCtrl+O", action: () => void chooseProject() },
     { text: "Open Recent", items: recentItems },
   ];

@@ -160,6 +160,12 @@ export async function pickFolder(title: string, defaultPath: string) {
  *  collision and a missing source — see `move_file` in main.rs. */
 export const moveFile = (from: string, to: string) => invoke<void>("move_file", { from, to });
 
+/** The `.pzt` template files directly inside a folder (seq 167 remainder,
+ *  M6): the Welcome dialog's shared-template gallery. A missing or
+ *  unreadable folder rejects, so the caller can leave the folder listed
+ *  with nothing under it instead of silently dropping it. */
+export const listTemplateFiles = (path: string) => invoke<string[]>("list_template_files", { path });
+
 // ── Files ──────────────────────────────────────────────────────────────
 
 export const readText = (path: string) => invoke<string>("read_text", { path });

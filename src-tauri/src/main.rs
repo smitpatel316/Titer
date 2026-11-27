@@ -761,12 +761,44 @@ async fn move_file(from: String, to: String) -> Result<(), String> {
         .map_err(|e| e.to_string())?
 }
 
+/// Lists the `.pzt` template files directly inside a folder (seq 167
+/// remainder, M6): the Welcome dialog's shared-template gallery. Only the
+/// folder itself — never its subfolders — and only `.pzt` files, in name
+/// order. A missing or unreadable folder is an error, never a silent
+/// empty gallery. Async, on the blocking pool (seq 248's class: a read
+/// under ~/Documents or ~/Desktop can block on a macOS TCC consent prompt).
+#[tauri::command]
+async fn list_template_files(path: String) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut files = Vec::new();
+        let entries = fs::read_dir(&path).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let file_type = entry.file_type().map_err(|e| e.to_string())?;
+            if !file_type.is_file() {
+                continue;
+            }
+            let file_path = entry.path();
+            if file_path
+                .extension()
+                .map(|ext| ext.eq_ignore_ascii_case("pzt"))
+                .unwrap_or(false)
+            {
+                files.push(file_path.to_string_lossy().into_owned());
+            }
+        }
+        files.sort();
+        Ok(files)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn move_file_blocking(from: &str, to: &str) -> Result<(), String> {
     // Gated like every other file command: only a file type Titer itself
     // reads or writes may move — the extension-equality check below then
     // keeps the format across the rename.
-    check_extension(from, WRITE_FILE_EXTENSIONS)?;
-    let from_path = Path::new(from);
+    check_extension(from, WRITE_FILE_EXTENSIONS)?;    let from_path = Path::new(from);
     let to_path = Path::new(to);
     if !from_path.exists() {
         return Err("The file couldn't be found. It may have been moved or deleted.".into());
@@ -2191,6 +2223,7 @@ fn main() {
             read_data_bytes,
             write_file,
             move_file,
+            list_template_files,
             send_to_keynote,
             copy_png_to_clipboard,
             copy_pdf_to_clipboard,

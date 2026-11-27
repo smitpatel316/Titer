@@ -14,7 +14,7 @@ import {
   type TemplateInfo,
   type TemplateKind,
 } from "../lib/template";
-import { WELCOME_KEY, planTemplateApply, shouldShowWelcome, templateById } from "../lib/templates";
+import { isNewProjectWindow, NEW_PROJECT_WINDOW_KEY, WELCOME_KEY, planTemplateApply, shouldShowWelcome, templateById } from "../lib/templates";
 import { markGuideSeen, readGuideSeen, shouldShowGuide } from "../lib/startup-guide";
 import { parsePzfx, type PzfxImport } from "../lib/pzfx";
 import { parsePzf } from "../lib/pzf";
@@ -2696,26 +2696,32 @@ export function useDocument() {
   React.useEffect(() => native.onOpening(({ path, untitled }) => void handlers.current.load(path, untitled)), []);
 
   // ── Welcome dialog auto-show (seq 167) ─────────────────────────────────
-  // Decided once, shortly after mount: only the first project window (a
-  // Cmd+N / MCP window must not pop it over work), only while the project
-  // is still blank, and only while the setting says to show it. The delay
-  // gives the shell's opening a chance to arrive — take_opening resolves
-  // within milliseconds of mount, and load() marks openedFile synchronously
-  // on entry, so a file window never sees the dialog.
+  // Decided once, shortly after mount: only the first project window, or a
+  // window a recent Cmd+N stamped (B1, seq 167 remainder — New Project
+  // routes through Welcome; an MCP window still never pops it over work),
+  // only while the project is still blank, and only while the setting says
+  // to show it. The delay gives the shell's opening a chance to arrive —
+  // take_opening resolves within milliseconds of mount, and load() marks
+  // openedFile synchronously on entry, so a file window never sees the dialog.
   React.useEffect(() => {
     const timer = setTimeout(() => {
       if (welcomeDecided.current) return;
       welcomeDecided.current = true;
       const firstWindow = !native.isNative || native.windowLabel() === "project-1";
       let stored: unknown = null;
+      let newProjectMark: unknown = null;
       try {
-        stored = typeof localStorage === "undefined" ? null : localStorage.getItem(WELCOME_KEY);
+        if (typeof localStorage !== "undefined") {
+          stored = localStorage.getItem(WELCOME_KEY);
+          newProjectMark = localStorage.getItem(NEW_PROJECT_WINDOW_KEY);
+        }
       } catch {
         stored = null;
+        newProjectMark = null;
       }
       const s = latest.current.get();
       if (
-        firstWindow &&
+        (firstWindow || isNewProjectWindow(newProjectMark, Date.now())) &&
         shouldShowWelcome(stored, openedFile.current) &&
         !s.filePath &&
         !s.isDirty

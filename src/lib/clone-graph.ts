@@ -57,6 +57,37 @@ export interface ClonePlan {
 
 export type ClonePlanResult = { plan: ClonePlan } | { error: string };
 
+/** The project shape the clonable-graph listing reads: its nodes and
+ *  their order. */
+export interface ClonableGraphSource {
+  nodes: Record<string, { id: string; type: string; name: string } | undefined>;
+  rootOrder: string[];
+  childOrder: Record<string, string[]>;
+}
+
+/** One graph the Welcome dialog can offer to clone: its id and name. */
+export interface ClonableGraph {
+  id: string;
+  name: string;
+}
+
+/** The project's graphs, in sidebar order — roots first, then each
+ *  table's children in order, so the listing reads the way the sidebar
+ *  does. Analyses (and anything else) never list: only graphs clone. A
+ *  fresh project lists nothing. */
+export function clonableGraphs(project: ClonableGraphSource): ClonableGraph[] {
+  const { nodes, rootOrder, childOrder } = project;
+  const listed: ClonableGraph[] = [];
+  const visit = (id: string) => {
+    const node = nodes[id];
+    if (!node) return;
+    if (node.type === "graph") listed.push({ id: node.id, name: node.name });
+    for (const childId of childOrder[id] ?? []) visit(childId);
+  };
+  for (const id of rootOrder) visit(id);
+  return listed;
+}
+
 /** A plain JSON value, copied so the clone never shares a reference with
  *  the original (editing one must never move the other). */
 function deepCopy<T>(value: T): T {

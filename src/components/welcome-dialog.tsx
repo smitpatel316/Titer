@@ -12,9 +12,24 @@
 import * as React from "react";
 import { Dialog } from "../ui/dialog";
 import { Button } from "../ui/controls";
-import { TEMPLATES, WELCOME_KEY, graphPortfolio, parseWelcomeSetting } from "../lib/templates";
+import {
+  addTemplateFolder,
+  parseTemplateFolders,
+  removeTemplateFolder,
+  serializeTemplateFolders,
+  sharedTemplatesForFolder,
+  templateFolderLabel,
+  TEMPLATES,
+  TEMPLATE_FOLDERS_KEY,
+  WELCOME_KEY,
+  graphPortfolio,
+  parseWelcomeSetting,
+  type SharedTemplateEntry,
+  type TemplateFolder,
+} from "../lib/templates";
+import type { ClonableGraph } from "../lib/clone-graph";
 import { TABLE_TYPE_OPTIONS } from "../views/tables";
-import { chooseProject } from "../native";
+import { chooseProject, listTemplateFiles, pickFolder } from "../native";
 import { recentKey, recentLabel, type RecentEntry } from "../store/recents";
 
 /** One gallery row: a label, a one-line description, and what picking it does. */
@@ -52,12 +67,37 @@ function readShowOnStartup(): boolean {
   }
 }
 
+/** The registered template folders, or none when nothing is stored. Never throws. */
+function readTemplateFolders(): TemplateFolder[] {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    return parseTemplateFolders(localStorage.getItem(TEMPLATE_FOLDERS_KEY));
+  } catch {
+    return [];
+  }
+}
+
+/** Persists the registered template folders. Never throws. */
+function writeTemplateFolders(folders: TemplateFolder[]): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(TEMPLATE_FOLDERS_KEY, serializeTemplateFolders(folders));
+    }
+  } catch {
+    // A registry that can't be stored doesn't stick; the folders simply
+    // aren't there next launch. Never throw on save.
+  }
+}
+
 export function WelcomeDialog({
   open,
   onClose,
   onApplyTemplate,
   recents,
   onOpenRecent,
+  clonableGraphs,
+  onCloneGraph,
+  onOpenSharedTemplate,
 }: {
   open: boolean;
   onClose: () => void;
@@ -65,12 +105,63 @@ export function WelcomeDialog({
   onApplyTemplate: (templateId: string) => void;
   recents: RecentEntry[];
   onOpenRecent: (entry: RecentEntry) => void;
+  /** The project's graphs, in sidebar order — the Clone a Graph section
+   *  lists them; empty on a fresh project, where there is nothing to clone. */
+  clonableGraphs: ClonableGraph[];
+  /** Clone a graph (with its data table): opens the Clone dialog for it. */
+  onCloneGraph: (graphId: string) => void;
+  /** Open a shared template file: it opens as a new untitled project. */
+  onOpenSharedTemplate: (path: string) => void;
 }) {
   const [showOnStartup, setShowOnStartup] = React.useState(readShowOnStartup);
-  // Re-read when the dialog opens: another window may have changed the setting.
+  const [folders, setFolders] = React.useState<TemplateFolder[]>(readTemplateFolders);
+  const [sharedTemplates, setSharedTemplates] = React.useState<SharedTemplateEntry[]>([]);
+  // Re-read when the dialog opens: another window may have changed the setting or the folders.
   React.useEffect(() => {
-    if (open) setShowOnStartup(readShowOnStartup());
+    if (open) {
+      setShowOnStartup(readShowOnStartup());
+      setFolders(readTemplateFolders());
+    }
   }, [open ]);
+
+  // The shared templates: each registered folder's .pzt files, re-listed
+  // whenever the dialog opens or the folders change. A folder that can't
+  // be read lists nothing under it instead of dropping out of the registry.
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void Promise.all(
+      folders.map((folder) =>
+        listTemplateFiles(folder.path)
+          .then((files) => sharedTemplatesForFolder(folder, files, {}))
+          .catch(() => [] as SharedTemplateEntry[]),
+      ),
+    ).then((perFolder) => {
+      if (!cancelled) setSharedTemplates(perFolder.flat());
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, folders]);
+
+  const addFolder = () => {
+    void pickFolder("Choose a template folder", "").then((picked) => {
+      if (!picked) return;
+      setFolders((current) => {
+        const next = addTemplateFolder(current, { path: picked, shared: false });
+        if (next !== current) writeTemplateFolders(next);
+        return next;
+      });
+    });
+  };
+
+  const removeFolder = (path: string) => {
+    setFolders((current) => {
+      const next = removeTemplateFolder(current, path);
+      if (next !== current) writeTemplateFolders(next);
+      return next;
+    });
+  };
 
   const pick = (templateId: string) => {
     onApplyTemplate(templateId);

@@ -188,6 +188,182 @@ export function shouldShowWelcome(storedValue: unknown, openedWithFile: boolean)
   return !openedWithFile && parseWelcomeSetting(storedValue);
 }
 
+// ── New-project window mark (seq 167 remainder, B1) ─────────────────────
+// Cmd+N routes through Welcome: the menu stamps the window it is about to
+// open, and the new window's auto-show reads the stamp. The stamp is a
+// millisecond timestamp, so it only fires for a window created by that
+// keypress, and only for a short while after it — a stale stamp never pops
+// Welcome over later work.
+
+/** The localStorage key for the Cmd+N stamp; the value is a timestamp. */
+export const NEW_PROJECT_WINDOW_KEY = "titer.new-project-window";
+
+/** How long a Cmd+N stamp counts: a new window takes well under this to
+ *  mount and decide, and anything older is not from that keypress. */
+export const NEW_PROJECT_WINDOW_MS = 10_000;
+
+/** The stamp for a window created now: the timestamp, as stored. */
+export function markNewProjectWindow(now: number): string {
+  return String(now);
+}
+
+/** Whether a stored stamp marks a window created by a recent Cmd+N: the
+ *  value must parse as a timestamp no more than NEW_PROJECT_WINDOW_MS old,
+ *  and never from the future. Garbage never counts. */
+export function isNewProjectWindow(value: unknown, now: number): boolean {
+  if (typeof value !== "string" || value.trim() === "") return false;
+  const mark = Number(value);
+  if (!Number.isFinite(mark)) return false;
+  const age = now - mark;
+  return age >= 0 && age < NEW_PROJECT_WINDOW_MS;
+}
+
+// ── Managed / shared template folders (seq 167 remainder, M6) ───────────
+// Prism's template folders: a team keeps its .pzt templates in a shared
+// folder, and the Welcome dialog lists them alongside the built-ins. The
+// registry lives in localStorage as JSON: a folder is a path plus whether
+// it is a shared (team) folder or a managed (own) one. Forgiving throughout
+// — a garbled value reads as no folders, never as a broken gallery.
+
+/** The localStorage key for the registered template folders (JSON). */
+export const TEMPLATE_FOLDERS_KEY = "titer.template-folders";
+
+/** How many folders the registry holds: one bad value can't grow it. */
+export const MAX_TEMPLATE_FOLDERS = 10;
+
+/** One registered folder: its path, and whether it is a shared (team)
+ *  folder — a missing flag is a managed (own) folder, not a shared one. */
+export interface TemplateFolder {
+  path: string;
+  shared: boolean;
+}
+
+/** A folder path, trimmed with trailing slashes dropped ("/" stays "/",
+ *  and an empty path stays empty). */
+function normalizeTemplateFolderPath(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed === "") return "";
+  const stripped = trimmed.replace(/\/+$/, "");
+  return stripped === "" ? "/" : stripped;
+}
+
+/** The registry, forgivingly: garbage reads as no folders, rows without a
+ *  usable path drop out, duplicates (after trimming, trailing-slash and
+ *  case) keep the first entry, and the list caps at MAX_TEMPLATE_FOLDERS. */
+export function parseTemplateFolders(value: unknown): TemplateFolder[] {
+  if (typeof value !== "string" || value.trim() === "") return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const seen = new Set<string>();
+  const folders: TemplateFolder[] = [];
+  for (const row of parsed) {
+    if (folders.length >= MAX_TEMPLATE_FOLDERS) break;
+    if (typeof row !== "object" || row === null) continue;
+    const rawPath = (row as { path?: unknown }).path;
+    if (typeof rawPath !== "string") continue;
+    const path = normalizeTemplateFolderPath(rawPath);
+    // Empty, or the whole drive — never a template folder ("/" would list
+    // every .pzt on the disk).
+    if (path === "" || path === "/") continue;
+    const key = path.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    folders.push({ path, shared: (row as { shared?: unknown }).shared === true });
+  }
+  return folders;
+}
+
+/** The registry, as stored. */
+export function serializeTemplateFolders(folders: TemplateFolder[]): string {
+  return JSON.stringify(folders);
+}
+
+/** Register a folder: a duplicate (after normalizing) is a no-op, and a
+ *  full registry stays full — the new folder is not added past the cap. */
+export function addTemplateFolder(folders: TemplateFolder[], folder: TemplateFolder): TemplateFolder[] {
+  const path = normalizeTemplateFolderPath(folder.path);
+  if (path === "" || path === "/") return folders;
+  if (folders.some((f) => f.path.toLowerCase() === path.toLowerCase())) return folders;
+  if (folders.length >= MAX_TEMPLATE_FOLDERS) return folders;
+  return [...folders, { path, shared: folder.shared === true }];
+}
+
+/** Unregister a folder, by path (after normalizing). Unknown paths are a no-op. */
+export function removeTemplateFolder(folders: TemplateFolder[], path: string): TemplateFolder[] {
+  const key = normalizeTemplateFolderPath(path).toLowerCase();
+  return folders.filter((f) => f.path.toLowerCase() !== key);
+}
+
+/** A folder's display label: its last segment ("/" and "" stay as they are). */
+export function templateFolderLabel(path: string): string {
+  if (path === "") return "";
+  const stripped = path.replace(/\/+$/, "");
+  if (stripped === "") return "/";
+  const base = stripped.slice(stripped.lastIndexOf("/") + 1);
+  return base === "" ? stripped : base;
+}
+
+/** A shared template's gallery id: its path, namespaced so it can never
+ *  collide with a built-in template id. */
+export function sharedTemplateId(path: string): string {
+  return `shared:${path}`;
+}
+
+/** A shared template's display name: the .pzt file's recorded name when
+ *  there is one, else its filename without the extension. */
+export function sharedTemplateName(path: string, metadata?: { name?: string }): string {
+  const named = metadata?.name?.trim();
+  if (named) return named;
+  const base = path.split("/").pop() ?? path;
+  return base.replace(/\.pzt$/i, "");
+}
+
+/** One shared template as the gallery lists it: the file, its folder, and
+ *  whether that folder is a shared one. */
+export interface SharedTemplateEntry {
+  id: string;
+  name: string;
+  description?: string;
+  path: string;
+  folderPath: string;
+  shared: boolean;
+}
+
+/** A folder's .pzt files as gallery entries, in name order: non-templates
+ *  never list, and a file without recorded metadata takes its name from
+ *  its filename. Only files directly in the folder belong to it. */
+export function sharedTemplatesForFolder(
+  folder: TemplateFolder,
+  filePaths: string[],
+  metadata: Record<string, { name?: string; description?: string } | undefined>,
+): SharedTemplateEntry[] {
+  const folderPath = normalizeTemplateFolderPath(folder.path);
+  const entries: SharedTemplateEntry[] = [];
+  for (const path of filePaths) {
+    if (!/\.pzt$/i.test(path)) continue;
+    const dir = path.slice(0, Math.max(path.lastIndexOf("/"), 0)) || "/";
+    if (normalizeTemplateFolderPath(dir) !== folderPath) continue;
+    const meta = metadata[path];
+    const entry: SharedTemplateEntry = {
+      id: sharedTemplateId(path),
+      name: sharedTemplateName(path, meta),
+      path,
+      folderPath: folder.path,
+      shared: folder.shared,
+    };
+    const description = meta?.description?.trim();
+    if (description) entry.description = description;
+    entries.push(entry);
+  }
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  return entries;
+}
+
 // ── Applying a template ─────────────────────────────────────────────────
 
 /** The project shape a template apply reads: its nodes and their order. */
