@@ -38,8 +38,8 @@ export interface WhatsNewEntry {
 /** The news, newest first. */
 export const WHAT_S_NEW: WhatsNewEntry[] = [
   {
-    version: "2.0.5",
-    title: "Titer 2.0.5 — in-place updates fixed",
+    version: "2.0.6",
+    title: "Titer 2.0.6 — in-place updates fixed",
     items: [
       "Check for Updates installs updates in place again: 2.0.3 opened GitHub instead, because the release was stamped with the old version number.",
       "The app now shows its real version — no more 2.0.1 on a newer build.",
