@@ -1082,6 +1082,25 @@ const xAxisRange = (options: GraphOptions, zeroBase?: boolean, grid: GraphOption
  *  their values, but texts (annotations) at the log10 of them on a log axis. */
 export const onAxis = (v: number, scale: GraphOptions["xScale"]) => (scale === "linear" ? v : Math.log10(v));
 
+/** Where a point label sits on the figure's axes (BUG-REPORT #101, seq 573):
+ *  a label carries physical Plotly coordinates, but `scaled` is keyed by
+ *  option — on a horizontal graph the value axis lies across (option y →
+ *  physical x) and the category axis down (option x → physical y), so the
+ *  log transform follows the physical axis, not the option key. The old
+ *  mapping transformed label.x with the category scale and label.y with
+ *  the value scale: a log value axis left label.x untransformed (10^v,
+ *  off-canvas) and log10 of row 0's place came out NaN. */
+export const labelOnAxes = (
+  label: { x: number; y: number },
+  scaled: { x: boolean; y: boolean },
+  options: Pick<GraphOptions, "xScale" | "yScale">,
+  horizontal: boolean,
+): { x: number; y: number } => ({
+  ...label,
+  x: onAxis(label.x, (horizontal ? scaled.y : scaled.x) ? (horizontal ? options.yScale : options.xScale) : "linear"),
+  y: onAxis(label.y, (horizontal ? scaled.x : scaled.y) ? (horizontal ? options.xScale : options.yScale) : "linear"),
+});
+
 /** Where a box's whiskers end, and which values lie past them (Prism's whisker
  *  choices, FAQ 1481): min to max (no outliers), Tukey's 1.5×IQR fences — the
  *  whiskers end at an observed data point, values beyond are outliers — or a

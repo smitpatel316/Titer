@@ -41,7 +41,7 @@ import { addEstimationPlot } from "./estimation-plot";
 import { coxSurvivalColumns } from "./survival";
 import { FormatPanel } from "./format-panel";
 import { copyGraphImage, drawSizeAtWidth, saveGraphImage, sendGraphToOffice } from "./graph-export";
-import { addNote, applyDateAxis, applyNumberFormats, fitLabels, hasTableXAxis, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, refLineParts, rightYDataset, rowValues, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
+import { addNote, applyDateAxis, applyNumberFormats, fitLabels, hasTableXAxis, INK, labelOnAxes, MOVABLE, marginsFor, movedText, paintOf, refLineParts, rightYDataset, rowValues, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
 import { addLogisticCurve as addAnalysisLogisticCurve } from "./fitted-curve";
 import { useStartAnalysis } from "../analyses/use-analysis-launcher";
 import { loadPlotly } from "./plotly";
@@ -867,12 +867,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
               dataset?.rowLabels ?? dataset?.titles,
               options.fontSize,
               labelPlotGeometry(fig.data, fig.layout, options),
-            ).map((label) => ({
-              ...label,
-              // A text sits at the log10 of its place on a log axis.
-              x: scaled.x ? onAxis(label.x, options.xScale) : label.x,
-              y: scaled.y ? onAxis(label.y, options.yScale) : label.y,
-            }));
+            ).map((label) => labelOnAxes(label, scaled, options, !!horizontal));
       if (labels.length) fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...labels];
       if (hasValueAxis(family) && options.refLines?.length) {
         const { shapes, annotations } = refLineParts(options, !!horizontal);

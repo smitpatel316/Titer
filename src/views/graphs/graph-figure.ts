@@ -367,6 +367,7 @@ export async function buildGraphFigure(
   const data = graph.frozen && graph.frozenData ? graph.frozenData : parent.data!;
   const type = graph.graphType as GraphType;
   const family = GRAPHS[type].family;
+  const horizontal = GRAPHS[type].horizontal;
   const analyses = Object.values(nodes).filter((n) => n.type === "analysis" && n.parentId === graph.parentId);
   const sibling = (analysisType: AnalysisType) => analyses.find((n) => n.analysisType === analysisType);
   const linked = (field: keyof GraphOptions) => {
@@ -786,8 +787,12 @@ export async function buildGraphFigure(
           labelPlotGeometry(fig.data, fig.layout, options),
         ).map((label) => ({
           ...label,
-          x: family === "xy" ? onAxis(label.x, options.xScale) : label.x,
-          y: onAxis(label.y, options.yScale),
+          // A text sits at the log10 of its place on a log axis — on a
+          // horizontal graph that axis lies across (option y → physical x),
+          // so the value scale transforms label.x and the category axis
+          // leaves label.y linear (BUG-REPORT #101, seq 573).
+          x: family === "xy" ? onAxis(label.x, options.xScale) : horizontal ? onAxis(label.x, options.yScale) : label.x,
+          y: horizontal ? onAxis(label.y, options.xScale) : onAxis(label.y, options.yScale),
         }));
   if (labels.length) fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...labels];
   if (hasValueAxis(family) && options.refLines?.length) {
