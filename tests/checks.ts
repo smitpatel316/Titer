@@ -48717,35 +48717,36 @@ check("feedback-loop-453: feedback reachable for every user, Discussions + suppo
   const shownVersions = (entries: { version: string }[]) => entries.map((e) => e.version);
   deepStrictEqual(
     shownVersions(visibleWhatsNewEntries("2.0.0")),
-    ["2.0.6", "2.0.3", "2.0.2"],
+    ["2.0.7", "2.0.6", "2.0.3"],
     "prev 2.0.0 sees the three newest, capped at 3",
   );
   deepStrictEqual(
     shownVersions(visibleWhatsNewEntries("1.9.0")),
-    ["2.0.6", "2.0.3", "2.0.2"],
+    ["2.0.7", "2.0.6", "2.0.3"],
     "prev 1.9.0 sees the three newest, capped at 3",
   );
   deepStrictEqual(
     shownVersions(visibleWhatsNewEntries("1.8.1")),
-    ["2.0.6", "2.0.3", "2.0.2"],
+    ["2.0.7", "2.0.6", "2.0.3"],
     "prev 1.8.1 sees the three newest, capped at 3",
   );
   deepStrictEqual(
     shownVersions(visibleWhatsNewEntries("2.0.1")),
-    ["2.0.6", "2.0.3", "2.0.2"],
+    ["2.0.7", "2.0.6", "2.0.3"],
     "prev 2.0.1 sees the three newer entries",
   );
   deepStrictEqual(
     shownVersions(visibleWhatsNewEntries("2.0.2")),
-    ["2.0.6", "2.0.3"],
-    "prev 2.0.2 sees the two newer entries",
+    ["2.0.7", "2.0.6", "2.0.3"],
+    "prev 2.0.2 sees the three newer entries",
   );
-  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.6")), [], "prev 2.0.6 (current) sees nothing");
-  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.6")), [], "downgrade sees nothing");
-  deepStrictEqual(shownVersions(visibleWhatsNewEntries(null)), ["2.0.6"], "no record sees only the current entry");
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.6")), ["2.0.7"], "prev 2.0.6 sees the new entry");
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.7")), [], "prev 2.0.7 (current) sees nothing");
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries("2.0.7")), [], "downgrade sees nothing");
+  deepStrictEqual(shownVersions(visibleWhatsNewEntries(null)), ["2.0.7"], "no record sees only the current entry");
   deepStrictEqual(
     shownVersions(visibleWhatsNewEntries("banana")),
-    ["2.0.6"],
+    ["2.0.7"],
     "garbled record sees only the current entry",
   );
   const fiveEntries = ["2.0.3", "2.0.2", "2.0.1", "2.0.0", "1.9.0"].map((v) => ({
