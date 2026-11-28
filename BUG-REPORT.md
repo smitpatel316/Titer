@@ -1,17 +1,18 @@
-# Titer (Helix) Bug Report — Round 2 (Recheck 4 at `c54f5954`)
+# Titer (Helix) Bug Report — Round 2 (Recheck 5 at `ad3fe0d0`)
 
-Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findings), rechecked at `b8a2528` (`#68`–`#81`), at `8c877d8` (`#82`–`#97`), at `d4b45130` (`#98`–`#111`), and at `HEAD` `c54f5954` across the 90 commits in `fbc68961..c54f5954` (+4 findings `#112`–`#115`).
+Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findings), rechecked at `b8a2528` (`#68`–`#81`), at `8c877d8` (`#82`–`#97`), at `d4b45130` (`#98`–`#111`), at `c54f5954` (`#112`–`#115`), and at `HEAD` `ad3fe0d0` (`v2.0.6`) across the 65 commits in `2aab5466..ad3fe0d0` (+30 findings `#116`–`#145`).
 
-## Recheck Status at `c54f5954`
+## Recheck Status at `ad3fe0d0`
 
 - **Round 1 (`85f6c91`, 28 issues)**: **28 of 28** fixed.
-- **Round 2 (`d44c1da`, #1–#67)**: **42 Fixed** (`#2`, `#3`, `#5`, `#8`, `#12`, `#13`, `#14`, `#15`, `#16`, `#18`, `#21`, `#22`, `#26`, `#27`, `#30`, `#31`, `#32`, `#34`, `#35`, `#36`, `#38`, `#39`, `#40`, `#41`, `#42`, `#43`, `#44`, `#48`, `#49`, `#51`, `#53`, `#54`, `#55`, `#56`, `#58`, `#59`, `#61`, `#62`, `#64`, `#65`, `#66`, `#67` — +14 newly fixed at `c54f5954`), **24 Partially Fixed** (`#1`, `#6`, `#7`, `#9`, `#10`, `#11`, `#17`, `#19`, `#20`, `#23`, `#24`, `#25`, `#28`, `#29`, `#33`, `#37`, `#45`, `#46`, `#47`, `#50`, `#52`, `#57`, `#60`, `#63`), **1 Open** (`#4`).
-- **Recheck 1 (`b8a2528`, #68–#81)**: **11 Fixed**, **3 Partially Fixed** (`#72`, `#73`, `#80`), **0 Open**.
+- **Round 2 (`d44c1da`, #1–#67)**: **43 Fixed** (`#2`, `#3`, `#5`, `#8`, `#12`, `#13`, `#14`, `#15`, `#16`, `#18`, `#21`, `#22`, `#26`, `#27`, `#30`, `#31`, `#32`, `#34`, `#35`, `#36`, `#38`, `#39`, `#40`, `#41`, `#42`, `#43`, `#44`, `#48`, `#49`, `#51`, `#53`, `#54`, `#55`, `#56`, `#58`, `#59`, `#61`, `#62`, `#63`, `#64`, `#65`, `#66`, `#67` — +1 newly fixed at `ad3fe0d0`), **23 Partially Fixed** (`#1`, `#6`, `#7`, `#9`, `#10`, `#11`, `#17`, `#19`, `#20`, `#23`, `#24`, `#25`, `#28`, `#29`, `#33`, `#37`, `#45`, `#46`, `#47`, `#50`, `#52`, `#57`, `#60`), **1 Open** (`#4`).
+- **Recheck 1 (`b8a2528`, #68–#81)**: **12 Fixed**, **2 Partially Fixed** (`#72`, `#73`), **0 Open** (`#80` newly fixed at `ad3fe0d0`).
 - **Recheck 2 (`8c877d8`, #82–#97)**: **12 Fixed**, **4 Partially Fixed** (`#82`, `#89`, `#90`, `#95`), **0 Open**.
-- **Recheck 3 (`d4b45130`, #98–#111)**: **5 Fixed** (`#102`, `#104`, `#106`, `#109`, `#111`), **8 Partially Fixed** (`#98`, `#99`, `#101`, `#103`, `#105`, `#107`, `#108`, `#110`), **1 Open** (`#100` — merged in `1f5af2e9`, reverted in `34f50c12`).
-- **New in `fbc68961..c54f5954` (#112–#115)**: **4 New** (**2 High**, **2 Medium**).
-- **Active Total**: **45 Active** (**27 High**, **16 Medium**, **2 Low**; **70 Fixed** out of 115 total).
-  - *Note*: Several Partial entries below carry high-priority regressions introduced in the 2.0.4 batch (`#45` macOS OAuth `O_NONBLOCK`, `#98` Linux `xdg-open --`, `#47` `abandon_window` closing already-open windows, `#33` `convertTableToNested` wiping `cachedResult`, `#107` `noncentralTChiSquareLimit` 0.17 CDF error, `#103` `fitLinear` all-`NaN` on identical X, `#25` ragged grouped excluded-cell cursor drift, and `#11` release CSP / same-`pluginId` remount).
+- **Recheck 3 (`d4b45130`, #98–#111)**: **5 Fixed** (`#102`, `#104`, `#106`, `#109`, `#111`), **9 Partially Fixed** (`#98`, `#99`, `#100`, `#101`, `#103`, `#105`, `#107`, `#108`, `#110`), **0 Open** (`#100` moved Open → Partial at `ad3fe0d0`; `#111` residual NaN-safe guard cleaned up in `b4f6bc07`).
+- **Recheck 4 (`c54f5954`, #112–#115)**: **4 Fixed** (`#112`–`#115`; note `#112`'s fix `f511dd4e` introduced cross-scale Games–Howell regression `#120`), **0 Partially Fixed**, **0 Open**.
+- **New in `2aab5466..ad3fe0d0` (#116–#145)**: **30 New** (**15 High**, **14 Medium**, **1 Low**).
+- **Active Total**: **69 Active** (**40 High**, **26 Medium**, **3 Low**; **76 Fixed** out of 145 total).
+  - *Note*: Several Partial and New entries below carry high-priority regressions or broken runtime integration paths (`#45` macOS OAuth `O_NONBLOCK`, `#98` Linux `xdg-open --`, `#47` `abandon_window` closing already-open windows, `#33` `convertTableToNested` wiping `cachedResult`, `#107` `noncentralTChiSquareLimit` 0.17 CDF error, `#103` `fitLinear` all-`NaN` on identical X, `#25` ragged grouped excluded-cell cursor drift, `#11` release CSP / same-`pluginId` remount, `#116` Flow Tauri `camelCase` IPC mismatch, `#117` `applyTransform` ignoring compensation, `#120` two-way Games–Howell cross-scale regression, and `#121` Linux updater downloading macOS zip).
 
 ---
 
@@ -81,7 +82,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 | 60 | **Medium** | Partial | Prism `.prism` Import | `.prism` import destroys line breaks in Info Sheet `notes` via `plainTitle()` and lacks bounds/type guards on malformed `document.json` / `content.json` and large row/column spreads |
 | 61 | **Medium** | Fixed | Stats Report | `report/conclusion.ts`, `report/checks.ts`, and `report/analyzed.ts` produce inverted/misleading conclusions and assumption checks (FDR `multiple-t-tests` always concludes "no difference", `compareModel` prints `"Y" and "undefined"`, `chi-square` trend uses omnibus Pearson P, `checks.ts` ignores weights & replicates, `analyzed.ts` ignores `chi-square` `sets` and misreports MV `linear-regression` X) |
 | 62 | **Medium** | Fixed | XY Stats (Nonlinear) | `AICc` in `enzyme-inhibition.ts` (and `nonlinear-regression.ts`) omits the residual-variance parameter (`+ 1`) from `k`; `interpolationCode` silently drops 95% CIs on tight positive-X ranges; multi-Y centered polynomials share only the first set's `centeredX` |
-| 63 | **Medium** | Partial | Sample Size & Power | `noncentralTCdf` underflows to `0` at `|δ| ≥ 38.57`, causing t-test power to jump discontinuously to `100%` and `solveN` to underestimate `n` at small `df` / strict `α` |
+| 63 | **Medium** | Fixed | Sample Size & Power | `noncentralTCdf` underflows to `0` at `|δ| ≥ 38.57`, causing t-test power to jump discontinuously to `100%` and `solveN` to underestimate `n` at small `df` / strict `α` |
 | 64 | **Medium** | Fixed | Plugins / Marketplace | Plugin wizard `kind: "text"` questions reject all non-numeric text, and `MarketplaceDialog` pre-checks `"network"` (and all permissions) by default |
 | 65 | **Low** | Fixed | UI / Menus | UI/menu minor defects: duplicate Grubbs' `"Outliers by column"` table, duplicate `Edit ▸ Fill Down` menu item (first lacks `!activeTableFrozen`), `CmdOrCtrl+Alt+I` shortcut collision (`New Info Sheet…` vs `Inspector`), and stale `Change Parameters…` enabled state |
 | 66 | **Low** | Fixed | WebR / Survival | WebR / survival edge cases: `ensurePackages` doubles caller `timeoutMs` on claim timeout; `survival-analysis.ts` computes 2-group HR on `k ≥ 3` and returns `—` without explanation on disjoint risk sets |
@@ -98,7 +99,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 | 77 | **Medium** | Fixed | UI / Modals | `StartupGuideDialog`'s global `window` keydown handler hijacks `Enter` and `Escape` from top-layer `<dialog>` modals (including `SendFeedbackDialog`) |
 | 78 | **Medium** | Fixed | Native Menu | Windowless Help menu exposes Help ▸ Send Feedback and Help ▸ What's New as enabled dead no-ops |
 | 79 | **Medium** | Fixed | UI / Startup Guide | `StartupGuideDialog` auto-show omits `!openedFile.current` and pops over opened `.pzt` templates, Sample Project, and slow/failed file launches |
-| 80 | **Medium** | Partial | Math / Distributions | `noncentralTCdf` (`logWeights` path) silently returns `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447` |
+| 80 | **Medium** | Fixed | Math / Distributions | `noncentralTCdf` (`logWeights` path) silently returns `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447` |
 | 81 | **Low** | Fixed | Native IPC | `send_to_keynote_blocking` / `applescript_number` lacks `.is_finite()` / upper-bound checks and can emit invalid AppleScript `inf` or `0` |
 | 82 | **High** | Partial | Graphs / Labels | `formatFigureLabels` HTML-escapes `<br>` and `<b>` across graph overlays, tooltips, and survival tables |
 | 83 | **High** | Fixed | Graphs / Security | `formatLabelForPlotly` double-escapes `&`, `<`, `>`, `\^`, `\_` in `buildGraphFigure` and allows HTML-escaping bypass (XSS) via `<sup>`/`<sub>` |
@@ -118,7 +119,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 | 97 | **Low** | Fixed | Graphs / Tables Labels | `labelRuns` splits Unicode minus (`10^−6` → `10<sup>−</sup>6`) and collapses consecutive `_` runs (`ctrl_1_a` → `ctrl<sub>1a</sub>`) |
 | 98 | **High** | Partial | Native IPC / Security | `open_file` IPC permits arbitrary executable launch (no extension allowlist), Windows `cmd /C start` shell injection, and macOS `open` flag injection |
 | 99 | **High** | Partial | Data Grid / Tables | `pasteNames` (upstream 1.1.1) corrupts Nested tables (`isNested` omitted), drops column metadata/calculated formulas, and cross-renames lead/group collisions |
-| 100 | **High** | Open | Graphs / Format Panel | Upstream 1.1.1 `axisKind` is not wired into `FormatPanel`: `rowsAt: "values"` and `histogram`/`qq-plot` lose X controls, `grouped-stacked`/`residuals` offer dead Log controls, `grouped-hbars` mislabels value axis as `"Y"`, and `scree-plot`/`dendrogram` misdeclare `XY_AXES` |
+| 100 | **High** | Partial | Graphs / Format Panel | Upstream 1.1.1 `axisKind` is not wired into `FormatPanel`: `rowsAt: "values"` and `histogram`/`qq-plot` lose X controls, `grouped-stacked`/`residuals` offer dead Log controls, `grouped-hbars` mislabels value axis as `"Y"`, and `scree-plot`/`dendrogram` misdeclare `XY_AXES` |
 | 101 | **High** | Partial | Graphs (Horizontal Bars) | Point labels on Horizontal Bars (`grouped-hbars`) with Log scale transform `y` instead of `x`, placing labels at `10^v` off-canvas and `NaN` on row 0 |
 | 102 | **High** | Fixed | Column Stats (ANOVA) | `2db68ed1` ANOVA 13-digit centering missed `TukeyHSD` (making Tukey P values contradict centered Tukey CIs), plus Welch, Brown-Forsythe, linear trend, and post-hoc diffs |
 | 103 | **Medium** | Partial | XY Stats (Linear) | `2db68ed1` linear-regression centering missed `compare-slopes.ts`, `report/checks.ts`, and `regression-overlay.ts` (crashes or inflates graph CI bands on 13-digit data) |
@@ -130,10 +131,40 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 | 109 | **Low** | Fixed | UI / Import | `openSourceFile` discards the specific Rust error string returned by `open_file` (`err instanceof Error` is `false` for Tauri string rejections) |
 | 110 | **Low** | Partial | Graphs / Ticks | `fitLabels` produces `dtick: NaN` on coincident adjacent ticks (`at[1] === at[0]`), and `graph-view.tsx` checks `!current` after `Plotly.relayout` instead of immediately after `Plotly.react` |
 | 111 | **Low** | Fixed | XY Graphs / Overlays | `fitted-curve.ts` `x === 0` guard misses 4 other R-guarded raw-X ratio models (`agonist-3pl-x`, `agonist-3pl-normalized-x`, `biphasic-x`, `bell-shaped-x`) and `asymmetric-5pl-x` underflow at tiny `HillSlope` |
-| 112 | **High** | New | Grouped Stats (2-Way ANOVA) | Two-way ANOVA `runPosthoc` still computes uncentered `mean(a) - mean(b)` at `1e13` scale (4.76% error on all ordinary and RM sphericity-assumed post-hocs) |
-| 113 | **High** | New | Grouped Stats (3-Way ANOVA) | Three-way ANOVA `runPosthoc` computes uncentered `diff` and single-pass TS Games–Howell `variance()` at `1e13` scale (4.76% diff / 6.0% variance error) |
-| 114 | **Medium** | New | Nested Stats | Nested ANOVA post-hoc `diff` still subtracts raw uncentered `described[i].mean - described[j].mean` instead of `describe()`'s centered `diff(i, j)` |
-| 115 | **Medium** | New | XY Stats (Deming) | Deming regression TS `olsFit` (for `notes()`) and `demingProblem` still use single-pass uncentered sums (disagreeing with R OLS rows at `1e13` and letting constant `[0.1, 0.1, 0.1]` flow to all-`NaN` R output) |
+| 112 | **High** | Fixed | Grouped Stats (2-Way ANOVA) | Two-way ANOVA `runPosthoc` still computes uncentered `mean(a) - mean(b)` at `1e13` scale (4.76% error on all ordinary and RM sphericity-assumed post-hocs) |
+| 113 | **High** | Fixed | Grouped Stats (3-Way ANOVA) | Three-way ANOVA `runPosthoc` computes uncentered `diff` and single-pass TS Games–Howell `variance()` at `1e13` scale (4.76% diff / 6.0% variance error) |
+| 114 | **Medium** | Fixed | Nested Stats | Nested ANOVA post-hoc `diff` still subtracts raw uncentered `described[i].mean - described[j].mean` instead of `describe()`'s centered `diff(i, j)` |
+| 115 | **Medium** | Fixed | XY Stats (Deming) | Deming regression TS `olsFit` (for `notes()`) and `demingProblem` still use single-pass uncentered sums (disagreeing with R OLS rows at `1e13` and letting constant `[0.1, 0.1, 0.1]` flow to all-`NaN` R output) |
+| 116 | **High** | New | Flow / Native IPC | Tauri 2 `camelCase` vs `snake_case` IPC argument mismatch breaks every Flow Tauri command at runtime (and drops `sample_id` in `flow_import_fcs`) |
+| 117 | **High** | New | Flow / Store | `applyTransform` (Rust + TS) mutates raw `sample.columns` instead of compensated columns, silently ignoring transforms after compensation and corrupting raw data |
+| 118 | **High** | New | Flow / MCP | Split-brain `isFlowEnabled`/`setFlowEnabled` (`feature-flag.ts` vs `store.ts`) keeps all 4 MCP flow executors locked off when enabled via `src/flow/index.ts` or `localStorage` |
+| 119 | **High** | New | Flow / Store | `setFlowSampleTransform` omitted from `UNDOABLE`/`MUTATING` in `use-project-store.tsx` — stalls `titer_transform_flow_parameter` for 3 seconds and breaks Undo / dirty tracking |
+| 120 | **High** | New | Grouped Stats (2-Way ANOVA) | Two-way ANOVA Games–Howell regression (`f511dd4e`): shifting cell `b` by `a[1]` before `var(b)` destroys `var(b)` across differing cell scales |
+| 121 | **High** | New | Auto-Updater | Linux `installUpdate` downloads the ~137 MB macOS `.app.zip`, promises restart-to-install, and crashes into macOS-only `apply_update` (and `!asset && forced` fails to quit) |
+| 122 | **High** | New | Flow / Rust DoS | Unbounded `1..=$PAR` loop in `flow.rs::check_datatype` enables permanent main-thread CPU DoS from a ~90-byte FCS file |
+| 123 | **High** | New | Flow / Rust FCS | Unchecked slice bounds and arithmetic overflow panics in `flow.rs` staging (`rebuild_dataset`, `shift_other_offsets`, `shifted`) crash the backend on malformed FCS files |
+| 124 | **High** | New | Flow / Rust FCS | Case-sensitive and untrimmed FCS keyword matching in `flow.rs` bypasses offset/datatype safety guards and corrupts staged files |
+| 125 | **High** | New | Flow / Rust Security | Synchronous file I/O on the macOS main thread (TCC deadlock) + missing `.tfcs` extension/URL/size guards & raw-byte leak in `flow_import_fcs` / `flow_load_sample_file` / `titer_import_fcs` |
+| 126 | **High** | New | Flow / Compensation | `parseSpilloverCsv` strips leading `\t` via `.trim()`, breaking every FlowJo TSV matrix, and `Number("")` silently accepts blank cells as `0` |
+| 127 | **High** | New | Flow / Transforms | Flow transform math defects (Rust + TS): `solveMonotonic` maps `NaN` → `-2` and `±Infinity` → `0` (unguarded in `viewer.ts`), `arcsinh` allows `A = -M` division by zero, and `log` is non-monotonic below `T·base^{-M}` |
+| 128 | **High** | New | Vector Export (PDF/EPS) | PDF and EPS vector exports silently render Arial, Helvetica, and default sans-serif text in `Times-Roman` because `"sans-serif".includes("serif")` is `true` |
+| 129 | **High** | New | Data Grid / Clipboard | `Preferences ▸ Data Entry ▸ Clipboard` title options corrupt in-app `⌘C`→`⌘V` / Paste Transposed / Paste Special and disagree on decimal formatting between `toTSV` and `toHTMLTable` |
+| 130 | **High** | New | Preferences / Figures | `Preferences ▸ Appearance ▸ Measurement units` (`cm`) creates an impossible-to-satisfy unit mismatch in `FigureView` size validation |
+| 131 | **Medium** | New | Graphs / Flow Plots | `flow-density-plot` and `flow-contour-plot` hide all Y-axis controls in `FormatPanel` despite declaring `axes: XY_AXES` |
+| 132 | **Medium** | New | Graphs / Axes | `scree-plot`, `silhouette-plot`, and `forest-plot` `axes()` / `logScaleOffered()` contradict their builders on log scales |
+| 133 | **Medium** | New | Auto-Updater | Updater lacks concurrency guard (racing on `Titer-update.zip`) and silently reports offline cached manifests as `"up to date"` |
+| 134 | **Medium** | New | Flow / Rust FCS | Staging an FCS file with exclusive `text_end == data_start` deletes byte 0 of DATA and misaligns all events |
+| 135 | **Medium** | New | Flow / Rust Store | `FlowStore::apply_compensation` bypasses LRU budget eviction (~2× memory), `invert_matrix` can return `NaN`/`Inf` on overflow, and `parse_sidecar` uses unchecked multiplication |
+| 136 | **Medium** | New | Flow / Density | `smoothGrid` returns all-`NaN` grids when `sigma <= 0` or `gridDim < Math.ceil(3 * sigma)` |
+| 137 | **Medium** | New | Flow / Stats | `computePopulationStats` reports wrong `% Parent`/`% Grandparent`/`% Total` (`100%` or `>100%`) when top-level populations (`parentId: null`) carry predicates |
+| 138 | **Medium** | New | Project File / Flow | `readOptions` in `project-file.ts` overwrites `GRAPH_LIMITS` clamping for `flowBins` and `flowDownsampleCap` |
+| 139 | **Medium** | New | Store / Flow | `use-project-store.tsx` `case "create"` crashes on regex metacharacters in flow sample/table names (`nextName`), overwrites nodes & duplicates `rootOrder` on colliding `sampleId`, and drifts `rootOrder` vs `parseProjectFile` |
+| 140 | **Medium** | New | Preferences / UI | New Preferences (`P-value format`, `Default font`, `Exports folder`) are unwired or non-reactive across primary consumers |
+| 141 | **Medium** | New | Preferences / Print | `Preferences ▸ Print ▸ Scale (%)` clamps every keystroke to `[50, 200]`, making it impossible to type multi-digit percentages (`80`, `120`, `150`) |
+| 142 | **Medium** | New | Preferences / Store | `Create an Info sheet with each new data table` (`L13`) is skipped by `createTable`, while `createTableWithGraph` bypasses `MAX_INFO_SHEETS`, duplicates `"Info Sheet"` names, reverses `rootOrder`, and ignores `Autocomplete titles` |
+| 143 | **Medium** | New | Preferences / Print CSS | Unescaped newlines in `PrintSettings.headerText` break or inject rules into `@media print` CSS in `printPageCss` |
+| 144 | **Medium** | New | Preferences / Privacy | `Extended log file` (`L16`) sends `navigator.userAgent` and `location.href` to the remote feedback server despite promising local-log-only detail |
+| 145 | **Low** | New | Prism Scripts / Flow | `prism-script.ts` `runScript` stamps `ctx.current` as `{ kind: "table" }` pointing to a non-table `rootOrder[0]` (e.g. a Flow `sample`) |
 
 ---
 
@@ -1218,10 +1249,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 63 [PARTIALLY FIXED]: `noncentralTCdf` underflows to `0` at `|δ| ≥ 38.57`, causing t-test power to jump discontinuously to `100%` and `solveN` to underestimate `n` at small `df` / strict `α`
+### Issue 63 [FIXED]: `noncentralTCdf` underflows to `0` at `|δ| ≥ 38.57`, causing t-test power to jump discontinuously to `100%` and `solveN` to underestimate `n` at small `df` / strict `α`
 - **Severity**: Medium
-- **Status**: Partially Fixed at `d4b45130` (`src/stats/distributions.ts:335-345` fixes `mu > 700` via mode-centered twin series)
-- **Remaining at `d4b45130`**: `mu <= 700` (`|δ| <= 37.42`) still hits `rxb = Math.pow(1 - x, b)` underflow at large `df` (`src/stats/distributions.ts:355`, e.g. `noncentralTCdf(39, 1e5, 37.4) -> 1.0` vs true `0.9445`); see also `#80` and new Issue `#107`.
+- **Status**: Fixed at `ad3fe0d0` (`578c480d` tracks `logGodd`/`logGeven` in log space in `src/stats/distributions.ts:408-429`, closing the remaining `mu <= 700` `rxb` underflow)
 - **Files**:
   - `src/stats/distributions.ts:306-361`
   - `src/stats/sample-size-power.ts:291-306`
@@ -1486,10 +1516,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 80 [PARTIALLY FIXED]: `noncentralTCdf` (`logWeights` path) silently returns `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447`
+### Issue 80 [FIXED]: `noncentralTCdf` (`logWeights` path) silently returns `1.0` when `rxb` underflows at large `df` and still cliffs to `0` past `|δ| > 447`
 - **Severity**: Medium
-- **Status**: Partially Fixed at `d4b45130` (`noncentralTTwinSeriesModeCentered` at `src/stats/distributions.ts:335-345` fixes `mu > 700` at moderate `df` and `|δ| <= 1e5`)
-- **Remaining at `d4b45130`**: `mu <= 700` (`|δ| <= 37.42`) still hits `rxb = Math.pow(1 - x, b)` underflow at large `df` (`src/stats/distributions.ts:355`, e.g. `noncentralTCdf(39, 1e5, 37.4) -> 1.0` vs true `0.9445`); extreme `|t| >= 1.34e154` and `|δ| >= 1e6` / large `df + δ` tracked as new Issue `#107`.
+- **Status**: Fixed at `ad3fe0d0` (same `578c480d` log-space increment fix closes the `mu <= 700` limb; extreme `noncentralTChiSquareLimit` regression remains tracked in `#107`)
 - **Files**:
   - `src/stats/distributions.ts:316-389` (`noncentralTCdf`)
 - **Explanation**:
@@ -1806,9 +1835,10 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 100: Upstream 1.1.1 `axisKind` is not wired into `FormatPanel`: `rowsAt: "values"` and `histogram`/`qq-plot` lose X controls, `grouped-stacked`/`residuals` offer dead Log controls, `grouped-hbars` mislabels value axis as `"Y"`, and `scree-plot`/`dendrogram` misdeclare `XY_AXES`
+### Issue 100 [PARTIALLY FIXED]: Upstream 1.1.1 `axisKind` is not wired into `FormatPanel`: `rowsAt: "values"` and `histogram`/`qq-plot` lose X controls, `grouped-stacked`/`residuals` offer dead Log controls, `grouped-hbars` mislabels value axis as `"Y"`, and `scree-plot`/`dendrogram` misdeclare `XY_AXES`
 - **Severity**: High
-- **Status**: Open (from Recheck 3 at `d4b45130`; merged in `1f5af2e9`, reverted in `34f50c12`)
+- **Status**: Partially Fixed at `ad3fe0d0` (`70898a47`/`60195352`/`b6d32854` wired `axisKind` into `FormatPanel` for `grouped-lines`, `histogram`/`qq-plot`/numeric `multiple`, and `scree-plot`/`dendrogram` X axes)
+- **Remaining at `ad3fe0d0`**: (1) `grouped-hbars` still hardcodes `axis="Y"` on Scale/Range/NumberFormat (`src/views/graphs/format-panel.tsx:463, 471, 485`); (2) Y `<AxisRange>` `log` prop still checks `family !== "volcano"` instead of `yKind === "scale"` (`format-panel.tsx:475`); (3) `refLineParts` still reads raw `options.yScale` instead of effective scale (`src/views/graphs/plot-helpers.ts:1206, 1228`).
 - **Files**:
   - `src/views/graphs/format-panel.tsx:453-522`
   - `src/views/graphs/grouped-lines.ts:8-10`
@@ -1925,7 +1955,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 ### Issue 107 [PARTIALLY FIXED]: `noncentralTCdf` overflows `tt * tt` for `|t| ≥ 1.34e154` (returning `normalCdf(-delta)` instead of `1`/`0`) and `noncentralTTwinSeriesModeCentered` breaks at `|δ| ≥ 1e6` / large `df + δ`
 - **Severity**: Medium
 - **Status**: Partially Fixed at `c54f5954` (`src/stats/distributions.ts` fixes `tt * tt` overflow and `Gamma(a, Inf)` via `noncentralTChiSquareLimit`)
-- **Remaining at `c54f5954`**: **High regression**: `noncentralTChiSquareLimit` (`src/stats/distributions.ts:368-370, 421-453`) drops `Z ~ N(0, 1)`, which is only valid for `df ≪ δ²`. For large `df` (including the entire `mu >= 7e5 && df >= 1.4e6` trigger and `|δ| > 1414` with large `df`), it produces up to `0.17` CDF error and an `0.081` boundary cliff at `|δ| = 1414 → 1415` (e.g. `noncentralTCdf(1416, 1e7, 1415)` → `0.9992` vs exact `0.8298`; `noncentralTCdf(1201, 1e8, 1200)` → `1.0` vs exact `0.8405`). Also see `#63`/`#80` for the remaining `mu <= 700` `rxb` underflow.
+- **Remaining at `ad3fe0d0`**: **High regression still open**: `578c480d` closed only the `mu <= 700` limb (`#63`/`#80`) and did **not** touch `noncentralTChiSquareLimit` (`src/stats/distributions.ts:368-370, 452-469`), which still drops `Z ~ N(0, 1)` (only valid for `df ≪ δ²`). For large `df` (including the entire `mu >= 7e5 && df >= 1.4e6` trigger and `|δ| > 1414` with large `df`), it produces up to `0.169` CDF error and `0.081`–`0.160` boundary cliffs (e.g. `noncentralTCdf(1416, 1e7, 1415)` → `0.9992` vs exact `0.8298`; `noncentralTCdf(1201, 1e8, 1200)` → `1.0` vs exact `0.8405`).
 - **Files**:
   - `src/stats/distributions.ts:135, 331-332, 413-439` (`noncentralTCdf`, `noncentralTTwinSeriesModeCentered`)
 - **Explanation**:
@@ -1982,7 +2012,7 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ### Issue 111 [FIXED]: `fitted-curve.ts` `x === 0` guard misses 4 other R-guarded raw-X ratio models and `asymmetric-5pl-x` underflow at tiny `HillSlope`
 - **Severity**: Low
-- **Status**: Fixed at `c54f5954` (`src/views/graphs/fitted-curve.ts` adds unconditional `x === 0` limits for all 8 raw-X ratio models matching R `nonlinear-fit.ts`)
+- **Status**: Fixed at `c54f5954` (`src/views/graphs/fitted-curve.ts` adds unconditional `x === 0` limits for all 8 raw-X ratio models matching R `nonlinear-fit.ts`; `b4f6bc07` at `ad3fe0d0` also adds NaN-safe `x === 0` guards for `biphasic-x` and `bell-shaped-x`)
 - **Files**:
   - `src/views/graphs/fitted-curve.ts:58-64, 82, 96, 121-145, 188`
 - **Explanation**:
@@ -1995,9 +2025,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ## New Issues Found in Recheck 4 at `c54f5954` (#112–#115)
 
-### Issue 112: Two-way ANOVA `runPosthoc` still computes uncentered `mean(a) - mean(b)` at `1e13` scale
+### Issue 112 [FIXED]: Two-way ANOVA `runPosthoc` still computes uncentered `mean(a) - mean(b)` at `1e13` scale
 - **Severity**: High
-- **Status**: New
+- **Status**: Fixed at `ad3fe0d0` (`f511dd4e` shifts each post-hoc pair by `m0 <- a[1]` in `src/stats/grouped/two-way-anova.ts:309, 330`; note the Games–Howell cross-scale variance regression introduced by `f511dd4e` is tracked as new Issue `#120`)
 - **Files**:
   - `src/stats/grouped/two-way-anova.ts:301-302, 323-325` (`runPosthoc`)
   - `src/stats/grouped/two-way-anova.ts:612` (RM sphericity-assumed post-hoc path)
@@ -2010,9 +2040,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 113: Three-way ANOVA `runPosthoc` computes uncentered `diff` and single-pass TS Games–Howell `variance()` at `1e13` scale
+### Issue 113 [FIXED]: Three-way ANOVA `runPosthoc` computes uncentered `diff` and single-pass TS Games–Howell `variance()` at `1e13` scale
 - **Severity**: High
-- **Status**: New
+- **Status**: Fixed at `ad3fe0d0` (`2aecd342` centers `diff` on `vi[0]` and independently double-centers each cell inside `variance()` in `src/stats/grouped/three-way-anova.ts:143-144, 273-277`)
 - **Files**:
   - `src/stats/grouped/three-way-anova.ts:135, 142-145, 259-262` (`runPosthoc`, `variance`)
 - **Explanation**:
@@ -2024,9 +2054,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 114: Nested ANOVA post-hoc `diff` still subtracts raw uncentered `described[i].mean - described[j].mean`
+### Issue 114 [FIXED]: Nested ANOVA post-hoc `diff` still subtracts raw uncentered `described[i].mean - described[j].mean`
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Fixed at `ad3fe0d0` (`28097a4c` passes `pairIndices(groups.length)` to `describe()` and uses centered `diff(i, j)` in `src/stats/nested/nested-anova.ts:90-97`)
 - **Files**:
   - `src/stats/nested/nested-anova.ts:85-94`
   - `src/stats/column/base.ts:78-79` (`describe()` centered `diff(i, j)`)
@@ -2039,9 +2069,9 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
 
 ---
 
-### Issue 115: Deming regression TS `olsFit` (for `notes()`) and `demingProblem` still use single-pass uncentered sums
+### Issue 115 [FIXED]: Deming regression TS `olsFit` (for `notes()`) and `demingProblem` still use single-pass uncentered sums
 - **Severity**: Medium
-- **Status**: New
+- **Status**: Fixed at `ad3fe0d0` (`9e3ee30d` double-centers TS `olsFit` and `demingProblem` against `xs[0]`/`ys[0]` in `src/stats/xy/deming-regression.ts:44-95`)
 - **Files**:
   - `src/stats/xy/deming-regression.ts:56-63, 70-78, 136, 140` (`demingProblem`, `olsFit`, `notes`)
 - **Explanation**:
@@ -2053,3 +2083,462 @@ Review of `smitpatel316/Helix` (Titer) originally at `HEAD` `d44c1da` (67 findin
   2. Fit `xs = [0.1, 0.1, 0.1]`, `ys = [0.1, 0.1, 0.1]`: `demingProblem` returns `undefined` instead of rejecting constant data.
 - **Suggested Fix**:
   Double-center against `xs[0]`/`ys[0]` in both `demingProblem` and `olsFit` (or format `notes()` OLS text from R's `olsSlope`/`olsIntercept`).
+
+
+
+---
+
+## New Issues Found in Recheck 5 at `ad3fe0d0` (#116–#145)
+
+### Issue 116: Tauri 2 `camelCase` vs `snake_case` IPC argument mismatch breaks every Flow Tauri command at runtime (and drops `sample_id` in `flow_import_fcs`)
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/flow.rs:981-989` (`flow_import_fcs`)
+  - `src-tauri/src/flow_store.rs:560-733` (`flow_load_sample`, `flow_load_sample_file`, `flow_get_column`, `flow_unload_sample`, `flow_sample_stats`, `flow_apply_compensation`, `flow_get_compensation`, `flow_clear_compensation`)
+  - `src-tauri/src/flow_transform.rs:332-352` (`flow_apply_transform`)
+  - `src/flow/store.ts:498-558` (`TauriFlowStore`), `src/flow/fcs.ts:67-71` (`importFcs`), `src/flow/transforms.ts:376-381` (`applyFlowTransform`)
+- **Explanation**:
+  Every new Flow `#[tauri::command]` omits `rename_all = "snake_case"`, so Tauri 2 expects **camelCase** JS invoke keys (`sampleId`, `paramNames`, `sourcePath`) matching existing commands in `src/native.ts:475,510-516` (`analysisId`, `jobId`). However, every TypeScript Flow client passes **snake_case** keys (`sample_id`, `param_names`, `source_path`). Calling `flow_load_sample`, `flow_get_column`, `flow_unload_sample`, `flow_sample_stats`, `flow_apply_compensation`, `flow_get_compensation`, `flow_clear_compensation`, or `flow_apply_transform` in the live desktop app fails immediately with `invalid args 'sampleId' for command ...: missing required key sampleId`. In `flow_import_fcs`, `sample_id` is `Option<String>`, so `{ sample_id }` is silently ignored (`sampleId` deserializes as `None`) and custom `sample_id` overrides are dropped. Tests missed this because Rust unit tests call internal methods directly and TS tests run against `InMemoryFlowStore`.
+- **Minimal Reproduction**:
+  In the desktop Tauri app, invoke `titer_import_fcs` with `sample_id: "s1"` (silently receives a filename-derived ID instead), or invoke `titer_apply_flow_compensation`, `titer_transform_flow_parameter`, or `titer_flow_population_stats` → fails at the Tauri IPC layer with `missing required key sampleId`.
+- **Suggested Fix**:
+  Pass `camelCase` keys (`sampleId`, `paramNames`, `sourcePath`) in `src/flow/store.ts:498-558`, `src/flow/fcs.ts:67-71`, and `src/flow/transforms.ts:376-381` (or annotate the Rust commands with `#[tauri::command(rename_all = "snake_case")]`).
+
+---
+
+### Issue 117: `applyTransform` (Rust + TS) mutates raw `sample.columns` instead of compensated columns, silently ignoring transforms after compensation and corrupting raw data
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/flow_store.rs:164-171, 290-315, 330-366` (`readable_column`, `FlowStore::apply_transform`, `FlowStore::apply_compensation`)
+  - `src/flow/store.ts:313-320, 454-465` (`readableColumn`, `InMemoryFlowStore.applyTransformSync`)
+- **Explanation**:
+  `applyCompensation` preserves raw intensities in `sample.columns` and materializes compensated fluorochrome columns in `sample.compensated`. Every read path (`getColumn`, `sampleStats`, `titer_flow_population_stats`) calls `readableColumn`, which returns `sample.compensated.columns` when compensation is active. However, `applyTransform` (in both Rust and TS) unconditionally reads and mutates raw `sample.columns[index]` in place without checking or updating `sample.compensated`. In the standard workflow (`import_fcs` → `apply_compensation` → `apply_transform` → read/stats), `applyTransform` transforms the hidden raw column and returns uncompensated before/after stats, while plots, gates, and population stats keep reading the untransformed compensated column — and raw data is permanently overwritten (breaking subsequent `apply_compensation` and `clear_compensation`).
+- **Minimal Reproduction**:
+  Import a 2-fluorochrome sample (`FL1-A`, `FL2-A`), call `applyCompensation` with a non-identity matrix, then call `applyTransform(id, "FL1-A", logicle)`: `getColumn(id, "FL1-A")` still returns raw-scale compensated fluorescence instead of logicle display values.
+- **Suggested Fix**:
+  Keep raw columns strictly immutable (like compensation does) and store transformed columns in a post-compensation display layer (`raw → compensate → transform`), recomputing cleanly whenever compensation changes.
+
+---
+
+### Issue 118: Split-brain `isFlowEnabled` / `setFlowEnabled` (`feature-flag.ts` vs `store.ts`) keeps all 4 MCP flow executors locked off when enabled via `src/flow/index.ts` or `localStorage`
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/flow/feature-flag.ts:7-15` (unpersisted module-local `let flowEnabled = false`)
+  - `src/flow/store.ts:578-604` (`localStorage["titer.flow.enabled"]` + `flowEnabledOverride`)
+  - `src/flow/index.ts:24-26` (re-exports `isFlowEnabled`, `setFlowEnabled` from `./store`)
+  - `src/store/mcp-flow.ts:16, 118, 187, 322, 411` (imports `isFlowEnabled` from `../flow/feature-flag`)
+- **Explanation**:
+  Two independent implementations of `isFlowEnabled` / `setFlowEnabled` exist: `src/flow/index.ts` exports the `localStorage`-persisted implementation from `src/flow/store.ts`, whereas `src/store/mcp-flow.ts` imports a separate unpersisted boolean from `src/flow/feature-flag.ts`. Enabling the Flow module through `src/flow/index.ts` (or `localStorage.setItem("titer.flow.enabled", "1")`) leaves `feature-flag.ts`'s `flowEnabled` at `false`, so all four MCP flow executors (`executeImportFcs`, `executeApplyFlowCompensation`, `executeTransformFlowParameter`, `executePopulationStats`) still reject with `"The FlowJo module is off"`.
+- **Minimal Reproduction**:
+  Call `setFlowEnabled(true)` imported from `src/flow/index.ts` (so `isFlowEnabled()` returns `true`), then run `executeImportFcs(...)`: throws `"The FlowJo module is off — turn it on in Settings..."`.
+- **Suggested Fix**:
+  Consolidate onto a single persisted source of truth and have `src/flow/feature-flag.ts`, `src/flow/store.ts`, `src/flow/index.ts`, and `src/store/mcp-flow.ts` share it.
+
+---
+
+### Issue 119: `setFlowSampleTransform` omitted from `UNDOABLE` / `MUTATING` in `use-project-store.tsx` — stalls `titer_transform_flow_parameter` for 3 seconds and breaks Undo / dirty tracking
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/store/use-project-store.tsx:165-166, 483-497, 1449-1488, 1491-1587, 1971-1975`
+  - `src/store/mcp-flow.ts:470-473`
+  - `src/store/mcp-dispatch.ts:3002-3005, 3044, 3074`
+- **Explanation**:
+  Although comments at `use-project-store.tsx:165` and `1971-1972` describe `setFlowSampleTransform` as an undo step, `"setFlowSampleTransform"` was omitted from `UNDOABLE` (`1449-1487`), which excludes it from `MUTATING` (`1488`) and `changeName` (`1491-1580`). Consequently, `reducer()` (`1583-1587`) never increments `state.revision` and never pushes an undo snapshot: (1) every `titer_transform_flow_parameter` call stalls until `flushUntilRevision` times out in `mcp-flow.ts:472` (2000 ms) and again in `mcp-dispatch.ts:3074` (1000 ms) — 3 seconds per call; (2) Edit ▸ Undo cannot revert the transform; and (3) `markSaved` can clear `isDirty` despite unsaved transform changes.
+- **Minimal Reproduction**:
+  Dispatch `{ type: "setFlowSampleTransform", id: sampleId, transform }` through `reducer(state, action)` → `next.revision === state.revision` and `next.past.length === state.past.length`.
+- **Suggested Fix**:
+  Add `"setFlowSampleTransform"` to `UNDOABLE` in `src/store/use-project-store.tsx:1477` and add `case "setFlowSampleTransform": return "Transform Flow Parameter";` to `changeName`.
+
+---
+
+### Issue 120: Two-way ANOVA Games–Howell regression (`f511dd4e`): shifting cell `b` by `a[1]` before `var(b)` destroys `var(b)` across differing cell scales
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/stats/grouped/two-way-anova.ts:330-332` (`runPosthoc` Games–Howell branch)
+- **Explanation**:
+  Commit `f511dd4e` (`#112`) changed Games–Howell in `runPosthoc` to shift both `a` and `b` by `m0 <- a[1]` before calling `var(a)` and `var(b)`: `m0<-a[1]; a<-a-m0; b<-b-m0; ... va<-var(a)/length(a); vb<-var(b)/length(b)`. Shifting `b` by `a[1]` preserves `var(b)` only when `a` and `b` share the same magnitude. When cell `a` is near `1e13` (ULP ≈ `0.00195`) and cell `b` is near `0` (e.g. control `[0, 1e-4, 2e-4]`), `b - a[1]` rounds all elements of `b` to `-1e13`, collapsing `var(b)` to **`0`** and corrupting `vb`, `s`, Welch `df` (`w`), `t`, `p`, and CIs. Even for `b = [0, 0.01, 0.02]`, `var(b - 1e13)` drops by `4.6%`.
+- **Minimal Reproduction**:
+  Run ordinary Two-way ANOVA with `posthoc: "games-howell"` on cell A `= [1e13, 1e13 + 1]` and cell B `= [0, 1e-4, 2e-4]`: `b - a[1]` collapses `vb` to `0` and Welch `df` to `1`.
+- **Suggested Fix**:
+  Center each cell by its own origin for `var()`, and combine origins in `d`: `a0<-a-a[1]; b0<-b-b[1]; d<-(a[1]-b[1])+(mean(a0)-mean(b0)); va<-var(a0)/length(a); vb<-var(b0)/length(b);`.
+
+---
+
+### Issue 121: Linux `installUpdate` downloads the ~137 MB macOS `.app.zip`, promises restart-to-install, and crashes into macOS-only `apply_update` (and `!asset && forced` fails to quit)
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/updates.ts:129, 137-166` (`checkAgainstManifest`, `installUpdate`)
+  - `src-tauri/src/updater.rs:219-252, 390-392` (`download_update`, `apply_update`)
+- **Explanation**:
+  `checkAgainstManifest` (`src/updates.ts:129`) passes `installable = deps.isMacOs() && manifest.update !== undefined` (`false` on Linux), promising the Linux user it will open GitHub for manual download. However, `installUpdate` (`lines 138-157`) checks `if (!asset)` first instead of `if (!deps.isMacOs())`. Because `version.json` publishes `manifest.update` for macOS releases, `asset` is truthy on Linux: `installUpdate` runs `deps.downloadUpdate()` (downloading the ~137 MB macOS bundle), announces `"Titer will restart to install it."`, and invokes `apply_update`, which immediately fails (`"in-place updates are macOS-only"`), spawning follow-up warning/download dialogs (or a Retry/Quit loop if forced). Additionally, if `!asset && forced`, `installUpdate` (`lines 148-156`) returns without calling `deps.quitApp()`.
+- **Minimal Reproduction**:
+  Run `checkForUpdates(false, deps)` with `isMacOs: () => false`, an outdated `appVersion`, and a manifest carrying `update`: accepting the manual-download prompt triggers `downloadUpdate()` and `applyUpdate()` instead of `openLink("releases")`.
+- **Suggested Fix**:
+  Move the `if (!deps.isMacOs())` redirect before `if (!asset)` (and call `if (forced) await deps.quitApp()` in both `!deps.isMacOs()` and `!asset` forced return paths).
+
+---
+
+### Issue 122: Unbounded `1..=$PAR` loop in `flow.rs::check_datatype` enables permanent main-thread CPU DoS from a ~90-byte FCS file
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/flow.rs:409-415, 981-989` (`check_datatype`, `flow_import_fcs`)
+- **Explanation**:
+  `check_datatype` parses `$PAR` directly as `usize` with no upper bound and iterates `for n in 1..=par { let Some(bits) = lookup_usize(pairs, &format!("$P{n}B"))? ... }`, allocating a `String` and linearly scanning `pairs` on every iteration. Because `flow_import_fcs` runs synchronously before `flow-fcs` is invoked, a ~90-byte valid-header `.fcs` file declaring `/$DATATYPE/I/$PAR/18446744073709551615/` permanently freezes the Tauri app at 100% CPU.
+- **Minimal Reproduction**:
+  Import a crafted ~90-byte FCS 3.0 file whose TEXT segment contains `/$DATATYPE/I/$PAR/18446744073709551615/` via `flow_import_fcs`.
+- **Suggested Fix**:
+  Iterate directly over `pairs` to inspect every `$P<n>B` key present (and/or bound `$PAR` to a sane maximum) instead of looping `1..=par`.
+
+---
+
+### Issue 123: Unchecked slice bounds and arithmetic overflow panics in `flow.rs` staging (`rebuild_dataset`, `shift_other_offsets`, `shifted`) crash the backend on malformed FCS files
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/flow.rs:453-477, 524-532, 567-615, 671-675` (`inspect_chain`, `shifted`, `rebuild_dataset`, `shift_other_offsets`)
+- **Explanation**:
+  When staging runs (non-`.fcs` extension, blank HEADER offset, short `$BYTEORD`, or bare `SPILL`), `rebuild_dataset` and helpers panic on crafted offsets that `inspect_chain` and `parse_text` allow:
+  1. `span.splice(text_at..text_to, ...)` (`line 572`) panics out of bounds if `$NEXTDATA` points before `text_end` (`next_base <= base + header.text_end`).
+  2. `span[..58].copy_from_slice(&header_bytes)` (`line 604`) panics (or overwrites TEXT) when `header.text_start < 58`.
+  3. `shift_other_offsets` (`lines 673-674`) panics in `region[i..i + 8].copy_from_slice(...)` whenever an OTHER offset `>= 100_000_000` (e.g. `99_999_999 + delta` formats to 9+ bytes).
+  4. `shifted` (`line 528`) does unchecked `value + delta as usize`, panicking in debug or wrapping in release when `$BEGINDATA` sits near `usize::MAX`.
+- **Minimal Reproduction**:
+  Stage a malformed `.lmd` or short-`$BYTEORD` FCS file with `header.text_start = 10` or `$NEXTDATA = 100 < text_end` (or OTHER offset `99999999` with `$BYTEORD/1,2/`): triggers an immediate Rust slice/arithmetic panic.
+- **Suggested Fix**:
+  Reject `header.text_start < 58` and `base + header.text_end >= span_end` in `inspect_chain`; use `checked_add` in `shifted`; and check `new_value < 100_000_000` in `shift_other_offsets` before `copy_from_slice`.
+
+---
+
+### Issue 124: Case-sensitive and untrimmed FCS keyword matching in `flow.rs` bypasses offset/datatype safety guards and corrupts staged files
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/flow.rs:333-346, 353-385, 390-433, 463, 495-518, 621-649` (`lookup`, `check_offsets`, `check_datatype`, `normalise_pairs`, `shift_pairs`)
+- **Explanation**:
+  Per the FCS 2.0–3.2 specification, keyword names are case-insensitive and vendor files often pad keyword values with spaces. However, `lookup` (`k == key`), `check_datatype` (`datatype == "A"`, `Some("C")`, `I|F|D`), `normalise_pairs` (`k == "$BYTEORD"`, `k == "SPILL"`), and `shift_pairs` (`"$BEGINDATA"`, `"$ENDDATA"`, `"$NEXTDATA"`, etc.) all use exact case-sensitive, untrimmed comparisons. Lowercase `$begindata`/`$enddata` bypasses `check_offsets` completely; lowercase `$datatype`/`$mode`/`$p1b` or whitespace-padded values bypass `check_datatype`; and any staged file with lowercase offset keywords has its HEADER offsets shifted while `shift_pairs` leaves TEXT offsets unshifted, corrupting the staged file.
+- **Minimal Reproduction**:
+  Import an `.lmd` FCS file containing lowercase `$begindata`/`$enddata`/`$nextdata` (or `$DATATYPE/ A/`): `check_datatype` / `check_offsets` / `shift_pairs` miss the keywords and either bypass validation or misalign offsets during staging.
+- **Suggested Fix**:
+  Compare keyword names with `.eq_ignore_ascii_case(...)` in `lookup`, `normalise_pairs`, and `shift_pairs`, and `.trim()` + case-fold `$MODE`, `$DATATYPE`, and `$BYTEORD` values.
+
+---
+
+### Issue 125: Synchronous file I/O on the macOS main thread (TCC deadlock) + missing `.tfcs` extension/URL/size guards & raw-byte leak in `flow_import_fcs` / `flow_load_sample_file` / `titer_import_fcs`
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/flow.rs:207-212, 735-743, 801-808, 981-989` (`parse_header`, `stage_fcs_bytes`, `read_fcs_sample`, `flow_import_fcs`)
+  - `src-tauri/src/flow_store.rs:576-589` (`flow_load_sample_file`)
+  - `src-tauri/src/mcp.rs:7033-7071` (`titer_import_fcs`)
+- **Explanation**:
+  1. **macOS main-thread TCC deadlock & UI freeze:** Both `flow_import_fcs` and `flow_load_sample_file` are synchronous `#[tauri::command]` handlers executing `fs::read` (and staging `fs::write` + Polars parsing) on the main thread — unlike `read_text`/`read_prism_bytes`/`read_data_bytes`, which use `async` + `spawn_blocking` specifically to avoid macOS TCC main-thread deadlocks on protected folders (`main.rs:648-654`).
+  2. **Missing extension/URL/size guards & raw-byte leak:** `flow_load_sample_file` (`flow_store.rs:585`) lacks any extension allowlist (reading arbitrary non-`.tfcs` files from disk into RAM), `titer_import_fcs` (`mcp.rs:7043-7071`) omits URL rejection, `read_fcs_sample` reads unbounded file sizes (`fs::read`) while `stage_fcs_bytes` needlessly clones the full file buffer even when `staged == false`, and `parse_header` (`flow.rs:210-212`) leaks the first 6 bytes (`found {version_raw:?}`) of non-FCS files in IPC/MCP error messages.
+- **Minimal Reproduction**:
+  Invoke `flow_load_sample_file` from the webview with an arbitrary non-`.tfcs` path (e.g. a protected or binary file in `~/Documents`): executes `fs::read` synchronously on the main thread without an extension check.
+- **Suggested Fix**:
+  Make `flow_import_fcs` and `flow_load_sample_file` `async` with `tokio::task::spawn_blocking`, enforce `.tfcs` extension gating on `flow_load_sample_file`, reject URLs in `titer_import_fcs`, cap FCS/sidecar file reads, avoid cloning `original` when `staged == false`, and redact raw file bytes from `parse_header` errors.
+
+---
+
+### Issue 126: `parseSpilloverCsv` strips leading `\t` via `.trim()`, breaking every FlowJo TSV matrix, and `Number("")` silently accepts blank cells as `0`
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/flow/compensation.ts:196, 209-248` (`parseSpilloverKeyword`, `parseSpilloverCsv`)
+- **Explanation**:
+  FlowJo TSV compensation matrices open the header row with a blank top-left corner cell (`"\tFITC\tPE\nFITC\t1\t0.1\nPE\t0.05\t1"`). `parseSpilloverCsv` (`line 212`) calls `.map((line) => line.trim())` **before** splitting on `\t`, deleting the leading tab (`"FITC\tPE"`) so `rows[0].slice(1)` drops `"FITC"` and every valid FlowJo TSV matrix fails with `"needs 1 data rows: got 2"` (or `"needs fluorochrome names"` on 1×1). Additionally, both `parseSpilloverCsv` (`line 238`) and `parseSpilloverKeyword` (`line 196`) evaluate `Number(cell)`, where `Number("") === 0` silently converts missing/blank entries (e.g. `"FITC,1,\nPE,0,1"` or `"2,FITC,PE,1,,0,1"`) into valid `0` coefficients instead of rejecting them.
+- **Minimal Reproduction**:
+  Call `parseSpilloverCsv("\tFITC\tPE\nFITC\t1\t0.1\nPE\t0.05\t1")` → throws `Error`; call `parseSpilloverCsv(",FITC,PE\nFITC,1,\nPE,0,1")` → silently returns `[[1, 0], [0, 1]]`.
+- **Suggested Fix**:
+  Only strip `\r` / skip blank lines (`line.trim().length > 0`) before splitting on `\t` or `,`, trim cells individually afterward, and reject empty cell strings (`cell === ""`), empty fluorochrome names, and non-integer `n` strings before `Number(...)`.
+
+---
+
+### Issue 127: Flow transform math defects (Rust + TS): `solveMonotonic` maps `NaN` → `-2` and `±Infinity` → `0` (unguarded in `viewer.ts`), `arcsinh` allows `A = -M` division by zero, and `log` is non-monotonic below `T·base^{-M}`
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/flow/transforms.ts:117-136, 228-248, 257-260, 283-286`
+  - `src-tauri/src/flow_transform.rs:104-127, 226-253, 261-269, 292-300`
+  - `src/flow/viewer.ts:87-93` (`transformedCopy`)
+- **Explanation**:
+  Three numerical defects appear identically in TS and Rust:
+  1. In `solveMonotonic` (`transforms.ts:228-248`, `flow_transform.rs:226-253`), `x = NaN` fails both `abs(f) <= tol` and `f < 0`, collapsing `hi` down to **`-2`** instead of returning `NaN`; `x = ±Infinity` yields `tol = Infinity`, returning **`0`** on iteration 0. Unlike `applyTransformToColumn`, `transformedCopy` (`viewer.ts:91`) passes raw events straight into `applyTransformValue`, turning `NaN`/`±Infinity` events into bogus finite plot coordinates at `-2`/`0`.
+  2. `resolveTransform` never validates `A` for `"arcsinh"`: `A = -M` divides by `(M + A) * LN10 === 0` (`NaN`/`±Infinity` for all events), and `A < -M` flips the axis backward.
+  3. `"log"` returns `floor` (`0`) for `x <= 0` without clamping positive values below `T·base^{M·(floor-1)}` (`~8.29` on defaults), so `f(0) = 0 > f(1) = -0.204` — making zero/negative events plot above positive events and contradicting `invertTransformValue` (which maps all `y <= floor` to `0`).
+- **Minimal Reproduction**:
+  With default logicle: `applyTransformValue(logicle, NaN) === -2` and `applyTransformValue(logicle, Infinity) === 0`; `resolveTransform("arcsinh", { M: 4.5, A: -4.5 })` yields `NaN` for positive inputs; default `log` gives `f(0) = 0 > f(1) = -0.20412`.
+- **Suggested Fix**:
+  Return `NaN` on non-finite inputs in `solveMonotonic` and guard non-finite inputs in `viewer.ts:91`; require `M + A > 0` for `arcsinh` (and bound `M + A` against `sinh`/`exp` overflow); and clamp `log` positive outputs with `.max(floor)` in Rust and TS.
+
+---
+
+### Issue 128: PDF and EPS vector exports silently render Arial, Helvetica, and default sans-serif text in `Times-Roman` because `"sans-serif".includes("serif")` is `true`
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/lib/vector-export.ts:358, 1289-1294, 1744-1749` (`pdfFontKey`, `psFontName`)
+  - `src/lib/preferences.ts:73-85` (`defaultFontFamily`)
+  - `src/lib/figure.ts:623-628` (`composeFigureSvg`)
+  - `src/views/graphs/plot-helpers.ts:314, 754, 1225` (`FONT`)
+- **Explanation**:
+  `defaultFontFamily("arial")` returns `"Arial, Helvetica, sans-serif"`, `defaultFontFamily("helvetica")` returns `"Helvetica, Arial, sans-serif"`, and graph SVGs use `FONT = "system-ui, -apple-system, sans-serif"`. Both `pdfFontKey` (`vector-export.ts:1292`) and `psFontName` (`1747`) execute `if (f.includes("times") || f.includes("serif")) return bold ? "F4" : "F3";` (`Times-Bold`/`Times-Roman`). Because `"sans-serif".includes("serif")` is `true`, **every** Arial, Helvetica, and default sans-serif text element in PDF and EPS exports silently embeds in Times-Roman while `measureTextWidth` (`line 953`) measures widths using the real CSS sans-serif font, misaligning centered and right-anchored labels.
+- **Minimal Reproduction**:
+  With Preferences → Default font set to Arial (or Helvetica), export any Figure or Graph to PDF or EPS: PDF/EPS streams emit `/F3`/`/F4` (`/Times-Roman`/`/Times-Bold`) instead of Helvetica.
+- **Suggested Fix**:
+  Check sans-serif families explicitly (or test `/(?:^|[\s,'"])serif\b/.test(f)`) before matching serif/Times.
+
+---
+
+### Issue 129: `Preferences ▸ Data Entry ▸ Clipboard` title options corrupt in-app `⌘C`→`⌘V` / Paste Transposed / Paste Special and disagree on decimal formatting between `toTSV` and `toHTMLTable`
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/views/tables/table-data.ts:1345-1373, 1390-1422, 1527-1551` (`toTSV`, `toHTMLTable`, `parseClipboardHTML`)
+  - `src/views/tables/grid.tsx:508-517, 573-600, 746-771` (`onCopy`, `onPaste`, `pasteBlock`, `pasteTransposed`)
+- **Explanation**:
+  1. When **"Include column titles when copying"** is enabled, `toTSV` prepends a header line to `text/plain`. In-app `onPaste` (`grid.tsx:576`) and `pasteTransposed` (`grid.tsx:770`) parse `text/plain` verbatim as cell data — breaking single-cell range fill and pasting the column title string into the first target numeric cell while shifting data rows down by 1. Meanwhile `toHTMLTable` (`table-data.ts:1406-1413`) always emits `<thead>` even when `includeColumnTitles` is `false`.
+  2. When **"Include row titles when copying"** is enabled and `range.c0 > 0`, both `toTSV` (`line 1364`) and `toHTMLTable` (`line 1417`) prepend column 0 into the data rows. Both `⌘V` and `Paste Special` (which only strips `<thead>`) write the row-title column into the destination data column and shift every pasted column right by 1. Additionally, `toTSV` writes raw `data.rows[r]?.[0]` without applying the decimal separator while `toHTMLTable` applies `shown(...)`.
+- **Minimal Reproduction**:
+  Enable Preferences → Data Entry → Clipboard → "Include column titles when copying" (or row titles), copy numeric cells `A1:A3` (`10, 20, 30`), and paste into `B1`: `B1` receives column title `"A"` (or row title `R1`) and shifts all data values.
+- **Suggested Fix**:
+  Carry an internal clipboard payload (e.g., custom MIME type `application/x-titer-cells`) for loss-free in-app `⌘V` / `Paste Transposed` / `Paste Special` while keeping `text/plain`/`text/html` formatted per Preferences for external apps; apply `shown(...)` consistently to column 0 in `toTSV`, and gate `<thead>` in `toHTMLTable` consistently with options.
+
+---
+
+### Issue 130: `Preferences ▸ Appearance ▸ Measurement units` (`cm`) creates an impossible-to-satisfy unit mismatch in `FigureView` size validation
+- **Severity**: High
+- **Status**: New
+- **Files**:
+  - `src/lib/preferences.ts:111-143` (`MEASUREMENT_UNIT_CHANGED_EVENT`, `formatLength`)
+  - `src/lib/figure.ts:441-455` (`validateFigureSize`)
+  - `src/views/figures/figure-view.tsx:343-352, 570-584` (`changeSize`)
+- **Explanation**:
+  `FigureView` (`figure-view.tsx:570-584`) hardcodes `"Width (in)"` / `"Height (in)"` inputs and passes raw input values directly to `validateFigureSize`, which compares against `1..20` **inches** (`line 443`). However, `validateFigureSize` (`lines 450-452`) formats its rejection message in centimeters (`"Figure size must be between 2.5 and 50.8 cm in each dimension."`) whenever `loadMeasurementUnit() === "cm"`, while `formatLength` and `MEASUREMENT_UNIT_CHANGED_EVENT` have zero listeners/callers. Entering any valid cm value from the error message (such as `25` or `30`) is immediately rejected against `20` inches.
+- **Minimal Reproduction**:
+  Set Preferences → Appearance → Measurement units to **Centimeters**, open a Figure sheet, and enter `25` in Width: rejected with `"Figure size must be between 2.5 and 50.8 cm in each dimension."`.
+- **Suggested Fix**:
+  Subscribe `FigureView` to `loadMeasurementUnit()` / `MEASUREMENT_UNIT_CHANGED_EVENT`, display `widthIn * 2.54` / `heightIn * 2.54` when `cm`, label inputs `Width (cm)`/`Height (cm)`, and convert back via `/ 2.54` before calling `validateFigureSize`.
+
+---
+
+## Medium-Severity Issues (Recheck 5)
+
+### Issue 131: `flow-density-plot` and `flow-contour-plot` hide all Y-axis controls in `FormatPanel` despite declaring `axes: XY_AXES`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/views/graphs/flow-plots.ts:33-46, 83-123`
+  - `src/views/graphs/format-panel.tsx:461, 469, 483, 607`
+  - `src/views/graphs/index.ts:87` (`hasValueAxis`)
+- **Explanation**:
+  `flowDensityPlot` (`flow-plots.ts:85-86`) and `flowContourPlot` (`106-107`) set `family: "heatmap"` and `axes: XY_AXES`, and `withAxes()` applies both `xAxisRange` and `yAxisRange`. However, `FormatPanel` still gates all Y-axis controls on legacy `family !== "heatmap"` (`lines 461, 469, 483`) and `hasValueAxis("heatmap") === false` (`line 607`), hiding Y Scale, Y Range, Y NumberFormat, and Y Reference Lines while showing X controls.
+- **Suggested Fix**:
+  Drive Y-axis controls and RefLines strictly from `yKind === "scale"` / `yKind === "range"` rather than `family !== "heatmap"` / `hasValueAxis`.
+
+---
+
+### Issue 132: `scree-plot`, `silhouette-plot`, and `forest-plot` `axes()` / `logScaleOffered()` contradict their builders on log scales
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/views/graphs/scree-plot.ts:37-49, 97`
+  - `src/views/graphs/choosing-k.ts:108-111, 169`
+  - `src/views/graphs/forest-plot.ts:48, 114-119, 150`
+  - `src/views/graphs/plot-helpers.ts:462` (`logScaleOffered`)
+- **Explanation**:
+  1. `scree-plot` and `silhouette-plot` declare `y: "scale"` (offering Log10/Log2 Y), yet when `yScale !== "linear"` and `yMin`/`yMax` are blank, `addScreePlot` overwrites `layout.yaxis.range = [0, 100]` and `addSilhouettePlot` overwrites `layout.yaxis.range = [-1, 1]`. Because Plotly treats `range` on `type: "log"` as log10 exponents, bars/silhouettes collapse into `[1, 1e100]` or `[0.1, 10]`.
+  2. `forest-plot` declares `x: "scale"` and `logScaleOffered("forest-plot")` offers `{ x: true, y: false }`, yet `build()` (`forest-plot.ts:48`) and `addForestPlot()` (`116`) hardcode `xaxis.type = "log"`, ignoring Linear/Log2 selection.
+- **Suggested Fix**:
+  Declare `y: "range"` with linear clamping on `scree-plot`/`silhouette-plot` (or avoid linear-unit `range` under `type: "log"`), and make `forest-plot` either declare `x: "range"` (non-togglable log axis) or honor `options.xScale`.
+
+---
+
+### Issue 133: Updater lacks concurrency guard (racing on `Titer-update.zip`) and silently reports offline cached manifests as `"up to date"`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/updates.ts:79-92, 120, 199-218`
+  - `src/lib/channel.ts:71, 85-117, 128`
+  - `src-tauri/src/updater.rs:223-224`
+- **Explanation**:
+  `fetchChannelManifest()` (`channel.ts:111-116`) returns stale `localStorage["titer.updateManifest"]` on network failure without indicating cache origin, causing manual `checkForUpdates(false)` while offline to display `"Titer is up to date"` and `checkForUpdatesDaily` to record a successful check timestamp. Additionally, `checkForUpdates` has no in-flight guard (so overlapping daily + manual checks race on `lastFetchError` and `Titer-update.zip`), and `decideUpdate` (`updates.ts:120`) reads module `isMacOs()` instead of `deps.isMacOs()`.
+- **Suggested Fix**:
+  Serialize `checkForUpdates` with an in-flight guard, distinguish live vs cached manifests so offline manual checks surface the fetch error, and pass `deps.isMacOs()` into `decideUpdate`.
+
+---
+
+### Issue 134: Staging an FCS file with exclusive `text_end == data_start` deletes byte 0 of DATA and misaligns all events
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/flow.rs:258-264, 524-532, 543-572` (`parse_text`, `shifted`, `rebuild_dataset`)
+- **Explanation**:
+  `parse_text` (`flow.rs:260-261`) accepts an exclusive `header.text_end` pointing 1 byte past the closing delimiter (`seg.len() - 1`), yet `rebuild_dataset` (`lines 543, 571-572`) computes `old_text_len = text_end - text_start + 1` and executes `span.splice(text_at..text_end + 1, ...)`, deleting byte `text_end` — which is byte 0 of DATA when `text_end == data_start` — while `shifted()` keeps `data_start <= text_end` unshifted, corrupting every decoded event.
+- **Suggested Fix**:
+  Return the inclusive `text_end` from `parse_text` (decremented by 1 when the trailing byte was stripped) and use it consistently in `rebuild_dataset` and `shifted`.
+
+---
+
+### Issue 135: `FlowStore::apply_compensation` bypasses LRU budget eviction (~2× memory), `invert_matrix` can return `NaN`/`Inf` on overflow, and `parse_sidecar` uses unchecked multiplication
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src-tauri/src/flow_store.rs:330-366, 399-453, 601` (`apply_compensation`, `invert_matrix`, `parse_sidecar`)
+  - `src/flow/store.ts:340-352`, `src/flow/compensation.ts:59-99`
+- **Explanation**:
+  1. `apply_compensation` adds `new_bytes` (up to another 100% of sample memory) to `bytes` without running the LRU eviction loop used in `insert()`, allowing store usage to reach ~2× `budget_bytes`.
+  2. `invert_matrix` checks `abs() < 1e-12` (false for `NaN`) and never checks output entries for finiteness; ill-scaled finite matrices (e.g. `[[1e-11, 1e300], [0, 1e-11]]`) overflow to `Inf`/`NaN` and poison all compensated events.
+  3. `parse_sidecar` (`flow_store.rs:601`) computes `SIDECAR_HEADER_LEN + file_params * event_count * 4` without `checked_mul`/`checked_add`, risking arithmetic wrap/OOM on 32-bit targets.
+- **Suggested Fix**:
+  Invoke the LRU eviction helper after `apply_compensation`, validate every entry of `invert_matrix`'s inverse with `.is_finite()`, and use checked arithmetic in `parse_sidecar`.
+
+---
+
+### Issue 136: `smoothGrid` returns all-`NaN` grids when `sigma <= 0` or `gridDim < Math.ceil(3 * sigma)`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/flow/density.ts:100-117` (`smoothGrid`)
+  - `src/flow/viewer.ts:156-161`
+- **Explanation**:
+  When `sigma === 0`, `(-d * d) / (2 * sigma * sigma)` evaluates `0 / 0 = NaN`, poisoning the entire kernel and output grid. In addition, the single-bounce mirror `sym(k)` (`line 111`) reads out of bounds (`undefined`) whenever `2 <= line.length < Math.ceil(3 * sigma)` (e.g. `bins = 4` with default `sigma = 1.5`, `radius = 5`), propagating `NaN` across every cell of the grid.
+- **Suggested Fix**:
+  Return a copy of `counts` when `!(sigma > 0) || !Number.isFinite(sigma)` and replace single-bounce `sym(k)` with modular periodic reflection `(2 * len)` into `[0, len - 1]`.
+
+---
+
+### Issue 137: `computePopulationStats` reports wrong `% Parent` / `% Grandparent` / `% Total` (`100%` or `>100%`) when top-level populations (`parentId: null`) carry predicates
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/flow/stats.ts:167, 199-224` (`resolvePopulationIndices`, `computePopulationStats`)
+  - `src/store/mcp-flow.ts:286-309, 336-351` (`parsePopulations`)
+- **Explanation**:
+  `computePopulationStats` (`lines 199-205`) assumes the first `parentId === null` population is an unpredicated root holding 100% of events and sets `parentCount = indices.length` when `parent` is undefined. When `titer_flow_population_stats` receives ad-hoc gated top-level populations (each `parent_id: null` with a filter predicate, no `"All events"` root), `total` equals the first gate's count rather than `columns[0].length`, reporting `pctParent = 100%`, `pctTotal = 100%` for the first gate and `>100%` for larger sibling gates.
+- **Suggested Fix**:
+  Compute `const total = columns[0]?.length ?? 0;` and `const parentCount = parent ? (indicesById.get(parent.id)?.length ?? 0) : total;`.
+
+---
+
+### Issue 138: `readOptions` in `project-file.ts` overwrites `GRAPH_LIMITS` clamping for `flowBins` and `flowDownsampleCap`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/lib/project-file.ts:288, 951-964` (`OPTIONAL_OPTIONS`, `readOptions`)
+  - `src/store/types.ts:198-200, 318-319` (`GRAPH_LIMITS`)
+  - `src/flow/density.ts:75, 176-179, 192`
+- **Explanation**:
+  In `readOptions` (`project-file.ts:951-964`), the `GRAPH_LIMITS` clamping loop runs **before** the `OPTIONAL_OPTIONS` loop. Because `flowBins` (`8..256`) and `flowDownsampleCap` (`100..5000`) appear in both maps, `OPTIONAL_OPTIONS` immediately overwrites the clamped values with raw unclamped numbers from `.hlx` JSON (`flowBins: -5` triggers `RangeError`, `4` produces all-`NaN` KDE grids, and `100000` allocates a `10^10`-cell matrix).
+- **Suggested Fix**:
+  Clamp `GRAPH_LIMITS` after `OPTIONAL_OPTIONS` is read (and validate/integer-clamp `bins` and `downsampleCap` inside `density.ts`/`viewer.ts`).
+
+---
+
+### Issue 139: `use-project-store.tsx` `case "create"` crashes on regex metacharacters in flow sample/table names (`nextName`), overwrites nodes & duplicates `rootOrder` on colliding `sampleId`, and drifts `rootOrder` vs `parseProjectFile`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/store/use-project-store.tsx:314-324, 374-436, 1958-1986` (`nextName`, `case "create"`, `createFlowSample`, `createFlowStatsTable`)
+  - `src/store/mcp-flow.ts:136, 149-150, 360, 375`
+  - `src/lib/project-file.ts:2604-2617`
+- **Explanation**:
+  1. `case "create"` passes root node names through `nextName`, which builds `new RegExp(\`^${prefix} (\\d+)$\`)` without escaping metacharacters — crashing `titer_import_fcs` / `titer_flow_population_stats` with `SyntaxError` on names like `"CD4++ (unstim"` and appending `" 1"` (`"PBMC 1"`) even when `"PBMC"` is unused.
+  2. `createFlowSample` reuses `ref.sampleId` as `node.id` without collision checks: importing two stems with the same basename (`/a/tube.fcs`, `/b/tube.fcs` → both `"fcs-tube"`) or passing an existing node ID overwrites `state.nodes[id]` and pushes a duplicate ID into `rootOrder`.
+  3. `case "create"` skips `"sample"` when choosing `insertAt`, placing tables created after a sample past the sample in `rootOrder`, whereas `parseProjectFile` orders `tables → infos → figures → samples`.
+- **Suggested Fix**:
+  Escape regex metacharacters in `nextName`, use `uniqueName` for flow sample/table names, reject/deduplicate colliding `sampleId`s before mutating `nodes`/`rootOrder`, and align `case "create"` `insertAt` ordering with `parseProjectFile`.
+
+---
+
+### Issue 140: New Preferences (`P-value format`, `Default font`, `Exports folder`) are unwired or non-reactive across primary consumers
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/lib/preferences.ts:70, 254, 325`
+  - `src/views/analyses/analysis-results-view.tsx:23, 315-318, 527`
+  - `src/views/graphs/graph-view.tsx:940-954`, `src/views/graphs/plot-helpers.ts:314, 754`
+  - `src/views/figures/figure-export.ts:31, 194, 229, 251`
+  - `src/views/graphs/graph-export.ts:194, 307, 327`, `src/views/tables/table-data-export.ts:86`, `src/components/converter-dialog.tsx:189`
+- **Explanation**:
+  1. `P_VALUE_FORMAT_CHANGED_EVENT` and `DEFAULT_FONT_CHANGED_EVENT` have **zero listeners** anywhere in `src/`, so changing P-value format or Default font never updates open analyses, graphs, or figures dynamically.
+  2. `loadDefaultFont()` is read only in `composeFigureSvg`; `renderFigureRaster` (PNG/JPEG/TIFF/BMP/Office/Keynote exports) still hardcodes Arial and graphs still hardcode `FONT = "system-ui, -apple-system, sans-serif"`.
+  3. `graph-export.ts`, `table-data-export.ts`, and `converter-dialog.tsx` never pass `defaultSaveFolder("exports", "")`, and `figure-export.ts`'s module-level `lastFolder` overrides any Exports folder change once a first export runs.
+- **Suggested Fix**:
+  Subscribe `AnalysisResultsView`, `GraphView`, `FigureView`, `renderFigureRaster`, and `plot-helpers.ts` to the change events; pass `defaultSaveFolder("exports", "")` in all export pickers and reset `lastFolder` on `DEFAULT_LOCATIONS_CHANGED_EVENT`.
+
+---
+
+### Issue 141: `Preferences ▸ Print ▸ Scale (%)` clamps every keystroke to `[50, 200]`, making it impossible to type multi-digit percentages (`80`, `120`, `150`)
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/components/preferences-dialog.tsx:506-517`
+  - `src/ui/controls.tsx:64-81` (`NumberInput`)
+- **Explanation**:
+  `Scale (%)` binds a controlled `NumberInput` whose `onChange` discards `null` and immediately clamps every keystroke to `[0.5, 2]` (`[50, 200]`%). Deleting `"100"` is ignored, and typing `"8"` (for `"80"`) or `"1"` (for `"150"`) snaps immediately to `"50"`, turning the second digit into `"500"` / `"505"` → immediately clamped to `"200"`. (Likewise `"Margins (mm)"` cannot be cleared past its last digit.)
+- **Suggested Fix**:
+  Buffer uncommitted text state while editing or clamp only on `onBlur` / `Enter`.
+
+---
+
+### Issue 142: `Create an Info sheet with each new data table` (`L13`) is skipped by `createTable`, while `createTableWithGraph` bypasses `MAX_INFO_SHEETS`, duplicates `"Info Sheet"` names, reverses `rootOrder`, and ignores `Autocomplete titles`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/store/use-project-store.tsx:378-392, 731-784, 1890-1919, 2004-2030`
+  - `src/components/app-shell.tsx:185-188`
+  - `src/app-menu.ts:543-549`
+- **Explanation**:
+  `loadAutoCreateInfo()` is checked only in `case "createTableWithGraph"` (`line 762`), so `⌘N`, Sidebar `+ Table`, `Insert ▸ New Data Table…`, and `createTableWithData` never auto-create an Info sheet. Meanwhile `case "createTableWithGraph"` bypasses `MAX_INFO_SHEETS` (`500`), hardcodes duplicate `"Info Sheet"` names instead of `nextName("Info Sheet", taken)`, prepends new Info sheets before older ones in `rootOrder`, and ignores `loadAutocompleteTitles()`.
+- **Suggested Fix**:
+  Apply `loadAutoCreateInfo()` in `createTable` consistently, enforce `MAX_INFO_SHEETS`, assign unique names via `nextName`, insert after existing Info sheets, and apply `loadAutocompleteTitles()` in `createTableWithGraph`.
+
+---
+
+### Issue 143: Unescaped newlines in `PrintSettings.headerText` break or inject rules into `@media print` CSS in `printPageCss`
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/lib/print-settings.ts:74-88` (`printPageCss`)
+  - `src/components/app-shell.tsx:88-101`
+- **Explanation**:
+  `printPageCss` escapes only `\\` and `"` inside `body::before { content: "${text}"; ... }`. An unescaped newline (`\n`, `\r`, `\f`) in `headerText` terminates the CSS string per CSS Syntax Level 3, silently dropping the header or breaking out of `body::before` to inject arbitrary `@media print` CSS rules.
+- **Suggested Fix**:
+  Escape newlines/form-feeds (`\r\n`/`\r`/`\n` → `\A `, `\f` → `\C `) or strip control characters before interpolating into CSS, and validate finite `marginMm`/`scale`.
+
+---
+
+### Issue 144: `Extended log file` (`L16`) sends `navigator.userAgent` and `location.href` to the remote feedback server despite promising local-log-only detail
+- **Severity**: Medium
+- **Status**: New
+- **Files**:
+  - `src/components/preferences-dialog.tsx:230-243`
+  - `src/lib/preferences.ts:406-410`
+  - `src/lib/error-log.ts:150-165` (`reportError`)
+  - `src-tauri/src/mcp.rs:1657-1683, 1709-1773` (`error_feedback_entry`, `try_send_error_entry`, `mcp_log_error`)
+- **Explanation**:
+  Both `preferences-dialog.tsx:241` and `preferences.ts:408-409` tell users **Extended log file** only enriches the local log file, yet `error-log.ts:156-160` appends `[extended] ${navigator.userAgent} | ${location.href}` straight onto `entry.message`, which `mcp_log_error` forwards verbatim inside `error_feedback_entry` to the remote feedback server whenever error-report sharing is enabled (and varying URLs defeat dedup / truncation at 4000 chars can cut `[extended]`).
+- **Suggested Fix**:
+  Store extended context in a separate local-only field in `error-log.jsonl` excluded from `error_feedback_entry` and dedup keys (or explicitly disclose remote sharing in Preferences).
+
+---
+
+## Low-Severity Issues (Recheck 5)
+
+### Issue 145: `prism-script.ts` `runScript` stamps `ctx.current` as `{ kind: "table" }` pointing to a non-table `rootOrder[0]` (e.g. a Flow `sample`)
+- **Severity**: Low
+- **Status**: New
+- **Files**:
+  - `src/lib/prism-script.ts:369-377, 1303-1314` (`currentNode`, `currentTable`, `runScript`)
+- **Explanation**:
+  When `active.type === "sample"` (or `activeNodeId` is null), `runScript` (`lines 1309-1311`) falls back to `{ kind: "table", id: doc.rootOrder[0] ?? null }` without checking whether `doc.rootOrder[0]` is actually a `"table"`. When an Info sheet, Figure, or Flow `sample` sits at index 0, `ctx.current` tags a non-table node ID as `"table"`, causing `currentTable()` to fail even if data tables exist later in `doc.rootOrder` and causing `%S` to expand a non-table node's name.
+- **Suggested Fix**:
+  Resolve `doc.rootOrder.find((id) => doc.nodes[id]?.type === "table") ?? null` as the fallback table ID.
