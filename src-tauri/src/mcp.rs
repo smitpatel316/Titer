@@ -13908,21 +13908,6 @@ mod tests {
             "population-stats blank name: {}",
             call_raw_text(&pop_stats_bad_name)
         );
-        let stats_runner = state.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(300)).await;
-            for job in stats_runner.take_jobs("project-1") {
-                assert_eq!(job.action, "flow-population-stats");
-                let _ = stats_runner.complete_job(
-                    "project-1",
-                    &job.job_id,
-                    JobStatus::Done,
-                    Some(json!({ "project_id": "project-1", "sample_id": "flow-fixture-1", "table_id": "stats-table-1", "name": "Fixture population stats", "populations": [{ "id": "root", "name": "All events", "count": 20000, "pct_parent": 100.0, "pct_grandparent": 100.0, "pct_total": 100.0 }, { "id": "cd4pos", "name": "CD4+", "count": 6000, "pct_parent": 30.0, "pct_grandparent": 30.0, "pct_total": 30.0 }], "rows": 2 })),
-                    None,
-                    None,
-                );
-            }
-        });
         let (transformed, _) = mcp_post(
             &client,
             &url,
@@ -13940,6 +13925,26 @@ mod tests {
         assert_eq!(call_text(&transformed)["event_count"], 4);
         assert_eq!(call_text(&transformed)["before"]["max"], 80.0);
         assert_eq!(call_text(&transformed)["after"]["max"], 0.1953420268655396);
+        // The completer is spawned immediately before its own call, like
+        // every other round trip in this test: it used to be spawned
+        // before the transform round trip above, whose own 300 ms wait
+        // consumed the completer's single-shot window, so it fired before
+        // the pop-stats job existed and the job was never completed.
+        let stats_runner = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in stats_runner.take_jobs("project-1") {
+                assert_eq!(job.action, "flow-population-stats");
+                let _ = stats_runner.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "project_id": "project-1", "sample_id": "flow-fixture-1", "table_id": "stats-table-1", "name": "Fixture population stats", "populations": [{ "id": "root", "name": "All events", "count": 20000, "pct_parent": 100.0, "pct_grandparent": 100.0, "pct_total": 100.0 }, { "id": "cd4pos", "name": "CD4+", "count": 6000, "pct_parent": 30.0, "pct_grandparent": 30.0, "pct_total": 30.0 }], "rows": 2 })),
+                    None,
+                    None,
+                );
+            }
+        });
         let (pop_stats, _) = mcp_post(
             &client,
             &url,
