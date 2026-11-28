@@ -28095,6 +28095,56 @@ check("an ROC curve stays linear even when a log scale is set (#151)", () => {
   ok(panel.includes("logScaleOffered(graphType).x"), "the panel must gate the X scale row on logScaleOffered");
 });
 
+// BUG-REPORT #100 (seq 572): the Format panel never called axisKind — it
+// gated its axis controls on the graph's family, so grouped lines at
+// rowsAt "values" got no X scale (their X is a scale axis) while
+// grouped-stacked and residuals got dead Log Y selectors (both builders
+// force yScale linear). The panel now drives both rows from axisKind, and
+// logScaleOffered says no Log Y where the builder forces linear.
+check("BUG-REPORT #100: the Format panel drives its axis controls from axisKind", () => {
+  deepStrictEqual(logScaleOffered("grouped-stacked"), { x: true, y: false });
+  deepStrictEqual(logScaleOffered("residuals"), { x: true, y: false });
+  const panel = readFileSync("src/views/graphs/format-panel.tsx", "utf8");
+  ok(
+    panel.includes('axisKind(graphType, options, "x", props.atValues)'),
+    "the panel must resolve its X axis with axisKind",
+  );
+  ok(
+    panel.includes('axisKind(graphType, options, "y", props.atValues)'),
+    "the panel must resolve its Y axis with axisKind",
+  );
+  ok(
+    !panel.includes('family === "xy" && !isDateX && logScaleOffered(graphType).x'),
+    "the X scale row must not be gated on family xy",
+  );
+  ok(
+    !panel.includes('family === "xy" || family === "volcano" || family === "histogram" || family === "multiple"'),
+    "the X range rows must not be gated on a family list",
+  );
+  // Grouped lines at rowsAt "values" draw a numeric X axis, so the settings
+  // the panel now offers for it must change the graph.
+  const data: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [
+      ["1", "1", "2", "3", "4"],
+      ["5", "2", "3", "5", "6"],
+      ["30", "4", "5", "6", "8"],
+    ],
+  };
+  const build = (over: Partial<GraphOptions>) => {
+    const opts = { ...newGraphOptions("grouped-lines"), rowsAt: "values" as const, ...over };
+    return GRAPHS["grouped-lines"].build(
+      plotColumns(readTable(data), "grouped-lines", opts, "grouped"),
+      opts,
+      paintOf(opts, 1),
+      readTable(data).titles,
+    );
+  };
+  strictEqual((build({}).layout.xaxis as { type?: string }).type, "linear");
+  strictEqual((build({ xScale: "log10" }).layout.xaxis as { type?: string }).type, "log");
+  deepStrictEqual((build({ xMin: 2, xMax: 20 }).layout.xaxis as { range?: number[] }).range, [2, 20]);
+});
+
 check("a logistic curve honours a set Y range, defaulting to the fixed 0–1 axis (G-F8)", () => {
   const data: TableData = {
     columns: ["Title", "X", "Response"],

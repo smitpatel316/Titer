@@ -32,7 +32,7 @@ import {
   type RefLine,
   type SeriesStyle,
 } from "../../store/types";
-import { GRAPHS, hasValueAxis, newGraphOptions } from ".";
+import { axisKind, GRAPHS, hasValueAxis, newGraphOptions } from ".";
 import {
   EXPORT_FORMATS,
   EXPORT_PRESETS,
@@ -185,6 +185,14 @@ function remember(key: string, value: unknown) {
 export function FormatPanel(props: Props) {
   const { graphType, options, set, seriesNames, setSeriesStyle, selection } = props;
   const { family, horizontal, placesRows } = GRAPHS[graphType];
+  // BUG-REPORT #100 (seq 572): the axis controls follow what the graph
+  // actually draws — axisKind resolves each axis from the module's axes()
+  // declaration (connected lines' X is a scale only at rowsAt "values", a
+  // stacked bar's Y is a range, never a scale) — instead of the legacy
+  // family gates, which hid the X scale from grouped lines at values and
+  // showed dead Log rows where the builder forces linear.
+  const xKind = axisKind(graphType, options, "x", props.atValues);
+  const yKind = axisKind(graphType, options, "y", props.atValues);
   // The keys of an axis as shown: horizontal bars keep their value axis's in y, their rows' in x.
   const keyOf = (shown: "X" | "Y") => ((shown === "X") === !horizontal ? "x" : "y");
   // The project's info constants, for the axis-limit hook pickers below.
@@ -450,7 +458,7 @@ export function FormatPanel(props: Props) {
             "tickLength",
           ])}
         >
-          {family !== "heatmap" && family !== "volcano" && logScaleOffered(graphType).y && (
+          {family !== "heatmap" && family !== "volcano" && yKind === "scale" && logScaleOffered(graphType).y && (
             <Scale
               axis="Y"
               value={options.yScale}
@@ -490,7 +498,7 @@ export function FormatPanel(props: Props) {
               ]}
             />
           )}
-          {family === "xy" && !isDateX && logScaleOffered(graphType).x && (
+          {xKind === "scale" && !isDateX && logScaleOffered(graphType).x && (
             <Scale
               axis="X"
               value={options.xScale}
@@ -498,15 +506,14 @@ export function FormatPanel(props: Props) {
               onChange={(xScale) => set({ xScale })}
             />
           )}
-          {(family === "xy" || family === "volcano" || family === "histogram" || family === "multiple") &&
-            axesRangeInputs(graphType).x && (
+          {(xKind === "scale" || xKind === "range") && axesRangeInputs(graphType).x && (
               <>
                 <AxisRange
                   axis="X"
                   min={options.xMin}
                   max={options.xMax}
                   step={options.xStep}
-                  log={family === "xy" && options.xScale !== "linear"}
+                  log={xKind === "scale" && options.xScale !== "linear"}
                   minHook={options.xMinConstant}
                   maxHook={options.xMaxConstant}
                   constants={constantItems}

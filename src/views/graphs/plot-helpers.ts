@@ -449,13 +449,19 @@ export function axesRangeInputs(graphType: GraphType): { x: boolean; y: boolean 
  *  axis of this graph. An ROC curve lives on [0, 1] on both axes, where a
  *  log scale is meaningless (#151): on a log axis the forced [0, 1] range
  *  reads as [1, 10] in data values, so the whole curve falls outside the
- *  window — and the (0,0)/(1,1) anchors have no log at all. Every other
- *  graph offers both rows (the Y row is further gated by family in the
- *  panel: heatmap and volcano have no Y scale). */
+ *  window — and the (0,0)/(1,1) anchors have no log at all. A stacked bar's
+ *  Y stays linear (BUG-REPORT #100, seq 572): on a log scale a slice's
+ *  height no longer says its value (nor its percent); a residuals plot's Y
+ *  stays linear too (residuals cross zero). Both builders force yScale
+ *  linear, so the panel offers no Log Y row for them. Every other graph
+ *  offers both rows (the Y row is further gated by family in the panel:
+ *  heatmap and volcano have no Y scale). */
 export function logScaleOffered(graphType: GraphType): { x: boolean; y: boolean } {
   if (graphType === "roc-curve") return { x: false, y: false };
   // A forest plot's Y is its covariate names, not values: no log scale there.
   if (graphType === "forest-plot") return { x: true, y: false };
+  // A stacked bar's Y and a residuals plot's Y stay linear (see above).
+  if (graphType === "grouped-stacked" || graphType === "residuals") return { x: true, y: false };
   return { x: true, y: true };
 }
 
