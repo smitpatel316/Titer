@@ -18,7 +18,7 @@ import {
   type MarketplaceListing,
 } from "./index";
 import type { PluginLoaderPort, PluginPermission, PluginRecord } from "./loader-port";
-import { onPluginDisabled, onPluginUninstalled } from "../plugins/isolation";
+import { launchPluginWebview, onPluginDisabled, onPluginUninstalled } from "../plugins/isolation";
 import { parseSemver } from "../plugins/manifest";
 import { clearPin as clearStoredPin, pinnedVersion as storedPin, savePin as saveStoredPin } from "./pins";
 import { availableUpdateFor } from "./updates";
@@ -63,6 +63,16 @@ export class MarketplaceStore {
   private index: MarketplaceIndex | null = null;
   private installed = new Map<string, PluginRecord>();
   private zipCache = new Map<string, Uint8Array>();
+  /**
+   * The entry file's source text, per plugin id — set at install from the
+   * parsed package, alongside the zip bytes. In-memory only, like the zip
+   * cache: after an app restart neither is there, so an enabled plugin's
+   * Isolation frame cannot be relaunched until the entry source is
+   * persisted on the record (a storage decision for the Titer side, not
+   * taken here — diff (5)). The analyses rehydrate on restart; the
+   * panel frame does not.
+   */
+  private entrySourceCache = new Map<string, string>();
 
   constructor(deps: MarketplaceStoreDeps) {
     this.loader = deps.loader;
@@ -233,6 +243,12 @@ export class MarketplaceStore {
     // zip-controlled bytes (Round 2 Issue 7, seq 471).
     this.installed.set(listing.id, installed.record);
     this.zipCache.set(listing.id, bytes);
+    // The entry source is cached with the zip so the frame can launch on
+    // enable without re-reading the package (diff (5)). Analysis-only
+    // plugins have no entry and get no frame.
+    if (parsed.package.entrySource !== undefined) {
+      this.entrySourceCache.set(listing.id, parsed.package.entrySource);
+    }
     this.persistInstalled();
     return installed;
   }
@@ -255,11 +271,24 @@ export class MarketplaceStore {
   /**
    * Finish the enable review: the user has seen the permission lines and
    * granted a subset. Grants outside the manifest are rejected by the loader.
+   *
+   * Diff (5) mount: once the record is enabled, launch the plugin's
+   * Isolation frame from its cached entry source. Best-effort — the
+   * enable stands even if the launch refuses (a disabled, pending-review
+   * or incompatible record, or a missing entry source), and the frame
+   * is torn down on disable/uninstall by the loader and the store.
+   * The frame's host router is built by the plugin panel dialog
+   * (`src/plugins/plugin-host-view.tsx`) and passed to
+   * `interceptPluginCall` when the frame posts a call.
    */
   confirmEnable(id: string, granted: readonly PluginPermission[]): PluginRecord {
     const record = this.loader.confirmEnable(this.requireInstalled(id), granted, this.appVersion);
     this.installed.set(id, record);
     this.persistInstalled();
+    const source = this.entrySourceCache.get(id);
+    if (source !== undefined) {
+      launchPluginWebview(record, { source });
+    }
     return record;
   }
 
@@ -309,6 +338,7 @@ export class MarketplaceStore {
     this.loader.disablePlugin(record);
     this.installed.delete(id);
     this.zipCache.delete(id);
+    this.entrySourceCache.delete(id);
     const installed = await this.installListing(listing, target);
     if ("errors" in installed) {
       // The old record is gone and the new one failed: restore the old
@@ -360,6 +390,7 @@ export class MarketplaceStore {
     onPluginUninstalled(id);
     this.installed.delete(id);
     this.zipCache.delete(id);
+    this.entrySourceCache.delete(id);
     clearStoredPin(this.storage, id);
     this.persistInstalled();
     return { removed: true };
