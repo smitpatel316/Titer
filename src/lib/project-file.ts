@@ -1003,8 +1003,10 @@ const PARAM_DEFAULTS: Record<string, Record<string, unknown>> = {
  *  Keep this table in step with every entry in the generator's
  *  ENUM_OVERRIDES (scripts/generate-analysis-params-schema.py): the MCP
  *  validator, the file reader and the generated schema must enforce the
- *  same per-analysis enums (BUG-REPORT #34). */
-const PARAM_CHOICES: Record<string, Record<string, readonly string[]>> = {
+ *  same per-analysis enums (BUG-REPORT #34). Exported so the runners read
+ *  the same table instead of keeping their own copies (rem34: Monte Carlo
+ *  and the mixed-effects model validate their enums against it). */
+export const PARAM_CHOICES: Record<string, Record<string, readonly string[]>> = {
   anova: { posthoc: ANOVA_POSTHOCS },
   "kruskal-wallis": { posthoc: RANK_POSTHOCS },
   friedman: { posthoc: RANK_POSTHOCS },
@@ -1036,7 +1038,7 @@ const PARAM_CHOICES: Record<string, Record<string, readonly string[]>> = {
   // correlation, outliers and P-value-stack methods, which its runner
   // refuses cleanly ("Choose a smoothing method: Lowess or Spline"), so
   // this pair is in LOAD_KEPT_CHOICES too (BUG-REPORT #34).
-  "spline-lowess": { method: ["spline", "lowess"] },
+  "spline-lowess": { "method": ["spline", "lowess"] },
   // Linear regression weights without 1/SD², which needs the replicate SDs
   // this runner never sees (the runner refuses it cleanly; anything else
   // outside the five reaches R as an undefined weight).

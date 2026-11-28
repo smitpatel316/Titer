@@ -22,6 +22,7 @@ import {
   rVec,
 } from "./base";
 import { evalNamedVector } from "../webr";
+import { PARAM_CHOICES } from "../../lib/project-file";
 
 /** R: `mx(y, g, s)`, the model of values `y` in groups `g` (1…k) of subjects `s`: its REML
  *  fit (`beta`, the groups' means; `s2`, `sb2`, the residual and subjects' variances), the
@@ -89,17 +90,21 @@ export async function runMixedModel(columns: Column[], params: RmAnovaParams | u
 
   // Tukey, Bonferroni, Šídák, Holm–Šídák or LSD, else none — a posthoc this
   // model doesn't offer is refused, never silently run as none (a file may
-  // name another family's posthoc; BUG-REPORT #34). Mirrors rm-anova's
-  // posthocIn, which refuses the same way.
+  // name another family's posthoc; BUG-REPORT #34). Validated against the
+  // shared PARAM_CHOICES table (rem34), the same table
+  // validateAnalysisParams narrows rm-anova.posthoc against, so the runner
+  // and the validator cannot drift apart. Mirrors rm-anova's posthocIn,
+  // which refuses the same way.
   const posthoc = params?.posthoc ?? "none";
-  if (
-    posthoc !== "none" &&
-    posthoc !== "tukey" &&
-    posthoc !== "bonferroni" &&
-    posthoc !== "sidak" &&
-    posthoc !== "holm-sidak" &&
-    posthoc !== "lsd"
-  ) {
+  const mixedPosthocs = PARAM_CHOICES["rm-anova"]?.posthoc ?? [
+    "none",
+    "tukey",
+    "bonferroni",
+    "sidak",
+    "holm-sidak",
+    "lsd",
+  ];
+  if (!mixedPosthocs.includes(posthoc)) {
     return {
       error:
         `“${posthoc}” multiple comparisons are not available for the mixed-effects model — ` +
