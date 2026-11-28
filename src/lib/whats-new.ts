@@ -38,6 +38,14 @@ export interface WhatsNewEntry {
 /** The news, newest first. */
 export const WHAT_S_NEW: WhatsNewEntry[] = [
   {
+    version: "2.0.7",
+    title: "Titer 2.0.7 — LabForge connection",
+    items: [
+      "LabForge connection: Titer now hosts the LabForge plugin — connect to a LabForge server from the plugin panel, with secure credential storage.",
+      "Analysis runners now validate their parameter choices against the shared list, so an invalid option is caught instead of silently accepted (bug #34 remainder).",
+    ],
+  },
+  {
     version: "2.0.6",
     title: "Titer 2.0.6 — in-place updates fixed",
     items: [

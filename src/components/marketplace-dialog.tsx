@@ -30,7 +30,7 @@ interface ReviewState {
 }
 
 export function MarketplaceDialog() {
-  const { selector, closeSelector } = useProjectStore();
+  const { selector, openSelector, closeSelector } = useProjectStore();
   const open = selector?.kind === "marketplace";
   const [store, setStore] = React.useState<MarketplaceStore | null>(null);
   const [loadError, setLoadError] = React.useState("");
@@ -273,7 +273,17 @@ export function MarketplaceDialog() {
                         <Button size="small" variant="accent" onClick={() => enableInstalled(listing.id)} disabled={busy}>Enable</Button>
                       )}
                       {installed && installed.status === "enabled" && (
-                        <Button size="small" onClick={() => disableInstalled(listing.id)} disabled={busy}>Disable</Button>
+                        <>
+                          {installed.manifest.entry !== undefined && (
+                            <Button
+                              size="small"
+                              onClick={() => openSelector({ kind: "plugin-panel", pluginId: listing.id })}
+                            >
+                              Open
+                            </Button>
+                          )}
+                          <Button size="small" onClick={() => disableInstalled(listing.id)} disabled={busy}>Disable</Button>
+                        </>
                       )}
                       {installed && offered && (
                         <Button size="small" onClick={() => update(listing.id)} disabled={busy}>Update to {offered}</Button>

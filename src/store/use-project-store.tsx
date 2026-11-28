@@ -74,6 +74,9 @@ type Selector =
   | { kind: "ai-connections" }
   // Marketplace (M2, seq 434): the in-app plugin store.
   | { kind: "marketplace" }
+  // Plugin panel (LabForge integration, diff (5)): an enabled plugin's
+  // Isolation frame, opened from the marketplace's "Open" button.
+  | { kind: "plugin-panel"; pluginId: string }
   | { kind: "preferences"; section?: PreferenceSection }
   | { kind: "export-all-graphs" };
 

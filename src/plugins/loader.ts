@@ -71,6 +71,11 @@ export interface ParsedPluginPackage {
   analyses: PluginAnalysisSpecJson[];
   /** Non-fatal notes (a missing README) — install proceeds. */
   warnings: string[];
+  /** The entry file's source text, when the manifest names one. The
+   *  isolation webview runs this text — it is carried through so the
+   *  marketplace store can launch the frame when the plugin is enabled
+   *  (diff (5)). An analysis-only plugin (no entry) has none. */
+  entrySource?: string;
 }
 
 /**
@@ -98,12 +103,24 @@ export function parsePluginPackage(
   if ("errors" in manifestResult) return { errors: manifestResult.errors };
   const { manifest } = manifestResult;
 
+  // B5 (LabForge): a plugin may carry no analyses at all — a UI-only
+  // plugin (its panel is the product). An absent `analyses` means none;
+  // a present one must still be a list of valid specs. A plugin with no
+  // analyses must name its entry file: without analyses AND without an
+  // entry there is nothing to install.
   const rawAnalyses = (raw as Record<string, unknown>).analyses;
-  if (!Array.isArray(rawAnalyses) || rawAnalyses.length === 0) {
-    return { errors: ["plugin.json must list at least one analysis under “analyses”."] };
+  if (rawAnalyses !== undefined && !Array.isArray(rawAnalyses)) {
+    return { errors: ["plugin.json “analyses” must be a list of analysis specs (or absent)."] };
+  }
+  if (rawAnalyses === undefined && manifest.entry === undefined) {
+    return {
+      errors: [
+        "A plugin with no analyses must name an entry file (“entry” in plugin.json) — a UI-only plugin needs its JavaScript entry point.",
+      ],
+    };
   }
   const analyses: PluginAnalysisSpecJson[] = [];
-  rawAnalyses.forEach((specValue, i) => {
+  (rawAnalyses ?? []).forEach((specValue, i) => {
     const result = validatePluginAnalysisSpec(specValue, { allowTypeScriptCompute: false });
     if ("errors" in result) {
       errors.push(...result.errors.map((e) => `Analysis ${i + 1}: ${e}`));
@@ -128,7 +145,17 @@ export function parsePluginPackage(
   if (![...files.keys()].some((n) => /^readme(\.md|\.txt)?$/i.test(n))) {
     warnings.push("This plugin has no README — a plugin folder should include one.");
   }
-  return { package: { manifest, analyses, warnings } };
+  // The entry file was validated to exist above; its text is carried
+  // through so the marketplace store can launch the isolation webview
+  // when the plugin is enabled (diff (5)) without re-reading the zip.
+  return {
+    package: {
+      manifest,
+      analyses,
+      warnings,
+      entrySource: manifest.entry !== undefined ? files.get(manifest.entry) : undefined,
+    },
+  };
 }
 
 /** Largest single text entry a plugin zip may carry (5 MB), and largest

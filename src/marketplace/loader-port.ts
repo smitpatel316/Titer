@@ -15,7 +15,9 @@ export type PluginPermission =
   | "write-analysis"
   | "save-file"
   | "open-link"
-  | "network";
+  | "network"
+  | "import-data"
+  | "secure-storage";
 
 /** Install lifecycle state (documented, loader.ts). */
 export type PluginStatus = "disabled" | "pending-review" | "enabled" | "incompatible";
@@ -33,6 +35,7 @@ export interface PluginManifest {
   homepage?: string;
   entry?: string;
   minAppVersion?: string;
+  networkHosts?: string[];
 }
 
 /**
@@ -49,6 +52,10 @@ export interface ParsedPluginPackage {
   analyses: PluginAnalysisSpecJson[];
   /** Non-fatal notes (a missing README) — install proceeds. */
   warnings: string[];
+  /** The entry file's source text, when the manifest names one
+   *  (documented, loader.ts) — the store launches the Isolation frame
+   *  from it on enable (diff (5)). */
+  entrySource?: string;
 }
 
 /** One installed plugin (documented, loader.ts). */
