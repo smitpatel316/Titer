@@ -19,6 +19,7 @@ import {
   type RQueueSnapshot,
 } from "../src/stats/r-queue";
 import { PARAM_KEYS_BY_ANALYSIS, parseProjectFile, parseProjectText, readPalette, serializeProjectFile, validateAnalysisParams, type ProjectFilePayload } from "../src/lib/project-file";
+import { PARAM_CHOICES } from "../src/lib/param-choices";
 import { createSampleNode, isSampleNode, readFlowSample, type FlowPopulationRef, type FlowSampleRef } from "../src/flow/sample";
 import { InMemoryFlowStore, createFlowStore, isFlowEnabled } from "../src/flow/store";
 import { buildExperimentSummaryTable, buildSampleSummaryTable, createSummaryTableNode } from "../src/flow/summary";
@@ -36489,6 +36490,30 @@ check("BUG-REPORT #34 remainder: runMixedModel refuses a cross-family posthoc", 
         "“dunnett” multiple comparisons are not available for the mixed-effects model — choose Tukey, Bonferroni, Šídák, Holm–Šídák or Fisher's LSD.",
     },
   );
+});
+
+check("BUG-REPORT #34 remainder: PARAM_CHOICES lives in a leaf module, not project-file", () => {
+  // The rem34 leaf move (2.0.8): the runners read PARAM_CHOICES from
+  // src/lib/param-choices.ts, a leaf that imports only ../stats/types —
+  // never ../stats (index) or lib/project-file, which imports ANALYSES from
+  // ../stats and closed a stats → project-file → stats cycle that crashed
+  // four gate legs with a TDZ ReferenceError (the 74bb64b2 fix had the right
+  // validation but the wrong import placement).
+  const mixed = readFileSync(new URL("../src/stats/column/mixed-model.ts", import.meta.url), "utf8");
+  const monte = readFileSync(new URL("../src/stats/simulation/monte-carlo.ts", import.meta.url), "utf8");
+  const leaf = readFileSync(new URL("../src/lib/param-choices.ts", import.meta.url), "utf8");
+  ok(!mixed.includes('from "../../lib/project-file"'), "mixed-model.ts must not import lib/project-file");
+  ok(!monte.includes('from "../../lib/project-file"'), "monte-carlo.ts must not import lib/project-file");
+  ok(mixed.includes('from "../../lib/param-choices"'), "mixed-model.ts reads PARAM_CHOICES from the leaf");
+  ok(monte.includes('from "../../lib/param-choices"'), "monte-carlo.ts reads PARAM_CHOICES from the leaf");
+  ok(!leaf.includes('from "../stats"'), "param-choices.ts must not import ../stats (index)");
+  ok(!leaf.includes('from "../views/'), "param-choices.ts must not import views");
+  ok(leaf.includes("export const PARAM_CHOICES"), "the leaf must export PARAM_CHOICES");
+  ok(leaf.includes('"rm-anova"'), "the leaf table must list rm-anova");
+  ok(leaf.includes('"monte-carlo"'), "the leaf table must list monte-carlo");
+  // Runtime: the leaf table is the same table the validator narrows against.
+  deepStrictEqual(PARAM_CHOICES["monte-carlo"]?.method, ["pearson", "spearman"]);
+  ok(PARAM_CHOICES["rm-anova"]?.posthoc?.includes("tukey"), "rm-anova posthoc must include tukey");
 });
 
 check("BUG-REPORT #49 remainder: two-way-anova.design defaults to ordinary in the generated schema", () => {

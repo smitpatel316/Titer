@@ -26,6 +26,7 @@ import type {
   StatRow,
 } from "../types";
 import { CORRELATION_METHODS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, TAILS } from "../types";
+import { PARAM_CHOICES } from "../../lib/param-choices";
 import { dataGroups, describe, rAlt } from "../column/base";
 import { evalNumericVector } from "../webr";
 import { computeFrequencyBins } from "../column/frequency-distribution";
@@ -200,8 +201,12 @@ export async function runMonteCarlo(
   // The correlation method (BUG-REPORT #34): only the correlation target
   // reads it, and R's cor() knows just pearson/spearman — a cross-family
   // value (e.g. "bonferroni") used to reach R and fail opaquely there.
+  // Validated against the shared PARAM_CHOICES table (rem34), the same
+  // table validateAnalysisParams narrows against, so the runner and the
+  // validator cannot drift apart.
   const method = params?.method;
-  if (method !== undefined && !(CORRELATION_METHODS as readonly string[]).includes(method)) {
+  const monteCarloMethods = PARAM_CHOICES["monte-carlo"]?.method ?? CORRELATION_METHODS;
+  if (method !== undefined && !monteCarloMethods.includes(method)) {
     return { error: `“${method}” is not a correlation method — use “pearson” or “spearman”.` };
   }
   // The simulation distribution (seq 204): Gaussian, or Student's t with
